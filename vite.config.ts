@@ -15,5 +15,9 @@ export default defineConfig({
     }),
   ],
   resolve: { alias: { "@": path.resolve(__dirname, "./src"), "@packages": path.resolve(__dirname, "./src/packages") } },
-  server: { host: "::", port: 8080 },
+  server: {
+    host: "::",
+    port: 8080,
+    allowedHosts: ["8080-ip8rdqoaentq1i5kdirc1-806f1b15.us4.manus.computer"],
+  },
 });

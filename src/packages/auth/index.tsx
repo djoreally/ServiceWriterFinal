@@ -9,6 +9,8 @@ export interface FrontendUser {
   id: string;
   email?: string;
   user_metadata?: Record<string, unknown>;
+  app_metadata?: Record<string, unknown>;
+  created_at?: string;
 }
 
 export interface FrontendSession {
@@ -50,8 +52,9 @@ export function useAuth(): AuthContextValue {
 export function useRBAC() {
   const { user } = useAuth();
   const hasRole = useCallback((_role: AppRole) => false, []);
+  const isAdmin = useCallback(() => false, []);
   const can = useCallback((_action: Action, _resource: Resource, _attributes?: Record<string, unknown>) => Boolean(user), [user]);
-  return { roles: [] as AppRole[], loading: false, hasRole, can };
+  return { roles: [] as AppRole[], loading: false, hasRole, isAdmin, can };
 }
 
 export function useSessionSecurity(options: {

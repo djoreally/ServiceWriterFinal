@@ -33,7 +33,7 @@
     // Path Aliases (resolved by Vite)
     "paths": {
       "@/*": ["./src/*"],
-      "@packages/*": ["./packages/*"]
+      "@packages/*": ["./src/packages/*"]
     }
   }
 }

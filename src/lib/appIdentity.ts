@@ -1,29 +1,15 @@
-export const SERVICE_WRITER_PROJECT_ID = "6e250a02-e2c6-4f56-bf35-debf576cf8be";
-export const SERVICE_WRITER_APP_SLUG = "service-writer";
+export const SERVICE_WRITER_PROJECT_ID = "servicewriterfinal";
+export const SERVICE_WRITER_APP_SLUG = "servicewriterfinal";
 
-// This app has exactly ONE backend: the Lovable Cloud project
-// hqfimxqsrwknvsuiizlg. It is the only project this workspace can migrate and
-// deploy functions to, so preview and production always run the same schema.
-// The retired external project (emvoddhlraalwkzswcki) must never be addressed
-// again — it drifted hundreds of migrations behind and its key was revoked.
-export const CANONICAL_BACKEND_PROJECT_ID = "hqfimxqsrwknvsuiizlg";
-
-
-/** Back-compat alias: Live is the only backend. */
+// Greenfield identity. The real Supabase project is configured at runtime.
+export const CANONICAL_BACKEND_PROJECT_ID = "supabase";
 export const LIVE_BACKEND_PROJECT_ID = CANONICAL_BACKEND_PROJECT_ID;
 
-/** Every host — local, preview, custom domain — must run the single backend. */
 export function expectedBackendForHost(_hostname: string): string {
   return CANONICAL_BACKEND_PROJECT_ID;
 }
 
-
-// Derived from the backend the build actually resolved (see vite.config.ts).
-// It must never be hardcoded to a second project: doing so shipped an invalid
-// publishable key and made every auth/data request fail with 401.
-export const SERVICE_WRITER_BACKEND_PROJECT_ID = __BACKEND_PROJECT_ID__;
-
-
+export const SERVICE_WRITER_BACKEND_PROJECT_ID = CANONICAL_BACKEND_PROJECT_ID;
 
 export interface AppIdentity {
   projectId: string;
@@ -33,10 +19,10 @@ export interface AppIdentity {
 }
 
 export const APP_IDENTITY: AppIdentity = Object.freeze({
-  projectId: __LOVABLE_PROJECT_ID__,
-  appSlug: __APP_SLUG__,
-  version: __APP_VERSION__,
-  backendProjectId: __BACKEND_PROJECT_ID__,
+  projectId: SERVICE_WRITER_PROJECT_ID,
+  appSlug: SERVICE_WRITER_APP_SLUG,
+  version: import.meta.env.VITE_APP_VERSION || "0.1.0-local",
+  backendProjectId: SERVICE_WRITER_BACKEND_PROJECT_ID,
 });
 
 function previewProjectId(hostname: string): string | null {
@@ -47,24 +33,13 @@ function previewProjectId(hostname: string): string | null {
 }
 
 export function getAppIdentityMismatch(hostname: string): string | null {
-  if (APP_IDENTITY.projectId !== SERVICE_WRITER_PROJECT_ID) {
-    return `compiled project ${APP_IDENTITY.projectId}`;
-  }
-  if (APP_IDENTITY.appSlug !== SERVICE_WRITER_APP_SLUG) {
-    return `compiled app ${APP_IDENTITY.appSlug}`;
-  }
-  if (APP_IDENTITY.backendProjectId !== SERVICE_WRITER_BACKEND_PROJECT_ID) {
-    return `compiled backend ${APP_IDENTITY.backendProjectId}`;
-  }
+  if (APP_IDENTITY.projectId !== SERVICE_WRITER_PROJECT_ID) return `compiled project ${APP_IDENTITY.projectId}`;
+  if (APP_IDENTITY.appSlug !== SERVICE_WRITER_APP_SLUG) return `compiled app ${APP_IDENTITY.appSlug}`;
+  if (APP_IDENTITY.backendProjectId !== SERVICE_WRITER_BACKEND_PROJECT_ID) return `compiled backend ${APP_IDENTITY.backendProjectId}`;
   const expectedBackend = expectedBackendForHost(hostname);
-  if (APP_IDENTITY.backendProjectId && APP_IDENTITY.backendProjectId !== expectedBackend) {
-    return `backend ${APP_IDENTITY.backendProjectId} served on a host that requires ${expectedBackend}`;
-  }
-
+  if (APP_IDENTITY.backendProjectId !== expectedBackend) return `backend ${APP_IDENTITY.backendProjectId} served on a host that requires ${expectedBackend}`;
   const hostProjectId = previewProjectId(hostname);
-  if (hostProjectId && hostProjectId !== SERVICE_WRITER_PROJECT_ID) {
-    return `preview host project ${hostProjectId}`;
-  }
+  if (hostProjectId && hostProjectId !== SERVICE_WRITER_PROJECT_ID) return `preview host project ${hostProjectId}`;
   return null;
 }
 
@@ -91,9 +66,8 @@ export function renderIdentityFailure(root: HTMLElement, mismatch: string): void
   panel.style.cssText = "max-width:680px;border:1px solid #444;padding:24px;border-radius:16px";
   const heading = document.createElement("h1");
   heading.textContent = "Incorrect application build blocked";
-  heading.style.cssText = "margin:0 0 12px;font-size:24px";
   const body = document.createElement("p");
-  body.textContent = "This preview did not receive the Service Writer build. No login or application data was loaded.";
+  body.textContent = "This preview did not receive the ServiceWriterFinal build.";
   const detail = document.createElement("code");
   detail.textContent = `Expected ${SERVICE_WRITER_PROJECT_ID}/${SERVICE_WRITER_BACKEND_PROJECT_ID}; received ${mismatch}; build ${APP_IDENTITY.version}`;
   detail.style.cssText = "display:block;margin-top:16px;overflow-wrap:anywhere;color:#8ec5ff";

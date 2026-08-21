@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 
 const APP_CACHE_PREFIX = 'service-writer-app';
-const APP_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev';
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'dev';
 
 /**
  * Service worker update hook
@@ -20,13 +20,7 @@ export function useServiceWorkerUpdate() {
   const isPreviewHost =
     host.startsWith('id-preview--') ||
     host.startsWith('preview--') ||
-    host.endsWith('.lovable.app') ||
-    host.endsWith('.lovableproject.com') ||
-    host.endsWith('.lovableproject-dev.com') ||
-    host.endsWith('.lovable.dev') ||
-    host.endsWith('.vercel.app') ||
-    host === 'lovable.app' ||
-    host === 'lovable.dev';
+    host.endsWith('.vercel.app');
 
   const isIframe = typeof window !== 'undefined' && window.self !== window.top;
   const swDisabled = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('sw') === 'off';

@@ -19,20 +19,16 @@
 
 import { whenAuthInteractionIdle } from "@/lib/authInteractionLock";
 
-const APP_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev";
-
-const BACKEND_PROJECT_ID = typeof __BACKEND_PROJECT_ID__ === "string" ? __BACKEND_PROJECT_ID__ : "";
-const APP_PROJECT_ID = typeof __LOVABLE_PROJECT_ID__ === "string" ? __LOVABLE_PROJECT_ID__ : "";
-const APP_SLUG = typeof __APP_SLUG__ === "string" ? __APP_SLUG__ : "";
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "dev";
+const BACKEND_PROJECT_ID = "supabase";
+const APP_PROJECT_ID = "servicewriterfinal";
+const APP_SLUG = "servicewriterfinal";
 const RELOAD_FLAG = "__sw_version_reload__";
 
 function isPreviewHost(): boolean {
   if (typeof window === "undefined") return true;
   const host = window.location.hostname;
   return (
-    host.endsWith(".lovable.app") ||
-    host.endsWith(".lovableproject.com") ||
-    host.endsWith(".lovable.dev") ||
     host === "localhost" ||
     host === "127.0.0.1"
   );

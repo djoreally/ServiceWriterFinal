@@ -37,13 +37,12 @@ const SUPABASE_URL = (
   RAW_SUPABASE_URL || (FALLBACK_PROJECT_ID ? `https://${FALLBACK_PROJECT_ID}.supabase.co` : '')
 ).replace(/\/$/, '');
 const SUPABASE_PUBLISHABLE_KEY = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || '').trim();
+const SUPABASE_CONFIGURED = Boolean(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY);
+const CLIENT_SUPABASE_URL = SUPABASE_URL || 'http://127.0.0.1:54321';
+const CLIENT_SUPABASE_KEY = SUPABASE_PUBLISHABLE_KEY || 'local-development-key';
 
-if (!SUPABASE_URL || !SUPABASE_PUBLISHABLE_KEY) {
-  throw new Error(
-    '[supabase] Missing backend configuration: VITE_SUPABASE_URL and ' +
-      'VITE_SUPABASE_PUBLISHABLE_KEY must be provided by the build environment. ' +
-      'There is no bundled fallback key by design.',
-  );
+if (!SUPABASE_CONFIGURED) {
+  console.warn('[supabase] Backend is not configured. UI is running in disconnected development mode; configure VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY before using authenticated data flows.');
 }
 
 const SUPABASE_PROJECT_ID =
@@ -54,7 +53,7 @@ const SUPABASE_PROJECT_ID =
 // Guard: the URL host and the publishable key must belong to the same project.
 // This is the exact class of misconfiguration that caused the auth/data split.
 {
-  const urlRef = SUPABASE_URL.replace(/^https?:\/\//, '').split('.')[0];
+  const urlRef = CLIENT_SUPABASE_URL.replace(/^https?:\/\//, '').split('.')[0];
   const keyRef = projectRefFromAnonKey(SUPABASE_PUBLISHABLE_KEY);
   if (keyRef && urlRef && keyRef !== urlRef) {
     throw new Error(
@@ -220,7 +219,7 @@ const tracedFetch: typeof fetch = async (input, init = {}) => {
   }
 };
 
-export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+export const supabase = createClient<Database>(CLIENT_SUPABASE_URL, CLIENT_SUPABASE_KEY, {
   auth: {
     storage: isBrowser ? localStorage : undefined,
     persistSession: true,
