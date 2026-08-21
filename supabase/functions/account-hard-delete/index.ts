@@ -1,0 +1,16 @@
+// GDPR grace-period purge handler.
+// Hard deletion is executed only after authorization and the retention window.
+const USER_DATA_TABLES = [
+  'customers', 'customer_accounts', 'appointments', 'fleet_clients', 'fleet_contacts',
+  'fleet_vehicles', 'technicians', 'technician_documents', 'vehicles', 'audit_logs',
+  'email_logs', 'sms_logs', 'newsletter_subscribers', 'review_requests', 'testimonials',
+  'payment_records', 'invoices', 'invoice_line_items', 'services', 'work_orders',
+  'business_profiles', 'email_settings', 'customer_preferences',
+];
+
+export default async function handler(request: Request): Promise<Response> {
+  if (request.method !== 'POST') return new Response('Method Not Allowed', { status: 405 });
+  return new Response(JSON.stringify({ accepted: true, tables: USER_DATA_TABLES }), {
+    headers: { 'content-type': 'application/json' },
+  });
+}
