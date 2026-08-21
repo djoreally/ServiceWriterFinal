@@ -6,6 +6,8 @@ import { requestAppointmentProviderSync } from "./provider-sync.command";
 import { requireWorkspaceOwnerUserId } from "@/application/tenant-workspace";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
+import { nextApi } from "@/lib/nextApiClient";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 export interface SaveAppointmentOptions {
   existingAppointmentId?: string;
   isPrefillNew?: boolean;
@@ -108,29 +110,21 @@ export async function saveAppointment(
 
 
 
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error("Select a workspace before saving an appointment.");
+  const starts_at = `${dataToSave.scheduled_date}T${dataToSave.scheduled_time}`;
+  const ends_at = new Date(new Date(starts_at).getTime() + Number(dataToSave.duration_minutes) * 60000).toISOString();
+  const bridgePayload = { workspace_id, customer_id: dataToSave.customer_id, vehicle_id: dataToSave.vehicle_id, starts_at: new Date(starts_at).toISOString(), ends_at, source: "staff", notes: dataToSave.notes ?? undefined };
   if (shouldUpdate && options.existingAppointmentId) {
-    const { error } = await supabase
-      .from("appointments")
-      .update(dataToSave)
-      .eq("id", options.existingAppointmentId);
-    if (error) throw new Error(error.message);
-    return {
-      appointmentId: options.existingAppointmentId,
-      isUpdate: true,
-    };
+    await nextApi.appointments.update(options.existingAppointmentId, { ...bridgePayload, title: dataToSave.title, status: dataToSave.status, duration_minutes: dataToSave.duration_minutes, description: dataToSave.description, guest_name: dataToSave.guest_name, guest_email: dataToSave.guest_email, guest_phone: dataToSave.guest_phone, estimated_cost: dataToSave.estimated_cost, tax_amount: dataToSave.tax_amount, location_address: dataToSave.location_address, customer_city: dataToSave.customer_city, customer_state: dataToSave.customer_state, customer_postal_code: dataToSave.customer_postal_code });
+    return { appointmentId: options.existingAppointmentId, isUpdate: true };
   }
-
-  const ownerUserId = await requireWorkspaceOwnerUserId();
-
-  const { data: created, error } = await supabase
-    .from("appointments")
-    .insert({ ...dataToSave, user_id: ownerUserId })
-    .select("id")
-    .single();
-  if (error || !created) throw new Error(error?.message ?? "Failed to create appointment");
+  const { data: created } = await nextApi.appointments.create({ ...bridgePayload, title: dataToSave.title, duration_minutes: dataToSave.duration_minutes, status: dataToSave.status, description: dataToSave.description, guest_name: dataToSave.guest_name, guest_email: dataToSave.guest_email, guest_phone: dataToSave.guest_phone, estimated_cost: dataToSave.estimated_cost, tax_amount: dataToSave.tax_amount, location_address: dataToSave.location_address, customer_city: dataToSave.customer_city, customer_state: dataToSave.customer_state, customer_postal_code: dataToSave.customer_postal_code });
+  const createdRecord = created as { id?: string };
+  if (!createdRecord.id) throw new Error("Failed to create appointment");
 
   requestAppointmentProviderSync({
-    appointmentId: created.id,
+    appointmentId: createdRecord.id,
     syncMode: "appointment_created",
     guestEmail: formData.guest_email?.trim() || null,
   }).catch((syncError) => {
@@ -138,7 +132,7 @@ export async function saveAppointment(
   });
 
   return {
-    appointmentId: created.id,
+    appointmentId: createdRecord.id,
     isUpdate: false,
   };
 }
@@ -218,7 +212,8 @@ export async function tryAutoDispatchAppointment(
       return { autoDispatchEnabled: true, topRecommendationName: null };
     }
 
-    const topRecommendationName = (data as any)?.top_recommendation?.name ?? null;
+    const dispatchResult = data as { top_recommendation?: { name?: string | null } } | null;
+    const topRecommendationName = dispatchResult?.top_recommendation?.name ?? null;
 
     return {
       autoDispatchEnabled: true,
@@ -242,22 +237,14 @@ export async function updateAppointmentStatus(
     return;
   }
 
+    const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error("Select a workspace before updating an appointment.");
   if (newStatus === "completed") {
-    const {
-      data: { user },
-    } = await getCurrentAuthUser();
-
-    const { error } = await supabase.rpc("complete_appointment_with_rewards", {
-      p_appointment_id: appointmentId,
-      p_actor_id: user?.id,
-    });
-    if (error) throw new Error(error.message);
+    await nextApi.appointments.complete(appointmentId, workspace_id);
+  } else if (newStatus === "cancelled") {
+    await nextApi.appointments.cancel(workspace_id, appointmentId);
   } else {
-    const { error } = await supabase
-      .from("appointments")
-      .update({ status: newStatus, updated_at: new Date().toISOString() })
-      .eq("id", appointmentId);
-    if (error) throw new Error(error.message);
+    await nextApi.appointments.update(appointmentId, { workspace_id, status: newStatus });
   }
 
   // Reservations are released on cancellation only. Completion records oil
@@ -282,13 +269,7 @@ export async function updateAppointmentSchedule(
   scheduledDate: string,
   scheduledTimeHHMM: string,
 ): Promise<void> {
-  const { error } = await supabase
-    .from("appointments")
-    .update({
-      scheduled_date: scheduledDate,
-      scheduled_time: `${scheduledTimeHHMM}:00`,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", appointmentId);
-  if (error) throw new Error(error.message);
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error("Select a workspace before rescheduling an appointment.");
+  await nextApi.appointments.update(appointmentId, { workspace_id, scheduled_date: scheduledDate, scheduled_time: `${scheduledTimeHHMM}:00` });
 }

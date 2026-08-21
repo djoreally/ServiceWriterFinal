@@ -1,7 +1,8 @@
 /**
  * Edit appointment command - inline update from dialog
  */
-import { supabase } from "@/integrations/supabase/client";
+import { nextApi } from "@/lib/nextApiClient";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
 export interface EditAppointmentPayload {
   title: string;
@@ -21,12 +22,7 @@ export interface EditAppointmentPayload {
 }
 
 export async function editAppointment(appointmentId: string, payload: EditAppointmentPayload): Promise<void> {
-  const { error } = await supabase
-    .from("appointments")
-    .update({
-      ...payload,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", appointmentId);
-  if (error) throw new Error(error.message);
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error("Select a workspace before editing an appointment.");
+  await nextApi.appointments.update(appointmentId, { workspace_id, ...payload });
 }
