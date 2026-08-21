@@ -1,0 +1,276 @@
+name: ServiceWriter CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      run_e2e:
+        description: Run Playwright browser smoke tests
+        required: false
+        default: true
+        type: boolean
+      run_supabase_lint:
+        description: Run Supabase CLI database lint when credentials are configured
+        required: false
+        default: false
+        type: boolean
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  NODE_VERSION: 22.x
+  CI: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: servicewriter-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend-quality:
+    name: Frontend lint, typecheck, tests, and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Lint frontend
+        run: npm run lint
+
+      - name: Typecheck frontend
+        run: npm run typecheck
+
+      - name: Run Jest unit and integration tests
+        run: npm test -- --ci --coverage
+
+      - name: Upload Jest coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jest-coverage-${{ github.sha }}
+          path: coverage/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Build Vite frontend
+        run: npm run build
+
+      - name: Upload Vite build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vite-dist-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  next-api-quality:
+    name: Next.js API typecheck and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/web-next
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL || 'https://example.supabase.co' }}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || 'ci-placeholder-publishable-key' }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || 'ci-placeholder-service-role-key' }}
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NEXT_PUBLIC_CORS_ORIGIN: http://localhost:4173
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: apps/web-next/package-lock.json
+
+      - name: Install Next.js dependencies
+        run: npm ci
+
+      - name: Typecheck Next.js API
+        run: npm run typecheck
+
+      - name: Build Next.js API application
+        run: npm run build
+
+      - name: Upload Next.js build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: next-build-${{ github.sha }}
+          path: apps/web-next/.next/
+          if-no-files-found: error
+          retention-days: 7
+
+  migration-sanity:
+    name: Migration safety and verification-script checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Compile repository Python scripts
+        run: python -m compileall -q scripts
+
+      - name: Verify migration filenames are ordered and unique
+        run: |
+          set -euo pipefail
+          mapfile -t migrations < <(find supabase/migrations -maxdepth 1 -type f -name '*.sql' -printf '%f\n' | sort)
+          test "${#migrations[@]}" -gt 0
+          printf '%s\n' "${migrations[@]}" | awk '
+            !/^[0-9]{14}_[a-z0-9][a-z0-9_-]*\.sql$/ { print "Invalid migration filename: " $0; bad=1 }
+            seen[$0]++ > 1 { print "Duplicate migration filename: " $0; bad=1 }
+            END { exit bad }
+          '
+
+      - name: Reject new destructive migration primitives
+        env:
+          BASE_SHA: ${{ github.event.before || github.event.pull_request.base.sha || 'HEAD^' }}
+        run: |
+          set -euo pipefail
+          mapfile -t changed_migrations < <(git diff --name-only "$BASE_SHA" "$GITHUB_SHA" -- 'supabase/migrations/*.sql')
+          for migration in "${changed_migrations[@]}"; do
+            if grep -nE '\bDROP[[:space:]]+(TABLE|SCHEMA|DATABASE)\b|TRUNCATE[[:space:]]+' "$migration"; then
+              echo "Destructive primitive detected in newly changed migration: $migration" >&2
+              echo 'Require explicit review and a separate approved workflow.' >&2
+              exit 1
+            fi
+          done
+
+      - name: Check quote-conversion migration invariants
+        run: |
+          set -euo pipefail
+          migration=supabase/migrations/20260821171500_quote_conversion_schema.sql
+          test -s "$migration"
+          grep -q 'quote_conversions' "$migration"
+          grep -q 'service_record_line_items' "$migration"
+          grep -q 'convert_quote_to_service_record_v1' "$migration"
+          grep -q 'workspace_id' "$migration"
+          test -s scripts/verify_quote_conversion_migration.py
+
+      - name: Upload migration sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-migrations-${{ github.sha }}
+          path: |
+            supabase/migrations/
+            scripts/verify_quote_conversion_migration.py
+          retention-days: 14
+
+  supabase-lint:
+    name: Optional Supabase database lint
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_supabase_lint == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+    steps:
+      - name: Require Supabase lint credentials
+        if: ${{ env.SUPABASE_ACCESS_TOKEN == '' || env.SUPABASE_PROJECT_REF == '' }}
+        run: |
+          echo 'Set SUPABASE_ACCESS_TOKEN and SUPABASE_PROJECT_REF before enabling optional Supabase lint.' >&2
+          exit 1
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link Supabase project
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
+
+      - name: Lint database migrations
+        run: supabase db lint --linked
+
+  e2e-smoke:
+    name: Playwright browser smoke tests
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.run_e2e == true }}
+    needs: [frontend-quality, next-api-quality]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright smoke tests
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.sha }}
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  ci-summary:
+    name: CI summary
+    if: always()
+    needs:
+      [
+        frontend-quality,
+        next-api-quality,
+        migration-sanity,
+        supabase-lint,
+        e2e-smoke,
+      ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if a required job failed or was cancelled
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "$RESULTS"
+          if jq -e 'to_entries[] | select(.value.result == "failure" or .value.result == "cancelled")' <<< "$RESULTS" >/dev/null; then
+            echo 'One or more CI jobs failed or were cancelled.' >&2
+            exit 1
+          fi
+          echo 'All applicable CI jobs passed.'
