@@ -10,7 +10,7 @@ import { RegionalSettingsProvider } from "@/contexts/RegionalSettingsContext";
 import { FeatureProvider } from "@/shared/features/feature.provider";
 import { TenantProvider } from "@/contexts/TenantContext";
 import { SubscriptionProvider } from "@/contexts/SubscriptionContext";
-import { AuthProvider } from "@packages/auth";
+import { AuthProvider, type FrontendSession } from "@packages/auth";
 import { KeyboardShortcutsProvider } from "@/contexts/KeyboardShortcutsContext";
 import { AppRoutes } from "@/App";
 import type { PersonaPreset } from "./personas";
@@ -61,7 +61,10 @@ export function renderRoute(options: RenderRouteOptions = {}) {
           <TerminologyProvider>
             <RegionalSettingsProvider>
               <FeatureProvider>
-                <AuthProvider>
+                <AuthProvider
+                  initialSession={persona.session as FrontendSession | null}
+                  authStateSource={backend.auth}
+                >
                   <SubscriptionProvider>
                     <TenantProvider>
                       <MemoryRouter initialEntries={initialEntries}>

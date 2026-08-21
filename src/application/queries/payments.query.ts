@@ -61,16 +61,22 @@ export interface PaymentSuccessBookingDetails {
  */
 export async function fetchPaymentRecords(): Promise<PaymentRecord[]> {
   const { data, error } = await supabase
-    .from("payment_records")
+    .from("payments")
     .select(
       `
-        *,
-        appointments (
-          title,
-          scheduled_date,
-          tax_amount,
-          status
-        )
+        id,
+        workspace_id,
+        invoice_id,
+        customer_id,
+        provider,
+        provider_payment_id,
+        status,
+        amount,
+        currency_code,
+        paid_at,
+        created_by,
+        created_at,
+        updated_at
       `,
     )
     .order("created_at", { ascending: false });
@@ -134,23 +140,26 @@ export async function fetchPaymentSuccessBookingDetails(
 ): Promise<PaymentSuccessBookingDetails | null> {
   // Query payment_records for webhook-confirmed payment (or success-redirect verification)
   const paymentRecordQuery = supabase
-    .from("payment_records")
+    .from("payments")
     .select(
       `
         id,
+        workspace_id,
+        invoice_id,
+        customer_id,
+        provider,
+        provider_payment_id,
         amount,
-        currency,
-        customer_name,
-        customer_email,
-        metadata,
-        appointment_id,
-        user_id,
-        status
+        currency_code,
+        status,
+        paid_at,
+        created_by,
+        created_at
       `,
     );
 
   const { data: paymentRecord } = sessionId.startsWith("cs_")
-    ? await paymentRecordQuery.filter("metadata->>checkout_session_id", "eq", sessionId).maybeSingle()
+    ? await paymentRecordQuery.eq("provider_payment_id", sessionId).maybeSingle()
     : await paymentRecordQuery.eq("id", sessionId).maybeSingle();
 
   if (!paymentRecord) {
@@ -162,30 +171,21 @@ export async function fetchPaymentSuccessBookingDetails(
   const { data: profile } = await supabase
     .from("business_profiles")
     .select("business_name")
-    .eq("user_id", paymentRecord.user_id)
-    .single();
+    .eq("user_id", paymentRecord.created_by ?? "")
+    .maybeSingle();
 
   // Get appointment if linked
   let appointmentDetails:
     | { scheduled_date?: string; scheduled_time?: string; title?: string }
     | undefined;
 
-  if (paymentRecord.appointment_id) {
-    const { data: appointment } = await supabase
-      .from("appointments")
-      .select("scheduled_date, scheduled_time, title")
-      .eq("id", paymentRecord.appointment_id)
-      .single();
+  const metadata: Record<string, unknown> = {};
 
-    appointmentDetails = appointment ?? undefined;
-  }
-
-  const metadata = (paymentRecord.metadata as Record<string, unknown>) || {};
 
   return {
     businessName: profile?.business_name || "Auto Service",
-    customerName: paymentRecord.customer_name || "Customer",
-    customerEmail: paymentRecord.customer_email || "",
+    customerName: "Customer",
+    customerEmail: "",
     scheduledDate:
       appointmentDetails?.scheduled_date ||
       (metadata.scheduledDate as string) ||
@@ -198,11 +198,11 @@ export async function fetchPaymentSuccessBookingDetails(
       appointmentDetails?.title ||
       (metadata.serviceName as string) ||
       "Auto Service",
-    amount: centsToDollars(toCents(paymentRecord.amount)),
-    currency: paymentRecord.currency || "USD",
+    amount: Number(paymentRecord.amount),
+    currency: paymentRecord.currency_code || "USD",
     vehicleInfo: metadata.vehicleInfo as string,
     confirmationNumber: paymentRecord.id.slice(-8).toUpperCase(),
     status: paymentRecord.status as "pending" | "succeeded" | "failed",
-    userId: paymentRecord.user_id,
+    userId: paymentRecord.created_by ?? undefined,
   };
 }

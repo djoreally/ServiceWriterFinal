@@ -23,7 +23,7 @@ export interface AppointmentPaymentRow {
  */
 export async function fetchAppointmentPayments(appointmentId: string): Promise<AppointmentPaymentRow[]> {
   const { data, error } = await supabase
-    .from("payment_records")
+    .from("payments")
     .select("*")
     .eq("appointment_id", appointmentId)
     .order("created_at", { ascending: false });

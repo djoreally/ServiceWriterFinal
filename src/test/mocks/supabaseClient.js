@@ -1,38 +1,23 @@
-const chain = () => {
-  const value = {
-    data: null,
-    error: null,
-    count: 0,
-    select: jest.fn(() => value),
-    insert: jest.fn(() => value),
-    update: jest.fn(() => value),
-    delete: jest.fn(() => value),
-    eq: jest.fn(() => value),
-    neq: jest.fn(() => value),
-    in: jest.fn(() => value),
-    ilike: jest.fn(() => value),
-    order: jest.fn(() => value),
-    limit: jest.fn(() => value),
-    maybeSingle: jest.fn(async () => ({ data: null, error: null })),
-    single: jest.fn(async () => ({ data: null, error: null })),
-    then: (resolve) => Promise.resolve({ data: [], error: null, count: 0 }).then(resolve),
-  };
-  return value;
-};
+const { getFakeBackend } = require("../journeys/fakeBackend");
 
-const supabase = {
-  auth: {
-    getSession: jest.fn(async () => ({ data: { session: null }, error: null })),
-    getUser: jest.fn(async () => ({ data: { user: null }, error: null })),
-    onAuthStateChange: jest.fn(() => ({ data: { subscription: { unsubscribe: jest.fn() } } })),
-    signInWithPassword: jest.fn(),
-    signInWithOtp: jest.fn(),
-    signOut: jest.fn(),
+const handler = {
+  get(_target, prop) {
+    const backend = getFakeBackend();
+    const value = backend[prop];
+    if (typeof value === "function") return value.bind(backend);
+    return value;
   },
-  from: jest.fn(() => chain()),
-  rpc: jest.fn(async () => ({ data: null, error: null })),
-  functions: { invoke: jest.fn(async () => ({ data: null, error: null })) },
-  channel: jest.fn(() => ({ on: jest.fn().mockReturnThis(), subscribe: jest.fn(), unsubscribe: jest.fn() })),
 };
 
-module.exports = { supabase, authSupabase: supabase };
+const supabase = new Proxy({}, handler);
+
+module.exports = {
+  supabase,
+  authSupabase: supabase,
+  SUPABASE_URL_RESOLVED: "http://localhost:54321",
+  SUPABASE_PUBLISHABLE_KEY_RESOLVED: "test-anon-key",
+  SUPABASE_PROJECT_ID_RESOLVED: "test-project",
+  AUTH_SUPABASE_URL_RESOLVED: "http://localhost:54321",
+  AUTH_SUPABASE_PUBLISHABLE_KEY_RESOLVED: "test-anon-key",
+  AUTH_SUPABASE_PROJECT_ID_RESOLVED: "test-project",
+};

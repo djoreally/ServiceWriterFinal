@@ -42,7 +42,7 @@ export async function fetchSucceededPayments(userId: string, sinceIso: string) {
 /** Fetch pending payment records for a user. */
 export async function fetchPendingPayments(userId: string) {
   return supabase
-    .from("payment_records")
+    .from("payments")
     .select("amount, appointment_id")
     .eq("user_id", userId)
     .eq("status", "pending");

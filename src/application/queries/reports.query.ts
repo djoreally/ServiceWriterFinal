@@ -9,7 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 // ── Fetch payments for a date range ────────────────────────────────
 export async function fetchReportPayments(fromDate: string, toDate: string) {
   return supabase
-    .from("payment_records")
+    .from("payments")
     .select("id, amount, created_at, status, customer_email, customer_name, refund_amount, payment_type, tax_amount, platform_fee, subtotal, metadata, appointment_id, data_origin, appointments(status)")
     .gte("created_at", `${fromDate}T00:00:00`)
     .lte("created_at", `${toDate}T23:59:59`)
@@ -62,7 +62,7 @@ export async function fetchReportVehicles(limit = 500) {
 // ── Fetch previous-period payments for comparison ──────────────────
 export async function fetchPreviousPeriodPayments(prevFrom: string, prevTo: string) {
   return supabase
-    .from("payment_records")
+    .from("payments")
     .select("id, amount, status")
     .gte("created_at", `${prevFrom}T00:00:00`)
     .lte("created_at", `${prevTo}T23:59:59`);
@@ -71,7 +71,7 @@ export async function fetchPreviousPeriodPayments(prevFrom: string, prevTo: stri
 // ── Fetch YTD payments ─────────────────────────────────────────────
 export async function fetchYtdPayments(ytdFrom: string) {
   return supabase
-    .from("payment_records")
+    .from("payments")
     .select("amount, status")
     .gte("created_at", `${ytdFrom}T00:00:00`);
 }

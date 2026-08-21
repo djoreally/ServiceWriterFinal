@@ -34,8 +34,30 @@ const AuthContext = createContext<AuthContextValue>({
   signOut: async () => undefined,
 });
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [session, setSession] = useState<FrontendSession | null>(null);
+export type AuthStateSource = {
+  onAuthStateChange?: (callback: (event: string, session: FrontendSession | null) => void) => {
+    data?: { subscription?: { unsubscribe?: () => void } };
+  };
+};
+
+export function AuthProvider({
+  children,
+  initialSession = null,
+  authStateSource,
+}: {
+  children: React.ReactNode;
+  initialSession?: FrontendSession | null;
+  authStateSource?: AuthStateSource;
+}) {
+  const [session, setSession] = useState<FrontendSession | null>(initialSession);
+
+  useEffect(() => {
+    if (!authStateSource?.onAuthStateChange) return;
+    const result = authStateSource.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+    });
+    return () => result?.data?.subscription?.unsubscribe?.();
+  }, [authStateSource]);
   const value = useMemo<AuthContextValue>(() => ({
     session,
     user: session?.user ?? null,

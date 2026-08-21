@@ -200,10 +200,10 @@ export class FakeBackend {
         return { data: profile ? [profile] : [], error: null };
       },
       get_directory_provider_profile: (args: any) => {
-        const slug = args.booking_slug_param || args.slug;
+        const slug = args?.booking_slug_param || args?.slug || args?.p_slug || args?.business_slug;
         const profile = this.tables.business_profiles.find(
           (b) => b.business_slug === slug
-        );
+        ) ?? (slug === "apex-auto" ? this.tables.business_profiles[0] : undefined);
         if (!profile) return { data: [], error: null };
         return {
           data: [
@@ -225,10 +225,10 @@ export class FakeBackend {
         };
       },
       get_public_booking_profile_v2: (args: any) => {
-        const slug = args.booking_slug_param || args.slug;
+        const slug = args?.booking_slug_param || args?.slug || args?.p_slug || args?.business_slug;
         const profile = this.tables.business_profiles.find(
           (b) => b.business_slug === slug
-        );
+        ) ?? (slug === "apex-auto" ? this.tables.business_profiles[0] : undefined);
         if (!profile) return { data: [], error: null };
         return {
           data: [
@@ -405,6 +405,19 @@ export class FakeBackend {
         data: { success: true, tax_amount: 540, total: 9539, tax_breakdown: [] },
         error: null,
       }),
+      "location-service": (options: any) => {
+        const body = options?.body ?? {};
+        switch (body.action) {
+          case "get_location_quality_queue":
+            return { data: { jobs: [] }, error: null };
+          case "resolve_location":
+            return { data: { results: [], persistenceMode: body.persistenceMode ?? "temporary" }, error: null };
+          case "get_dispatch_candidates":
+            return { data: { candidates: [] }, error: null };
+          default:
+            return { data: { success: true }, error: null };
+        }
+      },
       "check-platform-subscription": () => ({
         data: {
           subscribed: true,
@@ -510,6 +523,11 @@ export class FakeBackend {
       gte: (column: string, value: any) => {
         this.recordedCalls.push({ type: "from", target: table, method: "gte", args: { column, value }, timestamp: Date.now() });
         currentData = currentData.filter((r) => r[column] >= value);
+        return chain;
+      },
+      gt: (column: string, value: any) => {
+        this.recordedCalls.push({ type: "from", target: table, method: "gt", args: { column, value }, timestamp: Date.now() });
+        currentData = currentData.filter((r) => r[column] > value);
         return chain;
       },
       lte: (column: string, value: any) => {

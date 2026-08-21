@@ -4050,7 +4050,7 @@ export type Database = {
             foreignKeyName: "financial_transactions_payment_record_id_fkey"
             columns: ["payment_record_id"]
             isOneToOne: false
-            referencedRelation: "payment_records"
+            referencedRelation: "payments"
             referencedColumns: ["id"]
           },
           {
@@ -7743,150 +7743,66 @@ export type Database = {
       }
       invoices: {
         Row: {
-          amount_paid: number
-          bill_to_type: string
-          billing_context: Json
-          contact_email: string | null
-          contact_name: string | null
-          contact_phone: string | null
-          created_at: string
-          customer_id: string | null
-          deleted_at: string | null
-          deleted_by: string | null
-          deleted_reason: string | null
-          delivery_attempt_count: number
-          delivery_last_error: string | null
-          delivery_status: string
-          discount_amount: number
-          discount_type: string | null
-          due_date: string | null
-          fleet_client_id: string | null
           id: string
-          invoice_number: string
-          issue_date: string
-          last_delivery_attempt_at: string | null
-          notes: string | null
-          paid_at: string | null
-          payment_terms: string | null
-          sent_at: string | null
-          shop_fee: number
-          shop_fee_enabled: boolean
+          workspace_id: string
+          customer_id: string
+          vehicle_id: string | null
+          work_order_id: string | null
           status: string
+          invoice_number: number
           subtotal: number
-          surcharge: number
-          surcharge_enabled: boolean
-          tax_amount: number
-          tax_enabled: boolean
-          tax_rate: number
-          terms_text: string | null
+          tax_total: number
           total: number
+          amount_paid: number
+          due_at: string | null
+          issued_at: string | null
+          created_by: string | null
+          created_at: string
           updated_at: string
-          user_id: string
-          waste_oil_fee: number
-          waste_oil_fee_enabled: boolean
+          /** @deprecated Read-adapter compatibility only; not a live invoices column. */
+          user_id?: string | null
+          /** @deprecated Read-adapter compatibility only; not a live invoices column. */
+          bill_to_type?: string | null
+          /** @deprecated Read-adapter compatibility only; not a live invoices column. */
+          fleet_client_id?: string | null
         }
         Insert: {
-          amount_paid?: number
-          bill_to_type: string
-          billing_context?: Json
-          contact_email?: string | null
-          contact_name?: string | null
-          contact_phone?: string | null
-          created_at?: string
-          customer_id?: string | null
-          deleted_at?: string | null
-          deleted_by?: string | null
-          deleted_reason?: string | null
-          delivery_attempt_count?: number
-          delivery_last_error?: string | null
-          delivery_status?: string
-          discount_amount?: number
-          discount_type?: string | null
-          due_date?: string | null
-          fleet_client_id?: string | null
           id?: string
-          invoice_number: string
-          issue_date?: string
-          last_delivery_attempt_at?: string | null
-          notes?: string | null
-          paid_at?: string | null
-          payment_terms?: string | null
-          sent_at?: string | null
-          shop_fee?: number
-          shop_fee_enabled?: boolean
+          workspace_id: string
+          customer_id: string
+          vehicle_id?: string | null
+          work_order_id?: string | null
           status?: string
+          invoice_number: number
           subtotal?: number
-          surcharge?: number
-          surcharge_enabled?: boolean
-          tax_amount?: number
-          tax_enabled?: boolean
-          tax_rate?: number
-          terms_text?: string | null
+          tax_total?: number
           total?: number
+          amount_paid?: number
+          due_at?: string | null
+          issued_at?: string | null
+          created_by?: string | null
+          created_at?: string
           updated_at?: string
-          user_id: string
-          waste_oil_fee?: number
-          waste_oil_fee_enabled?: boolean
         }
         Update: {
-          amount_paid?: number
-          bill_to_type?: string
-          billing_context?: Json
-          contact_email?: string | null
-          contact_name?: string | null
-          contact_phone?: string | null
-          created_at?: string
-          customer_id?: string | null
-          deleted_at?: string | null
-          deleted_by?: string | null
-          deleted_reason?: string | null
-          delivery_attempt_count?: number
-          delivery_last_error?: string | null
-          delivery_status?: string
-          discount_amount?: number
-          discount_type?: string | null
-          due_date?: string | null
-          fleet_client_id?: string | null
           id?: string
-          invoice_number?: string
-          issue_date?: string
-          last_delivery_attempt_at?: string | null
-          notes?: string | null
-          paid_at?: string | null
-          payment_terms?: string | null
-          sent_at?: string | null
-          shop_fee?: number
-          shop_fee_enabled?: boolean
+          workspace_id?: string
+          customer_id?: string
+          vehicle_id?: string | null
+          work_order_id?: string | null
           status?: string
+          invoice_number?: number
           subtotal?: number
-          surcharge?: number
-          surcharge_enabled?: boolean
-          tax_amount?: number
-          tax_enabled?: boolean
-          tax_rate?: number
-          terms_text?: string | null
+          tax_total?: number
           total?: number
+          amount_paid?: number
+          due_at?: string | null
+          issued_at?: string | null
+          created_by?: string | null
+          created_at?: string
           updated_at?: string
-          user_id?: string
-          waste_oil_fee?: number
-          waste_oil_fee_enabled?: boolean
         }
-        Relationships: [
-          {
-            foreignKeyName: "invoices_customer_id_fkey"
-            columns: ["customer_id"]
-            isOneToOne: false
-            referencedRelation: "customers"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "invoices_fleet_client_id_fkey"
-            columns: ["fleet_client_id"]
-            isOneToOne: false
-            referencedRelation: "fleet_clients"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       job_charges: {
         Row: {
@@ -8552,7 +8468,7 @@ export type Database = {
             foreignKeyName: "journal_lines_payment_record_id_fkey"
             columns: ["payment_record_id"]
             isOneToOne: false
-            referencedRelation: "payment_records"
+            referencedRelation: "payments"
             referencedColumns: ["id"]
           },
           {
@@ -11025,7 +10941,7 @@ export type Database = {
             foreignKeyName: "payment_provider_records_payment_record_id_fkey"
             columns: ["payment_record_id"]
             isOneToOne: false
-            referencedRelation: "payment_records"
+            referencedRelation: "payments"
             referencedColumns: ["id"]
           },
         ]
@@ -11122,137 +11038,73 @@ export type Database = {
         }
         Relationships: []
       }
-      payment_records: {
+      payments: {
         Row: {
-          amount: number
-          appointment_id: string | null
-          cleared_at: string | null
-          created_at: string | null
-          currency: string | null
-          customer_email: string | null
-          customer_name: string | null
-          data_origin: Database["public"]["Enums"]["data_origin_type"]
-          deleted_at: string | null
-          deleted_by: string | null
-          deleted_reason: string | null
           id: string
-          import_batch_id: string | null
-          invoice_sent_at: string | null
-          metadata: Json | null
-          origin_source: string | null
-          payment_type: string | null
-          platform_fee: number | null
-          pricing_snapshot: Json | null
-          processor_fee_amount: number
-          refund_amount: number | null
-          refund_reason: string | null
-          refunded_at: string | null
-          settled_at: string | null
-          source_id: string | null
-          source_type: string | null
-          status: string | null
-          stripe_connected_account_id: string | null
-          stripe_payment_intent_id: string | null
-          stripe_refund_id: string | null
-          subtotal: number | null
-          tax_amount: number | null
-          tax_breakdown: Json | null
-          tax_rate: number | null
-          updated_at: string | null
-          user_id: string
+          workspace_id: string
+          invoice_id: string | null
+          customer_id: string | null
+          provider: string | null
+          provider_payment_id: string | null
+          status: string
+          amount: number
+          currency_code: string
+          paid_at: string | null
+          created_by: string | null
+          created_at: string
+          updated_at: string
+          /** @deprecated Read-adapter compatibility only; not a public.payments column. */
+          appointment_id?: string | null
+          /** @deprecated Read-adapter compatibility only; not a public.payments column. */
+          currency?: string | null
+          /** @deprecated Read-adapter compatibility only; not a public.payments column. */
+          customer_name?: string | null
+          /** @deprecated Read-adapter compatibility only; not a public.payments column. */
+          customer_email?: string | null
+          /** @deprecated Read-adapter compatibility only; not a public.payments column. */
+          payment_type?: string | null
+          /** @deprecated Read-adapter compatibility only; not a public.payments column. */
+          metadata?: Json | null
+          /** @deprecated Read-adapter compatibility only; not a public.payments column. */
+          refund_amount?: number | null
+          /** @deprecated Read-adapter compatibility only; not a public.payments column. */
+          tax_amount?: number | null
+          /** @deprecated Read-adapter compatibility only; not a public.payments column. */
+          user_id?: string | null
+          /** @deprecated Read-adapter compatibility only; not a public.payments column. */
+          deleted_at?: string | null
         }
         Insert: {
-          amount: number
-          appointment_id?: string | null
-          cleared_at?: string | null
-          created_at?: string | null
-          currency?: string | null
-          customer_email?: string | null
-          customer_name?: string | null
-          data_origin?: Database["public"]["Enums"]["data_origin_type"]
-          deleted_at?: string | null
-          deleted_by?: string | null
-          deleted_reason?: string | null
           id?: string
-          import_batch_id?: string | null
-          invoice_sent_at?: string | null
-          metadata?: Json | null
-          origin_source?: string | null
-          payment_type?: string | null
-          platform_fee?: number | null
-          pricing_snapshot?: Json | null
-          processor_fee_amount?: number
-          refund_amount?: number | null
-          refund_reason?: string | null
-          refunded_at?: string | null
-          settled_at?: string | null
-          source_id?: string | null
-          source_type?: string | null
-          status?: string | null
-          stripe_connected_account_id?: string | null
-          stripe_payment_intent_id?: string | null
-          stripe_refund_id?: string | null
-          subtotal?: number | null
-          tax_amount?: number | null
-          tax_breakdown?: Json | null
-          tax_rate?: number | null
-          updated_at?: string | null
-          user_id: string
+          workspace_id: string
+          invoice_id?: string | null
+          customer_id?: string | null
+          provider?: string | null
+          provider_payment_id?: string | null
+          status?: string
+          amount: number
+          currency_code?: string
+          paid_at?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
         }
         Update: {
-          amount?: number
-          appointment_id?: string | null
-          cleared_at?: string | null
-          created_at?: string | null
-          currency?: string | null
-          customer_email?: string | null
-          customer_name?: string | null
-          data_origin?: Database["public"]["Enums"]["data_origin_type"]
-          deleted_at?: string | null
-          deleted_by?: string | null
-          deleted_reason?: string | null
           id?: string
-          import_batch_id?: string | null
-          invoice_sent_at?: string | null
-          metadata?: Json | null
-          origin_source?: string | null
-          payment_type?: string | null
-          platform_fee?: number | null
-          pricing_snapshot?: Json | null
-          processor_fee_amount?: number
-          refund_amount?: number | null
-          refund_reason?: string | null
-          refunded_at?: string | null
-          settled_at?: string | null
-          source_id?: string | null
-          source_type?: string | null
-          status?: string | null
-          stripe_connected_account_id?: string | null
-          stripe_payment_intent_id?: string | null
-          stripe_refund_id?: string | null
-          subtotal?: number | null
-          tax_amount?: number | null
-          tax_breakdown?: Json | null
-          tax_rate?: number | null
-          updated_at?: string | null
-          user_id?: string
+          workspace_id?: string
+          invoice_id?: string | null
+          customer_id?: string | null
+          provider?: string | null
+          provider_payment_id?: string | null
+          status?: string
+          amount?: number
+          currency_code?: string
+          paid_at?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "payment_records_appointment_id_fkey"
-            columns: ["appointment_id"]
-            isOneToOne: false
-            referencedRelation: "appointments"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "payment_records_import_batch_id_fkey"
-            columns: ["import_batch_id"]
-            isOneToOne: false
-            referencedRelation: "import_batches"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       payouts: {
         Row: {
@@ -11962,7 +11814,7 @@ export type Database = {
             foreignKeyName: "receipt_events_payment_record_id_fkey"
             columns: ["payment_record_id"]
             isOneToOne: false
-            referencedRelation: "payment_records"
+            referencedRelation: "payments"
             referencedColumns: ["id"]
           },
         ]
@@ -18595,7 +18447,7 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "payment_records_appointment_id_fkey"
+            foreignKeyName: "payments_appointment_id_fkey"
             columns: ["appointment_id"]
             isOneToOne: false
             referencedRelation: "appointments"
@@ -21110,7 +20962,7 @@ export type Database = {
         }
         SetofOptions: {
           from: "*"
-          to: "payment_records"
+          to: "payments"
           isOneToOne: true
           isSetofReturn: false
         }

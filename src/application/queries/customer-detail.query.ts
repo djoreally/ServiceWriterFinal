@@ -106,7 +106,7 @@ export async function fetchCustomerDetail(customerId: string): Promise<CustomerD
 
   if (appointmentIds.length > 0 || customerEmail) {
     let payQuery = supabase
-      .from("payment_records")
+      .from("payments")
       .select("amount, status")
       .eq("status", "succeeded");
 

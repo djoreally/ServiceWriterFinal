@@ -217,7 +217,7 @@ export async function fetchLTVData(): Promise<LTVDataResult> {
       .not("lifetime_value", "is", null)
       .order("lifetime_value", { ascending: false }),
     supabase
-      .from("payment_records")
+      .from("payments")
       .select("created_at, amount, status, appointment_id")
       .eq("user_id", user.id)
       .eq("status", "succeeded")

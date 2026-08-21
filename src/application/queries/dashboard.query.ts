@@ -268,7 +268,7 @@ export async function fetchDashboardReporting(
 
   const [paymentsRes, servicesRes, appointmentsRes, prevPaymentsRes] = await Promise.all([
     supabase
-      .from("payment_records")
+      .from("payments")
       .select(
         "id, amount, created_at, status, customer_email, customer_name, refund_amount, appointment_id, appointments(status)"
       )
@@ -295,7 +295,7 @@ export async function fetchDashboardReporting(
       .lte("scheduled_date", toDate)
       .order("scheduled_date", { ascending: true }),
     supabase
-      .from("payment_records")
+      .from("payments")
       .select("id, amount, status, refund_amount")
       .gte("created_at", `${prevFrom}T00:00:00`)
       .lte("created_at", `${prevTo}T23:59:59`),

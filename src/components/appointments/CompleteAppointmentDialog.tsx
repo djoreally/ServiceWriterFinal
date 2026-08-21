@@ -58,7 +58,7 @@ export function CompleteAppointmentDialog({
   const [customOilType, setCustomOilType] = useState(false);
   const [step, setStep] = useState<"details" | "closeout">("details");
   const [closeoutProcessing, setCloseoutProcessing] = useState(false);
-  const [closeoutPayment, setCloseoutPayment] = useState<{ id: string; amount: number; subtotal: number | null; tax_amount: number | null; currency: string; customer_name: string | null } | null>(null);
+  const [closeoutPayment, setCloseoutPayment] = useState<{ id: string; amount: number; subtotal?: number; tax_amount?: number; refund_amount?: number; currency: string; customer_name?: string } | null>(null);
   const [manualPaymentOpen, setManualPaymentOpen] = useState(false);
   const [paymentLinkUrl, setPaymentLinkUrl] = useState<string | null>(null);
   const [paymentLinkOpen, setPaymentLinkOpen] = useState(false);
@@ -212,7 +212,14 @@ export function CompleteAppointmentDialog({
         customerName,
       });
 
-      setCloseoutPayment(payment);
+      setCloseoutPayment({
+        id: payment.id,
+        amount: payment.amount,
+        subtotal,
+        tax_amount: taxAmount,
+        currency: payment.currency_code,
+        customer_name: customerName,
+      });
       return payment;
     } finally {
       setCloseoutProcessing(false);

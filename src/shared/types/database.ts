@@ -31,9 +31,15 @@ export type BusinessProfileRow = Database["public"]["Tables"]["business_profiles
 export type BusinessProfileInsert = Database["public"]["Tables"]["business_profiles"]["Insert"];
 export type BusinessProfileUpdate = Database["public"]["Tables"]["business_profiles"]["Update"];
 
-export type PaymentRecordRow = Database["public"]["Tables"]["payment_records"]["Row"];
-export type PaymentRecordInsert = Database["public"]["Tables"]["payment_records"]["Insert"];
-export type PaymentRecordUpdate = Database["public"]["Tables"]["payment_records"]["Update"];
+export type PaymentRow = Database["public"]["Tables"]["payments"]["Row"];
+export type PaymentInsert = Database["public"]["Tables"]["payments"]["Insert"];
+export type PaymentUpdate = Database["public"]["Tables"]["payments"]["Update"];
+/** @deprecated Use PaymentRow while legacy application modules finish renaming. */
+export type PaymentRecordRow = PaymentRow;
+/** @deprecated Use PaymentInsert while legacy application modules finish renaming. */
+export type PaymentRecordInsert = PaymentInsert;
+/** @deprecated Use PaymentUpdate while legacy application modules finish renaming. */
+export type PaymentRecordUpdate = PaymentUpdate;
 
 export type IntakeQuestionRow = Database["public"]["Tables"]["intake_questions"]["Row"];
 export type IntakeQuestionInsert = Database["public"]["Tables"]["intake_questions"]["Insert"];

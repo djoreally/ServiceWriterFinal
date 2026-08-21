@@ -47,7 +47,7 @@ export async function fetchCustomerAddressByGuestEmail(email: string, userId: st
 /** Fetch succeeded payment records for an appointment. */
 export async function fetchSucceededPayments(appointmentId: string) {
   return supabase
-    .from("payment_records")
+    .from("payments")
     .select("status, payment_type")
     .eq("appointment_id", appointmentId)
     .eq("status", "succeeded");

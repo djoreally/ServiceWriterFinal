@@ -69,7 +69,7 @@ export async function getJobRuntime(
 
   const [{ data: payments }, { data: checklistRows }] = await Promise.all([
     client
-      .from("payment_records")
+      .from("payments")
       .select("amount, refund_amount, status")
       .eq("appointment_id", jobId),
     client

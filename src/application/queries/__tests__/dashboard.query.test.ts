@@ -10,13 +10,13 @@ import { fetchDashboardReporting } from "@/application/queries/dashboard.query";
 type QueryResult = { data: any; error: any };
 
 const tableResults: Record<string, QueryResult[]> = {
-  payment_records: [],
+  payments: [],
   services: [],
   appointments: [],
 };
 
 const tableCallCount: Record<string, number> = {
-  payment_records: 0,
+  payments: 0,
   services: 0,
   appointments: 0,
 };
@@ -39,11 +39,11 @@ describe("fetchDashboardReporting financial reporting mapping", () => {
 
   beforeEach(() => {
     mockFrom.mockReset();
-    tableCallCount.payment_records = 0;
+    tableCallCount.payments = 0;
     tableCallCount.services = 0;
     tableCallCount.appointments = 0;
 
-    tableResults.payment_records = [];
+    tableResults.payments = [];
     tableResults.services = [];
     tableResults.appointments = [];
 
@@ -56,7 +56,7 @@ describe("fetchDashboardReporting financial reporting mapping", () => {
   });
 
   it("excludes pending payments for cancelled appointments from reporting totals", async () => {
-    tableResults.payment_records = [
+    tableResults.payments = [
       {
         data: [
           {

@@ -62,8 +62,9 @@ function lazyRetry<T extends ComponentType<any>>(
           }
           throw err;
         }
+        const retryDelay = typeof process !== "undefined" && process.env.NODE_ENV === "test" ? 0 : 800;
         return new Promise<{ default: T }>((resolve) =>
-          setTimeout(() => resolve(attempt(remaining - 1)), 800),
+          setTimeout(() => resolve(attempt(remaining - 1)), retryDelay),
         );
       });
     return attempt(retries);
