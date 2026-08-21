@@ -286,6 +286,29 @@ jest.mock("@/integrations/supabase/client", () => ({
   },
 }));
 
+jest.mock("@/lib/nextApiClient", () => ({
+  nextApi: {
+    dispatch: {
+      assign: async (payload: any) => {
+        const { supabase } = require("@/integrations/supabase/client");
+        const result = await supabase.rpc("assign_dispatch_job_v1", {
+          p_job_source: payload.job_source,
+          p_job_id: payload.job_id,
+          p_technician_id: payload.technician_id,
+          p_van_id: payload.van_id,
+          p_date: payload.date,
+          p_start: payload.start,
+          p_duration_minutes: payload.duration_minutes,
+          p_expected_updated_at: payload.expected_updated_at,
+          p_notes: payload.notes,
+        });
+        if (result.error) throw new Error(result.error.message);
+        return { data: result.data ?? null };
+      },
+    },
+  },
+}));
+
 jest.mock("@/application/queries/job-thread.query", () => ({
   openCommunicationThreadsForJobs: jest.fn(async () => undefined),
 }));
@@ -315,7 +338,10 @@ async function techDashboardJobs(techId: string) {
 }
 
 describe("dispatch assignment paths → technician dashboards (E2E)", () => {
-  beforeEach(mockResetStore);
+  beforeEach(() => {
+    mockResetStore();
+    window.localStorage.setItem("servicewriter.selected_workspace_id", "00000000-0000-4000-8000-000000000001");
+  });
 
   it("Dispatch Board technician assignment lands on the assigned technician dashboard only", async () => {
     await assignTechnician("appt-1", TECH_A, "Board drag-drop");

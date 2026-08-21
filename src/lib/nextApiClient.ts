@@ -91,6 +91,20 @@ export const nextApi = {
     remove: (workspaceId: string, id: string) => request<{ data: unknown }>(`/v1/payments/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "DELETE" }),
     action: (payload: Record<string, unknown>) => request<{ data: unknown }>("/v1/payments/actions", { method: "POST", body: JSON.stringify(payload) }),
   },
+  dispatch: {
+    assign: (payload: Record<string, unknown>) => request<{ data: unknown }>("/v1/dispatch/assign", { method: "POST", body: JSON.stringify(payload) }),
+  },
+  dispatchEvents: {
+    list: (workspaceId: string) => request<{ data: unknown[] }>(`/v1/dispatch-events?workspace_id=${encodeURIComponent(workspaceId)}`),
+    create: (payload: Record<string, unknown>) => request<{ data: unknown }>("/v1/dispatch-events", { method: "POST", body: JSON.stringify(payload) }),
+  },
+  serviceRecords: {
+    list: (workspaceId: string) => request<{ data: unknown[] }>(`/v1/service-records?workspace_id=${encodeURIComponent(workspaceId)}`),
+    get: (workspaceId: string, id: string) => request<{ data: unknown }>(`/v1/service-records/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`),
+    create: (payload: Record<string, unknown>) => request<{ data: unknown }>("/v1/service-records", { method: "POST", body: JSON.stringify(payload) }),
+    update: (id: string, payload: Record<string, unknown>) => request<{ data: unknown }>(`/v1/service-records/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
+    remove: (workspaceId: string, id: string) => request<{ data: unknown }>(`/v1/service-records/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "DELETE" }),
+  },
   workOrders: {
     list: (workspaceId: string) => request<{ data: unknown[] }>(`/v1/work-orders?workspace_id=${encodeURIComponent(workspaceId)}`),
     get: (workspaceId: string, id: string) => request<{ data: unknown }>(`/v1/work-orders/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`),

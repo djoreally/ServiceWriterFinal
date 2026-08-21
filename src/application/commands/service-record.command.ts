@@ -9,7 +9,8 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
-
+import { nextApi } from "@/lib/nextApiClient";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface ServiceRecordData {
   customerId?: string | null;
@@ -71,32 +72,29 @@ export interface AppointmentToServiceData {
  */
 export async function createServiceRecord(
   data: ServiceRecordData,
-  ownerUserId?: string,
+  _ownerUserId?: string,
 ): Promise<CreateServiceRecordResult> {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) {
-    return { success: false, error: 'Not authenticated' };
-  }
-
-  const tenantUserId = ownerUserId || user.id;
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) return { success: false, error: 'Select a workspace before creating a service record.' };
 
   try {
-    const { data: serviceRecord, error } = await supabase
-      .from('services')
-      .insert({
-        user_id: tenantUserId,
+    const response = await nextApi.serviceRecords.create({
+      workspace_id,
+      appointment_id: data.appointmentId || null,
+      status: data.status === 'pending' ? 'draft' : data.status,
+      work_performed: data.description,
+      internal_notes: data.notes || null,
+      oil_quarts_used: null,
+      metadata: {
         customer_id: data.customerId || null,
         vehicle_id: data.vehicleId || null,
         service_date: data.serviceDate,
         service_type: data.serviceType,
-        description: data.description,
         parts_used: data.partsUsed || null,
         labor_hours: data.laborHours || null,
         labor_cost: data.laborCost || null,
         parts_cost: data.partsCost || null,
         total_cost: data.totalCost,
-        status: data.status,
-        notes: data.notes || null,
         technician: data.technician || null,
         tax_rate: data.taxRate || null,
         tax_amount: data.taxAmount || null,
@@ -105,12 +103,10 @@ export async function createServiceRecord(
         shop_supplies: data.shopSupplies || null,
         payment_status: data.paymentStatus || 'unpaid',
         paid_amount: data.paidAmount || null,
-        appointment_id: data.appointmentId || null,
-      })
-      .select()
-      .single();
+      },
+    });
 
-    if (error) throw error;
+    const serviceRecord = response.data as any;
 
     return {
       success: true,
@@ -371,76 +367,48 @@ export async function completeAppointmentWithServiceRecord(
     oilType?: string;
   }
 ): Promise<{ success: boolean; serviceId?: string; error?: string }> {
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) return { success: false, error: 'Select a workspace before completing a service record.' };
   try {
-    const filterPartsStr = options?.filterParts
+    // Completion must not mutate inventory; oil usage is reporting-only.
+    const filterParts = options?.filterParts?.length
       ? formatFilterPartsForDisplay(options.filterParts)
       : null;
-    const oilTypeTrimmed = options?.oilType?.trim() || null;
-    const completionIdempotencyKey = [
-      "appt-complete-v1",
-      appointmentId,
-      options?.technician ?? "",
-      options?.additionalNotes ?? "",
-      String(options?.laborHours ?? ""),
-      String(options?.mileage ?? ""),
-      options?.vin ?? "",
-      String(options?.oilQuartsUsed ?? ""),
-      filterPartsStr ?? "",
-      oilTypeTrimmed ?? "",
-    ].join("|");
-
-    const { data, error } = await supabase.rpc(
-      'complete_appointment_with_service_record' as any,
-      {
-        p_appointment_id: appointmentId,
-        p_technician: options?.technician ?? null,
-        p_additional_notes: options?.additionalNotes ?? null,
-        p_labor_hours: options?.laborHours ?? null,
-        p_mileage: options?.mileage ?? null,
-        p_vin: options?.vin ?? null,
-        p_oil_quarts_used: options?.oilQuartsUsed ?? null,
-        p_filter_parts: filterPartsStr,
-        p_shop_supplies: 0,
-        p_idempotency_key: completionIdempotencyKey,
-        p_oil_type: oilTypeTrimmed,
-      } as any,
-    );
-
-
-    if (error) throw new Error(error.message);
-
-    const result = data as any;
-
-    // Oil usage is a reporting metric sourced from the verified quantity stored
-    // on the completed service record. Completion must not mutate inventory.
-
-    return {
-      success: true,
-      serviceId: result?.service_id,
-    };
+    const completion = await nextApi.appointments.complete(appointmentId, workspace_id);
+    const appointment = completion.data as Record<string, unknown> | null;
+    const service = await nextApi.serviceRecords.create({
+      workspace_id,
+      appointment_id: appointmentId,
+      status: 'completed',
+      started_at: null,
+      completed_at: new Date().toISOString(),
+      work_performed: options?.additionalNotes ?? 'Completed service',
+      oil_quarts_used: options?.oilQuartsUsed ?? null,
+      metadata: {
+        technician: options?.technician ?? null,
+        labor_hours: options?.laborHours ?? null,
+        mileage: options?.mileage ?? null,
+        vin: options?.vin ?? null,
+        oil_type: options?.oilType?.trim() || null,
+        filter_parts: filterParts,
+        appointment_completion: appointment,
+      },
+    });
+    const serviceRecord = service.data as { id?: string } | null;
+    return { success: true, serviceId: serviceRecord?.id };
   } catch (error: unknown) {
     const err = error as Error;
     console.error('Failed to complete appointment:', err);
-
-    // Translate DB enforcement errors into user-friendly messages
     const msg = err.message || 'Failed to complete appointment';
     const friendlyMap: Record<string, string> = {
       'Vehicle oil type must be recorded': 'Please set the vehicle\'s oil type before completing this oil service. Go to the vehicle profile and update the oil type field.',
       'Oil services require confirmed oil quantity': 'Oil quantity is required. Please enter the number of quarts used.',
       'Oil services require filter replacement': 'Filter/parts confirmation is required for oil services.',
       'Captured VIN does not match': 'The VIN entered does not match the vehicle on file. Please verify.',
-      'does not match manufacturer spec': 'The vehicle\'s oil type or capacity conflicts with the manufacturer spec for this VIN. Update the vehicle (or your selection) so they match before completing.',
     };
-    const friendlyMsg = Object.entries(friendlyMap).find(([key]) => msg.includes(key))?.[1] ?? msg;
-
-
-    return {
-      success: false,
-      error: friendlyMsg,
-    };
+    return { success: false, error: Object.entries(friendlyMap).find(([key]) => msg.includes(key))?.[1] ?? msg };
   }
 }
-
 /**
  * Update service record status
  */
@@ -448,26 +416,20 @@ export async function updateServiceRecordStatus(
   serviceId: string,
   status: 'pending' | 'in_progress' | 'completed'
 ): Promise<{ success: boolean; error?: string }> {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) {
-    return { success: false, error: 'Not authenticated' };
-  }
-
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) return { success: false, error: 'Select a workspace before updating status.' };
   try {
-    const { error } = await supabase
-      .from('services')
-      .update({ status })
-      .eq('id', serviceId)
-      .eq('user_id', user.id);
-
-    if (error) throw error;
-
+    await nextApi.serviceRecords.update(serviceId, {
+      workspace_id,
+      status: status === 'pending' ? 'draft' : status,
+    });
     return { success: true };
   } catch (error: unknown) {
     const err = error as Error;
     return { success: false, error: err.message };
   }
 }
+
 
 /**
  * Update service record payment status
@@ -477,23 +439,14 @@ export async function updateServicePaymentStatus(
   paymentStatus: 'unpaid' | 'partial' | 'paid',
   paidAmount?: number
 ): Promise<{ success: boolean; error?: string }> {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) {
-    return { success: false, error: 'Not authenticated' };
-  }
-
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) return { success: false, error: 'Select a workspace before updating payment status.' };
   try {
-    const { error } = await supabase
-      .from('services')
-      .update({ 
-        payment_status: paymentStatus,
-        paid_amount: paidAmount || null,
-      })
-      .eq('id', serviceId)
-      .eq('user_id', user.id);
-
-    if (error) throw error;
-
+    await nextApi.serviceRecords.update(serviceId, {
+      workspace_id,
+      payment_status: paymentStatus,
+      paid_amount: paidAmount || null,
+    });
     return { success: true };
   } catch (error: unknown) {
     const err = error as Error;

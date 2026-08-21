@@ -5,6 +5,8 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
+import { nextApi } from "@/lib/nextApiClient";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface TechStatusUpdate {
@@ -149,44 +151,13 @@ export async function endBreak(): Promise<any> {
  * Accept job assignment (from Today view)
  */
 export async function acceptJobAssignment(appointment_id: string): Promise<any> {
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error('Select a workspace before acknowledging a job.');
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error('Not authenticated');
-
-  // Update appointment status to acknowledged
-  await supabase
-    .from('appointments')
-    .update({
-      dispatch_status: 'acknowledged',
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', appointment_id);
-
-  // Log dispatch event with explicit workspace ownership.
-  const [{ data: tech }, { data: appointmentData }] = await Promise.all([
-    supabase
-      .from('technicians')
-      .select('id')
-      .eq('auth_user_id', user.id)
-      .single(),
-    supabase
-      .from('appointments')
-      .select('*')
-      .eq('id', appointment_id)
-      .single(),
-  ]);
-  const appointment = appointmentData as { workspace_id?: string } | null;
-
-  if (tech && appointment?.workspace_id) {
-    await supabase.from('dispatch_events').insert({
-      workspace_id: appointment.workspace_id,
-      appointment_id,
-      technician_id: tech.id,
-      event_type: 'acknowledged',
-      notes: 'Technician acknowledged job assignment',
-      performed_by: user.id,
-    });
-  }
-
+  const { data: tech } = await supabase.from('technicians').select('id').eq('auth_user_id', user.id).single();
+  await nextApi.appointments.update(appointment_id, { workspace_id, dispatch_status: 'acknowledged' });
+  await nextApi.dispatchEvents.create({ workspace_id, appointment_id, technician_id: tech?.id ?? null, event_type: 'status_changed', new_status: 'acknowledged', notes: 'Technician acknowledged job assignment' });
   return { success: true };
 }
 
@@ -194,34 +165,14 @@ export async function acceptJobAssignment(appointment_id: string): Promise<any> 
  * Mark technician en route to job
  */
 export async function markEnRoute(appointment_id: string, location?: { lat: number; lng: number }): Promise<any> {
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error('Select a workspace before marking a job en route.');
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error('Not authenticated');
-
-  const { data: tech } = await supabase
-    .from('technicians')
-    .select('id')
-    .eq('auth_user_id', user.id)
-    .single();
-
+  const { data: tech } = await supabase.from('technicians').select('id').eq('auth_user_id', user.id).single();
   if (!tech) throw new Error('Technician not found');
-
-  // Update appointment dispatch status
-  await supabase
-    .from('appointments')
-    .update({
-      dispatch_status: 'en_route',
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', appointment_id);
-
-  // Update technician status
-  await updateTechnicianStatus({
-    technician_id: tech.id,
-    new_status: 'en_route',
-    appointment_id,
-    location,
-  });
-
+  await nextApi.appointments.update(appointment_id, { workspace_id, dispatch_status: 'en_route' });
+  await nextApi.dispatchEvents.create({ workspace_id, appointment_id, technician_id: tech.id, event_type: 'en_route', new_status: 'en_route', location: location ?? null, notes: 'Technician is en route' });
   return { success: true };
 }
 
@@ -229,34 +180,14 @@ export async function markEnRoute(appointment_id: string, location?: { lat: numb
  * Mark technician arrived at job site
  */
 export async function markArrived(appointment_id: string, location?: { lat: number; lng: number }): Promise<any> {
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error('Select a workspace before marking arrival.');
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error('Not authenticated');
-
-  const { data: tech } = await supabase
-    .from('technicians')
-    .select('id')
-    .eq('auth_user_id', user.id)
-    .single();
-
+  const { data: tech } = await supabase.from('technicians').select('id').eq('auth_user_id', user.id).single();
   if (!tech) throw new Error('Technician not found');
-
-  // Update appointment
-  await supabase
-    .from('appointments')
-    .update({
-      dispatch_status: 'arrived',
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', appointment_id);
-
-  // Update tech status
-  await updateTechnicianStatus({
-    technician_id: tech.id,
-    new_status: 'on_job',
-    appointment_id,
-    location,
-  });
-
+  await nextApi.appointments.update(appointment_id, { workspace_id, dispatch_status: 'arrived' });
+  await nextApi.dispatchEvents.create({ workspace_id, appointment_id, technician_id: tech.id, event_type: 'arrived', new_status: 'arrived', location: location ?? null, notes: 'Technician arrived at job site' });
   return { success: true };
 }
 
@@ -264,17 +195,12 @@ export async function markArrived(appointment_id: string, location?: { lat: numb
  * Start work on job
  */
 export async function startJob(appointment_id: string): Promise<any> {
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error('Select a workspace before starting a job.');
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error('Not authenticated');
-
-  await supabase
-    .from('appointments')
-    .update({
-      dispatch_status: 'in_progress',
-      actual_start_time: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', appointment_id);
-
+  const { data: tech } = await supabase.from('technicians').select('id').eq('auth_user_id', user.id).single();
+  await nextApi.appointments.update(appointment_id, { workspace_id, dispatch_status: 'in_progress', actual_start_time: new Date().toISOString() });
+  await nextApi.dispatchEvents.create({ workspace_id, appointment_id, technician_id: tech?.id ?? null, event_type: 'started', new_status: 'in_progress', notes: 'Technician started work' });
   return { success: true };
 }

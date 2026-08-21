@@ -3,7 +3,7 @@ import { z } from "zod";
 
 const serviceRecordSchema = z.object({
   workspace_id: z.string().uuid(),
-  appointment_id: z.string().uuid(),
+  appointment_id: z.string().uuid().nullable().optional(),
   work_order_id: z.string().uuid().nullable().optional(),
   technician_id: z.string().uuid().nullable().optional(),
   status: z.enum(["draft", "in_progress", "completed", "voided"]).default("completed"),

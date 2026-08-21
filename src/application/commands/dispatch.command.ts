@@ -3,6 +3,8 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
+import { nextApi } from "@/lib/nextApiClient";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
 export interface DispatchAssignmentInput {
   jobSource: "appointment" | "fleet_work_order";
@@ -36,18 +38,24 @@ function formatDispatchAssignmentError(message?: string): string {
 
 /** Route every assignment through the shared, permission-checked, source-aware backend boundary. */
 export async function assignDispatchJob(input: DispatchAssignmentInput): Promise<void> {
-  const { error } = await (supabase as any).rpc("assign_dispatch_job_v1", {
-    p_job_source: input.jobSource,
-    p_job_id: input.jobId,
-    p_technician_id: input.technicianId ?? null,
-    p_van_id: input.vanId ?? null,
-    p_date: input.date || null,
-    p_start: input.start || null,
-    p_duration_minutes: input.durationMinutes ?? 60,
-    p_expected_updated_at: input.expectedUpdatedAt ?? null,
-    p_notes: input.notes ?? null,
-  });
-  if (error) throw new Error(formatDispatchAssignmentError(error.message));
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error("Select a workspace before assigning dispatch work.");
+  try {
+    await nextApi.dispatch.assign({
+      workspace_id,
+      job_source: input.jobSource,
+      job_id: input.jobId,
+      technician_id: input.technicianId ?? null,
+      van_id: input.vanId ?? null,
+      date: input.date || null,
+      start: input.start || null,
+      duration_minutes: input.durationMinutes ?? 60,
+      expected_updated_at: input.expectedUpdatedAt || null,
+      notes: input.notes ?? null,
+    });
+  } catch (error) {
+    throw new Error(formatDispatchAssignmentError(error instanceof Error ? error.message : undefined));
+  }
 }
 
 /**
