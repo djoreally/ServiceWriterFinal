@@ -33,7 +33,8 @@ import { useCustomerImport } from "@/hooks/useDataImport";
 import { format } from "date-fns";
 import { fetchCustomerOverview } from "@/application/queries";
 import { createCustomer, updateCustomer, deleteCustomer } from "@/application/commands";
-import { fetchCustomerOverviewFromOffline } from "@/application/queries/customers.query";
+import { fetchCustomerOverviewFromNextApi, fetchCustomerOverviewFromOffline } from "@/application/queries/customers.query";
+import { useWorkspaceSelection } from "@/hooks/useWorkspaceSelection";
 import { isOfflineEligibleForCurrentUser } from "@/offline/rollout";
 import { ListPagination, usePageSlice, DEFAULT_PAGE_SIZE } from "@/components/ui/list-pagination";
 
@@ -67,6 +68,7 @@ const customerImportFields: FieldMapping[] = [
 const Customers = () => {
   const navigate = useNavigate();
   const { terms } = useTerminology();
+  const { selectedWorkspaceId, loading: workspaceLoading } = useWorkspaceSelection();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -107,10 +109,6 @@ const Customers = () => {
     URL.revokeObjectURL(url);
   };
 
-  useEffect(() => {
-    fetchCustomers();
-  }, []);
-
   const fetchCustomers = useCallback(async () => {
     setCustomersLoading(true); setVehiclesLoading(true); setServicesLoading(true);
     setCustomersError(null); setVehiclesError(null); setServicesError(null);
@@ -130,7 +128,10 @@ const Customers = () => {
         }
       }
 
-      const { customers, vehicleCounts, lastServiceDates } = await fetchCustomerOverview();
+      const overview = selectedWorkspaceId
+        ? await fetchCustomerOverviewFromNextApi(selectedWorkspaceId)
+        : await fetchCustomerOverview();
+      const { customers, vehicleCounts, lastServiceDates } = overview;
       setCustomers(customers);
       setVehicleCounts(vehicleCounts);
       setLastServiceDates(lastServiceDates);
@@ -143,7 +144,11 @@ const Customers = () => {
       setVehiclesLoading(false);
       setServicesLoading(false);
     }
-  }, []);
+  }, [selectedWorkspaceId]);
+
+  useEffect(() => {
+    if (!workspaceLoading) void fetchCustomers();
+  }, [fetchCustomers, workspaceLoading]);
 
   const { containerRef, isRefreshing } = usePullToRefresh({
     onRefresh: fetchCustomers,

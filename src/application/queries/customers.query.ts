@@ -8,6 +8,7 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Customer } from "@/shared/types";
 import { getOfflineDatabase } from "@/offline/database";
 import { isOfflineEligibleForCurrentUser } from "@/offline/rollout";
+import { z } from "zod";
 
 export interface CustomerOverviewResult {
   customers: Customer[];
@@ -15,12 +16,62 @@ export interface CustomerOverviewResult {
   lastServiceDates: Record<string, string>;
 }
 
+const apiCustomerSchema = z.object({
+  id: z.string().uuid(),
+  first_name: z.string().min(1),
+  last_name: z.string().min(1),
+  company_name: z.string().nullable().optional(),
+  email: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  created_at: z.string().optional(),
+});
+
+const apiVehicleSchema = z.object({ id: z.string().uuid(), customer_id: z.string().uuid().nullable().optional() });
+
 /** Internal type for appointment data used in vehicle/date aggregation */
 interface AppointmentAggregateData {
   customer_id: string | null;
   vehicle_id: string | null;
   scheduled_date: string;
   guest_email: string | null;
+}
+
+interface OfflineRawFields {
+  is_deleted?: boolean;
+  server_id?: string;
+  name?: string;
+  email?: string | null;
+  phone?: string | null;
+  updated_at_local?: string | number;
+  customer_server_id?: string | null;
+}
+
+function offlineRaw(record: { _raw: unknown }): OfflineRawFields {
+  return record._raw as OfflineRawFields;
+}
+
+export async function fetchCustomerOverviewFromNextApi(workspaceId: string): Promise<CustomerOverviewResult> {
+  const { nextApi } = await import("@/lib/nextApiClient");
+  const [customerResponse, vehicleResponse] = await Promise.all([
+    nextApi.customers.list(workspaceId),
+    nextApi.vehicles.list(workspaceId),
+  ]);
+  const customers = z.array(apiCustomerSchema).parse(customerResponse.data).map((customer) => ({
+    id: customer.id,
+    name: [customer.first_name, customer.last_name].filter(Boolean).join(" "),
+    email: customer.email ?? null,
+    phone: customer.phone ?? null,
+    notes: customer.notes ?? null,
+    created_at: customer.created_at,
+    user_id: "",
+  })) as Customer[];
+  const vehicles = z.array(apiVehicleSchema).parse(vehicleResponse.data);
+  const vehicleCounts: Record<string, number> = {};
+  for (const vehicle of vehicles) {
+    if (vehicle.customer_id) vehicleCounts[vehicle.customer_id] = (vehicleCounts[vehicle.customer_id] ?? 0) + 1;
+  }
+  return { customers, vehicleCounts, lastServiceDates: {} };
 }
 
 export async function fetchCustomerOverviewFromOffline(): Promise<CustomerOverviewResult | null> {
@@ -35,27 +86,31 @@ export async function fetchCustomerOverviewFromOffline(): Promise<CustomerOvervi
   ]);
 
   const customers = customersRecords
-    .filter((record: any) => !record._raw.is_deleted)
-    .map((record: any) => ({
-      id: record._raw.server_id,
-      name: record._raw.name || 'Unknown',
-      email: record._raw.email || null,
-      phone: record._raw.phone || null,
-      created_at: new Date(record._raw.updated_at_local || Date.now()).toISOString(),
-      updated_at: new Date(record._raw.updated_at_local || Date.now()).toISOString(),
+    .filter((record) => !offlineRaw(record).is_deleted)
+    .map((record) => {
+      const raw = offlineRaw(record);
+      return {
+      id: raw.server_id || '',
+      name: raw.name || 'Unknown',
+      email: raw.email || null,
+      phone: raw.phone || null,
+      created_at: new Date(raw.updated_at_local || Date.now()).toISOString(),
+      updated_at: new Date(raw.updated_at_local || Date.now()).toISOString(),
       user_id: '',
       address: null as string | null,
       notes: null as string | null,
-    })) as Customer[];
+      };
+    }) as Customer[];
 
   if (!customers.length) {
     return null;
   }
 
   const vehicleCounts: Record<string, number> = {};
-  for (const record of vehiclesRecords as any[]) {
-    if (record._raw.is_deleted) continue;
-    const customerId = record._raw.customer_server_id;
+  for (const record of vehiclesRecords) {
+    const raw = offlineRaw(record);
+    if (raw.is_deleted) continue;
+    const customerId = raw.customer_server_id;
     if (!customerId) continue;
     vehicleCounts[customerId] = (vehicleCounts[customerId] || 0) + 1;
   }
