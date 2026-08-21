@@ -53,6 +53,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (error) normalizeConversionError(error);
     return json({ data });
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      return json({ error: { code: "validation_error", message: "Invalid quote conversion request.", issues: error.issues } }, { status: 400 });
+    }
     return errorResponse(error);
   }
 }

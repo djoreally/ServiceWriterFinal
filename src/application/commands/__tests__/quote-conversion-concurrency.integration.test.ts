@@ -162,7 +162,7 @@ describe("quote conversion API concurrency contract", () => {
       { params: Promise.resolve({ id: QUOTE_ID }) },
     );
 
-    expect(response.status).toBe(500);
+    expect(response.status).toBe(400);
     expect(mockRpc).not.toHaveBeenCalled();
   });
 });
