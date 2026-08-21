@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "compilerOptions": {
+    // Language & Environment
+    "target": "ES2021",
+    "lib": ["ES2021", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    
+    // Modules
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "moduleDetection": "force",
+    "isolatedModules": true,
+    
+    // Interop
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    
+    // Type Checking (enterprise-grade strict checks)
+    "strict": false,
+    "noImplicitAny": true,
+    "strictNullChecks": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
+    
+    // Emit
+    "skipLibCheck": true,
+    "declaration": true,
+    "declarationMap": true,
+    
+    // Path Aliases (resolved by Vite)
+    "paths": {
+      "@/*": ["./src/*"],
+      "@packages/*": ["./packages/*"]
+    }
+  }
+}

@@ -1,0 +1,36 @@
+User-agent: *
+Allow: /
+
+# Do not index authenticated app/product routes
+Disallow: /auth
+Disallow: /onboarding
+Disallow: /dashboard
+Disallow: /customers
+Disallow: /vehicles
+Disallow: /inventory
+Disallow: /fleet
+Disallow: /fleet-os
+Disallow: /appointments
+Disallow: /services
+Disallow: /service-catalog
+Disallow: /service-packages
+Disallow: /subscriptions
+Disallow: /quick-service
+Disallow: /settings
+Disallow: /availability
+Disallow: /payments
+Disallow: /reports
+Disallow: /financials
+Disallow: /operations
+Disallow: /tax-compliance
+Disallow: /messages
+Disallow: /admin
+Disallow: /team
+Disallow: /my-bookings
+Disallow: /customer/auth
+Disallow: /booking-success
+Disallow: /knowledge-base
+Disallow: /tutorials
+Disallow: /whats-new
+
+Sitemap: https://moms.lovable.app/sitemap.xml

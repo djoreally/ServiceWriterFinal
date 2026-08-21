@@ -1,0 +1,1 @@
+import{c as u,u as o}from"./index-BxnhNaIA.js";function s(n){return u(n,Date.now())}function a(n){return t=>{const r=(n?Math[n]:Math.trunc)(t);return r===0?0:r}}function i(n,t){return+o(n)-+o(t)}export{s as c,i as d,a as g};

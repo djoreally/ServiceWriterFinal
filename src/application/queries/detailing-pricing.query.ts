@@ -1,0 +1,6 @@
+import { supabase } from "@/integrations/supabase/client";
+import type { DetailingPricingRule } from "@/lib/detailing-pricing";
+
+function mapRule(row: any): DetailingPricingRule { return { id:row.id,serviceCatalogId:row.service_catalog_id,sizeTier:row.size_tier,condition:row.condition,priceMultiplier:Number(row.price_multiplier),durationMultiplier:Number(row.duration_multiplier),flatFee:Number(row.flat_fee),photoRequired:Boolean(row.photo_required),quoteRequired:Boolean(row.quote_required),requiresWater:Boolean(row.requires_water),requiresPower:Boolean(row.requires_power),requiresCoveredArea:Boolean(row.requires_covered_area) }; }
+export async function fetchPublicDetailingPricingRules(businessUserId:string){const {data,error}=await (supabase as any).rpc("get_public_detailing_pricing_rules",{p_business_user_id:businessUserId});if(error)throw error;return (data||[]).map(mapRule) as DetailingPricingRule[];}
+export async function fetchDetailingPricingRules(){const {data,error}=await (supabase as any).from("detailing_pricing_rules").select("*").order("service_catalog_id").order("size_tier").order("condition");if(error)throw error;return (data||[]).map(mapRule) as DetailingPricingRule[];}

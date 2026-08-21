@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": false,
+    "noCheck": true
+  },
+  "include": ["supabase/functions/**/*.ts"],
+  "exclude": ["node_modules"]
+}

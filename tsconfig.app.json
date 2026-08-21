@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "allowImportingTsExtensions": true,
+    "emitDeclarationOnly": true,
+    "outDir": "dist/types/app",
+    "tsBuildInfoFile": "dist/types/app/.tsbuildinfo"
+  },
+  "include": ["src", "packages"],
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx",
+    "**/__tests__/**",
+    "src/test/**"
+  ]
+}

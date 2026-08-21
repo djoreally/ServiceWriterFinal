@@ -1,0 +1,1 @@
+import{u as o}from"./index-BxnhNaIA.js";function u(n,t){const e=o(n),r=o(t),a=e.getFullYear()-r.getFullYear(),s=e.getMonth()-r.getMonth();return a*12+s}function c(n){const t=o(n),e=t.getMonth();return t.setFullYear(t.getFullYear(),e+1,0),t.setHours(23,59,59,999),t}export{u as d,c as e};

@@ -1,0 +1,1 @@
+import{F as i}from"./index-BxnhNaIA.js";async function r(a){try{const{data:{user:t}}=await i.auth.getUser(),s={action:String(a.action),user_id:a.user_id??t?.id??null,new_data:a.details??null,table_name:a.resource_type??null,record_id:a.resource_id??null};await i.from("audit_logs").insert(s)}catch{}}export{r as l};

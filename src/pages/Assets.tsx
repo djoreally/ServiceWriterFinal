@@ -1,0 +1,22 @@
+import { lazy, Suspense } from "react";
+import { AppLayout } from "@/components/layout/AppLayout";
+import { AssetsErrorBoundary } from "@/components/assets/AssetsErrorBoundary";
+import { AssetsLoading } from "@/components/assets/AssetsLoading";
+
+const AssetsPage = lazy(() =>
+  import("@/components/assets/AssetsPage").then((m) => ({ default: m.AssetsPage })),
+);
+
+export default function Assets() {
+  return (
+    <AppLayout>
+      <div className="container mx-auto px-4 py-6 max-w-7xl">
+        <AssetsErrorBoundary>
+          <Suspense fallback={<AssetsLoading />}>
+            <AssetsPage />
+          </Suspense>
+        </AssetsErrorBoundary>
+      </div>
+    </AppLayout>
+  );
+}

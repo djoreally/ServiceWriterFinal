@@ -1,0 +1,567 @@
+/* =========================================
+   GLOBAL THEME TOKENS
+   Apple-style dark/light foundation
+   ========================================= */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+
+    /* Shadcn-compatible HSL tokens */
+    --background: 240 9% 97%;            /* #f5f5f7 */
+    --foreground: 0 0% 7%;               /* #111111 */
+
+    --card: 0 0% 100%;                   /* #ffffff */
+    --card-foreground: 0 0% 7%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 7%;
+
+    --primary: 211 100% 52%;             /* #0a84ff */
+    --primary-foreground: 0 0% 100%;
+    --action-text: 211 100% 36%;          /* accessible small blue text on white */
+
+    --secondary: 220 20% 95%;            /* #f0f2f5 */
+    --secondary-foreground: 0 0% 7%;
+
+    --muted: 220 20% 95%;               /* #f0f2f5 */
+    --muted-foreground: 215 16% 38%;
+
+    --accent: 220 20% 95%;
+    --accent-foreground: 0 0% 7%;
+
+    --destructive: 3 100% 61%;           /* #ff453a */
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 9% 92%;               /* approx rgba(17,17,17,0.08) on white */
+    --input: 220 9% 92%;
+    --ring: 211 100% 52%;
+
+    --radius: 0.5rem;
+
+    --success: 135 62% 37%;             /* semantic green for successful/assigned states */
+    --warning: 36 100% 52%;             /* #ff9f0a */
+    --intent-action: var(--primary);
+    --intent-success: var(--success);
+    --intent-warning: var(--warning);
+    --intent-danger: var(--destructive);
+    --intent-info: 205 80% 40%;
+
+    /* Surface system (raw values for non-tailwind use) */
+    --surface: #ffffff;
+    --surface-2: #f0f2f5;
+    --surface-3: #e7ebf0;
+    --surface-elevated: rgba(255, 255, 255, 0.82);
+
+    /* Border system (raw values) */
+    --border-raw: rgba(17, 17, 17, 0.08);
+    --border-strong: rgba(17, 17, 17, 0.16);
+
+    /* Text system (raw values) */
+    --text-primary: #0f1720;
+    --text-secondary: #364152;
+    --text-muted: #52606d;
+    --text-inverse: #ffffff;
+
+    /* Accent system (raw values) */
+    --accent-blue: #0a84ff;
+    --accent-gray: #666666;
+    --accent-red: #ff453a;
+    --accent-orange: #ff9f0a;
+    --accent-pink: #ff375f;
+    --accent-purple: #bf5af2;
+    --accent-yellow: #ffd60a;
+
+    /* State (raw) */
+    --info: #64d2ff;
+    --danger: #ff453a;
+
+    /* UI effects */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+    --shadow-md: 0 4px 12px rgba(15, 23, 32, 0.08);
+    --shadow-lg: 0 10px 28px rgba(15, 23, 32, 0.13);
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.06);
+    --shadow-hover: 0 10px 30px rgba(10, 132, 255, 0.12);
+    --shadow-btn: 0 4px 14px rgba(10, 132, 255, 0.3);
+
+    --ring-glow: 0 0 0 3px rgba(10, 132, 255, 0.22);
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
+    --space-1: 0.25rem;
+    --space-2: 0.5rem;
+    --space-3: 0.75rem;
+    --space-4: 1rem;
+    --space-5: 1.25rem;
+    --space-6: 1.5rem;
+    --space-8: 2rem;
+    --control-height: 2.5rem;
+    --touch-control-height: 2.75rem;
+    --mobile-nav-height: 4rem;
+    --booking-action-height: 4rem;
+
+    /* Layout */
+    --container-max: 1280px;
+    --nav-height: 72px;
+
+    /* Typography */
+    --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-display: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+    /* Hero / stage */
+    --hero-bg: radial-gradient(circle at top center, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0) 40%), linear-gradient(180deg, #fbfbfc 0%, #f1f2f5 100%);
+    --spotlight: 0 0 120px rgba(255, 255, 255, 0.18);
+    --device-frame: #d9dde4;
+    --device-screen: #ffffff;
+    --device-bezel: #b9c0cb;
+
+    /* Financial System */
+    --revenue-positive-bg: 135 60% 95%;
+    --revenue-positive-text: 135 62% 27%;
+    --revenue-positive-border: 135 62% 51%;
+
+    --revenue-neutral-bg: 220 20% 95%;
+    --revenue-neutral-text: 0 0% 30%;
+
+    --revenue-negative-bg: 3 86% 97%;
+    --revenue-negative-text: 3 72% 35%;
+    --revenue-negative-accent: 3 100% 61%;
+
+    /* Operational Status */
+    --status-scheduled-bg: 211 100% 95%;
+    --status-scheduled-text: 211 100% 40%;
+
+    --status-inprogress-bg: 211 100% 93%;
+    --status-inprogress-text: 211 100% 30%;
+
+    --status-completed-bg: 135 60% 95%;
+    --status-completed-text: 135 62% 27%;
+
+    --status-awaiting-bg: 36 93% 92%;
+    --status-awaiting-text: 36 80% 30%;
+
+    --status-po-pending-bg: 36 100% 96%;
+    --status-po-pending-text: 36 80% 30%;
+
+    --status-payment-captured-bg: 135 60% 93%;
+    --status-payment-captured-text: 135 62% 22%;
+
+    --status-payment-failed-bg: 3 94% 94%;
+    --status-payment-failed-text: 3 63% 31%;
+
+    /* Dispatch & Logistics */
+    --logistics-van-assigned: 211 60% 94%;
+    --logistics-route-optimized: 211 80% 93%;
+    --logistics-capacity-warning: 36 93% 89%;
+    --logistics-overbooked: 3 96% 89%;
+
+    /* Stripe */
+    --stripe-accent: 244 100% 68%;
+
+    /* Alert System */
+    --alert-info-bg: 211 100% 93%;
+    --alert-info-text: 211 100% 30%;
+    --alert-warning-bg: 36 93% 89%;
+    --alert-warning-text: 36 80% 30%;
+    --alert-critical-bg: 3 94% 94%;
+    --alert-critical-text: 3 63% 31%;
+
+    /* Sidebar */
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 0 0% 7%;
+    --sidebar-primary: 211 100% 52%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 20% 95%;
+    --sidebar-accent-foreground: 0 0% 7%;
+    --sidebar-border: 220 9% 92%;
+    --sidebar-ring: 211 100% 52%;
+  }
+
+  .dark {
+    color-scheme: dark;
+
+    /* Shadcn-compatible HSL tokens */
+    --background: 0 0% 0%;               /* #000000 */
+    --foreground: 240 9% 97%;             /* #f5f5f7 */
+
+    --card: 230 25% 4%;                  /* #0b0b0f */
+    --card-foreground: 240 9% 97%;
+
+    --popover: 230 25% 4%;
+    --popover-foreground: 240 9% 97%;
+
+    --primary: 211 100% 52%;             /* #0a84ff */
+    --primary-foreground: 0 0% 100%;
+    --action-text: 211 100% 72%;
+
+    --secondary: 225 19% 8%;             /* #111318 */
+    --secondary-foreground: 240 9% 97%;
+
+    --muted: 225 19% 8%;
+    --muted-foreground: 215 15% 72%;
+
+    --accent: 225 19% 8%;
+    --accent-foreground: 240 9% 97%;
+
+    --destructive: 3 100% 61%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 10% 12%;              /* approx rgba(255,255,255,0.08) on black */
+    --input: 220 10% 12%;
+    --ring: 211 100% 52%;
+
+    --success: 135 62% 51%;
+    --warning: 36 100% 52%;
+
+    /* Surface system */
+    --surface: #0b0b0f;
+    --surface-2: #111318;
+    --surface-3: #171a20;
+    --surface-elevated: rgba(17, 19, 24, 0.82);
+
+    /* Border system */
+    --border-raw: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.14);
+
+    /* Text system */
+    --text-primary: #f5f5f7;
+    --text-secondary: #d6dbe3;
+    --text-muted: #b8c0cc;
+    --text-inverse: #050505;
+
+    /* Accent system */
+    --accent-blue: #0a84ff;
+    --accent-gray: #666666;
+    --accent-red: #ff453a;
+    --accent-orange: #ff9f0a;
+    --accent-pink: #ff375f;
+    --accent-purple: #bf5af2;
+    --accent-yellow: #ffd60a;
+
+    /* State */
+    --info: #64d2ff;
+    --danger: #ff453a;
+
+    /* UI effects */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
+    --shadow-md: 0 16px 40px rgba(0, 0, 0, 0.42);
+    --shadow-lg: 0 30px 80px rgba(0, 0, 0, 0.6);
+    --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.3);
+    --shadow-hover: 0 10px 30px rgba(10, 132, 255, 0.2);
+    --shadow-btn: 0 4px 14px rgba(10, 132, 255, 0.4);
+
+    --ring-glow: 0 0 0 3px rgba(10, 132, 255, 0.28);
+
+    /* Hero / stage */
+    --hero-bg: radial-gradient(circle at top center, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 35%), linear-gradient(180deg, #050505 0%, #000000 100%);
+    --spotlight: 0 0 120px rgba(255, 255, 255, 0.06);
+    --device-frame: #3a404c;
+    --device-screen: #05070a;
+    --device-bezel: #5b6270;
+
+    /* Financial System */
+    --revenue-positive-bg: 135 50% 8%;
+    --revenue-positive-text: 135 62% 65%;
+    --revenue-positive-border: 135 62% 51%;
+
+    --revenue-neutral-bg: 225 19% 8%;
+    --revenue-neutral-text: 0 0% 60%;
+
+    --revenue-negative-bg: 3 55% 8%;
+    --revenue-negative-text: 3 86% 76%;
+    --revenue-negative-accent: 3 70% 55%;
+
+    /* Operational Status */
+    --status-scheduled-bg: 211 60% 12%;
+    --status-scheduled-text: 211 80% 70%;
+
+    --status-inprogress-bg: 211 50% 10%;
+    --status-inprogress-text: 211 70% 68%;
+
+    --status-completed-bg: 135 50% 8%;
+    --status-completed-text: 135 62% 65%;
+
+    --status-awaiting-bg: 36 50% 10%;
+    --status-awaiting-text: 36 80% 60%;
+
+    --status-po-pending-bg: 36 45% 10%;
+    --status-po-pending-text: 36 80% 65%;
+
+    --status-payment-captured-bg: 135 50% 8%;
+    --status-payment-captured-text: 135 62% 65%;
+
+    --status-payment-failed-bg: 3 50% 8%;
+    --status-payment-failed-text: 3 86% 76%;
+
+    /* Logistics */
+    --logistics-van-assigned: 211 40% 12%;
+    --logistics-route-optimized: 211 40% 10%;
+    --logistics-capacity-warning: 36 50% 10%;
+    --logistics-overbooked: 3 50% 10%;
+
+    /* Stripe */
+    --stripe-accent: 244 100% 74%;
+
+    /* Alerts */
+    --alert-info-bg: 211 40% 10%;
+    --alert-info-text: 211 70% 68%;
+    --alert-warning-bg: 36 50% 10%;
+    --alert-warning-text: 36 80% 60%;
+    --alert-critical-bg: 3 50% 8%;
+    --alert-critical-text: 3 86% 76%;
+
+    /* Sidebar */
+    --sidebar-background: 230 25% 4%;
+    --sidebar-foreground: 240 9% 97%;
+    --sidebar-primary: 211 100% 52%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 225 19% 8%;
+    --sidebar-accent-foreground: 240 9% 97%;
+    --sidebar-border: 220 10% 12%;
+    --sidebar-ring: 211 100% 52%;
+  }
+}
+
+/* =========================================
+   GLOBAL RESET & BASE
+   ========================================= */
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    font-weight: 700;
+    color: hsl(var(--foreground));
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+  }
+
+  h1 { font-size: clamp(1.8rem, 3vw, 2.4rem); font-weight: 800; }
+  h2 { font-size: clamp(1.4rem, 2.5vw, 1.9rem); }
+  h3 { font-size: 1.2rem; }
+
+  p, span, label, td, li {
+    font-family: var(--font-sans);
+  }
+
+  /* Normalize legacy gray utilities onto the accessible semantic muted token
+     so hierarchy remains consistent in both organization themes. */
+  .text-muted-foreground,
+  .text-gray-400, .text-gray-500, .text-gray-600, .text-gray-700,
+  .text-slate-400, .text-slate-500, .text-slate-600, .text-slate-700,
+  .text-zinc-400, .text-zinc-500, .text-zinc-600, .text-zinc-700,
+  .text-neutral-400, .text-neutral-500, .text-neutral-600, .text-neutral-700 {
+    color: hsl(var(--muted-foreground));
+  }
+
+  .dark .text-muted-foreground,
+  .dark .text-gray-400, .dark .text-gray-500, .dark .text-gray-600, .dark .text-gray-700,
+  .dark .text-slate-400, .dark .text-slate-500, .dark .text-slate-600, .dark .text-slate-700,
+  .dark .text-zinc-400, .dark .text-zinc-500, .dark .text-zinc-600, .dark .text-zinc-700,
+  .dark .text-neutral-400, .dark .text-neutral-500, .dark .text-neutral-600, .dark .text-neutral-700,
+  .dark .dark\:text-gray-300, .dark .dark\:text-gray-400, .dark .dark\:text-gray-500,
+  .dark .dark\:text-slate-300, .dark .dark\:text-slate-400, .dark .dark\:text-slate-500,
+  .dark .dark\:text-zinc-300, .dark .dark\:text-zinc-400, .dark .dark\:text-zinc-500,
+  .dark .dark\:text-neutral-300, .dark .dark\:text-neutral-400, .dark .dark\:text-neutral-500 {
+    color: hsl(var(--muted-foreground));
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+  }
+}
+
+@layer components {
+  .app-page { @apply mx-auto w-full max-w-[1600px] space-y-4; }
+  .app-section { @apply space-y-3; }
+  .app-toolbar { @apply flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between; }
+  .operator-page { @apply space-y-4; }
+  .operator-control-zone { @apply flex flex-col gap-2 border-b bg-card px-3 py-2.5 sm:flex-row sm:items-center; }
+  .text-action { color: hsl(var(--action-text)); }
+  .sticky-action-bar { position: fixed; inset-inline: 0; bottom: 0; z-index: 45; border-top: 1px solid hsl(var(--border)); background: hsl(var(--card) / 0.98); padding-bottom: env(safe-area-inset-bottom); box-shadow: 0 -4px 16px rgb(15 23 42 / 0.08); }
+  /* Bottom nav only exists below the lg breakpoint, so only reserve space there. */
+  .safe-bottom-content { padding-bottom: env(safe-area-inset-bottom); }
+  @media (max-width: 1023px) {
+    .safe-bottom-content { padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom) + 1.5rem); }
+  }
+
+  .hide-scrollbar { scrollbar-width: none; }
+  .hide-scrollbar::-webkit-scrollbar { display: none; }
+}
+
+/* =========================================
+   TRUE-BLACK DARK MODE
+   ========================================= */
+
+.dark body {
+  background-color: #000000;
+  background-image: none;
+}
+
+/* =========================================
+   SURFACE UTILITIES
+   ========================================= */
+
+.surface {
+  background: var(--surface);
+  border: 1px solid var(--border-raw);
+  box-shadow: var(--shadow-md);
+  border-radius: var(--radius-lg);
+}
+
+.surface-elevated {
+  background: var(--surface-elevated);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border-raw);
+  box-shadow: var(--shadow-md);
+  border-radius: var(--radius-lg);
+}
+
+/* =========================================
+   SELECTION & SCROLLBAR
+   ========================================= */
+
+::selection {
+  background: rgba(10, 132, 255, 0.24);
+  color: var(--text-primary);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(var(--background));
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--surface-3);
+  border-radius: var(--radius-sm);
+  border: 2px solid hsl(var(--background));
+}
+
+/* =========================================
+   TEXT GRADIENT HELPERS
+   ========================================= */
+
+.text-gradient {
+  background: linear-gradient(180deg, #ffffff 0%, #aeb8c7 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.light .text-gradient {
+  background: linear-gradient(180deg, #111111 0%, #5b6472 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+/* =========================================
+   GLOW UTILITIES
+   ========================================= */
+
+.glow-blue {
+  box-shadow: 0 0 0 1px rgba(10, 132, 255, 0.18), 0 0 30px rgba(10, 132, 255, 0.12);
+}
+
+.glow-red {
+  box-shadow: 0 0 0 1px rgba(255, 69, 58, 0.18), 0 0 30px rgba(255, 69, 58, 0.12);
+}
+
+/* =========================================
+   PRINT STYLES — Professional service records / invoices
+   Hides app chrome (sidebar, top header, mobile nav, bottom nav,
+   floating buttons) so printed/PDF output is a clean legal document.
+   ========================================= */
+@media print {
+  @page {
+    size: Letter;
+    margin: 0.5in;
+  }
+
+  html, body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  /* Hide all app chrome */
+  aside,
+  nav,
+  header[data-app-header],
+  [data-app-sidebar],
+  [data-app-topheader],
+  [data-app-mobilenav],
+  [data-app-bottomnav],
+  [data-print-hide],
+  .print\:hidden {
+    display: none !important;
+  }
+
+  /* Strip layout padding, force single column flow */
+  main {
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* Show print-only blocks (letterhead) */
+  .print-only {
+    display: block !important;
+  }
+
+  /* Neutralize muted surfaces so they print clean */
+  .bg-muted,
+  .bg-muted\/30,
+  .bg-muted\/50,
+  .bg-card {
+    background: #ffffff !important;
+  }
+
+  /* Avoid card breaks splitting awkwardly */
+  .card, [class*="rounded-lg"] {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  a {
+    color: #000000 !important;
+    text-decoration: none !important;
+  }
+}
+
+/* Print-only block hidden on screen, shown on print */
+.print-only {
+  display: none;
+}
+
+.high-contrast {
+  --background: 0 0% 0%;
+  --foreground: 0 0% 100%;
+  --primary: 58 100% 50%;
+  --primary-foreground: 0 0% 0%;
+  --border: 58 100% 50%;
+  --ring: 58 100% 50%;
+}

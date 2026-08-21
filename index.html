@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-LWEY21320W"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-LWEY21320W');
+    </script>
+    
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+    <!-- Primary Meta Tags -->
+    <title>Service Writer — Software for mobile service businesses</title>
+    <meta name="title" content="Service Writer — Software for mobile service businesses" />
+    <meta name="description" content="Run your mobile service business from one place — online booking, dispatch, payments, customer history, and automated follow-ups." />
+    <meta name="keywords" content="mobile mechanic software, mobile service business, field service software, mobile auto repair, dispatch software, online booking, technician app" />
+    <meta name="author" content="Service Writer" />
+    <meta name="robots" content="index, follow" />
+    <meta name="google-site-verification" content="1R7QE-n4mIijKMuxEOBffYy5cYh6vNkpyiT4S3cCdLE" />
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Poppins:wght@400;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/pwa-192x192.png" />
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://moms.lovable.app/" />
+    <meta property="og:title" content="Service Writer — Software for mobile service businesses" />
+    <meta property="og:description" content="Run your mobile service business from one place — online booking, dispatch, payments, customer history, and automated follow-ups." />
+    <meta property="og:image" content="https://moms.lovable.app/og-image.png" />
+    <meta property="og:site_name" content="Service Writer" />
+    
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:url" content="https://moms.lovable.app/" />
+    <meta property="twitter:title" content="Service Writer — Software for mobile service businesses" />
+    <meta property="twitter:description" content="Run your mobile service business from one place — online booking, dispatch, payments, customer history, and automated follow-ups." />
+    <meta property="twitter:image" content="https://moms.lovable.app/og-image.png" />
+    
+    <!-- Theme Color -->
+    <meta name="theme-color" content="#667eea" />
+    <meta name="msapplication-TileColor" content="#667eea" />
+    
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- Structured Data: Organization -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "Service Writer",
+      "url": "https://moms.lovable.app/",
+      "logo": "https://moms.lovable.app/logo.png",
+      "description": "Software built for mobile service businesses — booking, dispatch, payments, customer history, and automated follow-ups in one place.",
+      "sameAs": []
+    }
+    </script>
+
+    <!-- Structured Data: WebSite -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "Service Writer",
+      "url": "https://moms.lovable.app/",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": "https://moms.lovable.app/?q={search_term_string}",
+        "query-input": "required name=search_term_string"
+      }
+    }
+    </script>
+  </head>
+  <body>
+    <!-- Defensive code: Prevent browser extension errors from breaking the app -->
+    <script>
+      // Browser extensions often try to access global properties that don't exist
+      // This script catches errors from extension scripts to prevent app breakage
+      (function() {
+        'use strict';
+        
+        // Catch global errors from third-party scripts (extensions)
+        window.addEventListener('error', function(e) {
+          // Ignore errors from known extension scripts
+          var source = e.filename || '';
+          if (source.includes('extension') || source.includes('chrome-extension') || source.includes('moz-extension')) {
+            e.preventDefault();
+            console.warn('Blocked extension error:', e.message);
+            return true;
+          }
+        }, true);
+        
+        // Catch unhandled promise rejections from extensions
+        window.addEventListener('unhandledrejection', function(e) {
+          var reason = e.reason;
+          if (reason && reason.message && reason.message.includes('feature_flags')) {
+            e.preventDefault();
+            console.warn('Blocked extension promise rejection for feature_flags');
+          }
+        }, true);
+      })();
+    </script>
+    
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

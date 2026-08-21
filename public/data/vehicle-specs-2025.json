@@ -1,0 +1,3626 @@
+[
+  {
+    "Year":2025,
+    "Make":"Acura",
+    "Model":"Integra",
+    "Engine":"Turbo 1.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"3.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Acura",
+    "Model":"Integra",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Acura",
+    "Model":"MDX",
+    "Engine":"3.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Acura",
+    "Model":"MDX",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Acura",
+    "Model":"RDX",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Acura",
+    "Model":"TLX",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Acura",
+    "Model":"TLX",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Alfa Romeo",
+    "Model":"Giulia",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"5.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Alfa Romeo",
+    "Model":"Stelvio",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"5.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Alfa Romeo",
+    "Model":"Tonale",
+    "Engine":"Turbo 1.3",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"A3 Quattro",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"A4 Quattro",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"A5 Sportback",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"A6 Allroad",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"A6 Quattro",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"A6 Quattro",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"A7 Sportback",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"A8 Quattro",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"Allroad Quattro",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"Q3",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"Q5 PHEV",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"Q5 Sportback",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"Q7",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"Q7",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"Q8",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"RS Q8",
+    "Engine":"Turbo 4.0",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"10 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"RS5 Sportback",
+    "Engine":"Turbo 2.9",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"RS6 Avant",
+    "Engine":"Turbo 4.0",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"10 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"RS7 Sportback",
+    "Engine":"Turbo 4.0",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"10 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"S4",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"S5",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"S5 Sportback",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"S6",
+    "Engine":"Turbo 2.9",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"S7 Sportback",
+    "Engine":"Turbo 2.9",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"S8",
+    "Engine":"Turbo 4.0",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"10 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"SQ5",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"SQ5 Sportback",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"SQ7",
+    "Engine":"Turbo 4.0",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"10 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Audi",
+    "Model":"SQ8",
+    "Engine":"Turbo 4.0",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"10 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"230I",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"230I XDrive",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"430I",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"430I XDrive",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"530i",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"530xi",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"840I",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"840I Gran Coupe",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"840I XDrive",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"840I XDrive Gran Coupe",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"M2",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"7.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"M3",
+    "Engine":"Tubo 3.0",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"7.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"M4",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"7.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"M440I",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.2 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"M440I XDrive",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.2 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"M5",
+    "Engine":"Turbo 4.4",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"10.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"M550I XDrive",
+    "Engine":"Turbo 4.4",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"11.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"M8",
+    "Engine":"Turbo 4.4",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"10.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"M8 Gran Coupe",
+    "Engine":"Turbo 4.4",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"10.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"M850I XDrive",
+    "Engine":"Turbo 4.4",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"11.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"M850l XDrive Gran Coupe",
+    "Engine":"Turbo 4.4",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"11.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"X1",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"X2",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"X3",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"X4",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"X4",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"7.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"X5",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.2 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"X6",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.2 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"X7",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.2 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"BMW",
+    "Model":"Z4",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Buick",
+    "Model":"Enclave",
+    "Engine":"Turbo 2.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Buick",
+    "Model":"Encore GX",
+    "Engine":"Turbo 1.2",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.2 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Buick",
+    "Model":"Encore GX",
+    "Engine":"Turbo 1.3",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Buick",
+    "Model":"Envision",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Buick",
+    "Model":"Envista",
+    "Engine":"Turbo 1.2",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.2 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Cadillac",
+    "Model":"CT4",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Cadillac",
+    "Model":"CT4",
+    "Engine":"Turbo 2.7",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Cadillac",
+    "Model":"CT4",
+    "Engine":"Turbo 3.6",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Cadillac",
+    "Model":"CT5",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Cadillac",
+    "Model":"CT5",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"All Wheel Drive 6.6 or Rear Wheel Drive 6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Cadillac",
+    "Model":"CT5",
+    "Engine":"Turbo 6.2",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Cadillac",
+    "Model":"Escalade",
+    "Engine":"6.2 Engine Code (6)",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Cadillac",
+    "Model":"Escalade",
+    "Engine":"6.2 Engine Code (L)",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Cadillac",
+    "Model":"XT4",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Cadillac",
+    "Model":"XT5",
+    "Engine":"3.6",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Cadillac",
+    "Model":"XT5",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Cadillac",
+    "Model":"XT6",
+    "Engine":"3.6",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Cadillac",
+    "Model":"XT6",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet",
+    "Model":"Corvette",
+    "Engine":"5.5",
+    "Oil Type":"5W-50",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet",
+    "Model":"Corvette",
+    "Engine":"6.2",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"7.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet",
+    "Model":"Malibu",
+    "Engine":"Turbo 1.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.2 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Blazer",
+    "Engine":"3.6",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Blazer",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Colorado",
+    "Engine":"Turbo 2.7",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Equinox",
+    "Engine":"Turbo 1.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"All Wheel Drive 5.3 qts. Front Wheel Drive 4.2 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Express 2500",
+    "Engine":"4.3",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Express 2500",
+    "Engine":"6.6",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Express 3500",
+    "Engine":"4.3",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Express 3500",
+    "Engine":"6.6",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Express 4500",
+    "Engine":"6.6",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Silverado 1500",
+    "Engine":"5.3",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Silverado 1500",
+    "Engine":"6.2",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Silverado 1500",
+    "Engine":"Diesel 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Silverado 1500",
+    "Engine":"Turbo 2.7",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Silverado 2500",
+    "Engine":"6.6",
+    "Oil Type":"5W-30 Dexos",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Silverado 2500",
+    "Engine":"Diesel 6.6",
+    "Oil Type":"5W-40 or 15W-40",
+    "Oil Capacity":"10 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Silverado 3500",
+    "Engine":"6.6",
+    "Oil Type":"5W-30 Dexos",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Silverado 3500",
+    "Engine":"Diesel 6.6",
+    "Oil Type":"5W-40 or 15W-40",
+    "Oil Capacity":"10 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Suburban",
+    "Engine":"5.3",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Suburban",
+    "Engine":"6.2",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Suburban",
+    "Engine":"Diesel 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Tahoe",
+    "Engine":"5.3",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Tahoe",
+    "Engine":"6.2",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Tahoe",
+    "Engine":"Diesel 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Trailblazer",
+    "Engine":"Turbo 1.2",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.2 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Trailblazer",
+    "Engine":"Turbo 1.3",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Traverse",
+    "Engine":"Turbo 2.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chevrolet Trucks",
+    "Model":"Trax",
+    "Engine":"Turbo 1.2",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.2 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chrysler",
+    "Model":"Pacifica",
+    "Engine":"3.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Chrysler",
+    "Model":"Voyager",
+    "Engine":"3.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Dodge Trucks",
+    "Model":"Durango",
+    "Engine":"3.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Dodge Trucks",
+    "Model":"Durango",
+    "Engine":"5.7",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Dodge Trucks",
+    "Model":"Durango",
+    "Engine":"6.2",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"8.2 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Dodge Trucks",
+    "Model":"Hornet",
+    "Engine":"Turbo 1.3",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Dodge Trucks",
+    "Model":"Hornet",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Fiat",
+    "Model":"500E",
+    "Engine":null,
+    "Oil Type":null,
+    "Oil Capacity":"N\/A qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford",
+    "Model":"Mustang",
+    "Engine":"5.0",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"9.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford",
+    "Model":"Mustang",
+    "Engine":"Turbo 2.3",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"5.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"Bronco",
+    "Engine":"Turbo 2.3",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"Bronco",
+    "Engine":"Turbo 2.7",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"Bronco",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"Bronco Sport",
+    "Engine":"Turbo 1.5",
+    "Oil Type":"5W-20",
+    "Oil Capacity":"6.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"Bronco Sport",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"5.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"Escape",
+    "Engine":"2.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"Escape",
+    "Engine":"Turbo 1.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"Escape",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"6.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"Expedition",
+    "Engine":"Turbo 3.5",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"Explorer",
+    "Engine":"Turbo 2.3",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"5.2 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"Explorer",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"F150",
+    "Engine":"5.0",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"7.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"F150",
+    "Engine":"5.2",
+    "Oil Type":null,
+    "Oil Capacity":"N\/A qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"F150",
+    "Engine":"Turbo 2.7",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"F150",
+    "Engine":"Turbo 3.5",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"F250",
+    "Engine":"6.8",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"F250",
+    "Engine":"7.3",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"F250",
+    "Engine":"Diesel 6.7",
+    "Oil Type":"10W-30 for Diesel Engines",
+    "Oil Capacity":"15 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"F350",
+    "Engine":"6.8",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"F350",
+    "Engine":"7.3",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"F350",
+    "Engine":"Diesel 6.7",
+    "Oil Type":"10W-30 for Diesel Engines",
+    "Oil Capacity":"15 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"F450",
+    "Engine":"Diesel 6.7",
+    "Oil Type":"10W-30 for Diesel Engines",
+    "Oil Capacity":"15 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"F550",
+    "Engine":"7.3",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"F550",
+    "Engine":"Diesel 6.7",
+    "Oil Type":"10W-30 for Diesel Engines",
+    "Oil Capacity":"15 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"Maverick",
+    "Engine":"2.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"Maverick",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"5.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"Police Interceptor Utility",
+    "Engine":"3.3",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"Police Interceptor Utility",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"Ranger",
+    "Engine":"Turbo 2.7",
+    "Oil Type":null,
+    "Oil Capacity":"N\/A qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"Ranger",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"Transit-150",
+    "Engine":"3.5",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"12 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"Transit-150",
+    "Engine":"Turbo 3.5",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"Transit-250",
+    "Engine":"3.5",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"12 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"Transit-250",
+    "Engine":"Turbo 3.5",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"Transit-350",
+    "Engine":"3.5",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"12 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ford Trucks",
+    "Model":"Transit-350",
+    "Engine":"Turbo 3.5",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"GMC Trucks",
+    "Model":"Canyon",
+    "Engine":"Turbo 2.7",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"GMC Trucks",
+    "Model":"Savana 2500",
+    "Engine":"4.3",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"GMC Trucks",
+    "Model":"Savana 2500",
+    "Engine":"6.6",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"GMC Trucks",
+    "Model":"Savana 3500",
+    "Engine":"4.3",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"GMC Trucks",
+    "Model":"Savana 3500",
+    "Engine":"6.6",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"GMC Trucks",
+    "Model":"Sierra 1500",
+    "Engine":"5.3",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"GMC Trucks",
+    "Model":"Sierra 1500",
+    "Engine":"6.2",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"GMC Trucks",
+    "Model":"Sierra 1500",
+    "Engine":"Diesel 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"GMC Trucks",
+    "Model":"Sierra 1500",
+    "Engine":"Turbo 2.7",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"GMC Trucks",
+    "Model":"Sierra 2500",
+    "Engine":"6.6",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"GMC Trucks",
+    "Model":"Sierra 2500",
+    "Engine":"Diesel 6.6",
+    "Oil Type":"5W-40 or 15W-40",
+    "Oil Capacity":"10 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"GMC Trucks",
+    "Model":"Sierra 3500",
+    "Engine":"6.6",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"GMC Trucks",
+    "Model":"Sierra 3500",
+    "Engine":"Diesel 6.6",
+    "Oil Type":"5W-40 or 15W-40",
+    "Oil Capacity":"10 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"GMC Trucks",
+    "Model":"Terrain",
+    "Engine":"Turbo 1.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"All Wheel Drive 5.3 qts. Front Wheel Drive 4.2 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"GMC Trucks",
+    "Model":"Yukon",
+    "Engine":"5.3",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"GMC Trucks",
+    "Model":"Yukon",
+    "Engine":"6.2",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"GMC Trucks",
+    "Model":"Yukon",
+    "Engine":"Diesel 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Genesis",
+    "Model":"G70",
+    "Engine":"Turbo 2.5",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"6.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Genesis",
+    "Model":"G70",
+    "Engine":"Turbo 3.3",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"7.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Genesis",
+    "Model":"G80",
+    "Engine":"Turbo 2.5",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"6.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Genesis",
+    "Model":"G80",
+    "Engine":"Turbo 3.5",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"7.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Genesis",
+    "Model":"G90",
+    "Engine":"Turbo 3.5",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"7.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Genesis",
+    "Model":"GV70",
+    "Engine":"Turbo 2.5",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"6.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Genesis",
+    "Model":"GV70",
+    "Engine":"Turbo 3.5",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"7.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Genesis",
+    "Model":"GV80",
+    "Engine":"Turbo 2.5",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"6.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Genesis",
+    "Model":"GV80",
+    "Engine":"Turbo 3.5",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"7.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Honda",
+    "Model":"Accord",
+    "Engine":"2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.2 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Honda",
+    "Model":"Accord",
+    "Engine":"Turbo 1.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"3.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Honda",
+    "Model":"CR-V",
+    "Engine":"2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.2 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Honda",
+    "Model":"CR-V",
+    "Engine":"Turbo 1.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"3.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Honda",
+    "Model":"Civic",
+    "Engine":"Turbo 1.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"3.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Honda",
+    "Model":"Civic",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.2 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Honda",
+    "Model":"HR-V",
+    "Engine":"2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Honda",
+    "Model":"Odyssey",
+    "Engine":"3.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Honda",
+    "Model":"Passport",
+    "Engine":"3.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Honda",
+    "Model":"Pilot",
+    "Engine":"3.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Honda",
+    "Model":"Ridgeline",
+    "Engine":"3.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Hyundai",
+    "Model":"Elantra",
+    "Engine":"1.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Hyundai",
+    "Model":"Elantra",
+    "Engine":"2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Hyundai",
+    "Model":"Elantra",
+    "Engine":"Turbo 1.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Hyundai",
+    "Model":"Elantra N",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"5.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Hyundai",
+    "Model":"Kona",
+    "Engine":"2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Hyundai",
+    "Model":"Kona",
+    "Engine":"Turbo 1.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Hyundai",
+    "Model":"Palisade",
+    "Engine":"3.8",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Hyundai",
+    "Model":"Santa Cruz",
+    "Engine":"2.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Hyundai",
+    "Model":"Santa Cruz",
+    "Engine":"Turbo 2.5",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"6.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Hyundai",
+    "Model":"Santa Fe",
+    "Engine":"Turbo 1.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Hyundai",
+    "Model":"Santa Fe",
+    "Engine":"Turbo 2.5",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"6.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Hyundai",
+    "Model":"Sonata",
+    "Engine":"2.0",
+    "Oil Type":"0W-16",
+    "Oil Capacity":"4.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Hyundai",
+    "Model":"Sonata",
+    "Engine":"2.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Hyundai",
+    "Model":"Sonata",
+    "Engine":"Turbo 2.5",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"6.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Hyundai",
+    "Model":"Tucson",
+    "Engine":"2.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Hyundai",
+    "Model":"Tucson",
+    "Engine":"Turbo 1.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Hyundai",
+    "Model":"Venue",
+    "Engine":"1.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Infiniti",
+    "Model":"Q50",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"All Wheel Drive 6.2 or Rear Wheel Drive 5.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Infiniti",
+    "Model":"QX55",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Infiniti",
+    "Model":"QX60",
+    "Engine":"3.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Infiniti",
+    "Model":"QX80",
+    "Engine":"Turbo 3.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Jeep",
+    "Model":"Compass",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Jeep",
+    "Model":"Gladiator",
+    "Engine":"3.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Jeep",
+    "Model":"Grand Cherokee",
+    "Engine":"3.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Jeep",
+    "Model":"Grand Cherokee",
+    "Engine":"5.7",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Jeep",
+    "Model":"Grand Cherokee",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Jeep",
+    "Model":"Grand Cherokee L",
+    "Engine":"3.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Jeep",
+    "Model":"Grand Cherokee L",
+    "Engine":"5.7",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Jeep",
+    "Model":"Grand Wagoneer",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20 Standard Output or 0W-40 High Output",
+    "Oil Capacity":"7.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Jeep",
+    "Model":"Wagoneer",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"Standard Output SO OW-20 or High Output HO 0W-40",
+    "Oil Capacity":"7.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Jeep",
+    "Model":"Wrangler",
+    "Engine":"3.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Jeep",
+    "Model":"Wrangler",
+    "Engine":"6.4",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"7.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Jeep",
+    "Model":"Wrangler",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"5W-30 Full Synthetic",
+    "Oil Capacity":"5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Kia",
+    "Model":"Carnival",
+    "Engine":"3.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Kia",
+    "Model":"Carnival",
+    "Engine":"Turbo 1.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Kia",
+    "Model":"Forte",
+    "Engine":"2",
+    "Oil Type":"5W-20",
+    "Oil Capacity":"4.2 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Kia",
+    "Model":"Forte",
+    "Engine":"Turbo 1.6",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"4.2 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Kia",
+    "Model":"K4",
+    "Engine":"2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Kia",
+    "Model":"K4",
+    "Engine":"Turbo 1.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Kia",
+    "Model":"K5",
+    "Engine":"2.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Kia",
+    "Model":"K5",
+    "Engine":"Turbo 2.5",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"6.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Kia",
+    "Model":"Niro",
+    "Engine":"1.6",
+    "Oil Type":"0W-16",
+    "Oil Capacity":"4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Kia",
+    "Model":"Seltos",
+    "Engine":"2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.2 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Kia",
+    "Model":"Seltos",
+    "Engine":"Turbo 1.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Kia",
+    "Model":"Sorento",
+    "Engine":"2.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Kia",
+    "Model":"Sorento",
+    "Engine":"Turbo 1.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Kia",
+    "Model":"Sorento",
+    "Engine":"Turbo 2.5",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"6.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Kia",
+    "Model":"Soul",
+    "Engine":"2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.2 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Kia",
+    "Model":"Sportage",
+    "Engine":"2.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Kia",
+    "Model":"Sportage",
+    "Engine":"Turbo 1.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Kia",
+    "Model":"Telluride",
+    "Engine":"3.8",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Land Rover",
+    "Model":"Defender",
+    "Engine":"5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"8.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Land Rover",
+    "Model":"Defender",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Land Rover",
+    "Model":"Defender",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"9.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Land Rover",
+    "Model":"Discovery",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Land Rover",
+    "Model":"Discovery",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"9.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Land Rover",
+    "Model":"Discovery Sport",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Land Rover",
+    "Model":"Range Rover",
+    "Engine":"4.4",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"11.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Land Rover",
+    "Model":"Range Rover",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"9.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Land Rover",
+    "Model":"Range Rover Evoque",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Land Rover",
+    "Model":"Range Rover Sport",
+    "Engine":"4.4",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"11.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Land Rover",
+    "Model":"Range Rover Sport",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"9.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Land Rover",
+    "Model":"Range Rover Velar",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Land Rover",
+    "Model":"Range Rover Velar",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"9.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"ES250",
+    "Engine":"2.5",
+    "Oil Type":"0W-16",
+    "Oil Capacity":"4.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"ES300H",
+    "Engine":"2.5",
+    "Oil Type":"0W-16",
+    "Oil Capacity":"4.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"ES350",
+    "Engine":"3.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"GX550",
+    "Engine":"Turbo 3.4",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"IS300",
+    "Engine":"3.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"All Wheel Drive 6.8 qts. Rear Wheel Drive 6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"IS300",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"IS350",
+    "Engine":"3.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"All Wheel Drive 6.8 qts Rear Wheel Drive 6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"IS500",
+    "Engine":"5.0",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"9.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"LC500",
+    "Engine":"5",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"9.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"LC500H",
+    "Engine":"3.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"LS500",
+    "Engine":"Turbo 3.4",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"All Wheel Drive 7.5 or Rear Wheel Drive 6.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"LS500H",
+    "Engine":"3.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"LX 700h",
+    "Engine":"3.4",
+    "Oil Type":null,
+    "Oil Capacity":"N\/A qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"LX600",
+    "Engine":"Turbo 3.4",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"NX250",
+    "Engine":"2.5",
+    "Oil Type":"0W-16",
+    "Oil Capacity":"4.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"NX350",
+    "Engine":"Turbo 2.4",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"NX350H",
+    "Engine":"2.5",
+    "Oil Type":"0W-16",
+    "Oil Capacity":"4.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"NX450H+",
+    "Engine":"2.5",
+    "Oil Type":"0W-16",
+    "Oil Capacity":"4.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"RC F",
+    "Engine":"5",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"9.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"RC300",
+    "Engine":"3.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"RC300",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"RC350",
+    "Engine":"3.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"All Wheel Drive 6.8 qts Rear Wheel Drive 6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"RX350",
+    "Engine":"Turbo 2.4",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"RX350H",
+    "Engine":"2.5",
+    "Oil Type":"0W-16",
+    "Oil Capacity":"4.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"RX450H+",
+    "Engine":"2.5",
+    "Oil Type":"0W-16",
+    "Oil Capacity":"4.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"RX500H",
+    "Engine":"Turbo 2.4",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"TX350",
+    "Engine":"Turbo 2.4",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"TX500H",
+    "Engine":"Turbo 2.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"TX550H+",
+    "Engine":"3.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lexus",
+    "Model":"UX300H",
+    "Engine":"2.0",
+    "Oil Type":"0W-8",
+    "Oil Capacity":"4.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lincoln",
+    "Model":"Aviator",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lincoln",
+    "Model":"Corsair",
+    "Engine":"2.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lincoln",
+    "Model":"Corsair",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lincoln",
+    "Model":"Nautilus",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Lincoln",
+    "Model":"Navigator",
+    "Engine":"Turbo 3.5",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mazda",
+    "Model":"CX-30",
+    "Engine":"2.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mazda",
+    "Model":"CX-30",
+    "Engine":"Turbo 2.5",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"5.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mazda",
+    "Model":"CX-5",
+    "Engine":"2.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mazda",
+    "Model":"CX-5",
+    "Engine":"Turbo 2.5",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"5.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mazda",
+    "Model":"CX-50",
+    "Engine":"2.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mazda",
+    "Model":"CX-50",
+    "Engine":"Turbo 2.5",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"5.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mazda",
+    "Model":"CX-70",
+    "Engine":"2.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mazda",
+    "Model":"CX-70",
+    "Engine":"Turbo 3.3",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mazda",
+    "Model":"CX-90",
+    "Engine":"2.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mazda",
+    "Model":"CX-90",
+    "Engine":"Turbo 3.3",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mazda",
+    "Model":"Mazda 3",
+    "Engine":"2.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mazda",
+    "Model":"Mazda 3",
+    "Engine":"Turbo 2.5",
+    "Oil Type":"5W-30",
+    "Oil Capacity":"5.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mazda",
+    "Model":"Miata",
+    "Engine":"2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"AMG GT 55",
+    "Engine":"Turbo 4.0",
+    "Oil Type":"0W-40 or 5W-40",
+    "Oil Capacity":"9.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"AMG GT 63",
+    "Engine":"Turbo 4.0",
+    "Oil Type":"0W-40 or 5W-40",
+    "Oil Capacity":"9.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"AMG GT 63 S E Performance",
+    "Engine":"Turbo 4.0",
+    "Oil Type":"0W-40 or 5W-40",
+    "Oil Capacity":"9.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"C300",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"European Car Formula 0W-40 Synthetic",
+    "Oil Capacity":"5.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"C43 AMG",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"C43 AMG",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"European Car Formula 5W-40 or 0W-40 Synthetic",
+    "Oil Capacity":"6.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"C63 AMG S E Performance",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"6.3",
+    "Oil Capacity":"22 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"CLA250",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"CLA35 AMG",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"CLA45 AMG S",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"CLE300",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"CLE450",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"8.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"CLE53 AMG",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-40 or 5W-40",
+    "Oil Capacity":"8.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"E350",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"5.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"E450",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"7.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"G550",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"European Car Formula 5W-40 or 0W-40 Synthetic or 0W-20",
+    "Oil Capacity":"9.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"G63 AMG",
+    "Engine":"Turbo 4.0",
+    "Oil Type":"European Car Formula 0W-40 or 0W-30 Synthetic",
+    "Oil Capacity":"10 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"GLA250",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"5.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"GLA35 AMG",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"5.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"GLB250",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"5.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"GLB35 AMG",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"GLC300",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"5.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"GLC43 AMG",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"GLC63 AMG S E Performance",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"GLE350",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"5.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"GLE450",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"GLE450 SUV",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-40 or 5W-40",
+    "Oil Capacity":"7.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"GLE53 AMG",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"European Car Formula 5W-40 or 0W-40 Synthetic",
+    "Oil Capacity":"9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"GLE53 AMG SUV",
+    "Engine":"Turbo 4.0",
+    "Oil Type":"European Car Formula 0W-40 or 5W-40 Synthetic",
+    "Oil Capacity":"9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"GLE580",
+    "Engine":"Turbo 4.0",
+    "Oil Type":"0W-40 or 5W-40",
+    "Oil Capacity":"10 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"GLE63 AMG S",
+    "Engine":"Turbo 4.0",
+    "Oil Type":"0W-40 or 5W-40",
+    "Oil Capacity":"10 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"GLS450",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"European Car Formula 5W-40 or 0W-40 Synthetic",
+    "Oil Capacity":"9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"GLS580",
+    "Engine":"Turbo 4.0",
+    "Oil Type":"European Car Formula 5W-40 or 0W-40 Synthetic",
+    "Oil Capacity":"10 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"GLS63 AMG",
+    "Engine":"Turbo 4.0",
+    "Oil Type":"European Car Formula 0W-40 or 5W-40 Synthetic",
+    "Oil Capacity":"10 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"Maybach GLS600",
+    "Engine":"Turbo 4.0",
+    "Oil Type":"European Car Formula 5W-40 or 0W-40 Synthetic",
+    "Oil Capacity":"10 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"Maybach S580",
+    "Engine":"Turbo 4.0",
+    "Oil Type":"European Car Formula 5W-40 or 0W-40 Synthetic",
+    "Oil Capacity":"9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"Maybach S680",
+    "Engine":"Turbo 6.0",
+    "Oil Type":"European Car Formula 5W-40 or 0W-40 Synthetic",
+    "Oil Capacity":"10.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"Maybach SL680",
+    "Engine":"Turbo 4.0",
+    "Oil Type":"0W-40 or 5W-40",
+    "Oil Capacity":"9.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"S500",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"European Car Formula 5W-40 or 0W-40 Synthetic",
+    "Oil Capacity":"8.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"S580",
+    "Engine":"Turbo 4.0",
+    "Oil Type":"0W-30 or 0W-40",
+    "Oil Capacity":"9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"S580E",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"European Car Formula 5W-40 or 0W-40 Synthetic",
+    "Oil Capacity":"7.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"S63 AMG E Performance",
+    "Engine":"Turbo 4.0",
+    "Oil Type":null,
+    "Oil Capacity":"N\/A qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"SL43 AMG",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"SL55 AMG",
+    "Engine":"Turbo 4.0",
+    "Oil Type":"European Car Formula 5W-40 or 0W-40 Synthetic",
+    "Oil Capacity":"9.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"SL63 AMG",
+    "Engine":"Turbo 4.0",
+    "Oil Type":"European Car Formula 5W-40 or 0W-40 Synthetic",
+    "Oil Capacity":"9.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"SL63 AMG S E Performance",
+    "Engine":"Turbo 4.0",
+    "Oil Type":"0W-40 or 5W-40",
+    "Oil Capacity":"9.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"Sprinter 2500",
+    "Engine":"Diesel 2.0",
+    "Oil Type":"0W-20, 0W-30, 0W-40",
+    "Oil Capacity":"10.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"Sprinter 3500",
+    "Engine":"Diesel 2.0",
+    "Oil Type":"0W-20, 0W-30, 0W-40",
+    "Oil Capacity":"10.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mercedes Benz",
+    "Model":"Sprinter 4500",
+    "Engine":"Diesel 2.0",
+    "Oil Type":"0W-20, 0W-30, 0W-40",
+    "Oil Capacity":"10.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mini",
+    "Model":"Cooper",
+    "Engine":"Turbo 1.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mini",
+    "Model":"Cooper",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mini",
+    "Model":"Cooper Clubman",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mini",
+    "Model":"Cooper Countryman",
+    "Engine":"Turbo 1.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.8 qts. or Variable Fuel Engine 4.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mini",
+    "Model":"Cooper Countryman",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mitsubishi",
+    "Model":"Eclipse Cross",
+    "Engine":"Turbo 1.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Mitsubishi",
+    "Model":"Outlander Phev",
+    "Engine":"2.4",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Nissan",
+    "Model":"Altima",
+    "Engine":"2.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Nissan",
+    "Model":"Armada",
+    "Engine":"Turbo 3.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Nissan",
+    "Model":"Frontier",
+    "Engine":"3.8",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Nissan",
+    "Model":"Kicks",
+    "Engine":"2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Nissan",
+    "Model":"Murano",
+    "Engine":"Turbo 2.0",
+    "Oil Type":null,
+    "Oil Capacity":"N\/A qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Nissan",
+    "Model":"Pathfinder",
+    "Engine":"3.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.1 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Nissan",
+    "Model":"Rogue",
+    "Engine":"Turbo 1.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Nissan",
+    "Model":"Sentra",
+    "Engine":"2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Nissan",
+    "Model":"Titan",
+    "Engine":"5.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Nissan",
+    "Model":"Versa",
+    "Engine":"1.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Porsche",
+    "Model":"718 Boxster",
+    "Engine":"4",
+    "Oil Type":"European Car Formula 5W-40 or 0W-40 Synthetic",
+    "Oil Capacity":"8.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Porsche",
+    "Model":"718 Boxster",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"European Car Formula 5W-40 or 0W-40 Synthetic",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Porsche",
+    "Model":"718 Boxster",
+    "Engine":"Turbo 2.5",
+    "Oil Type":"European Car Formula 5W-40 or 0W-40 Synthetic",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Porsche",
+    "Model":"718 Cayman",
+    "Engine":"4",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"8.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Porsche",
+    "Model":"718 Cayman",
+    "Engine":"4.0 Engine Code (DUD)",
+    "Oil Type":"European Car Formula 0W-40 or 5W-40 Synthetic",
+    "Oil Capacity":"4.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Porsche",
+    "Model":"718 Cayman",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Porsche",
+    "Model":"718 Cayman",
+    "Engine":"Turbo 2.5",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Porsche",
+    "Model":"718 Spyder",
+    "Engine":"4",
+    "Oil Type":"European Car Formula 0W-40 or 5W-40 Synthetic",
+    "Oil Capacity":"8.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Porsche",
+    "Model":"911",
+    "Engine":"4",
+    "Oil Type":"European Car Formula 5W-40 or 0W-40 Synthetic",
+    "Oil Capacity":"4.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Porsche",
+    "Model":"911",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"9.3 qts. or Variable Fuel Engine 8.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Porsche",
+    "Model":"911",
+    "Engine":"Turbo 3.7",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"8.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Porsche",
+    "Model":"Cayenne",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"Variable Fuel Engine 7.6 qts. or Non Variable Fuel 8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Porsche",
+    "Model":"Cayenne",
+    "Engine":"Turbo 4.0",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"11.6 qts. or Variable Fuel Engine 11.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Porsche",
+    "Model":"Macan",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Porsche",
+    "Model":"Macan",
+    "Engine":"Turbo 2.9",
+    "Oil Type":"0W-30",
+    "Oil Capacity":"7.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ram",
+    "Model":"1500",
+    "Engine":"3.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ram",
+    "Model":"1500",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ram",
+    "Model":"2500",
+    "Engine":"6.4",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ram",
+    "Model":"2500",
+    "Engine":"Diesel 6.7",
+    "Oil Type":"10W-30 Formulate for Diesel Engines",
+    "Oil Capacity":"12 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ram",
+    "Model":"3500",
+    "Engine":"6.4",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ram",
+    "Model":"3500",
+    "Engine":"Diesel 6.7",
+    "Oil Type":"10W-30 Formulate for Diesel Engines",
+    "Oil Capacity":"12 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ram",
+    "Model":"4500",
+    "Engine":"6.4",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ram",
+    "Model":"4500",
+    "Engine":"Diesel 6.7",
+    "Oil Type":"10W-30 Formulate for Diesel Engines",
+    "Oil Capacity":"12 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ram",
+    "Model":"5500",
+    "Engine":"6.4",
+    "Oil Type":"0W-40",
+    "Oil Capacity":"7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ram",
+    "Model":"5500",
+    "Engine":"Diesel 6.7",
+    "Oil Type":"10W-30 Formulate for Diesel Engines",
+    "Oil Capacity":"12 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ram",
+    "Model":"Promaster 1500",
+    "Engine":"3.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ram",
+    "Model":"Promaster 2500",
+    "Engine":"3.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Ram",
+    "Model":"Promaster 3500",
+    "Engine":"3.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Subaru",
+    "Model":"Ascent",
+    "Engine":"Turbo 2.4",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Subaru",
+    "Model":"BRZ",
+    "Engine":"2.4",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Subaru",
+    "Model":"Crosstrek",
+    "Engine":"2.0",
+    "Oil Type":"0W-16",
+    "Oil Capacity":"4.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Subaru",
+    "Model":"Crosstrek",
+    "Engine":"2.5",
+    "Oil Type":"0W-16",
+    "Oil Capacity":"4.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Subaru",
+    "Model":"Forester",
+    "Engine":"2.5",
+    "Oil Type":"0W-16",
+    "Oil Capacity":"4.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Subaru",
+    "Model":"Impreza",
+    "Engine":"2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Subaru",
+    "Model":"Impreza",
+    "Engine":"2.5",
+    "Oil Type":null,
+    "Oil Capacity":"N\/A qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Subaru",
+    "Model":"Legacy",
+    "Engine":"2.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Subaru",
+    "Model":"Legacy",
+    "Engine":"Turbo 2.4",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Subaru",
+    "Model":"Outback",
+    "Engine":"2.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Subaru",
+    "Model":"Outback",
+    "Engine":"Turbo 2.4",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Subaru",
+    "Model":"WRX",
+    "Engine":"Turbo 2.4",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.8 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Toyota",
+    "Model":"4-Runner",
+    "Engine":"Turbo 2.4",
+    "Oil Type":null,
+    "Oil Capacity":"N\/A qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Toyota",
+    "Model":"Camry",
+    "Engine":"2.5",
+    "Oil Type":"0W-16",
+    "Oil Capacity":"4.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Toyota",
+    "Model":"Corolla",
+    "Engine":"1.8",
+    "Oil Type":"0W-16",
+    "Oil Capacity":"4.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Toyota",
+    "Model":"Corolla",
+    "Engine":"2",
+    "Oil Type":"0W-8 or 0W-16 if 0W-8 is unavailable",
+    "Oil Capacity":"4.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Toyota",
+    "Model":"Crown",
+    "Engine":"2.5",
+    "Oil Type":"0W-8",
+    "Oil Capacity":"4.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Toyota",
+    "Model":"Crown",
+    "Engine":"Turbo 2.4",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Toyota",
+    "Model":"GR Corolla",
+    "Engine":"Turbo 1.6",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Toyota",
+    "Model":"GR Supra",
+    "Engine":"Turbo 3.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Toyota",
+    "Model":"GR86",
+    "Engine":"2.4",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.3 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Toyota",
+    "Model":"Grand Highlander",
+    "Engine":"2.5",
+    "Oil Type":"0w-8",
+    "Oil Capacity":"4.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Toyota",
+    "Model":"Grand Highlander",
+    "Engine":"Turbo 2.4",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Toyota",
+    "Model":"Highlander",
+    "Engine":"2.5",
+    "Oil Type":"0W-16",
+    "Oil Capacity":"4.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Toyota",
+    "Model":"Highlander",
+    "Engine":"Turbo 2.4",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Toyota",
+    "Model":"Land Cruiser",
+    "Engine":"Turbo 2.4",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Toyota",
+    "Model":"Rav4",
+    "Engine":"2.5",
+    "Oil Type":"0W-16",
+    "Oil Capacity":"4.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Toyota",
+    "Model":"Sequoia",
+    "Engine":"Turbo 3.4",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Toyota",
+    "Model":"Sienna",
+    "Engine":"2.5",
+    "Oil Type":"0W-16",
+    "Oil Capacity":"4.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Toyota",
+    "Model":"Tacoma",
+    "Engine":"Turbo 2.4",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Toyota",
+    "Model":"Tundra",
+    "Engine":"Turbo 3.4",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"7.7 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Volkswagen",
+    "Model":"Atlas",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Volkswagen",
+    "Model":"Atlas Cross Sport",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Volkswagen",
+    "Model":"GTI",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Volkswagen",
+    "Model":"Jetta",
+    "Engine":"Turbo 1.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Volkswagen",
+    "Model":"Jetta",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Volkswagen",
+    "Model":"Taos",
+    "Engine":"Turbo 1.5",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"4.5 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Volkswagen",
+    "Model":"Tiguan",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Volvo",
+    "Model":"S60",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Volvo",
+    "Model":"S90",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Volvo",
+    "Model":"V60",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Volvo",
+    "Model":"V60 Cross Country",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Volvo",
+    "Model":"V90 Cross Country",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Volvo",
+    "Model":"XC40",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Volvo",
+    "Model":"XC60",
+    "Engine":"Turbo 2.0",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.4 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Volvo",
+    "Model":"XC90",
+    "Engine":"Turbo 2.0 Engine Code (B4204T57 2)",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"5.9 qts. with filter"
+  },
+  {
+    "Year":2025,
+    "Make":"Volvo",
+    "Model":"XC90",
+    "Engine":"Turbo 2.0 Engine Code (B420T) or (B420T2)",
+    "Oil Type":"0W-20",
+    "Oil Capacity":"6.4 qts. with filter"
+  }
+]

@@ -1,0 +1,1 @@
+import{F as s}from"./index-BxnhNaIA.js";async function u({user_id:a,action:n,entity:t,entity_id:o,status:i,ip:l,details:e}){await s.from("audit_logs").insert([{user_id:a,action:n||"unknown_action",table_name:t||null,record_id:o||null,ip_address:l||null,new_data:e||{status:i}}])}export{u as l};
