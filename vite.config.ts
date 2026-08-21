@@ -15,6 +15,19 @@ export default defineConfig({
     }),
   ],
   resolve: { alias: { "@": path.resolve(__dirname, "./src"), "@packages": path.resolve(__dirname, "./src/packages") } },
+  build: {
+    chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "vendor-react": ["react", "react-dom", "react-router-dom"],
+          "vendor-charts": ["recharts"],
+          "vendor-maps": ["mapbox-gl"],
+          "vendor-data": ["xlsx"],
+        },
+      },
+    },
+  },
   server: {
     host: "::",
     port: 8080,

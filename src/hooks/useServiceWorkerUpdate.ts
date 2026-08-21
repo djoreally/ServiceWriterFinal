@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 
 const APP_CACHE_PREFIX = 'service-writer-app';
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'dev';
+const APP_VERSION = 'dev';
 
 /**
  * Service worker update hook
@@ -10,7 +10,7 @@ const APP_VERSION = import.meta.env.VITE_APP_VERSION || 'dev';
  * - stale cache protection by app version
  */
 export function useServiceWorkerUpdate() {
-  const isProduction = import.meta.env.PROD;
+  const isProduction = typeof window !== 'undefined' && window.location.protocol === 'https:' && !window.location.hostname.includes('localhost');
 
   // Preview deployments change frequently. Registering a worker there can claim
   // the current login page while a person is entering credentials, which used to
