@@ -77,5 +77,7 @@ export const nextApi = {
     get: (workspaceId: string, id: string) => request<{ data: unknown }>(`/v1/work-orders/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`),
     create: (payload: Record<string, unknown>) => request<{ data: unknown }>("/v1/work-orders", { method: "POST", body: JSON.stringify(payload) }),
     update: (id: string, payload: Record<string, unknown>) => request<{ data: unknown }>(`/v1/work-orders/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
+    advanceChecklist: (payload: Record<string, unknown>) => request<{ data: unknown }>("/v1/work-orders/checklist/advance", { method: "POST", body: JSON.stringify(payload) }),
+    updateChecklistItem: (itemId: string, payload: Record<string, unknown>) => request<{ data: unknown }>(`/v1/work-orders/checklist/items/${encodeURIComponent(itemId)}`, { method: "PATCH", body: JSON.stringify(payload) }),
   },
 };

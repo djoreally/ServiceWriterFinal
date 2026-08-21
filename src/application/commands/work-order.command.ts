@@ -123,25 +123,15 @@ export async function advanceChecklistStep(
   evidenceUrl?: string | null,
   notes?: string | null
 ): Promise<{ status: string; item_id: string; next_item_id: string | null; execution_phase: string }> {
-  const { data, error } = await supabase.rpc("advance_checklist_step" as never, {
-    p_item_id: itemId,
-    p_evidence_url: evidenceUrl ?? null,
-    p_notes: notes ?? null,
-  });
-
-  if (error) {
-    // Surface enforcement errors cleanly to the UI
-    const msg = error.message || "Step completion blocked";
-    const match = msg.match(/ENFORCEMENT_ERROR:\s*(.+)/);
-    throw new Error(match ? match[1] : msg);
-  }
-
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error("Select a workspace before advancing a checklist step.");
+  const response = await nextApi.workOrders.advanceChecklist({ workspace_id, item_id: itemId, evidence_url: evidenceUrl ?? null, notes: notes ?? null });
   return z.object({
     status: z.string(),
     item_id: z.string().uuid(),
-    next_item_id: z.string().uuid().nullable(),
+    next_item_id: z.string().uuid().nullable().default(null),
     execution_phase: z.string(),
-  }).parse(data);
+  }).parse(response.data);
 }
 
 /** Capture VIN on a work order (required before completion if requires_vin). */
@@ -181,12 +171,9 @@ export async function updateChecklistItem(
     if (updates.completedBy) payload.completed_by = updates.completedBy;
   }
 
-  const { error } = await supabase
-    .from("work_order_checklist_items")
-    .update(payload as never)
-    .eq("id", itemId);
-
-  if (error) throw new Error(`Failed to update checklist item: ${error.message}`);
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error("Select a workspace before updating a checklist item.");
+  await nextApi.workOrders.updateChecklistItem(itemId, { workspace_id, ...payload });
 }
 
 // ============= Internal Helpers =============
