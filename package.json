@@ -12,6 +12,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.app.json --noEmit",
+    "test": "jest --runInBand",
+    "test:e2e": "playwright test --config=e2e/playwright.config.ts",
     "lint": "eslint ."
   },
   "playwright": {

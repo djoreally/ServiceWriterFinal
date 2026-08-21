@@ -10,8 +10,23 @@ export class ApiError extends Error {
   }
 }
 
+export function corsHeaders() {
+  const headers = new Headers();
+  const origin = process.env.NEXT_PUBLIC_CORS_ORIGIN;
+  if (origin) {
+    headers.set("Access-Control-Allow-Origin", origin);
+    headers.set("Access-Control-Allow-Credentials", "true");
+    headers.set("Access-Control-Allow-Headers", "authorization, content-type");
+    headers.set("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS");
+    headers.set("Vary", "Origin");
+  }
+  return headers;
+}
+
 export function json<T>(data: T, init?: ResponseInit) {
-  return NextResponse.json(data, init);
+  const headers = corsHeaders();
+  new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
+  return NextResponse.json(data, { ...init, headers });
 }
 
 export function errorResponse(error: unknown) {
@@ -20,7 +35,17 @@ export function errorResponse(error: unknown) {
   return json({ error: { code: "internal_error", message: "An unexpected error occurred." } }, { status: 500 });
 }
 
-export async function requireUser() {
+export async function requireUser(request?: Request) {
+  const authorization = request?.headers.get("authorization");
+  const bearerToken = authorization?.match(/^Bearer\\s+(.+)$/i)?.[1];
+
+  if (bearerToken) {
+    const supabase = await createSupabaseServerClient();
+    const { data, error } = await supabase.auth.getUser(bearerToken);
+    if (error || !data.user) throw new ApiError(401, "Authentication required", "unauthenticated");
+    return { supabase, user: data.user };
+  }
+
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase.auth.getUser();
   if (error || !data.user) throw new ApiError(401, "Authentication required", "unauthenticated");
