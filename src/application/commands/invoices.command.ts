@@ -7,6 +7,8 @@ import { generateInvoiceNumber } from "@/application/queries/invoices.query";
 
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
+import { nextApi } from "@/lib/nextApiClient";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 export interface InvoiceLineItemInput {
   vehicle_id: string | null;
   service_catalog_id: string | null;
@@ -112,203 +114,44 @@ export function computeInvoiceTotals(input: {
 }
 
 export async function createInvoice(input: CreateInvoiceInput): Promise<string> {
-  const {
-    data: { user },
-  } = await getCurrentAuthUser();
+  const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("Not authenticated");
-
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error("Select a workspace before creating an invoice.");
   const totals = computeInvoiceTotals(input);
-
   const { validateInvoice, assertValid } = await import("@/application/validation/fleet-validation");
-  assertValid(
-    validateInvoice({
-      invoice_number: input.invoice_number,
-      bill_to_type: input.bill_to_type,
-      customer_id: input.customer_id,
-      fleet_client_id: input.fleet_client_id,
-      due_date: input.due_date,
-      line_items: input.line_items,
-      computedTotal: totals.total,
-    }),
-    "Cannot create invoice",
-  );
-
-
-
-  const { data: invoice, error: invErr } = await supabase
-    .from("invoices")
-    .insert({
-      user_id: user.id,
-      invoice_number: input.invoice_number,
-      bill_to_type: input.bill_to_type,
-      customer_id: input.customer_id,
-      fleet_client_id: input.fleet_client_id,
-      contact_name: input.contact_name,
-      contact_email: input.contact_email,
-      contact_phone: input.contact_phone,
-      issue_date: input.issue_date,
-      due_date: input.due_date,
-      payment_terms: input.payment_terms,
-      notes: input.notes,
-      terms_text: input.terms_text,
-      status: "draft",
-      subtotal: totals.subtotal,
-      discount_type: input.discount_type,
-      discount_amount: totals.effective_discount,
-      tax_enabled: input.tax_enabled,
-      tax_rate: input.tax_enabled ? input.tax_rate : 0,
-      tax_amount: totals.tax_amount,
-      waste_oil_fee_enabled: input.waste_oil_fee_enabled,
-      waste_oil_fee: input.waste_oil_fee_enabled ? bankersRound(input.waste_oil_fee, 2) : 0,
-      shop_fee_enabled: input.shop_fee_enabled,
-      shop_fee: input.shop_fee_enabled ? bankersRound(input.shop_fee, 2) : 0,
-      surcharge_enabled: input.surcharge_enabled,
-      surcharge: input.surcharge_enabled ? bankersRound(input.surcharge, 2) : 0,
-      total: totals.total,
-    })
-    .select("id")
-    .single();
-
-  if (invErr || !invoice) {
-    console.error("[createInvoice] header insert failed", invErr);
-    const msg = invErr?.message || invErr?.details || invErr?.hint || "Failed to create invoice";
-    throw new Error(`Failed to create invoice: ${msg}`);
-  }
-
-
-  if (input.line_items.length > 0) {
-    const rows = input.line_items.map((li, idx) => ({
-      invoice_id: invoice.id,
-      user_id: user.id,
-      vehicle_id: li.vehicle_id,
-      service_catalog_id: li.service_catalog_id,
-      description: li.description,
-      quantity: bankersRound(Number(li.quantity) || 0, 2),
-      unit_price: bankersRound(Number(li.unit_price) || 0, 2),
-      line_total: bankersRound((Number(li.quantity) || 0) * (Number(li.unit_price) || 0), 2),
-      display_order: li.display_order ?? idx,
-      vin: li.vin ?? null,
-      vehicle_year: li.vehicle_year ?? null,
-      vehicle_make: li.vehicle_make ?? null,
-      vehicle_model: li.vehicle_model ?? null,
-      vehicle_trim: li.vehicle_trim ?? null,
-      vehicle_engine: li.vehicle_engine ?? null,
-      oil_type: li.oil_type ?? null,
-      oil_capacity: li.oil_capacity ?? null,
-      oil_filter: li.oil_filter ?? null,
-      vehicle_mileage: li.vehicle_mileage ?? null,
-      license_plate: li.license_plate ?? null,
-      odometer_measure: li.odometer_measure ?? null,
-    }));
-
-    const { error: liErr } = await supabase.from("invoice_line_items").insert(rows);
-    if (liErr) {
-      console.error("[createInvoice] line items insert failed", liErr);
-      // Roll back the header via soft-delete RPC
-      await supabase.rpc("soft_delete_invoice", {
-        _invoice_id: invoice.id,
-        _reason: "create_rollback_line_items_failed",
-      });
-      const msg = liErr.message || liErr.details || liErr.hint || "Failed to save invoice line items";
-      throw new Error(`Failed to create invoice: ${msg}`);
-    }
-
-  }
-
-  return invoice.id;
+  assertValid(validateInvoice({ invoice_number: input.invoice_number, bill_to_type: input.bill_to_type, customer_id: input.customer_id, fleet_client_id: input.fleet_client_id, due_date: input.due_date, line_items: input.line_items, computedTotal: totals.total }), "Cannot create invoice");
+  const result = await nextApi.invoices.create({ workspace_id, invoice_number: input.invoice_number, bill_to_type: input.bill_to_type, customer_id: input.customer_id, fleet_client_id: input.fleet_client_id, contact_name: input.contact_name, contact_email: input.contact_email, contact_phone: input.contact_phone, issue_date: input.issue_date, due_date: input.due_date, payment_terms: input.payment_terms, notes: input.notes, terms_text: input.terms_text, status: "draft", subtotal: totals.subtotal, discount_type: input.discount_type, discount_amount: totals.effective_discount, tax_enabled: input.tax_enabled, tax_rate: input.tax_enabled ? input.tax_rate : 0, tax_amount: totals.tax_amount, waste_oil_fee_enabled: input.waste_oil_fee_enabled, waste_oil_fee: input.waste_oil_fee_enabled ? bankersRound(input.waste_oil_fee, 2) : 0, shop_fee_enabled: input.shop_fee_enabled, shop_fee: input.shop_fee_enabled ? bankersRound(input.shop_fee, 2) : 0, surcharge_enabled: input.surcharge_enabled, surcharge: input.surcharge_enabled ? bankersRound(input.surcharge, 2) : 0, total: totals.total, line_items: input.line_items.map((li, idx) => ({ ...li, quantity: bankersRound(Number(li.quantity) || 0, 2), unit_price: bankersRound(Number(li.unit_price) || 0, 2), display_order: li.display_order ?? idx })) });
+  return (result.data as { id: string }).id;
 }
 
-/** Update an existing invoice header + replace its line items. */
 export async function updateInvoice(invoiceId: string, input: CreateInvoiceInput): Promise<void> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("Not authenticated");
-
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error("Select a workspace before updating an invoice.");
   const totals = computeInvoiceTotals(input);
-
-  const { error: updErr } = await supabase
-    .from("invoices")
-    .update({
-      invoice_number: input.invoice_number,
-      bill_to_type: input.bill_to_type,
-      customer_id: input.customer_id,
-      fleet_client_id: input.fleet_client_id,
-      contact_name: input.contact_name,
-      contact_email: input.contact_email,
-      contact_phone: input.contact_phone,
-      issue_date: input.issue_date,
-      due_date: input.due_date,
-      payment_terms: input.payment_terms,
-      notes: input.notes,
-      terms_text: input.terms_text,
-      subtotal: totals.subtotal,
-      discount_type: input.discount_type,
-      discount_amount: totals.effective_discount,
-      tax_enabled: input.tax_enabled,
-      tax_rate: input.tax_enabled ? input.tax_rate : 0,
-      tax_amount: totals.tax_amount,
-      waste_oil_fee_enabled: input.waste_oil_fee_enabled,
-      waste_oil_fee: input.waste_oil_fee_enabled ? bankersRound(input.waste_oil_fee, 2) : 0,
-      shop_fee_enabled: input.shop_fee_enabled,
-      shop_fee: input.shop_fee_enabled ? bankersRound(input.shop_fee, 2) : 0,
-      surcharge_enabled: input.surcharge_enabled,
-      surcharge: input.surcharge_enabled ? bankersRound(input.surcharge, 2) : 0,
-      total: totals.total,
-    })
-    .eq("id", invoiceId)
-    .eq("user_id", user.id);
-  if (updErr) throw updErr;
-
-  // Replace line items — soft-delete existing rows via RPC (hard delete is not permitted)
-  const { error: replaceErr } = await supabase.rpc(
-    "soft_delete_invoice_line_items_for_invoice",
-    { _invoice_id: invoiceId, _reason: "replaced_on_update" },
-  );
-  if (replaceErr) throw replaceErr;
-
-  if (input.line_items.length > 0) {
-    const rows = input.line_items.map((li, idx) => ({
-      invoice_id: invoiceId,
-      user_id: user.id,
-      vehicle_id: li.vehicle_id,
-      service_catalog_id: li.service_catalog_id,
-      description: li.description,
-      quantity: bankersRound(Number(li.quantity) || 0, 2),
-      unit_price: bankersRound(Number(li.unit_price) || 0, 2),
-      line_total: bankersRound((Number(li.quantity) || 0) * (Number(li.unit_price) || 0), 2),
-      display_order: li.display_order ?? idx,
-      vin: li.vin ?? null,
-      vehicle_year: li.vehicle_year ?? null,
-      vehicle_make: li.vehicle_make ?? null,
-      vehicle_model: li.vehicle_model ?? null,
-      vehicle_trim: li.vehicle_trim ?? null,
-      vehicle_engine: li.vehicle_engine ?? null,
-      oil_type: li.oil_type ?? null,
-      oil_capacity: li.oil_capacity ?? null,
-      oil_filter: li.oil_filter ?? null,
-    }));
-    const { error: liErr } = await supabase.from("invoice_line_items").insert(rows);
-    if (liErr) throw liErr;
-  }
+  const { validateInvoice, assertValid } = await import("@/application/validation/fleet-validation");
+  assertValid(validateInvoice({ invoice_number: input.invoice_number, bill_to_type: input.bill_to_type, customer_id: input.customer_id, fleet_client_id: input.fleet_client_id, due_date: input.due_date, line_items: input.line_items, computedTotal: totals.total }), "Cannot update invoice");
+  await nextApi.invoices.update(invoiceId, { workspace_id, invoice_number: input.invoice_number, bill_to_type: input.bill_to_type, customer_id: input.customer_id, fleet_client_id: input.fleet_client_id, contact_name: input.contact_name, contact_email: input.contact_email, contact_phone: input.contact_phone, issue_date: input.issue_date, due_date: input.due_date, payment_terms: input.payment_terms, notes: input.notes, terms_text: input.terms_text, subtotal: totals.subtotal, discount_type: input.discount_type, discount_amount: totals.effective_discount, tax_enabled: input.tax_enabled, tax_rate: input.tax_enabled ? input.tax_rate : 0, tax_amount: totals.tax_amount, waste_oil_fee_enabled: input.waste_oil_fee_enabled, waste_oil_fee: input.waste_oil_fee_enabled ? bankersRound(input.waste_oil_fee, 2) : 0, shop_fee_enabled: input.shop_fee_enabled, shop_fee: input.shop_fee_enabled ? bankersRound(input.shop_fee, 2) : 0, surcharge_enabled: input.surcharge_enabled, surcharge: input.surcharge_enabled ? bankersRound(input.surcharge, 2) : 0, total: totals.total, line_items: input.line_items.map((li, idx) => ({ ...li, quantity: bankersRound(Number(li.quantity) || 0, 2), unit_price: bankersRound(Number(li.unit_price) || 0, 2), display_order: li.display_order ?? idx })) });
 }
 
 export async function deleteInvoice(invoiceId: string, reason?: string): Promise<void> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("Not authenticated");
-  // Soft-delete: RPC cascades to invoice_line_items
-  const { error } = await supabase.rpc("soft_delete_invoice", {
-    _invoice_id: invoiceId,
-    _reason: reason ?? null,
-  });
-  if (error) throw error;
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error("Select a workspace before deleting an invoice.");
+  await nextApi.invoices.remove(workspace_id, invoiceId);
 }
 
 export async function markInvoiceStatus(invoiceId: string, status: "draft" | "sent" | "partial" | "paid" | "void"): Promise<void> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("Not authenticated");
-  const patch: Record<string, unknown> = { status };
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error("Select a workspace before updating invoice status.");
+  const patch: Record<string, unknown> = { workspace_id, status };
   if (status === "sent") patch.sent_at = new Date().toISOString();
-  const { error } = await supabase.from("invoices").update(patch as never).eq("id", invoiceId).eq("user_id", user.id);
-  if (error) throw error;
+  await nextApi.invoices.update(invoiceId, patch);
   if (status === "void") {
     const { error: eventError } = await (supabase as any).from("invoice_lifecycle_events").insert({
       invoice_id: invoiceId,
@@ -328,17 +171,11 @@ export async function sendManualInvoiceEmail(params: {
   subject?: string;
   message?: string;
 }): Promise<{ recipient: string }> {
-  const { data, error } = await supabase.functions.invoke("send-manual-invoice", {
-    body: {
-      invoice_id: params.invoiceId,
-      recipient_email: params.recipientEmail ?? null,
-      subject: params.subject ?? null,
-      message: params.message ?? null,
-    },
-  });
-  if (error) throw error;
-  if (data?.error) throw new Error(data.error);
-  return { recipient: data?.recipient ?? "" };
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error("Select a workspace before sending an invoice.");
+  const { data } = await nextApi.payments.action({ action: "send_manual_invoice", workspace_id, invoice_id: params.invoiceId, recipient_email: params.recipientEmail, subject: params.subject, message: params.message });
+  const result = data as { recipient?: string } | null;
+  return { recipient: result?.recipient ?? "" };
 }
 
 export async function recordFleetInvoicePayment(params: {

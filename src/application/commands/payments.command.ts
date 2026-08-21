@@ -1,4 +1,6 @@
-import { SUPABASE_PUBLISHABLE_KEY_RESOLVED, SUPABASE_URL_RESOLVED, supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/integrations/supabase/client";
+import { nextApi } from "@/lib/nextApiClient";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 import {
   parseEdgeFunctionResponse,
   stripeRefundResponseSchema,
@@ -43,27 +45,9 @@ export interface ManualPaymentRequest {
 export async function refundPayment(
   request: RefundPaymentRequest,
 ): Promise<void> {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  if (!session) {
-    throw new Error("Not authenticated");
-  }
-
-  const { data, error } = await supabase.functions.invoke("stripe-refund", {
-    body: {
-      payment_id: request.paymentId,
-      amount: request.amountCents,
-      reason: request.reason,
-    },
-    headers: { Authorization: `Bearer ${session.access_token}` },
-  });
-
-  if (error) {
-    console.error("[refundPayment] Edge function error", error);
-    throw new Error("Failed to process refund");
-  }
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error("Select a workspace before processing a refund.");
+  const { data } = await nextApi.payments.action({ action: "refund", workspace_id, payment_id: request.paymentId, amount: request.amountCents, reason: request.reason });
 
   // ⚡ Validated parse — replaces unsafe `(data as any)` cast
   parseEdgeFunctionResponse(stripeRefundResponseSchema, data);
@@ -73,23 +57,9 @@ export async function refundPayment(
  * Send or resend an invoice email for a payment.
  */
 export async function sendInvoiceForPayment(paymentId: string): Promise<void> {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  if (!session) {
-    throw new Error("Not authenticated");
-  }
-
-  const { data, error } = await supabase.functions.invoke("send-invoice", {
-    body: { payment_id: paymentId },
-    headers: { Authorization: `Bearer ${session.access_token}` },
-  });
-
-  if (error) {
-    console.error("[sendInvoiceForPayment] Edge function error", error);
-    throw new Error("Failed to send invoice");
-  }
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error("Select a workspace before sending an invoice.");
+  const { data } = await nextApi.payments.action({ action: "send_invoice", workspace_id, payment_id: paymentId });
 
   parseEdgeFunctionResponse(sendInvoiceResponseSchema, data);
 }
@@ -100,32 +70,9 @@ export async function sendInvoiceForPayment(paymentId: string): Promise<void> {
 export async function sendPaymentLink(
   request: PaymentLinkRequest,
 ): Promise<PaymentLinkResult> {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  if (!session) {
-    throw new Error("Not authenticated");
-  }
-
-  const { data, error } = await supabase.functions.invoke(
-    "create-invoice-payment-link",
-    {
-      body: {
-        payment_id: request.paymentId,
-        amount: request.amountCents,
-        customer_email: request.customerEmail,
-        customer_name: request.customerName,
-        description: request.description,
-      },
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    },
-  );
-
-  if (error) {
-    console.error("[sendPaymentLink] Edge function error", error);
-    throw new Error("Failed to send payment link");
-  }
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error("Select a workspace before creating a payment link.");
+  const { data } = await nextApi.payments.action({ action: "payment_link", workspace_id, payment_id: request.paymentId, amount: request.amountCents, customer_email: request.customerEmail, customer_name: request.customerName, description: request.description });
 
   const parsed = parseEdgeFunctionResponse(paymentLinkResponseSchema, data);
 
@@ -145,44 +92,10 @@ export async function sendPaymentLink(
 export async function recordManualPayment(
   request: ManualPaymentRequest,
 ): Promise<void> {
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  if (!session) {
-    throw new Error("Not authenticated");
-  }
-
-  const url = `${SUPABASE_URL_RESOLVED}/functions/v1/record-manual-payment`;
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${session.access_token}`,
-      apikey: SUPABASE_PUBLISHABLE_KEY_RESOLVED,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      payment_id: request.paymentId,
-      amount: request.amountCents,
-      payment_method: request.paymentMethod,
-      notes: request.notes,
-      waive_fees: request.waiveFees,
-      waive_tax: request.waiveTax,
-      waive_remaining: request.waiveRemaining,
-    }),
-  });
-
-  const json = await res.json().catch(() => ({} as Record<string, unknown>));
-
-  if (!res.ok) {
-    const message =
-      (typeof json.error === "string" && json.error) ||
-      `Failed to record payment (HTTP ${res.status})`;
-    console.error("[recordManualPayment] Edge function error", { status: res.status, body: json });
-    throw new Error(message);
-  }
-
-  parseEdgeFunctionResponse(manualPaymentResponseSchema, json);
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error("Select a workspace before recording a payment.");
+  const { data } = await nextApi.payments.action({ action: "manual_payment", workspace_id, payment_id: request.paymentId, amount: request.amountCents, payment_method: request.paymentMethod, notes: request.notes, waive_fees: request.waiveFees, waive_tax: request.waiveTax, waive_remaining: request.waiveRemaining });
+  parseEdgeFunctionResponse(manualPaymentResponseSchema, data);
 }
 
 /**

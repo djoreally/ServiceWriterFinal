@@ -76,6 +76,21 @@ export const nextApi = {
     cancel: (workspaceId: string, id: string) => request<{ data: unknown }>(`/v1/appointments/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "DELETE" }),
     complete: (id: string, workspaceId: string) => request<{ data: unknown }>(`/v1/appointments/${encodeURIComponent(id)}/complete`, { method: "POST", body: JSON.stringify({ workspace_id: workspaceId }) }),
   },
+  invoices: {
+    list: (workspaceId: string) => request<{ data: unknown[] }>(`/v1/invoices?workspace_id=${encodeURIComponent(workspaceId)}`),
+    get: (workspaceId: string, id: string) => request<{ data: unknown }>(`/v1/invoices/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`),
+    create: (payload: Record<string, unknown>) => request<{ data: unknown }>("/v1/invoices", { method: "POST", body: JSON.stringify(payload) }),
+    update: (id: string, payload: Record<string, unknown>) => request<{ data: unknown }>(`/v1/invoices/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
+    remove: (workspaceId: string, id: string) => request<{ data: unknown }>(`/v1/invoices/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "DELETE" }),
+  },
+  payments: {
+    list: (workspaceId: string) => request<{ data: unknown[] }>(`/v1/payments?workspace_id=${encodeURIComponent(workspaceId)}`),
+    get: (workspaceId: string, id: string) => request<{ data: unknown }>(`/v1/payments/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`),
+    create: (payload: Record<string, unknown>) => request<{ data: unknown }>("/v1/payments", { method: "POST", body: JSON.stringify(payload) }),
+    update: (id: string, payload: Record<string, unknown>) => request<{ data: unknown }>(`/v1/payments/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
+    remove: (workspaceId: string, id: string) => request<{ data: unknown }>(`/v1/payments/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "DELETE" }),
+    action: (payload: Record<string, unknown>) => request<{ data: unknown }>("/v1/payments/actions", { method: "POST", body: JSON.stringify(payload) }),
+  },
   workOrders: {
     list: (workspaceId: string) => request<{ data: unknown[] }>(`/v1/work-orders?workspace_id=${encodeURIComponent(workspaceId)}`),
     get: (workspaceId: string, id: string) => request<{ data: unknown }>(`/v1/work-orders/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`),

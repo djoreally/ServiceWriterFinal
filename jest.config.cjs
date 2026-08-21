@@ -8,6 +8,7 @@ module.exports = {
   moduleNameMapper: {
     "^@/config/features$": "<rootDir>/src/test/mocks/features.js",
     "^@/integrations/supabase/client$": "<rootDir>/src/test/mocks/supabaseClient.js",
+    "^@/lib/nextApiClient$": "<rootDir>/src/test/mocks/nextApiClient.js",
     "^@/(.*)$": "<rootDir>/src/$1",
     "^@packages/(.*)$": "<rootDir>/src/packages/$1",
   },
