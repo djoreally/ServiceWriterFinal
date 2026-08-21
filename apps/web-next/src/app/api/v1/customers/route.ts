@@ -8,6 +8,7 @@ const customerCreateSchema = z.object({
   company_name: z.string().trim().max(200).optional(),
   email: z.string().email().optional(),
   phone: z.string().trim().max(40).optional(),
+  address: z.string().trim().max(500).optional(),
   notes: z.string().max(5000).optional(),
 });
 

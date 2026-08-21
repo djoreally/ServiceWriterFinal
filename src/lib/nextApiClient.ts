@@ -59,6 +59,8 @@ export const nextApi = {
   customers: {
     list: (workspaceId: string, search?: string) => request<{ data: unknown[] }>(`/v1/customers?workspace_id=${encodeURIComponent(workspaceId)}${search ? `&search=${encodeURIComponent(search)}` : ""}`),
     create: (payload: Record<string, unknown>) => request<{ data: unknown }>("/v1/customers", { method: "POST", body: JSON.stringify(payload) }),
+    update: (id: string, payload: Record<string, unknown>) => request<{ data: unknown }>(`/v1/customers/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
+    remove: (workspaceId: string, id: string) => request<{ data: unknown }>(`/v1/customers/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "DELETE" }),
   },
   vehicles: {
     list: (workspaceId: string) => request<{ data: unknown[] }>(`/v1/vehicles?workspace_id=${encodeURIComponent(workspaceId)}`),

@@ -6,8 +6,10 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
-import { softDelete, hardDelete } from "@/lib/soft-delete";
-import { requireWorkspaceOwnerUserId } from "@/application/tenant-workspace";
+import { z } from "zod";
+import { hardDelete } from "@/lib/soft-delete";
+import { nextApi } from "@/lib/nextApiClient";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
 export interface CustomerWritePayload {
   name: string;
@@ -16,6 +18,27 @@ export interface CustomerWritePayload {
   address: string | null;
   notes: string | null;
 }
+
+function requireSelectedWorkspaceId(): string {
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) throw new Error("Select a workspace before managing customers.");
+  return workspaceId;
+}
+
+function splitCustomerName(name: string): { first_name: string; last_name: string } {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const first_name = parts.shift() || "Customer";
+  const last_name = parts.join(" ") || "Record";
+  return { first_name, last_name };
+}
+
+const customerResponseSchema = z.object({
+  id: z.string().uuid(),
+  first_name: z.string(),
+  last_name: z.string(),
+  email: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+});
 
 export async function createCustomer(payload: CustomerWritePayload): Promise<void> {
   await createCustomerAndReturn(payload);
@@ -26,45 +49,39 @@ export async function createCustomer(payload: CustomerWritePayload): Promise<voi
 export async function createCustomerAndReturn(
   payload: CustomerWritePayload,
 ): Promise<{ id: string; name: string; email: string | null; phone: string | null }> {
-  const ownerUserId = await requireWorkspaceOwnerUserId();
-
-  const { data, error } = await supabase
-    .from("customers")
-    .insert([{ ...payload, user_id: ownerUserId }])
-    .select("id, name, email, phone")
-    .single();
-
-  if (error) throw new Error(error.message);
-  return data as { id: string; name: string; email: string | null; phone: string | null };
+  const workspace_id = requireSelectedWorkspaceId();
+  const response = await nextApi.customers.create({
+    workspace_id,
+    ...splitCustomerName(payload.name),
+    email: payload.email || undefined,
+    phone: payload.phone || undefined,
+    address: payload.address || undefined,
+    notes: payload.notes || undefined,
+  });
+  const customer = customerResponseSchema.parse(response.data);
+  return {
+    id: customer.id,
+    name: [customer.first_name, customer.last_name].join(" "),
+    email: customer.email ?? null,
+    phone: customer.phone ?? null,
+  };
 }
 
 export async function updateCustomer(id: string, payload: CustomerWritePayload): Promise<void> {
-  const { error } = await supabase
-    .from("customers")
-    .update(payload)
-    .eq("id", id);
-
-  if (error) throw new Error(error.message);
+  const workspace_id = requireSelectedWorkspaceId();
+  await nextApi.customers.update(id, {
+    workspace_id,
+    ...splitCustomerName(payload.name),
+    email: payload.email,
+    phone: payload.phone,
+    address: payload.address,
+    notes: payload.notes,
+  });
 }
 
 export async function deleteCustomer(id: string): Promise<void> {
-  const { error } = await softDelete(supabase, "customers", id);
-  if (!error) {
-    return;
-  }
-
-  // Backward compatibility: some deployments do not yet have `deleted_at` on customers.
-  // Fall back to hard delete so customer removal still works.
-  const isDeletedAtSchemaIssue =
-    error.message.includes("deleted_at") ||
-    error.message.toLowerCase().includes("schema cache");
-
-  if (!isDeletedAtSchemaIssue) {
-    throw error;
-  }
-
-  const hardDeleteResult = await hardDelete(supabase, "customers", id);
-  if (hardDeleteResult.error) throw hardDeleteResult.error;
+  const workspace_id = requireSelectedWorkspaceId();
+  await nextApi.customers.remove(workspace_id, id);
 }
 
 /**
