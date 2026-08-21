@@ -23,7 +23,11 @@ const errorMap: Record<string, { status: number; code: string }> = {
 };
 
 function normalizeConversionError(error: unknown): never {
-  const message = error instanceof Error ? error.message : "quote_conversion_failed";
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === "object" && error !== null && "message" in error && typeof error.message === "string"
+      ? error.message
+      : "quote_conversion_failed";
   const normalized = errorMap[message];
   if (normalized) throw new ApiError(normalized.status, message.replaceAll("_", " "), normalized.code);
   throw error;

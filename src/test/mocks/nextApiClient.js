@@ -31,6 +31,7 @@ module.exports = {
       advanceChecklist: jest.fn(async () => ({ data: null })),
       updateChecklistItem: jest.fn(async () => ({ data: null })),
     },
+    quotes: { convert: jest.fn(async (quoteId, payload) => ({ data: { conversion_id: `conversion-${quoteId}`, quote_id: quoteId, service_record_id: `service-${quoteId}`, status: "converted", ...payload } })) },
     invoices: { list: jest.fn(async () => ({ data: [] })), create: jest.fn(), update: jest.fn(), remove: jest.fn() },
     payments: { list: jest.fn(async () => ({ data: [] })), create: jest.fn(), update: jest.fn(), remove: jest.fn(), action: jest.fn() },
     customers: { list: jest.fn(async () => ({ data: getFakeBackend().tables.customers || [] })), create: jest.fn(), update: jest.fn(), remove: jest.fn() },
