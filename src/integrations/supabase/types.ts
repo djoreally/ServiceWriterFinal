@@ -14,6 +14,91 @@ export type Database = {
   }
   public: {
     Tables: {
+      service_records: {
+        Row: {
+          appointment_id: string
+          complaint: string | null
+          completed_at: string | null
+          completed_by: string | null
+          created_at: string
+          customer_notes: string | null
+          diagnosis: string | null
+          id: string
+          internal_notes: string | null
+          metadata: Json
+          oil_quarts_used: number | null
+          started_at: string | null
+          status: string
+          technician_id: string | null
+          updated_at: string
+          work_order_id: string | null
+          work_performed: string | null
+          workspace_id: string
+        }
+        Insert: {
+          appointment_id: string
+          complaint?: string | null
+          completed_at?: string | null
+          completed_by?: string | null
+          created_at?: string
+          customer_notes?: string | null
+          diagnosis?: string | null
+          id?: string
+          internal_notes?: string | null
+          metadata?: Json
+          oil_quarts_used?: number | null
+          started_at?: string | null
+          status?: string
+          technician_id?: string | null
+          updated_at?: string
+          work_order_id?: string | null
+          work_performed?: string | null
+          workspace_id: string
+        }
+        Update: {
+          appointment_id?: string
+          complaint?: string | null
+          completed_at?: string | null
+          completed_by?: string | null
+          created_at?: string
+          customer_notes?: string | null
+          diagnosis?: string | null
+          id?: string
+          internal_notes?: string | null
+          metadata?: Json
+          oil_quarts_used?: number | null
+          started_at?: string | null
+          status?: string
+          technician_id?: string | null
+          updated_at?: string
+          work_order_id?: string | null
+          work_performed?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_records_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_records_work_order_id_fkey"
+            columns: ["work_order_id"]
+            isOneToOne: false
+            referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_records_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       abandoned_bookings: {
         Row: {
           attempt_count: number
@@ -2930,7 +3015,7 @@ export type Database = {
       }
       dispatch_events: {
         Row: {
-          appointment_id: string
+          appointment_id: string | null
           created_at: string
           event_type: string
           id: string
@@ -2940,9 +3025,11 @@ export type Database = {
           performed_by: string | null
           previous_status: string | null
           technician_id: string | null
+          work_order_id: string | null
+          workspace_id: string
         }
         Insert: {
-          appointment_id: string
+          appointment_id?: string | null
           created_at?: string
           event_type: string
           id?: string
@@ -2952,9 +3039,11 @@ export type Database = {
           performed_by?: string | null
           previous_status?: string | null
           technician_id?: string | null
+          work_order_id?: string | null
+          workspace_id: string
         }
         Update: {
-          appointment_id?: string
+          appointment_id?: string | null
           created_at?: string
           event_type?: string
           id?: string
@@ -2964,6 +3053,8 @@ export type Database = {
           performed_by?: string | null
           previous_status?: string | null
           technician_id?: string | null
+          work_order_id?: string | null
+          workspace_id?: string
         }
         Relationships: [
           {
@@ -2974,10 +3065,17 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "dispatch_events_technician_id_fkey"
-            columns: ["technician_id"]
+            foreignKeyName: "dispatch_events_work_order_id_fkey"
+            columns: ["work_order_id"]
             isOneToOne: false
-            referencedRelation: "technicians"
+            referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dispatch_events_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]

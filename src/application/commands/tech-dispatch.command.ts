@@ -161,15 +161,24 @@ export async function acceptJobAssignment(appointment_id: string): Promise<any> 
     })
     .eq('id', appointment_id);
 
-  // Log dispatch event
-  const { data: tech } = await supabase
-    .from('technicians')
-    .select('id')
-    .eq('auth_user_id', user.id)
-    .single();
+  // Log dispatch event with explicit workspace ownership.
+  const [{ data: tech }, { data: appointmentData }] = await Promise.all([
+    supabase
+      .from('technicians')
+      .select('id')
+      .eq('auth_user_id', user.id)
+      .single(),
+    supabase
+      .from('appointments')
+      .select('*')
+      .eq('id', appointment_id)
+      .single(),
+  ]);
+  const appointment = appointmentData as { workspace_id?: string } | null;
 
-  if (tech) {
+  if (tech && appointment?.workspace_id) {
     await supabase.from('dispatch_events').insert({
+      workspace_id: appointment.workspace_id,
       appointment_id,
       technician_id: tech.id,
       event_type: 'acknowledged',
