@@ -3,14 +3,13 @@
  * Extracted from quotes.query.ts to enforce command/query separation.
  */
 import { supabase } from "@/integrations/supabase/client";
+import { nextApi } from "@/lib/nextApiClient";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 import type { Database } from "@/integrations/supabase/types";
 
 type QuoteInsert = Database["public"]["Tables"]["quotes"]["Insert"];
 type QuoteUpdate = Database["public"]["Tables"]["quotes"]["Update"];
 type QuoteItemInsert = Database["public"]["Tables"]["quote_items"]["Insert"];
-type ServiceInsert = Database["public"]["Tables"]["services"]["Insert"];
-type LaborItemInsert = Database["public"]["Tables"]["labor_items"]["Insert"];
-type ServiceItemInsert = Database["public"]["Tables"]["service_items"]["Insert"];
 
 /** Create a new quote */
 export async function createQuote(data: QuoteInsert) {
@@ -42,19 +41,37 @@ export async function updateQuoteStatus(id: string, status: string) {
   return supabase.from("quotes").update({ status }).eq("id", id);
 }
 
-/** Create a service record from a quote (conversion) */
-export async function createServiceFromQuote(data: ServiceInsert) {
-  return supabase.from("services").insert([data]).select("id").single();
+/** Convert a quote into one canonical service record and its line items. */
+export interface ConvertQuoteInput {
+  quoteId: string;
+  idempotencyKey?: string;
+  serviceDate?: string;
+  technicianId?: string | null;
+  appointmentId?: string | null;
+  workOrderId?: string | null;
+  internalNotes?: string | null;
+  expectedQuoteUpdatedAt?: string | null;
 }
 
-/** Insert labor items for a converted quote */
-export async function insertLaborItems(items: LaborItemInsert[]) {
-  return supabase.from("labor_items").insert(items);
-}
-
-/** Insert service items for a converted quote */
-export async function insertServiceItems(items: ServiceItemInsert[]) {
-  return supabase.from("service_items").insert(items);
+export async function convertQuoteToServiceRecord(input: ConvertQuoteInput): Promise<{ data: unknown | null; error: Error | null }> {
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) return { data: null, error: new Error("Select a workspace before converting a quote.") };
+  const idempotency_key = input.idempotencyKey ?? crypto.randomUUID();
+  try {
+    const response = await nextApi.quotes.convert(input.quoteId, {
+      workspace_id,
+      idempotency_key,
+      service_date: input.serviceDate,
+      technician_id: input.technicianId ?? null,
+      appointment_id: input.appointmentId ?? null,
+      work_order_id: input.workOrderId ?? null,
+      internal_notes: input.internalNotes ?? null,
+      expected_quote_updated_at: input.expectedQuoteUpdatedAt ?? null,
+    });
+    return { data: response.data, error: null };
+  } catch (error) {
+    return { data: null, error: error instanceof Error ? error : new Error("Quote conversion failed.") };
+  }
 }
 
 /** Create a new customer inline from quotes page */

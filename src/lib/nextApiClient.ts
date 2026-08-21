@@ -68,6 +68,9 @@ export const nextApi = {
     update: (id: string, payload: Record<string, unknown>) => request<{ data: unknown }>(`/v1/vehicles/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
     remove: (workspaceId: string, id: string) => request<{ data: unknown }>(`/v1/vehicles/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "DELETE" }),
   },
+  quotes: {
+    convert: (quoteId: string, payload: Record<string, unknown>) => request<{ data: unknown }>(`/v1/quotes/${encodeURIComponent(quoteId)}/convert`, { method: "POST", body: JSON.stringify(payload) }),
+  },
   appointments: {
     list: (workspaceId: string) => request<{ data: unknown[] }>(`/v1/appointments?workspace_id=${encodeURIComponent(workspaceId)}`),
     get: (workspaceId: string, id: string) => request<{ data: unknown }>(`/v1/appointments/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`),

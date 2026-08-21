@@ -14,9 +14,7 @@ import {
   deleteQuoteItems,
   insertQuoteItems,
   updateQuoteStatus,
-  createServiceFromQuote,
-  insertLaborItems,
-  insertServiceItems,
+  convertQuoteToServiceRecord,
   createQuoteCustomer,
   createQuoteVehicle,
 } from "@/application/commands/quotes.command";
@@ -575,72 +573,18 @@ const Quotes = () => {
   };
 
   const handleConvertToService = async (quote: Quote) => {
-    const user = await getCurrentUser();
-    if (!user) return;
-    const ownerUserId = await requireWorkspaceOwnerUserId();
-
-    const { data: newService, error: serviceError } = await createServiceFromQuote({
-      user_id: ownerUserId,
-      customer_id: quote.customer_id,
-      vehicle_id: quote.vehicle_id,
-      service_date: format(new Date(), "yyyy-MM-dd"),
-      service_type: "Service from Quote",
-      description: quote.description,
-      labor_hours: quote.labor_hours,
-      labor_cost: quote.labor_cost,
-      parts_cost: quote.parts_cost,
-      total_cost: quote.total_cost,
-      status: "completed",
-      notes: `Converted from quote ${quote.quote_number}`,
+    const result = await convertQuoteToServiceRecord({
+      quoteId: quote.id,
+      idempotencyKey: crypto.randomUUID(),
+      serviceDate: format(new Date(), "yyyy-MM-dd"),
+      internalNotes: `Converted from quote ${quote.id}`,
     });
 
-    if (serviceError || !newService) {
-      toast.error("Failed to convert quote to service");
+    if (result.error || !result.data) {
+      toast.error(result.error?.message || "Failed to convert quote to service");
       return;
     }
 
-    const { data: quoteItemsData, error: quoteItemsError } = await fetchQuoteItems(quote.id);
-
-    const [laborInsertRes, itemsInsertRes] = await Promise.all([
-      (quote.labor_cost && quote.labor_cost > 0)
-        ? insertLaborItems([
-            {
-              service_id: newService.id,
-              description: quote.description?.split("\n")[0] || "Labor",
-              hours: quote.labor_hours && quote.labor_hours > 0 ? quote.labor_hours : 1,
-              rate:
-                quote.labor_hours && quote.labor_hours > 0
-                  ? quote.labor_cost / quote.labor_hours
-                  : quote.labor_cost,
-              total_price: quote.labor_cost,
-            },
-          ])
-        : Promise.resolve({ error: null }),
-      quoteItemsData && quoteItemsData.length > 0
-        ? insertServiceItems(
-            quoteItemsData.map((item: { description: string; quantity: number; unit_price: number; total_price: number; inventory_item_id: string | null }) => ({
-              service_id: newService.id,
-              description: item.description,
-              quantity: item.quantity,
-              unit_price: item.unit_price,
-              total_price: item.total_price,
-              inventory_item_id: item.inventory_item_id,
-            }))
-          )
-        : Promise.resolve({ error: null }),
-    ]);
-
-    if (quoteItemsError) {
-      console.warn("Failed to load quote items for conversion:", quoteItemsError);
-    }
-    if (laborInsertRes?.error) {
-      console.warn("Failed to create labor line-item from quote:", laborInsertRes.error);
-    }
-    if (itemsInsertRes?.error) {
-      console.warn("Failed to create service items from quote:", itemsInsertRes.error);
-    }
-
-    await updateQuoteStatus(quote.id, "accepted");
     toast.success("Quote converted to service successfully");
     fetchData();
   };
