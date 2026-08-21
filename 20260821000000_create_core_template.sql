@@ -66,6 +66,7 @@ create table public.workspace_members (
   is_active boolean not null default true,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
+  unique (workspace_id, id),
   primary key (workspace_id, user_id)
 );
 
@@ -116,6 +117,7 @@ create table public.customers (
   created_by uuid references public.profiles(id),
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
+  unique (workspace_id, id),
   unique (workspace_id, id)
 );
 
@@ -141,6 +143,7 @@ create table public.vehicles (
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
   unique (workspace_id, id),
+  unique (workspace_id, id),
   foreign key (workspace_id, customer_id) references public.customers(workspace_id, id) on delete set null
 );
 create unique index vehicles_workspace_vin_idx on public.vehicles(workspace_id, vin) where vin is not null;
@@ -156,6 +159,7 @@ create table public.service_catalog (
   is_active boolean not null default true,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
+  unique (workspace_id, id),
   unique (workspace_id, id)
 );
 
@@ -170,6 +174,7 @@ create table public.filter_catalog (
   is_active boolean not null default true,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
+  unique (workspace_id, id),
   unique (workspace_id, brand, filter_type, part_number)
 );
 
@@ -189,6 +194,7 @@ create table public.appointments (
   created_by uuid references public.profiles(id),
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
+  unique (workspace_id, id),
   unique (workspace_id, id),
   check (ends_at > starts_at),
   foreign key (workspace_id, customer_id) references public.customers(workspace_id, id) on delete restrict,
@@ -215,6 +221,7 @@ create table public.work_orders (
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
   unique (workspace_id, id),
+  unique (workspace_id, id),
   unique (workspace_id, number),
   foreign key (workspace_id, appointment_id) references public.appointments(workspace_id, id) on delete set null,
   foreign key (workspace_id, customer_id) references public.customers(workspace_id, id) on delete restrict,
@@ -235,6 +242,7 @@ create table public.work_order_items (
   sort_order integer not null default 0,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
+  unique (workspace_id, id),
   foreign key (workspace_id, work_order_id) references public.work_orders(workspace_id, id) on delete cascade,
   foreign key (workspace_id, service_catalog_id) references public.service_catalog(workspace_id, id) on delete set null
 );
@@ -278,6 +286,7 @@ create table public.quotes (
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
   unique (workspace_id, id),
+  unique (workspace_id, id),
   foreign key (workspace_id, customer_id) references public.customers(workspace_id, id) on delete restrict,
   foreign key (workspace_id, vehicle_id) references public.vehicles(workspace_id, id) on delete set null,
   foreign key (workspace_id, work_order_id) references public.work_orders(workspace_id, id) on delete set null
@@ -300,6 +309,7 @@ create table public.invoices (
   created_by uuid references public.profiles(id),
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
+  unique (workspace_id, id),
   unique (workspace_id, id),
   unique (workspace_id, invoice_number),
   foreign key (workspace_id, customer_id) references public.customers(workspace_id, id) on delete restrict,
@@ -334,6 +344,7 @@ create table public.payments (
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
   unique (workspace_id, id),
+  unique (workspace_id, id),
   unique (provider, provider_payment_id),
   foreign key (workspace_id, invoice_id) references public.invoices(workspace_id, id) on delete set null,
   foreign key (workspace_id, customer_id) references public.customers(workspace_id, id) on delete set null
@@ -351,6 +362,7 @@ create table public.fleet_clients (
   is_active boolean not null default true,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
+  unique (workspace_id, id),
   unique (workspace_id, id)
 );
 
@@ -378,6 +390,7 @@ create table public.fleet_contracts (
   terms jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
+  unique (workspace_id, id),
   foreign key (workspace_id, fleet_client_id) references public.fleet_clients(workspace_id, id) on delete cascade
 );
 
@@ -398,6 +411,7 @@ create table public.fleet_service_requests (
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
   unique (workspace_id, id),
+  unique (workspace_id, id),
   foreign key (workspace_id, fleet_client_id) references public.fleet_clients(workspace_id, id) on delete restrict,
   foreign key (workspace_id, fleet_contract_id) references public.fleet_contracts(workspace_id, id) on delete set null,
   foreign key (workspace_id, vehicle_id) references public.vehicles(workspace_id, id) on delete set null,
@@ -415,6 +429,7 @@ create table public.fleet_dispatch_assignments (
   status text not null default 'assigned' check (status in ('assigned', 'en_route', 'on_site', 'in_progress', 'completed', 'cancelled')),
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
+  unique (workspace_id, id),
   foreign key (workspace_id, service_request_id) references public.fleet_service_requests(workspace_id, id) on delete cascade,
   foreign key (workspace_id, work_order_id) references public.work_orders(workspace_id, id) on delete set null
 );
@@ -432,6 +447,7 @@ create table public.provider_connections (
   created_by uuid references public.profiles(id),
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
+  unique (workspace_id, id),
   unique (workspace_id, provider)
 );
 
