@@ -5,6 +5,9 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
+import { nextApi } from "@/lib/nextApiClient";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
+import { z } from "zod";
 
 // ============= Types =============
 
@@ -31,35 +34,26 @@ export type WorkOrderStatus = "created" | "in_progress" | "completed" | "cancell
 
 /** Create a work order, optionally from an appointment. Copies playbook steps as checklist items. */
 export async function createWorkOrder(
-  userId: string,
+  _userId: string,
   payload: CreateWorkOrderPayload
 ): Promise<CreateWorkOrderResult> {
-  // 1. Insert the work order
-  const { data: wo, error } = await supabase
-    .from("work_orders")
-    .insert({
-      user_id: userId,
-      appointment_id: payload.appointmentId ?? null,
-      customer_id: payload.customerId ?? null,
-      vehicle_id: payload.vehicleId ?? null,
-      technician_id: payload.technicianId ?? null,
-      van_id: payload.vanId ?? null,
-      location_address: payload.locationAddress ?? null,
-      location_lat: payload.locationLat ?? null,
-      location_lng: payload.locationLng ?? null,
-      customer_notes: payload.customerNotes ?? null,
-    })
-    .select("id, order_number")
-    .single();
-
-  if (error) throw new Error(`Failed to create work order: ${error.message}`);
-
-  // 2. If linked to an appointment, hydrate checklist from matching playbooks
-  if (payload.appointmentId) {
-    await hydrateChecklistFromAppointment(wo.id, payload.appointmentId, userId);
-  }
-
-  return { workOrderId: wo.id, orderNumber: wo.order_number };
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error("Select a workspace before creating a repair order.");
+  if (!payload.customerId) throw new Error("A customer is required before creating a repair order.");
+  const response = await nextApi.workOrders.create({
+    workspace_id,
+    appointment_id: payload.appointmentId ?? null,
+    customer_id: payload.customerId,
+    vehicle_id: payload.vehicleId ?? null,
+    technician_id: payload.technicianId ?? null,
+    van_id: payload.vanId ?? null,
+    location_address: payload.locationAddress ?? null,
+    location_lat: payload.locationLat ?? null,
+    location_lng: payload.locationLng ?? null,
+    customer_notes: payload.customerNotes ?? null,
+  });
+  const workOrder = z.object({ id: z.string().uuid(), order_number: z.string().min(1) }).parse(response.data);
+  return { workOrderId: workOrder.id, orderNumber: workOrder.order_number };
 }
 
 /** Advance work order status with timestamp tracking. */
@@ -78,12 +72,9 @@ export async function advanceWorkOrderStatus(
     updates.completed_at = new Date().toISOString();
   }
 
-  const { error } = await supabase
-    .from("work_orders")
-    .update(updates as never)
-    .eq("id", workOrderId);
-
-  if (error) throw new Error(`Failed to update work order status: ${error.message}`);
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error("Select a workspace before updating a repair order.");
+  await nextApi.workOrders.update(workOrderId, { workspace_id, ...updates });
 }
 
 /** Complete a work order with optional signature URL and tech notes. */
@@ -112,18 +103,14 @@ export async function completeWorkOrder(
     }
   }
 
-  const { error } = await supabase
-    .from("work_orders")
-    .update({
-      status: "completed",
-      completed_at: new Date().toISOString(),
-      signature_url: validatedSignatureUrl,
-      tech_notes: options?.techNotes ?? null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", workOrderId);
-
-  if (error) throw new Error(`Failed to complete work order: ${error.message}`);
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error("Select a workspace before completing a repair order.");
+  await nextApi.workOrders.update(workOrderId, {
+    workspace_id,
+    status: "completed",
+    signature_url: validatedSignatureUrl,
+    tech_notes: options?.techNotes ?? null,
+  });
 }
 
 /**
@@ -136,7 +123,7 @@ export async function advanceChecklistStep(
   evidenceUrl?: string | null,
   notes?: string | null
 ): Promise<{ status: string; item_id: string; next_item_id: string | null; execution_phase: string }> {
-  const { data, error } = await supabase.rpc("advance_checklist_step" as any, {
+  const { data, error } = await supabase.rpc("advance_checklist_step" as never, {
     p_item_id: itemId,
     p_evidence_url: evidenceUrl ?? null,
     p_notes: notes ?? null,
@@ -149,25 +136,26 @@ export async function advanceChecklistStep(
     throw new Error(match ? match[1] : msg);
   }
 
-  return data as any;
+  return z.object({
+    status: z.string(),
+    item_id: z.string().uuid(),
+    next_item_id: z.string().uuid().nullable(),
+    execution_phase: z.string(),
+  }).parse(data);
 }
 
 /** Capture VIN on a work order (required before completion if requires_vin). */
 export async function captureWorkOrderVin(workOrderId: string, vin: string) {
-  const { error } = await supabase
-    .from("work_orders")
-    .update({ vin_captured: vin, updated_at: new Date().toISOString() })
-    .eq("id", workOrderId);
-  if (error) throw new Error(`Failed to capture VIN: ${error.message}`);
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error("Select a workspace before capturing VIN.");
+  await nextApi.workOrders.update(workOrderId, { workspace_id, vin_captured: vin });
 }
 
 /** Capture mileage on a work order (required before completion if requires_mileage). */
 export async function captureWorkOrderMileage(workOrderId: string, mileage: number) {
-  const { error } = await supabase
-    .from("work_orders")
-    .update({ mileage_captured: mileage, updated_at: new Date().toISOString() })
-    .eq("id", workOrderId);
-  if (error) throw new Error(`Failed to capture mileage: ${error.message}`);
+  const workspace_id = getSelectedWorkspaceId();
+  if (!workspace_id) throw new Error("Select a workspace before capturing mileage.");
+  await nextApi.workOrders.update(workOrderId, { workspace_id, mileage_captured: mileage });
 }
 
 /**

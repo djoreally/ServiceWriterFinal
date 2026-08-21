@@ -3,15 +3,20 @@ import { z } from "zod";
 
 const vehicleSchema = z.object({
   workspace_id: z.string().uuid(),
-  customer_id: z.string().uuid().optional(),
-  vin: z.string().trim().max(32).optional(),
-  year: z.number().int().min(1886).max(2200).optional(),
-  make: z.string().trim().max(80).optional(),
-  model: z.string().trim().max(120).optional(),
-  license_plate: z.string().trim().max(30).optional(),
-  mileage: z.number().int().min(0).optional(),
+  customer_id: z.string().uuid().nullable().optional(),
+  vin: z.string().trim().max(32).nullable().optional(),
+  year: z.number().int().min(1886).max(2200).nullable().optional(),
+  make: z.string().trim().max(80).nullable().optional(),
+  model: z.string().trim().max(120).nullable().optional(),
+  license_plate: z.string().trim().max(30).nullable().optional(),
+  plate_state: z.string().trim().max(2).nullable().optional(),
+  color: z.string().trim().max(50).nullable().optional(),
+  mileage: z.number().int().min(0).nullable().optional(),
   mileage_unit: z.enum(["mi", "km"]).default("mi"),
-  notes: z.string().max(5000).optional(),
+  odometer_measure: z.string().trim().max(20).nullable().optional(),
+  oil_type: z.string().trim().max(80).nullable().optional(),
+  oil_capacity: z.string().trim().max(40).nullable().optional(),
+  notes: z.string().max(5000).nullable().optional(),
 });
 
 export async function GET(request: Request) {

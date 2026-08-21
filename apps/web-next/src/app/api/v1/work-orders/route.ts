@@ -3,12 +3,18 @@ import { z } from "zod";
 
 const workOrderSchema = z.object({
   workspace_id: z.string().uuid(),
-  appointment_id: z.string().uuid().optional(),
+  appointment_id: z.string().uuid().nullable().optional(),
   customer_id: z.string().uuid(),
-  vehicle_id: z.string().uuid().optional(),
-  location_id: z.string().uuid().optional(),
+  vehicle_id: z.string().uuid().nullable().optional(),
+  location_id: z.string().uuid().nullable().optional(),
   priority: z.enum(["low", "normal", "high", "urgent"]).default("normal"),
   complaint: z.string().max(10000).optional(),
+  location_address: z.string().max(500).nullable().optional(),
+  location_lat: z.number().finite().nullable().optional(),
+  location_lng: z.number().finite().nullable().optional(),
+  technician_id: z.string().uuid().nullable().optional(),
+  van_id: z.string().uuid().nullable().optional(),
+  customer_notes: z.string().max(10000).nullable().optional(),
 });
 
 export async function GET(request: Request) {

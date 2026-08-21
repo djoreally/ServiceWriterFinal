@@ -6,7 +6,14 @@ const patchSchema = z.object({
   status: z.enum(["draft", "scheduled", "assigned", "in_progress", "waiting_for_parts", "awaiting_approval", "completed", "cancelled"]).optional(),
   priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
   technician_notes: z.string().max(10000).optional(),
+  tech_notes: z.string().max(10000).nullable().optional(),
   diagnosis: z.string().max(10000).optional(),
+  signature_url: z.string().max(200000).nullable().optional(),
+  vin_captured: z.string().trim().max(32).optional(),
+  mileage_captured: z.number().int().min(0).optional(),
+  started_at: z.string().datetime().optional(),
+  completed_at: z.string().datetime().optional(),
+  updated_at: z.string().datetime().optional(),
 });
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {

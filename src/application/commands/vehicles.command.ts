@@ -6,8 +6,9 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
-import { softDelete, hardDelete } from "@/lib/soft-delete";
-import { requireWorkspaceOwnerUserId } from "@/application/tenant-workspace";
+import { hardDelete } from "@/lib/soft-delete";
+import { nextApi } from "@/lib/nextApiClient";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
 export interface VehicleWritePayload {
   customer_id: string | null;
@@ -25,36 +26,30 @@ export interface VehicleWritePayload {
   oil_capacity: string | null;
 }
 
+function requireSelectedWorkspaceId(): string {
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) throw new Error("Select a workspace before managing vehicles.");
+  return workspaceId;
+}
+
+function vehiclePayload(workspace_id: string, payload: VehicleWritePayload): Record<string, unknown> {
+  return { workspace_id, ...payload };
+}
+
 export async function createVehicle(payload: VehicleWritePayload): Promise<void> {
-  const ownerUserId = await requireWorkspaceOwnerUserId();
-
-  const { error } = await supabase
-    .from("vehicles")
-    .insert([{ ...payload, user_id: ownerUserId }]);
-
-  if (error) throw new Error(error.message);
+  await nextApi.vehicles.create(vehiclePayload(requireSelectedWorkspaceId(), payload));
 }
 
 export async function updateVehicle(id: string, payload: VehicleWritePayload): Promise<void> {
-  const { error } = await supabase
-    .from("vehicles")
-    .update(payload)
-    .eq("id", id);
-
-  if (error) throw new Error(error.message);
+  await nextApi.vehicles.update(id, vehiclePayload(requireSelectedWorkspaceId(), payload));
 }
 
 export async function updateVehicleOilType(id: string, oilType: string): Promise<void> {
-  const { error } = await supabase
-    .from("vehicles")
-    .update({ oil_type: oilType })
-    .eq("id", id);
-  if (error) throw new Error(error.message);
+  await nextApi.vehicles.update(id, { workspace_id: requireSelectedWorkspaceId(), oil_type: oilType });
 }
 
 export async function deleteVehicle(id: string): Promise<void> {
-  const { error } = await softDelete(supabase, "vehicles", id);
-  if (error) throw error;
+  await nextApi.vehicles.remove(requireSelectedWorkspaceId(), id);
 }
 
 /**
