@@ -38,6 +38,13 @@ jobs:
     name: Frontend lint, typecheck, tests, and build
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # Public client configuration required by the Vite production bundle.
+      # Repository variables/secrets should point to staging for PR validation
+      # and production only in a separately protected release workflow.
+      VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL || 'https://example.supabase.co' }}
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY || 'ci-placeholder-publishable-key' }}
+      VITE_SUPABASE_PROJECT_ID: ${{ vars.VITE_SUPABASE_PROJECT_ID || 'servicewriterfinal-ci' }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
