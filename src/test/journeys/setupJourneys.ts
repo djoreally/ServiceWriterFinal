@@ -1,4 +1,6 @@
+import React from "react";
 import { configure } from "@testing-library/react";
+import { getFakeBackend, resetFakeBackend } from "./fakeBackend";
 import { setupConsoleErrorGuard, restoreConsoleErrorGuard } from "./matchers";
 import { resetCurrentAuthUserCache } from "@/lib/auth/current-user";
 
@@ -8,8 +10,6 @@ configure({ asyncUtilTimeout: 8000 });
 
 // Mock Supabase client module to route through Proxy pointing to active FakeBackend
 jest.mock("@/integrations/supabase/client", () => {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { getFakeBackend } = require("./fakeBackend");
   const handler = {
     get(_target: any, prop: string) {
       const backend = getFakeBackend();
@@ -49,8 +49,6 @@ jest.mock("@mapbox/search-js-react", () => ({
 }), { virtual: true });
 
 jest.mock("react-map-gl", () => {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const React = require("react");
   return {
     Map: ({ children }: { children: any }) => React.createElement("div", null, "Map Mock", children),
     Marker: ({ children }: { children: any }) => React.createElement("div", null, "Marker", children),
@@ -90,8 +88,6 @@ jest.mock("@stripe/stripe-js", () => ({
 
 beforeEach(() => {
   resetCurrentAuthUserCache();
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { resetFakeBackend } = require("./fakeBackend");
   resetFakeBackend();
   setupConsoleErrorGuard();
 

@@ -31,11 +31,18 @@ const MONEY_FIELD_RULES = [
 ];
 
 export default tseslint.config(
-  { ignores: ["dist", "supabase/functions/**"] },
+  {
+    ignores: [
+      "dist",
+      "apps/web-next/.next/**",
+      "apps/web-next/next-env.d.ts",
+      "supabase/functions/**",
+    ],
+  },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],
-    ignores: ["supabase/functions/**"],
+    ignores: ["apps/web-next/.next/**", "apps/web-next/next-env.d.ts", "supabase/functions/**"],
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.browser,

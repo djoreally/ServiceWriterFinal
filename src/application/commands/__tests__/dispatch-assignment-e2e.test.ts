@@ -9,6 +9,8 @@
  * unassignment returns it to the workspace queue as unassigned.
  */
 
+import { supabase } from "@/integrations/supabase/client";
+
 const mockOwner = "owner-user-id";
 const TECH_A = "tech-a";
 const TECH_B = "tech-b";
@@ -289,9 +291,9 @@ jest.mock("@/integrations/supabase/client", () => ({
 jest.mock("@/lib/nextApiClient", () => ({
   nextApi: {
     dispatch: {
-      assign: async (payload: any) => {
-        const { supabase } = require("@/integrations/supabase/client");
+      assign:       async (payload: any) => {
         const result = await supabase.rpc("assign_dispatch_job_v1", {
+
           p_job_source: payload.job_source,
           p_job_id: payload.job_id,
           p_technician_id: payload.technician_id,
