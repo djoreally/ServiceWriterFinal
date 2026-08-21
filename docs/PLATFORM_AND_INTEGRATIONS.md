@@ -148,3 +148,16 @@ The repository must contain an architecture decision record for tenancy, auth, p
 [3]: https://stripe.com/docs/webhooks — Stripe webhook verification and event handling guidance.
 
 [4]: https://developers.google.com/calendar/api/guides/overview — Google Calendar API overview.
+
+
+## Vendor-neutral messaging adapters
+
+Email and SMS are platform capabilities, not vendor capabilities. Domain services must call the internal `MessagingAdapter` contract and may not import Resend, Twilio, SendGrid, MessageBird, or another provider SDK directly. The contract validates channel, purpose, recipient, workspace, template key, variables, metadata, and idempotency key with Zod before a send is attempted.
+
+Each provider adapter implements the same operations: send a message, report capabilities, perform a health check, verify inbound webhooks, and normalize delivery events. The normalized event model supports queued, accepted, sent, delivered, failed, bounced, complained, undeliverable, and canceled states. Provider-specific response bodies remain inside the adapter boundary and are never exposed to domain workflows.
+
+The registry selects a provider by channel and configuration. A workspace may use one email provider and a different SMS provider, and an administrator can change either default without changing appointment, payment, marketing, or reminder code. Provider switching requires a new adapter implementation, credential validation, a health check, webhook registration, delivery-event replay tests, and a controlled configuration change; it does not require a schema rewrite or domain-code migration.
+
+All sends must be protected by an idempotency key, persisted with workspace and message-purpose context, checked against consent and suppression rules, and retried only for classified transient failures. Marketing messages require channel-specific consent and suppression checks. Transactional messages may use a separate lawful-basis policy, but must still honor hard bounces, invalid destinations, opt-outs, and workspace-level safety controls. Credentials belong only in server-side secret storage; the browser receives status and configuration metadata, never provider keys.
+
+The repository includes an explicit disconnected adapter for local development. It renders the UI and reports an unhealthy integration rather than silently sending or pretending delivery succeeded. Production adapters should be added in the server package under `apps/api` or the Next.js server boundary, with contract tests shared across every provider.
