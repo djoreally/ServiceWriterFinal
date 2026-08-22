@@ -39,12 +39,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      # Public client configuration required by the Vite production bundle.
-      # Repository variables/secrets should point to staging for PR validation
-      # and production only in a separately protected release workflow.
-      VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL || 'https://example.supabase.co' }}
-      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.VITE_SUPABASE_PUBLISHABLE_KEY || 'ci-placeholder-publishable-key' }}
-      VITE_SUPABASE_PROJECT_ID: ${{ vars.VITE_SUPABASE_PROJECT_ID || 'servicewriterfinal-ci' }}
+      # Public client configuration required by the consolidated Next.js bundle.
+      # Repository variables/secrets should point to the canonical project only
+      # in protected deployment contexts; CI uses safe placeholders by default.
+      NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL || 'https://example.supabase.co' }}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || 'ci-placeholder-publishable-key' }}
+      NEXT_PUBLIC_SUPABASE_PROJECT_ID: ${{ vars.NEXT_PUBLIC_SUPABASE_PROJECT_ID || 'servicewriterfinal-ci' }}
+      NEXT_PUBLIC_API_BASE_URL: /api
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -77,14 +78,14 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-      - name: Build Vite frontend
+      - name: Build consolidated Next.js application
         run: npm run build
 
-      - name: Upload Vite build artifact
+      - name: Upload consolidated Next.js build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: vite-dist-${{ github.sha }}
-          path: dist/
+          name: next-build-${{ github.sha }}
+          path: .next/
           if-no-files-found: error
           retention-days: 7
 
@@ -94,7 +95,7 @@ jobs:
     timeout-minutes: 20
     defaults:
       run:
-        working-directory: apps/web-next
+        working-directory: .
     env:
       NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL || 'https://example.supabase.co' }}
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || 'ci-placeholder-publishable-key' }}
@@ -110,22 +111,22 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: apps/web-next/package-lock.json
+          cache-dependency-path: package-lock.json
 
-      - name: Install Next.js dependencies
+      - name: Install consolidated application dependencies
         run: npm ci
 
-      - name: Typecheck Next.js API
+      - name: Typecheck consolidated Next.js application
         run: npm run typecheck
 
-      - name: Build Next.js API application
+      - name: Build consolidated Next.js application
         run: npm run build
 
-      - name: Upload Next.js build artifact
+      - name: Upload Next.js API compatibility artifact
         uses: actions/upload-artifact@v4
         with:
-          name: next-build-${{ github.sha }}
-          path: apps/web-next/.next/
+          name: next-api-build-${{ github.sha }}
+          path: .next/
           if-no-files-found: error
           retention-days: 7
 

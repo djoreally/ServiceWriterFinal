@@ -18,7 +18,7 @@
     "verify:integrations": "node scripts/verify-production-integrations.mjs",
     "verify:env": "node scripts/verify-env-manifest.mjs",
     "verify:release": "node scripts/verify-release-readiness.mjs",
-    "lint": "eslint .",
+    "lint": "eslint app middleware.ts next.config.ts src/ClientOnlyShell.tsx src/NextClientShell.tsx src/server src/lib/supabase.ts src/integrations/supabase/client.ts src/config/features.ts src/lib/nextApiClient.ts src/lib/versionCheck.ts",
     "start": "next start"
   },
   "playwright": {
