@@ -1,25 +1,11 @@
-const getEnvValue = (key: string): string => {
-  switch (key) {
-    case 'VITE_FF_EXAMPLE_FEATURE':
-      return import.meta.env.VITE_FF_EXAMPLE_FEATURE ?? '';
-    case 'VITE_FF_OFFLINE_ENGINE':
-      return import.meta.env.VITE_FF_OFFLINE_ENGINE ?? '';
-    case 'VITE_FF_OFFLINE_ENGINE_ALLOWLIST':
-      return import.meta.env.VITE_FF_OFFLINE_ENGINE_ALLOWLIST ?? '';
-    case 'VITE_FF_OFFLINE_PILOT_TENANTS':
-      return import.meta.env.VITE_FF_OFFLINE_PILOT_TENANTS ?? '';
-    case 'VITE_FF_OFFLINE_KILL_SWITCH':
-      return import.meta.env.VITE_FF_OFFLINE_KILL_SWITCH ?? '';
-    case 'VITE_FF_OFFLINE_ALERT_OUTBOX_DEPTH':
-      return import.meta.env.VITE_FF_OFFLINE_ALERT_OUTBOX_DEPTH ?? '';
-    case 'VITE_FF_FLEET_INTAKE_KILL_SWITCH':
-      return import.meta.env.VITE_FF_FLEET_INTAKE_KILL_SWITCH ?? '';
-    case 'VITE_FF_FLEET_RESOURCE_SCHEDULER_KILL_SWITCH':
-      return import.meta.env.VITE_FF_FLEET_RESOURCE_SCHEDULER_KILL_SWITCH ?? '';
-    default:
-      return '';
-  }
-};
+const viteEnv = ((import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {}) as Record<string, string | undefined>;
+const runtimeEnv = (typeof process !== "undefined" ? process.env : {}) as Record<string, string | undefined>;
+
+function readEnv(key: string): string {
+  return runtimeEnv[`NEXT_PUBLIC_${key}`] ?? runtimeEnv[key] ?? viteEnv[key] ?? '';
+}
+
+const getEnvValue = (key: string): string => readEnv(key);
 
 export const features = {
   // Add your feature flags here

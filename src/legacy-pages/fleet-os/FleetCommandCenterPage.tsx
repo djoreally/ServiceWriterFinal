@@ -1,4 +1,4 @@
-import CommandCenter from "@/pages/CommandCenter";
+import CommandCenter from "@/legacy-pages/CommandCenter";
 import { FleetOSLayout } from "@/components/layout/FleetOSLayout";
 import { FleetDispatcherActionQueue } from "@/components/fleet/FleetDispatcherActionQueue";
 

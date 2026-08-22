@@ -38,7 +38,7 @@ export const ServiceAreaStep = ({ data, onUpdate, onNext, onBack }: ServiceAreaS
   const handleAddressBlur = async () => {
     if (!data.service_address.trim()) return;
     
-    const mapboxToken = import.meta.env.VITE_MAPBOX_PUBLIC_TOKEN;
+    const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_PUBLIC_TOKEN;
     if (!mapboxToken) return;
 
     setGeocoding(true);

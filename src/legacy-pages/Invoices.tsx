@@ -1,5 +1,5 @@
 import { AppLayout } from "@/components/layout/AppLayout";
-import { InvoicesTab } from "@/pages/financials/Invoices";
+import { InvoicesTab } from "@/legacy-pages/financials/Invoices";
 
 const InvoicesPage = () => {
   return (

@@ -65,9 +65,9 @@ const ROLE_LANDING: Record<WorkforceRole, string> = {
 };
 
 const IDENTITY_RESOLUTION_TIMEOUT_MS = 10_000;
-const DEMO_LOGIN_ENABLED = import.meta.env.VITE_ENABLE_DEMO_LOGIN === "true";
-const DEMO_EMAIL = (import.meta.env.VITE_DEMO_EMAIL || "demo@servicewriter.app").trim();
-const DEMO_PASSWORD = import.meta.env.VITE_DEMO_PASSWORD || "";
+const DEMO_LOGIN_ENABLED = process.env.NEXT_PUBLIC_ENABLE_DEMO_LOGIN === "true";
+const DEMO_EMAIL = (process.env.NEXT_PUBLIC_DEMO_EMAIL || "demo@servicewriter.app").trim();
+const DEMO_PASSWORD = process.env.NEXT_PUBLIC_DEMO_PASSWORD || "";
 
 /**
  * Where a signed-in user goes when workspace identity itself could not be read.

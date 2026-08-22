@@ -21,7 +21,7 @@ export interface AppIdentity {
 export const APP_IDENTITY: AppIdentity = Object.freeze({
   projectId: SERVICE_WRITER_PROJECT_ID,
   appSlug: SERVICE_WRITER_APP_SLUG,
-  version: import.meta.env.VITE_APP_VERSION || "0.1.0-local",
+  version: process.env.NEXT_PUBLIC_APP_VERSION || "0.1.0-local",
   backendProjectId: SERVICE_WRITER_BACKEND_PROJECT_ID,
 });
 

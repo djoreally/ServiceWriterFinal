@@ -76,7 +76,7 @@ export async function logAudit(entry: AuditEntry): Promise<void> {
     await (supabase.from('audit_logs') as any).insert(insertData);
   } catch (err) {
     // Audit logging must never crash the app
-    if (import.meta.env.DEV) {
+    if (process.env.NODE_ENV !== "production") {
       console.warn('[Audit] Failed to log event:', entry.action, err);
     }
   }

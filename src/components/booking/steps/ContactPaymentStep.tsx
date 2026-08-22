@@ -15,7 +15,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { CheckoutErrorAlert, CheckoutErrorType } from "@/components/booking/CheckoutErrors";
 import { CustomerAccountPrompt } from "@/components/booking/CustomerAccountPrompt";
 import { PaymentOptions } from "@/components/booking/PaymentOptions";
-import CustomerAuth from "@/pages/CustomerAuth";
+import CustomerAuth from "@/legacy-pages/CustomerAuth";
 import { SplitPhoneInput } from "@/components/ui/split-phone-input";
 import { format } from "date-fns";
 import type { VehicleData } from "@/components/booking/VehicleEntry";

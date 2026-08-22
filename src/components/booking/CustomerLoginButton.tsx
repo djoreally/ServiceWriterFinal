@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { LogIn, LogOut, LayoutDashboard } from "lucide-react";
 import { toast } from "sonner";
-import CustomerAuth from "@/pages/CustomerAuth";
+import CustomerAuth from "@/legacy-pages/CustomerAuth";
 import { useAuth } from "@packages/auth";
 
 interface CustomerLoginButtonProps {

@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 type ApiErrorBody = { error?: { code?: string; message?: string } };
 
-const baseUrl = (import.meta.env.VITE_API_BASE_URL || "http://localhost:3000/api").replace(/\/$/, "");
+const baseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL || "/api").replace(/\/$/, "");
 
 export class ApiClientError extends Error {
   constructor(public status: number, public code: string, message: string) {

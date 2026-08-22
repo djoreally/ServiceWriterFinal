@@ -19,7 +19,7 @@
 
 import { whenAuthInteractionIdle } from "@/lib/authInteractionLock";
 
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || "dev";
+const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION || "dev";
 const BACKEND_PROJECT_ID = "supabase";
 const APP_PROJECT_ID = "servicewriterfinal";
 const APP_SLUG = "servicewriterfinal";
@@ -35,7 +35,7 @@ function isPreviewHost(): boolean {
 }
 
 export async function checkAppVersion(): Promise<void> {
-  if (!import.meta.env.PROD) return;
+  if (process.env.NODE_ENV !== "production") return;
   if (isPreviewHost()) return;
   if (typeof window === "undefined") return;
 

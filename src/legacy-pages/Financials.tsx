@@ -20,8 +20,8 @@ import {
   FileText,
   Receipt,
 } from "lucide-react";
-import { ExpensesTab } from "@/pages/financials/Expenses";
-import { InvoicesTab } from "@/pages/financials/Invoices";
+import { ExpensesTab } from "@/legacy-pages/financials/Expenses";
+import { InvoicesTab } from "@/legacy-pages/financials/Invoices";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { CustomerLifetimeValue } from "@/components/marketing/CustomerLifetimeValue";
 import { getCurrentUserId, fetchSucceededPayments, fetchPendingPayments, fetchAppointmentStatuses, fetchCompletedServices } from "@/application/queries/financials.query";

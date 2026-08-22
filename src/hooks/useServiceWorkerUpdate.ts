@@ -37,22 +37,20 @@ export function useServiceWorkerUpdate() {
       return;
     }
     let interval: number | undefined;
-    void import('virtual:pwa-register').then(({ registerSW }) => {
-      registerSW({
-        immediate: true,
-        onRegisteredSW(_swUrl, registration) {
-          if (!registration) return;
-          void registration.update();
-          interval = window.setInterval((): void => {
-            void registration.update();
-          }, 30_000);
-        },
-        onRegisterError(error) {
-          console.error('Service Worker registration error:', error);
-        },
-      });
+    let active = true;
+    void navigator.serviceWorker.register('/sw.js', { scope: '/' }).then((registration) => {
+      if (!active) return;
+      void registration.update();
+      interval = window.setInterval((): void => {
+        void registration.update();
+      }, 30_000);
+    }).catch((error: unknown) => {
+      // Service worker support is optional; the application remains usable
+      // without offline caching or background update checks.
+      console.warn('Service Worker registration skipped:', error);
     });
     return () => {
+      active = false;
       if (interval !== undefined) window.clearInterval(interval);
     };
   }, [skipSW]);

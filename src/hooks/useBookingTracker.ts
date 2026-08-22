@@ -87,7 +87,7 @@ export function useBookingTracker(opts: UseBookingTrackerOptions) {
       };
       void trackBookingProgress(payload).then(({ error }) => {
         if (!error) lastSentRef.current = fingerprint;
-        else if (import.meta.env.DEV) {
+        else if (process.env.NODE_ENV !== "production") {
           console.warn("[booking-tracker] write failed:", error.message);
         }
       });

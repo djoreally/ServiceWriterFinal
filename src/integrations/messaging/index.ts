@@ -10,14 +10,16 @@ import type {
 import { messagingRegistry } from "./registry";
 
 class DisconnectedAdapter implements MessagingAdapter {
-  readonly capabilities = {
-    channels: [this.channel] as const,
-    supportsScheduling: false,
-    supportsInboundReplies: false,
-    supportsDeliveryEvents: false,
-    supportsAttachments: false,
-    supportsTemplates: true,
-  };
+  get capabilities() {
+    return {
+      channels: [this.channel] as const,
+      supportsScheduling: false,
+      supportsInboundReplies: false,
+      supportsDeliveryEvents: false,
+      supportsAttachments: false,
+      supportsTemplates: true,
+    };
+  }
 
   constructor(
     readonly providerName: string,

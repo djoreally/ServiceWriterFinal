@@ -1,5 +1,5 @@
 // Public Mapbox token (tiles + geocoding). Must be set in VITE_MAPBOX_PUBLIC_TOKEN.
-const rawToken = (import.meta.env.VITE_MAPBOX_PUBLIC_TOKEN || "").trim();
+const rawToken = (process.env.NEXT_PUBLIC_MAPBOX_PUBLIC_TOKEN || "").trim();
 
 /**
  * Mapbox public tokens always start with `pk.`. Misconfigured environments have

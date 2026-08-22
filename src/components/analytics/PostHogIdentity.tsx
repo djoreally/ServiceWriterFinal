@@ -5,7 +5,7 @@ import { fetchPostHogOrganizationProfile } from "@/application/queries/posthog-i
 import { useTeamRole } from "@/hooks/useTeamRole";
 
 const INTERNAL_EMAILS = new Set(
-  (import.meta.env.VITE_POSTHOG_INTERNAL_EMAILS ?? "")
+  (process.env.NEXT_PUBLIC_POSTHOG_INTERNAL_EMAILS ?? "")
     .split(",")
     .map((email: string) => email.trim().toLowerCase())
     .filter(Boolean),
