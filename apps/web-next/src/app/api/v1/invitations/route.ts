@@ -62,6 +62,12 @@ export async function POST(request: Request) {
     const expiresAt = new Date(Date.now() + body.expires_in_days * 86_400_000).toISOString();
     const { expires_in_days: _expiresInDays, ...input } = body;
     const { data, error } = await supabase.from("invitations").insert({ ...input, token_hash: digest(token), expires_at: expiresAt, created_by: user.id }).select(invitationSelect).single();
+    if (error?.code === "23505") {
+      throw new ApiError(409, "An active invitation already exists for this email.", "invitation_pending");
+    }
+    if (error?.code === "23503" && body.customer_id) {
+      throw new ApiError(400, "The customer does not belong to this workspace.", "customer_workspace_mismatch");
+    }
     if (error) throw error;
     const { error: eventError } = await supabase.from("invitation_events").insert({ invitation_id: data.id, workspace_id: data.workspace_id, event_type: "created", actor_user_id: user.id, metadata: { invited_role: data.invited_role } });
     if (eventError) throw eventError;
