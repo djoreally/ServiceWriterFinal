@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { sendInvitationEmail } from "@/server/invitations/mailer";
 import { ApiError, errorResponse, json, paginationSchema, requireWorkspaceMember } from "@/server/api";
+import { recordOperationalAudit } from "@/server/audit";
 
 const invitationRole = z.enum(["owner", "admin", "manager", "service_advisor", "technician", "dispatcher", "receptionist", "fleet_manager", "viewer", "customer"]);
 const createInvitationSchema = z.object({
@@ -64,6 +65,7 @@ export async function POST(request: Request) {
     if (error) throw error;
     const { error: eventError } = await supabase.from("invitation_events").insert({ invitation_id: data.id, workspace_id: data.workspace_id, event_type: "created", actor_user_id: user.id, metadata: { invited_role: data.invited_role } });
     if (eventError) throw eventError;
+    await recordOperationalAudit({ supabase, request, workspaceId: data.workspace_id, actorUserId: user.id, action: "invitation.created", entityType: "invitation", entityId: data.id, metadata: { invited_role: data.invited_role } });
 
     let delivery: { status: "accepted" | "failed"; provider?: string; provider_message_id?: string; error?: string };
     try {
