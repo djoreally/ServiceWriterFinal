@@ -16,9 +16,14 @@ import { generateCorrelationId, reportClientError } from '@/lib/client-observabi
 // No publishable key is ever embedded in this file: a stale hard-coded key is
 // how production once shipped an invalid anon JWT, and rewriting this source at
 // build time is how it once shipped a malformed client bundle.
-const viteEnv = ((import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {}) as Record<string, string | undefined>;
-const runtimeEnv = (typeof process !== "undefined" ? process.env : {}) as Record<string, string | undefined>;
-const FALLBACK_PROJECT_ID = runtimeEnv.NEXT_PUBLIC_SUPABASE_PROJECT_ID || viteEnv.VITE_SUPABASE_PROJECT_ID || '';
+// These direct references are intentional: Next.js statically inlines
+// `NEXT_PUBLIC_*` variables into the browser bundle. Reading `process.env`
+// through a dynamically typed object leaves the client with undefined values
+// in production and silently routes auth to disconnected development mode.
+const NEXT_PUBLIC_SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || '';
+const NEXT_PUBLIC_SUPABASE_PROJECT_ID = process.env.NEXT_PUBLIC_SUPABASE_PROJECT_ID || '';
+const FALLBACK_PROJECT_ID = NEXT_PUBLIC_SUPABASE_PROJECT_ID;
 
 function projectRefFromAnonKey(key: string | undefined): string | null {
   if (!key) return null;
@@ -34,11 +39,11 @@ function projectRefFromAnonKey(key: string | undefined): string | null {
   }
 }
 
-const RAW_SUPABASE_URL = (runtimeEnv.NEXT_PUBLIC_SUPABASE_URL || viteEnv.VITE_SUPABASE_URL || '').trim();
+const RAW_SUPABASE_URL = NEXT_PUBLIC_SUPABASE_URL.trim();
 const SUPABASE_URL = (
   RAW_SUPABASE_URL || (FALLBACK_PROJECT_ID ? `https://${FALLBACK_PROJECT_ID}.supabase.co` : '')
 ).replace(/\/$/, '');
-const SUPABASE_PUBLISHABLE_KEY = (runtimeEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || viteEnv.VITE_SUPABASE_PUBLISHABLE_KEY || '').trim();
+const SUPABASE_PUBLISHABLE_KEY = NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY.trim();
 const SUPABASE_CONFIGURED = Boolean(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY);
 const CLIENT_SUPABASE_URL = SUPABASE_URL || 'http://127.0.0.1:54321';
 const CLIENT_SUPABASE_KEY = SUPABASE_PUBLISHABLE_KEY || 'local-development-key';
@@ -49,8 +54,7 @@ if (!SUPABASE_CONFIGURED) {
 
 const SUPABASE_PROJECT_ID =
   projectRefFromAnonKey(SUPABASE_PUBLISHABLE_KEY) ||
-  runtimeEnv.NEXT_PUBLIC_SUPABASE_PROJECT_ID ||
-  viteEnv.VITE_SUPABASE_PROJECT_ID ||
+  NEXT_PUBLIC_SUPABASE_PROJECT_ID ||
   FALLBACK_PROJECT_ID;
 
 // Guard: the URL host and the publishable key must belong to the same project.
