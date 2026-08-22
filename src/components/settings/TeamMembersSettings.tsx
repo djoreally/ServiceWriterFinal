@@ -18,7 +18,6 @@ import {
 import {
   addTechnician,
   createTeamInvitation,
-  sendTeamInvitationEmail,
   cancelTeamInvitation,
   updateTechnician,
   uploadTeamDocument,
@@ -72,6 +71,7 @@ import { toast } from "sonner";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import type { Json } from "@/integrations/supabase/types";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
 interface TeamMember {
   id: string;
@@ -150,9 +150,10 @@ export function TeamMembersSettings() {
       const user = await getAuthUser();
       if (!user) return;
 
+      const workspaceId = getSelectedWorkspaceId();
       const [techResult, invResult] = await Promise.all([
         fetchTeamMembers(user.id),
-        fetchTeamInvitations(user.id),
+        workspaceId ? fetchTeamInvitations(workspaceId) : Promise.resolve({ data: [], error: null }),
       ]);
 
       if (techResult.data) {
@@ -239,16 +240,19 @@ export function TeamMembersSettings() {
       const user = await getAuthUser();
       if (!user) throw new Error("Not authenticated");
 
-      // Create invitation record
-      const { data: invitation, error } = await createTeamInvitation(
-        user.id,
+      const workspaceId = getSelectedWorkspaceId();
+      if (!workspaceId) throw new Error("Select a workspace before inviting a team member");
+
+      const { data: invitationResponse, error } = await createTeamInvitation(
+        workspaceId,
         inviteEmail.trim().toLowerCase(),
         inviteName.trim(),
         inviteRole,
       );
 
       if (error) {
-        if (error.code === "23505") {
+        const code = (error as { code?: string }).code;
+        if (code === "invitation_pending" || code === "23505") {
           toast.error("This email has already been invited");
         } else {
           throw error;
@@ -257,17 +261,8 @@ export function TeamMembersSettings() {
         return;
       }
 
-      // Send invitation email via edge function
-      const { error: emailError } = await sendTeamInvitationEmail({
-        invitation_id: invitation.id,
-        email: inviteEmail.trim().toLowerCase(),
-        name: inviteName.trim(),
-        invitation_token: invitation.invitation_token,
-      });
-
-      if (emailError) {
-        console.error("Email error:", emailError);
-        toast.warning("Invitation created but email could not be sent. Share the link manually.");
+      if (invitationResponse?.delivery.status === "failed") {
+        toast.warning("Invitation created, but the email could not be sent. You can resend it from the invitation list.");
       } else {
         toast.success(`Invitation sent to ${inviteEmail}`);
       }

@@ -2,17 +2,18 @@
  * Team Members Commands — Write operations for technician and invitation management.
  */
 import { supabase } from "@/integrations/supabase/client";
+import { nextApi } from "@/lib/nextApiClient";
 
 export async function addTechnician(userId: string, data: Record<string, unknown>): Promise<any> {
   const result = await supabase.from("technicians").insert([{ user_id: userId, ...data } as any]);
 
-  if (result.error?.message === 'seat_limit_reached') {
+  if (result.error?.message === "seat_limit_reached") {
     return {
       ...result,
       error: {
         ...result.error,
-        code: 'seat_limit_reached',
-        message: 'Technician seat limit reached for current plan.',
+        code: "seat_limit_reached",
+        message: "Technician seat limit reached for current plan.",
       },
     };
   }
@@ -20,20 +21,26 @@ export async function addTechnician(userId: string, data: Record<string, unknown
   return result;
 }
 
-export async function createTeamInvitation(userId: string, email: string, name: string, role: string) {
-  return supabase
-    .from("team_invitations")
-    .insert({ user_id: userId, email, name, role })
-    .select()
-    .single();
+export async function createTeamInvitation(workspaceId: string, email: string, _name: string, role: string): Promise<{ data: Awaited<ReturnType<typeof nextApi.invitations.create>> | null; error: unknown }> {
+  try {
+    const data = await nextApi.invitations.create({
+      workspace_id: workspaceId,
+      invited_email: email,
+      invited_role: role as "owner" | "admin" | "manager" | "service_advisor" | "technician" | "dispatcher" | "receptionist" | "fleet_manager" | "viewer" | "customer",
+    });
+    return { data, error: null };
+  } catch (error) {
+    return { data: null, error };
+  }
 }
 
-export async function sendTeamInvitationEmail(body: Record<string, unknown>): Promise<any> {
-  return supabase.functions.invoke("invite-team-member", { body });
-}
-
-export async function cancelTeamInvitation(invId: string) {
-  return supabase.from("team_invitations").update({ status: "cancelled" }).eq("id", invId);
+export async function cancelTeamInvitation(invitationId: string): Promise<{ data: Awaited<ReturnType<typeof nextApi.invitations.revoke>> | null; error: unknown }> {
+  try {
+    const data = await nextApi.invitations.revoke(invitationId);
+    return { data, error: null };
+  } catch (error) {
+    return { data: null, error };
+  }
 }
 
 export async function updateTechnician(techId: string, data: Record<string, unknown>) {
