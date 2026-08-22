@@ -40,6 +40,7 @@ import {
   Store,
   Star,
   ContactRound,
+  Upload,
 } from "lucide-react";
 
 
@@ -172,6 +173,7 @@ const buildAllGroups = (terms: Terms): NavGroup[] => [
       { path: "/settings?tab=business", label: "Business Profile", icon: Settings },
       { path: "/settings?tab=team", label: "Employees", icon: Users },
       { path: "/invitations", label: "Invitations", icon: UserRoundPlus },
+      { path: "/settings/import", label: "Import Data", icon: Upload },
       { path: "/settings?tab=integrations", label: "Integrations", icon: Zap },
       { path: "/settings?tab=payments", label: "Billing", icon: CreditCard },
       { path: "/settings?tab=comms", label: "Notifications", icon: Mail },

@@ -58,6 +58,7 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
   // The page performs the capability check against the canonical API. This
   // route-level rule keeps technicians and customer accounts out of CRM URLs.
   { match: "/crm", roles: CRM },
+  { match: "/settings/import", roles: ADMIN },
 
   // --- owner / admin only ----------------------------------------------
   { match: "/settings", roles: ADMIN },
