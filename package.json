@@ -18,6 +18,7 @@
     "verify:deployment": "node scripts/verify-deployment.mjs",
     "verify:integrations": "node scripts/verify-production-integrations.mjs",
     "verify:env": "node scripts/verify-env-manifest.mjs",
+    "verify:release": "node scripts/verify-release-readiness.mjs",
     "lint": "eslint ."
   },
   "playwright": {
