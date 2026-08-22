@@ -18478,6 +18478,24 @@ export type Database = {
           },
         ]
       }
+      customer_users: {
+        Row: { workspace_id: string; customer_id: string; user_id: string; is_primary: boolean; created_at: string; updated_at: string }
+        Insert: { workspace_id: string; customer_id: string; user_id: string; is_primary?: boolean; created_at?: string; updated_at?: string }
+        Update: { workspace_id?: string; customer_id?: string; user_id?: string; is_primary?: boolean; created_at?: string; updated_at?: string }
+        Relationships: []
+      }
+      invitation_events: {
+        Row: { id: string; invitation_id: string; workspace_id: string; event_type: string; actor_user_id: string | null; metadata: Json; created_at: string }
+        Insert: { id?: string; invitation_id: string; workspace_id: string; event_type: string; actor_user_id?: string | null; metadata?: Json; created_at?: string }
+        Update: { id?: string; invitation_id?: string; workspace_id?: string; event_type?: string; actor_user_id?: string | null; metadata?: Json; created_at?: string }
+        Relationships: []
+      }
+      invitations: {
+        Row: { id: string; workspace_id: string; customer_id: string | null; invited_email: string; invited_role: Database["public"]["Enums"]["member_role"]; token_hash: string; expires_at: string; accepted_at: string | null; accepted_by: string | null; revoked_at: string | null; created_by: string; created_at: string; updated_at: string }
+        Insert: { id?: string; workspace_id: string; customer_id?: string | null; invited_email: string; invited_role: Database["public"]["Enums"]["member_role"]; token_hash: string; expires_at: string; accepted_at?: string | null; accepted_by?: string | null; revoked_at?: string | null; created_by: string; created_at?: string; updated_at?: string }
+        Update: { id?: string; workspace_id?: string; customer_id?: string | null; invited_email?: string; invited_role?: Database["public"]["Enums"]["member_role"]; token_hash?: string; expires_at?: string; accepted_at?: string | null; accepted_by?: string | null; revoked_at?: string | null; created_by?: string; created_at?: string; updated_at?: string }
+        Relationships: []
+      }
     }
     Views: {
       campaign_message_rollups: {
@@ -21378,6 +21396,8 @@ export type Database = {
         | "discount_percent"
         | "discount_fixed"
         | "priority_booking"
+      member_role:
+        | "owner" | "admin" | "manager" | "service_advisor" | "technician" | "dispatcher" | "receptionist" | "fleet_manager" | "viewer" | "customer"
       retention_campaign_type:
         | "reminder"
         | "winback"
@@ -21606,6 +21626,7 @@ export const Constants = {
         "discount_fixed",
         "priority_booking",
       ],
+      member_role: ["owner", "admin", "manager", "service_advisor", "technician", "dispatcher", "receptionist", "fleet_manager", "viewer", "customer"],
       retention_campaign_type: [
         "reminder",
         "winback",
