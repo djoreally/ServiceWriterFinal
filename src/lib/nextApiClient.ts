@@ -85,6 +85,13 @@ export const nextApi = {
     if (!parsed.success) throw new ApiClientError(502, "invalid_api_response", "Workspace response was invalid");
     return parsed.data;
   },
+  imports: {
+    list: (workspaceId: string) => request<{ data: unknown[]; meta: { limit: number; offset: number; total: number } }>(`/v1/imports?workspace_id=${encodeURIComponent(workspaceId)}&limit=50`),
+    stage: (workspaceId: string, fileName: string, exportData: unknown) => request<{ data: unknown; preview: unknown }>("/v1/imports", { method: "POST", body: JSON.stringify({ workspace_id: workspaceId, file_name: fileName, export: exportData }) }),
+    get: (workspaceId: string, batchId: string) => request<{ data: unknown; records: unknown[] }>(`/v1/imports/${encodeURIComponent(batchId)}?workspace_id=${encodeURIComponent(workspaceId)}`),
+    execute: (workspaceId: string, batchId: string, exportData: unknown) => request<{ data: unknown }>(`/v1/imports/${encodeURIComponent(batchId)}`, { method: "POST", body: JSON.stringify({ workspace_id: workspaceId, action: "execute", export: exportData }) }),
+    rollback: (workspaceId: string, batchId: string) => request<{ data: unknown }>(`/v1/imports/${encodeURIComponent(batchId)}`, { method: "POST", body: JSON.stringify({ workspace_id: workspaceId, action: "rollback" }) }),
+  },
   crm: {
     access: (workspaceId: string) => request<{ data: { workspace_id: string; can_view: boolean } }>(`/v1/crm/access?workspace_id=${encodeURIComponent(workspaceId)}`),
     profiles: {

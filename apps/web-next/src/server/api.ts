@@ -52,10 +52,10 @@ export async function requireUser(request?: Request) {
   return { supabase, user: data.user };
 }
 
-export async function requireWorkspaceMember(workspaceId: string, roles?: string[]) {
+export async function requireWorkspaceMember(workspaceId: string, roles?: string[], request?: Request) {
   const parsed = workspaceIdSchema.safeParse(workspaceId);
   if (!parsed.success) throw new ApiError(400, "Invalid workspace_id", "invalid_workspace");
-  const { supabase, user } = await requireUser();
+  const { supabase, user } = await requireUser(request);
   const query = supabase
     .from("workspace_members")
     .select("workspace_id,user_id,role,is_active")
