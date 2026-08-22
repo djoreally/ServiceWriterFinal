@@ -61,7 +61,7 @@ type Terms = {
   quote: string;
 };
 
-export type RoleScope = "admin" | "manager" | "dispatcher" | "technician" | null;
+export type RoleScope = "admin" | "owner" | "manager" | "dispatcher" | "fleet_manager" | "technician" | null;
 
 /**
  * Grouped navigation for desktop Sidebar.

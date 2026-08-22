@@ -4,7 +4,7 @@ import { withTransientRetry } from "@/lib/transient-backend";
 
 const WORKFORCE_IDENTITY_TIMEOUT_MS = 2_500;
 
-export type WorkforceRole = "admin" | "manager" | "dispatcher" | "technician";
+export type WorkforceRole = "admin" | "owner" | "manager" | "dispatcher" | "fleet_manager" | "technician";
 export interface WorkforceMembership { workspaceUserId: string; workspaceName: string; role: WorkforceRole; landingPath: string; isDefault: boolean; }
 const map = (row: { workspace_user_id: string; workspace_name?: string; role: string; landing_path: string; is_default?: boolean }): WorkforceMembership => ({ workspaceUserId: row.workspace_user_id, workspaceName: row.workspace_name ?? "Service Writer workspace", role: row.role as WorkforceRole, landingPath: row.landing_path, isDefault: Boolean(row.is_default) });
 export async function fetchWorkforceIdentity() {

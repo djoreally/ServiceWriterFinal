@@ -11,13 +11,16 @@
  */
 import type { TeamRole } from "@/hooks/useTeamRole";
 
-export type AccessRole = TeamRole;
+export type AccessRole = TeamRole | "customer";
 
-const ADMIN: AccessRole[] = ["admin"];
-const OFFICE: AccessRole[] = ["admin", "manager"];
-const BOARD: AccessRole[] = ["admin", "manager", "dispatcher"];
+const ADMIN: AccessRole[] = ["admin", "owner"];
+const OFFICE: AccessRole[] = ["admin", "owner", "manager"];
+const BOARD: AccessRole[] = ["admin", "owner", "manager", "dispatcher"];
+const SCHEDULING: AccessRole[] = [...BOARD, "fleet_manager"];
+const FLEET: AccessRole[] = ["admin", "owner", "manager", "dispatcher", "fleet_manager"];
 const TECH: AccessRole[] = ["technician"];
-const EVERYONE: AccessRole[] = ["admin", "manager", "dispatcher", "technician"];
+const CUSTOMER: AccessRole[] = ["customer"];
+const EVERYONE: AccessRole[] = ["admin", "owner", "manager", "dispatcher", "fleet_manager", "technician"];
 
 export interface RouteAccessRule {
   /** Exact path or path prefix (matches `path` and `path/...`). */
@@ -38,6 +41,14 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
   { match: "/whats-new", roles: EVERYONE },
   { match: "/support", roles: EVERYONE },
   { match: "/field-companion", roles: EVERYONE },
+  { match: "/customer", roles: CUSTOMER },
+  { match: "/customer/dashboard", roles: CUSTOMER },
+  { match: "/customer/appointments", roles: CUSTOMER },
+  { match: "/customer/vehicles", roles: CUSTOMER },
+  { match: "/customer/approvals", roles: CUSTOMER },
+  { match: "/customer/invoices", roles: CUSTOMER },
+  { match: "/customer/messages", roles: CUSTOMER },
+  { match: "/customer/profile", roles: CUSTOMER },
 
   // --- technician field app --------------------------------------------
   { match: "/tech-app", roles: TECH },
@@ -72,7 +83,7 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
   { match: "/dispatch", roles: BOARD },
   { match: "/dispatch-engine", roles: BOARD },
   { match: "/command-center", roles: BOARD },
-  { match: "/appointments", roles: BOARD },
+  { match: "/appointments", roles: SCHEDULING },
   { match: "/messages", roles: BOARD },
   { match: "/weather-guard", roles: BOARD },
   { match: "/quick-service", roles: BOARD },
@@ -87,7 +98,7 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
   { match: "/service-packages", roles: BOARD }, // dispatcher = read-only
   { match: "/tire-pricing", roles: ["admin"] },
   { match: "/detailing-pricing", roles: ["admin"] },
-  { match: "/fleet", roles: BOARD },
+  { match: "/fleet", roles: FLEET },
   { match: "/dashboard", roles: OFFICE },
   { match: "/inventory", roles: OFFICE },
   { match: "/subscriptions", roles: OFFICE },
@@ -97,14 +108,14 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
   // --- Fleet OS ---------------------------------------------------------
   // Dispatchers get the scheduling + board surfaces only; the commercial
   // side of Fleet OS (contracts, invoices, POs, reports) stays with office.
-  { match: "/fleet-os/scheduler", roles: BOARD },
-  { match: "/fleet-os/command-center", roles: BOARD },
-  { match: "/fleet-os/checkin", roles: BOARD },
-  { match: "/fleet-os/tracking", roles: BOARD },
-  { match: "/fleet-os/work-orders", roles: BOARD },
-  { match: "/fleet-os/vehicles", roles: BOARD },
-  { match: "/fleet-os/help", roles: BOARD },
-  { match: "/fleet-os", roles: OFFICE },
+  { match: "/fleet-os/scheduler", roles: FLEET },
+  { match: "/fleet-os/command-center", roles: FLEET },
+  { match: "/fleet-os/checkin", roles: FLEET },
+  { match: "/fleet-os/tracking", roles: FLEET },
+  { match: "/fleet-os/work-orders", roles: FLEET },
+  { match: "/fleet-os/vehicles", roles: FLEET },
+  { match: "/fleet-os/help", roles: FLEET },
+  { match: "/fleet-os", roles: [...OFFICE, "fleet_manager"] },
 ];
 
 const matches = (pathname: string, match: string) =>
@@ -142,9 +153,12 @@ export type WriteArea =
 
 const READ_ONLY: Record<AccessRole, WriteArea[]> = {
   admin: [],
+  owner: [],
   manager: ["settings"],
   dispatcher: ["quotes", "availability", "service-catalog", "service-packages", "settings"],
+  fleet_manager: ["settings", "invoices"],
   technician: ["quotes", "availability", "service-catalog", "service-packages", "customers", "invoices", "settings"],
+  customer: ["quotes", "availability", "service-catalog", "service-packages", "appointments", "customers", "invoices", "settings"],
 };
 
 export function canWrite(role: AccessRole | null, area: WriteArea): boolean {

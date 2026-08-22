@@ -49,16 +49,18 @@ type WorkforceRole = WorkforceMembership["role"];
 /** Which roles each login entry point is allowed to activate. */
 const VARIANT_ROLES: Record<Variant, WorkforceRole[] | null> = {
   default: null, // generic/magic-link entry: any role
-  business: ["admin"],
-  dispatch: ["dispatcher", "manager"],
+  business: ["admin", "owner"],
+  dispatch: ["dispatcher", "manager", "fleet_manager"],
   technician: ["technician"],
 };
 
 /** Client-side source of truth for where each role lands. */
 const ROLE_LANDING: Record<WorkforceRole, string> = {
   admin: "/dashboard",
+  owner: "/dashboard",
   manager: "/dispatch",
   dispatcher: "/dispatch",
+  fleet_manager: "/fleet-os",
   technician: "/tech-app",
 };
 

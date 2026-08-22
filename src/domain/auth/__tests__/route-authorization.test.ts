@@ -1,26 +1,28 @@
 import { describe, expect, it } from "@jest/globals";
 import { canAccessRoute, canWrite } from "@/domain/auth/route-authorization";
 
-const roles = ["admin", "manager", "dispatcher", "technician"] as const;
+const roles = ["admin", "owner", "manager", "dispatcher", "fleet_manager", "technician"] as const;
 
 describe("role-by-route authorization contract", () => {
   it.each(roles)("allows only admin on privileged settings routes (%s)", (role) => {
-    expect(canAccessRoute(role, "/settings")).toBe(role === "admin");
-    expect(canAccessRoute(role, "/admin")).toBe(role === "admin");
-    expect(canAccessRoute(role, "/vehicle-specs")).toBe(role === "admin");
-    expect(canAccessRoute(role, "/receptionist")).toBe(role === "admin");
-    expect(canAccessRoute(role, "/marketplace/listing")).toBe(role === "admin");
+    const owner = role === "admin" || role === "owner";
+    expect(canAccessRoute(role, "/settings")).toBe(owner);
+    expect(canAccessRoute(role, "/admin")).toBe(owner);
+    expect(canAccessRoute(role, "/vehicle-specs")).toBe(owner);
+    expect(canAccessRoute(role, "/receptionist")).toBe(owner);
+    expect(canAccessRoute(role, "/marketplace/listing")).toBe(owner);
   });
 
   it.each(roles)("keeps owner-only financial reporting closed (%s)", (role) => {
-    expect(canAccessRoute(role, "/financials")).toBe(role === "admin");
-    expect(canAccessRoute(role, "/expenses")).toBe(role === "admin");
-    expect(canAccessRoute(role, "/reports")).toBe(role === "admin");
-    expect(canAccessRoute(role, "/tax-compliance")).toBe(role === "admin");
+    const owner = role === "admin" || role === "owner";
+    expect(canAccessRoute(role, "/financials")).toBe(owner);
+    expect(canAccessRoute(role, "/expenses")).toBe(owner);
+    expect(canAccessRoute(role, "/reports")).toBe(owner);
+    expect(canAccessRoute(role, "/tax-compliance")).toBe(owner);
   });
 
   it.each(roles)("gives office staff billing without reporting (%s)", (role) => {
-    const office = role === "admin" || role === "manager";
+    const office = ["admin", "owner", "manager"].includes(role);
     expect(canAccessRoute(role, "/invoices")).toBe(office);
     expect(canAccessRoute(role, "/payments")).toBe(office);
     expect(canAccessRoute(role, "/pricing-tool")).toBe(office);
@@ -29,11 +31,12 @@ describe("role-by-route authorization contract", () => {
   });
 
   it.each(roles)("opens the daily board to dispatch + office (%s)", (role) => {
-    const board = ["admin", "manager", "dispatcher"].includes(role);
+    const board = ["admin", "owner", "manager", "dispatcher"].includes(role);
+    const scheduling = board || role === "fleet_manager";
     expect(canAccessRoute(role, "/dispatch")).toBe(board);
     expect(canAccessRoute(role, "/dispatch-engine")).toBe(board);
     expect(canAccessRoute(role, "/command-center")).toBe(board);
-    expect(canAccessRoute(role, "/appointments/abc")).toBe(board);
+    expect(canAccessRoute(role, "/appointments/abc")).toBe(scheduling);
     expect(canAccessRoute(role, "/messages")).toBe(board);
     expect(canAccessRoute(role, "/customers/abc")).toBe(board);
     expect(canAccessRoute(role, "/vehicles/abc")).toBe(board);
@@ -46,11 +49,24 @@ describe("role-by-route authorization contract", () => {
     expect(canAccessRoute("dispatcher", "/fleet-os/contracts")).toBe(false);
     expect(canAccessRoute("dispatcher", "/fleet-os/invoices")).toBe(false);
     expect(canAccessRoute("manager", "/fleet-os/contracts")).toBe(true);
+    expect(canAccessRoute("fleet_manager", "/fleet-os/scheduler")).toBe(true);
+    expect(canAccessRoute("fleet_manager", "/fleet-os/vehicles")).toBe(true);
+    expect(canAccessRoute("fleet_manager", "/fleet-os/contracts")).toBe(true);
+    expect(canAccessRoute("fleet_manager", "/settings")).toBe(false);
   });
 
   it.each(roles)("contains technicians in their dedicated workspace (%s)", (role) =>
     expect(canAccessRoute(role, "/tech-app/jobs")).toBe(role === "technician")
   );
+
+  it("keeps customer access inside the customer dashboard boundary", () => {
+    expect(canAccessRoute("customer", "/customer/dashboard")).toBe(true);
+    expect(canAccessRoute("customer", "/customer/invoices")).toBe(true);
+    expect(canAccessRoute("customer", "/dashboard")).toBe(false);
+    expect(canAccessRoute("customer", "/customers")).toBe(false);
+    expect(canAccessRoute("customer", "/dispatch")).toBe(false);
+    expect(canWrite("customer", "invoices")).toBe(false);
+  });
 
   it("denies every protected route for an unresolved identity", () => {
     expect(canAccessRoute(null, "/dashboard")).toBe(false);
@@ -61,11 +77,13 @@ describe("role-by-route authorization contract", () => {
     expect(canAccessRoute("dispatcher", "/some-future-surface")).toBe(false);
     expect(canAccessRoute("manager", "/some-future-surface")).toBe(false);
     expect(canAccessRoute("admin", "/some-future-surface")).toBe(true);
+    expect(canAccessRoute("owner", "/some-future-surface")).toBe(false);
   });
 
   it("ignores query strings so nav links resolve", () => {
     expect(canAccessRoute("manager", "/settings?tab=team")).toBe(false);
     expect(canAccessRoute("admin", "/settings?tab=team")).toBe(true);
+    expect(canAccessRoute("owner", "/settings?tab=team")).toBe(true);
   });
 
   it("keeps shared self-service surfaces open to all staff", () => {
@@ -90,5 +108,8 @@ describe("write capability contract", () => {
     expect(canWrite("manager", "invoices")).toBe(true);
     expect(canWrite("manager", "settings")).toBe(false);
     expect(canWrite("admin", "settings")).toBe(true);
+    expect(canWrite("owner", "settings")).toBe(true);
+    expect(canWrite("fleet_manager", "appointments")).toBe(true);
+    expect(canWrite("fleet_manager", "invoices")).toBe(false);
   });
 });

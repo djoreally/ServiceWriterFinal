@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 export type TrustContext = {
   userId: string;
   orgId: string;
-  role: "owner" | "manager" | "dispatcher" | "technician" | "customer";
+  role: "owner" | "manager" | "dispatcher" | "fleet_manager" | "technician" | "customer";
   permissions: string[];
   subscriptionTier?: string;
 };
@@ -12,6 +12,7 @@ const ROLE_PERMISSIONS: Record<TrustContext["role"], string[]> = {
   owner: ["jobs.read", "jobs.write", "jobs.transition", "financials.read"],
   manager: ["jobs.read", "jobs.write", "jobs.transition", "financials.read"],
   dispatcher: ["jobs.read", "jobs.write", "jobs.transition"],
+  fleet_manager: ["jobs.read", "jobs.write", "jobs.transition", "fleet.read", "fleet.write"],
   technician: ["jobs.read", "jobs.transition"],
   customer: ["jobs.read"],
 };
@@ -21,6 +22,7 @@ function normalizeRole(raw: unknown): TrustContext["role"] {
   if (key === "owner" || key === "tenant_owner" || key === "provider_owner") return "owner";
   if (key === "manager" || key === "tenant_staff") return "manager";
   if (key === "dispatcher") return "dispatcher";
+  if (key === "fleet_manager" || key === "fleet-manager" || key === "fleet manager") return "fleet_manager";
   if (key === "technician") return "technician";
   return "customer";
 }
