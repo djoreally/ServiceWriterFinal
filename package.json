@@ -16,6 +16,7 @@
     "test:e2e": "playwright test --config=e2e/playwright.config.ts",
     "smoke:vercel": "node scripts/smoke-test-vercel-authenticated.mjs",
     "verify:deployment": "node scripts/verify-deployment.mjs",
+    "verify:integrations": "node scripts/verify-production-integrations.mjs",
     "lint": "eslint ."
   },
   "playwright": {
