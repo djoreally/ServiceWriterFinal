@@ -1,0 +1,16 @@
+{
+  "target_table": "public.vehicle_specifications",
+  "all_rows": 16704,
+  "verified_import_rows": 15195,
+  "manual_review_rows": 1509,
+  "primary_filter_mapping": "wix_filter -> oil_filter",
+  "alternative_filter_mapping": "napa_gold_filter and stp_filter -> additional_specs JSON",
+  "safe_import_policy": "Import only verification_status=verified by default. Keep unverified/incomplete rows in review queue until an authoritative source validates them.",
+  "no_guessing": true,
+  "source_provenance": "source plus additional_specs.source_files/source_status",
+  "output_files": [
+    "vehicle_specifications_import_all.csv",
+    "vehicle_specifications_import_eligible_verified.csv",
+    "vehicle_specifications_manual_review.csv"
+  ]
+}

@@ -1,0 +1,88 @@
+{
+  "generated_at_utc": "2026-08-22T02:09:57.976074+00:00",
+  "merge_key": "normalized year|make|model|engine; blank engine remains distinct from populated engine",
+  "source_precedence": [
+    "fulloilandfilter2022to2027",
+    "release_2022_2027_final_audit",
+    "autolubespecsYmm.xlsx",
+    "yearmakemodel.json",
+    "completevehiclelist.xlsx-Sheet1.csv",
+    "car_data_2025-2.csv"
+  ],
+  "source_summary": [
+    {
+      "source_file": "fulloilandfilter2022to2027",
+      "source_kind": "full_oil_filter_workbook",
+      "rows": 15259,
+      "valid_key_rows": 15259,
+      "year_min": 2000,
+      "year_max": 2027,
+      "status": "loaded"
+    },
+    {
+      "source_file": "release_2022_2027_final_audit",
+      "source_kind": "release_audit_workbook",
+      "rows": 3188,
+      "valid_key_rows": 3188,
+      "year_min": 2022,
+      "year_max": 2027,
+      "status": "loaded"
+    },
+    {
+      "source_file": "autolubespecsYmm.xlsx",
+      "source_kind": "autolube_ymm_workbook",
+      "rows": 12653,
+      "valid_key_rows": 12653,
+      "year_min": 2000,
+      "year_max": 2022,
+      "status": "loaded"
+    },
+    {
+      "source_file": "yearmakemodel.json",
+      "source_kind": "year_make_model_json",
+      "rows": 14196,
+      "valid_key_rows": 14196,
+      "year_min": 1999,
+      "year_max": 2024,
+      "status": "loaded"
+    },
+    {
+      "source_file": "completevehiclelist.xlsx-Sheet1.csv",
+      "source_kind": "vehicle_list_csv",
+      "rows": 14196,
+      "valid_key_rows": 14196,
+      "year_min": 1999,
+      "year_max": 2024,
+      "status": "loaded"
+    },
+    {
+      "source_file": "car_data_2025-2.csv",
+      "source_kind": "vehicle_2025_csv",
+      "rows": 453,
+      "valid_key_rows": 453,
+      "year_min": 2025,
+      "year_max": 2025,
+      "status": "loaded"
+    }
+  ],
+  "input_rows_after_basic_validation": 59945,
+  "canonical_rows": 16704,
+  "duplicate_rows_removed": 43241,
+  "year_min": 1999,
+  "year_max": 2027,
+  "verification_status_counts": {
+    "verified": 15195,
+    "incomplete": 1316,
+    "unverified": 193
+  },
+  "records_with_missing_required_oil_fields": 1497,
+  "conflict_cells": 12366,
+  "safe_fill_rule": "Only coalesce non-empty values from supplied sources with the same normalized vehicle key; no value is guessed or inferred from neighboring model years.",
+  "sanitization": [
+    "Unicode NFKC normalization",
+    "control/non-printable character removal",
+    "whitespace normalization",
+    "year range validation 1900-2100",
+    "blank key rejection"
+  ]
+}
