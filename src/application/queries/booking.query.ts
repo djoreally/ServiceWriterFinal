@@ -5,7 +5,12 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
+import { nextApi } from "@/lib/nextApiClient";
 import { resolveOilPricePerQuart } from "@/lib/oilPricing";
+import {
+  fetchPublicServicePackages,
+  fetchBookedSlotsForDate,
+} from "@/application/queries/public-booking.query";
 
 export interface BookingBusinessProfile {
   id: string;
@@ -60,14 +65,13 @@ export interface ServicePackage {
  * Uses the safe get_public_booking_profile_v2 RPC exclusively — no raw business_profiles query.
  */
 export async function fetchBookingProfile(slug: string): Promise<BookingBusinessProfile | null> {
-  const { data: businessData, error: businessError } = await supabase
-    .rpc("get_public_booking_profile_v2", { booking_slug_param: slug });
-
-  if (businessError || !businessData || businessData.length === 0) {
+  let profile: Record<string, any>;
+  try {
+    const response = await nextApi.publicBooking.get(slug, "profile");
+    profile = response.data as Record<string, any>;
+  } catch {
     return null;
   }
-
-  const profile = businessData[0];
 
   return {
     id: '',
@@ -97,44 +101,21 @@ export async function fetchBookingProfile(slug: string): Promise<BookingBusiness
 /**
  * Fetch service packages for a business
  */
-export async function fetchServicePackages(businessUserId: string): Promise<ServicePackage[]> {
-  const { data: packagesData, error } = await supabase
-    .rpc("get_public_service_packages", { business_user_id: businessUserId });
-
-  if (error || !packagesData) {
-    console.error("[fetchServicePackages] Error:", error);
-    return [];
-  }
-
-  return packagesData.map((p: Record<string, unknown>) => ({
-    id: p.id as string,
-    name: p.name as string,
-    description: p.description as string | null,
-    package_price: p.package_price as number,
-    discount_type: p.discount_type as string,
-    discount_value: p.discount_value as number,
-    estimated_duration: p.estimated_duration as number | null,
-    services: (p.services as ServicePackageItem[]) || [],
-  }));
+export async function fetchServicePackages(bookingSlug: string): Promise<ServicePackage[]> {
+  const { data, error } = await fetchPublicServicePackages(bookingSlug);
+  if (error || !Array.isArray(data)) return [];
+  return data as ServicePackage[];
 }
 
 /**
  * Fetch booked slots for a specific date
  */
 export async function fetchBookedSlots(
-  businessUserId: string, 
-  bookingDate: string
+  bookingSlug: string,
+  bookingDate: string,
 ): Promise<BookedSlot[]> {
-  const { data, error } = await supabase.rpc("get_booked_slots", {
-    business_user_id: businessUserId,
-    booking_date: bookingDate,
-  });
-
-  if (error || !data) {
-    console.error("[fetchBookedSlots] Error:", error);
-    return [];
-  }
-
+  const { data, error } = await fetchBookedSlotsForDate(bookingSlug, bookingDate);
+  if (error || !Array.isArray(data)) return [];
   return data as BookedSlot[];
 }
 

@@ -77,7 +77,7 @@ export default function ProviderProfile() {
         bookingSlug: data.booking_slug,
       });
 
-      const { data: serviceData, error: serviceError } = await fetchPublicServiceCatalog(data.user_id);
+      const { data: serviceData, error: serviceError } = await fetchPublicServiceCatalog(data.booking_slug || slug);
       setServicesError(Boolean(serviceError));
       setServices((serviceData || []) as PublicService[]);
       setLoading(false);

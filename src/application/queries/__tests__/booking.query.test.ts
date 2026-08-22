@@ -1,32 +1,32 @@
-jest.mock("@/integrations/supabase/client", () => ({
-  supabase: {
-    rpc: jest.fn(),
+jest.mock("@/lib/nextApiClient", () => ({
+  nextApi: {
+    publicBooking: {
+      get: jest.fn(),
+    },
   },
 }));
 
-import { supabase } from "@/integrations/supabase/client";
+import { nextApi } from "@/lib/nextApiClient";
 import { fetchBookingProfile } from "@/application/queries/booking.query";
 
 describe("fetchBookingProfile public booking constraints", () => {
-  const mockRpc = supabase.rpc as jest.Mock;
+  const mockGet = nextApi.publicBooking.get as jest.Mock;
 
   beforeEach(() => {
-    mockRpc.mockReset();
+    mockGet.mockReset();
   });
 
   it("returns null when slug lookup fails", async () => {
-    mockRpc.mockResolvedValue({ data: null, error: new Error("not found") });
+    mockGet.mockRejectedValue(new Error("not found"));
 
     const result = await fetchBookingProfile("missing-shop");
 
     expect(result).toBeNull();
-    expect(mockRpc).toHaveBeenCalledWith("get_public_booking_profile_v2", {
-      booking_slug_param: "missing-shop",
-    });
+    expect(mockGet).toHaveBeenCalledWith("missing-shop", "profile");
   });
 
   it("returns null when no public profile exists", async () => {
-    mockRpc.mockResolvedValue({ data: [], error: null });
+    mockGet.mockRejectedValue(new Error("public_booking_unavailable"));
 
     const result = await fetchBookingProfile("no-public-profile");
 
@@ -34,9 +34,8 @@ describe("fetchBookingProfile public booking constraints", () => {
   });
 
   it("maps public profile fields, applies safe defaults, and never includes stripe_account_id", async () => {
-    mockRpc.mockResolvedValue({
-      data: [
-        {
+    mockGet.mockResolvedValue({
+      data: {
           user_id: "owner-1",
           business_name: "Acme Auto",
           logo_url: "https://cdn.example.com/logo.png",
@@ -58,9 +57,8 @@ describe("fetchBookingProfile public booking constraints", () => {
           google_review_url: null,
           yelp_review_url: null,
           oil_price_per_quart: 5,
+          stripe_account_id: "must-not-cross-boundary",
         },
-      ],
-      error: null,
     });
 
     const result = await fetchBookingProfile("acme");
@@ -94,15 +92,12 @@ describe("fetchBookingProfile public booking constraints", () => {
   });
 
   it("preserves a configured zero-dollar additional oil quart price", async () => {
-    mockRpc.mockResolvedValue({
-      data: [
-        {
+    mockGet.mockResolvedValue({
+      data: {
           user_id: "owner-1",
           business_name: "Acme Auto",
           oil_price_per_quart: 0,
         },
-      ],
-      error: null,
     });
 
     const result = await fetchBookingProfile("acme");

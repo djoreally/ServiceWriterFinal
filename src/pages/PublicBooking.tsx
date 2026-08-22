@@ -410,6 +410,7 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
   // ── Slot / scheduling hook ─────────────────────────────────────────────
   const slots = useBookingSlots({
     businessUserId: business?.user_id,
+    bookingSlug: slug,
     bookingContextId: bs.bookingContextId,
     openingTime: business?.opening_time ?? null,
     closingTime: business?.closing_time ?? null,
@@ -573,7 +574,8 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
         return;
       }
 
-      const { data: businessData, error: businessError } = await fetchPublicBookingProfile(slug);
+      const { data: rawBusinessData, error: businessError } = await fetchPublicBookingProfile(slug);
+      const businessData = Array.isArray(rawBusinessData) ? rawBusinessData as Record<string, any>[] : null;
 
       if (businessError || !businessData || businessData.length === 0) {
         setNotFound(true);
@@ -650,19 +652,21 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
           : ["oil_change"],
       });
 
-      const { data: servicesData } = await fetchPublicServiceCatalog(profile.user_id);
-      setServices(servicesData || []);
+      const { data: rawServicesData } = await fetchPublicServiceCatalog(slug);
+      const servicesData = Array.isArray(rawServicesData) ? rawServicesData as ServiceCatalogItem[] : [];
+      setServices(servicesData);
       fetchPublicDetailingPricingRules(profile.user_id).then(setDetailingRules).catch(()=>setDetailingRules([]));
 
       // Public blocked dates (fail-soft: empty list on error)
-      fetchPublicBlockedDates(profile.user_id)
+      fetchPublicBlockedDates(slug)
         .then(setBlockedDates)
         .catch(() => setBlockedDates([]));
 
 
-      const { data: packagesData } = await fetchPublicServicePackages(profile.user_id);
+      const { data: rawPackagesData } = await fetchPublicServicePackages(slug);
+      const packagesData = Array.isArray(rawPackagesData) ? rawPackagesData as unknown as ServicePackage[] : [];
       setPackages(
-        (packagesData || []).map((p: any) => ({ ...p, services: p.services || [] })),
+        packagesData.map((p) => ({ ...p, services: p.services || [] })),
       );
 
       // Fetch subscription plans for this business

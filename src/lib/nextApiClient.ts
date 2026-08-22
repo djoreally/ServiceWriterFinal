@@ -72,6 +72,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const nextApi = {
   health: () => request<{ ok: boolean; version: string }>("/v1/health"),
+  publicBooking: {
+    get: (slug: string, section: "profile" | "catalog" | "packages" | "slots" | "blocked_dates" | "settings" = "profile", date?: string) => {
+      const params = new URLSearchParams({ section });
+      if (date) params.set("date", date);
+      return request<{ data: unknown }>(`/v1/public-booking/${encodeURIComponent(slug)}?${params.toString()}`);
+    },
+  },
   workspaces: async (): Promise<WorkspaceMembership[]> => {
     const response = await request<{ data: unknown[] }>("/v1/workspaces");
     const parsed = z.array(workspaceSchema).safeParse(response.data);

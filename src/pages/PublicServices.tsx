@@ -79,8 +79,8 @@ export default function PublicServices({ tenantSlug, embedded = false }: PublicS
         }
 
         const [servicesResult, packagesResult] = await Promise.all([
-          fetchPublicServiceCatalog(profile.user_id),
-          fetchPublicServicePackages(profile.user_id),
+          fetchPublicServiceCatalog(slug),
+          fetchPublicServicePackages(slug),
         ]);
 
         if (!isMounted) return;

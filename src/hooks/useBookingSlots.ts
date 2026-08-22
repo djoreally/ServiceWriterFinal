@@ -6,8 +6,8 @@
  */
 
 import { useCallback, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { fetchRouteSafeSlots } from "@/application/queries/booking-context.query";
+import { fetchBookedSlotsForDate } from "@/application/queries/public-booking.query";
 import { format, isBefore, addDays, addMinutes, addHours, setHours, setMinutes, startOfDay, parse } from "date-fns";
 import { toast } from "sonner";
 import type { BookingAction, BookingState } from "@/hooks/useBookingState";
@@ -19,6 +19,8 @@ import { isOperatingDay, resolveDayWindow, type DayHoursMap } from "@/lib/busine
 
 export interface SlotsDeps {
   businessUserId: string | undefined;
+  /** Canonical public booking slug used by the secure API boundary. */
+  bookingSlug?: string;
   bookingContextId: string | null;
   openingTime: string | null;
   closingTime: string | null;
@@ -53,6 +55,7 @@ export interface SlotsDeps {
 export function useBookingSlots(deps: SlotsDeps) {
   const {
     businessUserId,
+    bookingSlug,
     bookingContextId,
     openingTime,
     closingTime,
@@ -85,12 +88,11 @@ export function useBookingSlots(deps: SlotsDeps) {
         const { data, error } = await fetchRouteSafeSlots(bookingContextId, businessUserId, dateStr);
         if (!error && data?.slots) {
           dispatch({ type: "SET_ROUTE_SAFE_SLOTS", slots: data.slots });
-          // Also fetch legacy for weather guard / conflict display
-          const { data: legacyData } = await supabase.rpc("get_booked_slots", {
-            business_user_id: businessUserId,
-            booking_date: dateStr,
-          });
-          dispatch({ type: "SET_BOOKED_SLOTS", slots: (legacyData || []) as BookingState["bookedSlots"] });
+          // Fetch conflict data through the same secure public API boundary.
+          const { data: publicData } = bookingSlug
+            ? await fetchBookedSlotsForDate(bookingSlug, dateStr)
+            : { data: null };
+          dispatch({ type: "SET_BOOKED_SLOTS", slots: (publicData || []) as BookingState["bookedSlots"] });
           dispatch({ type: "SET_LOADING_SLOTS", loading: false });
           return;
         }
@@ -99,16 +101,15 @@ export function useBookingSlots(deps: SlotsDeps) {
       }
     }
 
-    // Legacy fallback
+    // Public conflict fallback remains behind the secure API boundary.
     dispatch({ type: "SET_ROUTE_SAFE_SLOTS", slots: [] });
-    const { data, error } = await supabase.rpc("get_booked_slots", {
-      business_user_id: businessUserId,
-      booking_date: dateStr,
-    });
+    const { data, error } = bookingSlug
+      ? await fetchBookedSlotsForDate(bookingSlug, dateStr)
+      : { data: null, error: new Error("missing_booking_slug") };
 
     dispatch({ type: "SET_BOOKED_SLOTS", slots: error ? [] : (data as BookingState["bookedSlots"]) || [] });
     dispatch({ type: "SET_LOADING_SLOTS", loading: false });
-  }, [businessUserId, bookingContextId, dispatch]);
+  }, [businessUserId, bookingSlug, bookingContextId, dispatch]);
 
   // Re-fetch when date changes
   useEffect(() => {
@@ -118,48 +119,16 @@ export function useBookingSlots(deps: SlotsDeps) {
     }
   }, [selectedDate, businessUserId, fetchBookedSlots, dispatch]);
 
-  // ── Realtime subscription ───────────────────────────────────────────────
+  // ── Secure refresh polling ───────────────────────────────────────────────
+  // Anonymous clients do not subscribe directly to the appointments table.
+  // Refreshing through the public API keeps payloads within the audited boundary.
   useEffect(() => {
-    if (!businessUserId || !selectedDate) return;
-
-    const dateStr = format(selectedDate, "yyyy-MM-dd");
-
-    const channel = supabase
-      .channel("appointments-realtime")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "appointments",
-          filter: `user_id=eq.${businessUserId}`,
-        },
-        (payload) => {
-          const newRecord = payload.new as { scheduled_date?: string; scheduled_time?: string } | null;
-          const oldRecord = payload.old as { scheduled_date?: string } | null;
-
-          const affectsSelectedDate =
-            newRecord?.scheduled_date === dateStr || oldRecord?.scheduled_date === dateStr;
-
-          if (affectsSelectedDate) {
-            fetchBookedSlots(selectedDate);
-
-            if (payload.eventType === "INSERT" && selectedTime && newRecord?.scheduled_time) {
-              const bookedTime = newRecord.scheduled_time.substring(0, 5);
-              if (bookedTime === selectedTime) {
-                toast.info("Your selected time slot was just booked. Please choose another time.");
-                dispatch({ type: "SET_SELECTED_TIME", time: "" });
-              }
-            }
-          }
-        },
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [businessUserId, selectedDate, selectedTime, fetchBookedSlots, dispatch]);
+    if (!bookingSlug || !selectedDate) return;
+    const interval = window.setInterval(() => {
+      void fetchBookedSlots(selectedDate);
+    }, 30_000);
+    return () => window.clearInterval(interval);
+  }, [bookingSlug, selectedDate, fetchBookedSlots]);
 
   // ── Pure slot helpers ───────────────────────────────────────────────────
 
