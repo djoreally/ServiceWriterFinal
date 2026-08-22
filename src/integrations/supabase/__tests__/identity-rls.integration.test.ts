@@ -36,4 +36,17 @@ describe("authenticated cross-workspace identity RLS", () => {
     expect(result.data ?? []).toHaveLength(0);
     await client.auth.signOut();
   });
+
+  testIntegration("foreign workspace operational and financial rows are not visible", async () => {
+    const client = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+    const { error: signInError } = await client.auth.signInWithPassword({ email: fixture!.email, password: fixture!.password });
+    expect(signInError).toBeNull();
+    const tenantTables = ["customers", "vehicles", "appointments", "quotes", "invoices", "payments", "work_orders", "service_records", "dispatch_events", "message_logs", "fleet_clients"] as const;
+    for (const table of tenantTables) {
+      const result = await client.from(table).select("workspace_id").eq("workspace_id", fixture!.workspaceB).limit(10);
+      expect(result.error).toBeNull();
+      expect(result.data ?? []).toHaveLength(0);
+    }
+    await client.auth.signOut();
+  });
 });
