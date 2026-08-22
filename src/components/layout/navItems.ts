@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   Calculator,
   Users,
+  UserRoundPlus,
   Car,
   ClipboardList,
   Package,
@@ -163,6 +164,7 @@ const buildAllGroups = (terms: Terms): NavGroup[] => [
     items: [
       { path: "/settings?tab=business", label: "Business Profile", icon: Settings },
       { path: "/settings?tab=team", label: "Employees", icon: Users },
+      { path: "/invitations", label: "Invitations", icon: UserRoundPlus },
       { path: "/settings?tab=integrations", label: "Integrations", icon: Zap },
       { path: "/settings?tab=payments", label: "Billing", icon: CreditCard },
       { path: "/settings?tab=comms", label: "Notifications", icon: Mail },

@@ -12,9 +12,12 @@ import { useTeamRole } from "@/hooks/useTeamRole";
 
 const LANDING: Record<string, string> = {
   admin: "/dashboard",
-  manager: "/dashboard",
+  owner: "/dashboard",
+  manager: "/dispatch",
   dispatcher: "/dispatch",
+  fleet_manager: "/fleet-os",
   technician: "/tech-app",
+  customer: "/customer/dashboard",
 };
 
 export const AccessDenied = () => {

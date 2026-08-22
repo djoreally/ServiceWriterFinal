@@ -169,6 +169,8 @@ const Invoices = lazyRetry(() => import("./pages/Invoices"));
 const Operations = lazyRetry(() => import("./pages/Operations"));
 const TaxCompliance = lazyRetry(() => import("./pages/TaxCompliance"));
 const TeamJoin = lazyRetry(() => import("./pages/TeamJoin"));
+const InvitationCenter = lazyRetry(() => import("./pages/InvitationCenter"));
+const InvitationAccept = lazyRetry(() => import("./pages/InvitationAccept"));
 const LegacyInviteRedirect = lazyRetry(() => import("./pages/LegacyInviteRedirect"));
 const ForgotPassword = lazyRetry(() => import("./pages/ForgotPassword"));
 const ResetPassword = lazyRetry(() => import("./pages/ResetPassword"));
@@ -430,6 +432,7 @@ export const AppRoutes = () => {
               <Route path="/fleet" element={<RequireAuth><RouteErrorBoundary section="Fleet"><Fleet /></RouteErrorBoundary></RequireAuth>} />
               <Route path="/fleet/:id" element={<RequireAuth><RouteErrorBoundary section="Fleet"><VanDetail /></RouteErrorBoundary></RequireAuth>} />
               <Route path="/team-os" element={<RequireAuth><RouteRoleGuard><RouteErrorBoundary section="Team OS"><TechnicianOS /></RouteErrorBoundary></RouteRoleGuard></RequireAuth>} />
+              <Route path="/invitations" element={<RequireAuth><RouteRoleGuard><RouteErrorBoundary section="Invitations"><InvitationCenter /></RouteErrorBoundary></RouteRoleGuard></RequireAuth>} />
               <Route path="/technician-os" element={<RequireAuth><Navigate to="/team-os" replace /></RequireAuth>} />
               <Route path="/technician-os/profile" element={<RequireAuth><Navigate to="/team-os" replace /></RequireAuth>} />
               <Route path="/dispatch-engine" element={<RequireAuth><RouteErrorBoundary section="Fleet"><DispatchEngine /></RouteErrorBoundary></RequireAuth>} />
@@ -512,7 +515,7 @@ export const AppRoutes = () => {
               <Route path="/team/login" element={<Navigate to="/login" replace />} />
               <Route path="/team/dashboard" element={<Navigate to="/tech-app" replace />} />
               <Route path="/invite/:token" element={<TeamJoin />} />
-              <Route path="/team/join" element={<LegacyInviteRedirect />} />
+              <Route path="/team/join" element={<InvitationAccept />} />
               {/* Tech App - Field Technician Mobile App */}
               <Route path="/tech-app" element={<RequireAuth><RouteErrorBoundary section="Tech App"><TechAppLayout /></RouteErrorBoundary></RequireAuth>}>
                 <Route index element={<TechToday />} />

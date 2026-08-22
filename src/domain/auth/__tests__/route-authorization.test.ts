@@ -9,6 +9,7 @@ describe("role-by-route authorization contract", () => {
     expect(canAccessRoute(role, "/settings")).toBe(owner);
     expect(canAccessRoute(role, "/admin")).toBe(owner);
     expect(canAccessRoute(role, "/vehicle-specs")).toBe(owner);
+    expect(canAccessRoute(role, "/invitations")).toBe(owner);
     expect(canAccessRoute(role, "/receptionist")).toBe(owner);
     expect(canAccessRoute(role, "/marketplace/listing")).toBe(owner);
   });
@@ -66,6 +67,13 @@ describe("role-by-route authorization contract", () => {
     expect(canAccessRoute("customer", "/customers")).toBe(false);
     expect(canAccessRoute("customer", "/dispatch")).toBe(false);
     expect(canWrite("customer", "invoices")).toBe(false);
+  });
+
+  it("keeps fleet managers in Fleet OS and customers in self-service", () => {
+    expect(canAccessRoute("fleet_manager", "/fleet-os")).toBe(true);
+    expect(canAccessRoute("fleet_manager", "/invitations")).toBe(false);
+    expect(canAccessRoute("customer", "/customer/profile")).toBe(true);
+    expect(canAccessRoute("customer", "/invitations")).toBe(false);
   });
 
   it("denies every protected route for an unresolved identity", () => {

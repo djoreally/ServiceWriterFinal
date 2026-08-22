@@ -28,6 +28,28 @@ const workspaceSchema = z.object({
 });
 
 export type WorkspaceMembership = z.infer<typeof workspaceSchema>;
+export type InvitationRecord = {
+  id: string;
+  workspace_id: string;
+  customer_id: string | null;
+  invited_email: string;
+  invited_role: string;
+  expires_at: string;
+  accepted_at: string | null;
+  accepted_by: string | null;
+  revoked_at: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+};
+export type InvitationCreatePayload = {
+  workspace_id: string;
+  invited_email: string;
+  invited_role: "owner" | "admin" | "manager" | "service_advisor" | "technician" | "dispatcher" | "receptionist" | "fleet_manager" | "viewer" | "customer";
+  customer_id?: string;
+  expires_in_days?: number;
+};
+export type InvitationDelivery = { status: "accepted" | "failed"; provider?: string; provider_message_id?: string; error?: string };
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -55,6 +77,16 @@ export const nextApi = {
     const parsed = z.array(workspaceSchema).safeParse(response.data);
     if (!parsed.success) throw new ApiClientError(502, "invalid_api_response", "Workspace response was invalid");
     return parsed.data;
+  },
+  identity: {
+    get: () => request<{ data: { user: { id: string; email: string | null }; memberships: unknown[]; customer_links: unknown[] } }>("/v1/identity"),
+  },
+  invitations: {
+    list: (workspaceId: string) => request<{ data: InvitationRecord[] }>(`/v1/invitations?workspace_id=${encodeURIComponent(workspaceId)}&limit=100`),
+    create: (payload: InvitationCreatePayload) => request<{ data: InvitationRecord; delivery: InvitationDelivery; token?: string }>("/v1/invitations", { method: "POST", body: JSON.stringify(payload) }),
+    resend: (id: string) => request<{ data: InvitationRecord; delivery: InvitationDelivery; token?: string }>(`/v1/invitations/${encodeURIComponent(id)}/resend`, { method: "POST" }),
+    revoke: (id: string) => request<{ data: InvitationRecord }>(`/v1/invitations/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    accept: (id: string, token: string) => request<{ data: InvitationRecord }>(`/v1/invitations/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify({ token }) }),
   },
   customers: {
     list: (workspaceId: string, search?: string) => request<{ data: unknown[] }>(`/v1/customers?workspace_id=${encodeURIComponent(workspaceId)}${search ? `&search=${encodeURIComponent(search)}` : ""}`),

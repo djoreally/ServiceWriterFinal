@@ -55,6 +55,7 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
 
   // --- owner / admin only ----------------------------------------------
   { match: "/settings", roles: ADMIN },
+  { match: "/invitations", roles: ADMIN },
   { match: "/receptionist", roles: ADMIN },
   { match: "/vehicle-specs", roles: ADMIN },
   { match: "/admin", roles: ADMIN },
