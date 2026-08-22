@@ -113,6 +113,7 @@ const InsightsFeed = lazyRetry(() => import("./pages/InsightsFeed"));
 const TechnicalArticle = lazyRetry(() => import("./pages/TechnicalArticle"));
 const Onboarding = lazyRetry(() => import("./pages/Onboarding"));
 const Dashboard = lazyRetry(() => import("./pages/Dashboard"));
+const CRM = lazyRetry(() => import("./pages/CRM"));
 const Customers = lazyRetry(() => import("./pages/Customers"));
 const CustomerDetail = lazyRetry(() => import("./pages/CustomerDetail"));
 const Vehicles = lazyRetry(() => import("./pages/Vehicles"));
@@ -423,6 +424,7 @@ export const AppRoutes = () => {
               <Route path="/plans" element={<RequireAuth><Plans /></RequireAuth>} />
               {/* Core dashboard routes — isolated error boundary */}
               <Route path="/dashboard" element={<RequireAuth><RouteErrorBoundary section="Dashboard"><Dashboard /></RouteErrorBoundary></RequireAuth>} />
+              <Route path="/crm" element={<RequireAuth><RouteRoleGuard><RouteErrorBoundary section="CRM"><CRM /></RouteErrorBoundary></RouteRoleGuard></RequireAuth>} />
               <Route path="/customers" element={<RequireAuth><RouteErrorBoundary section="Dashboard"><Customers /></RouteErrorBoundary></RequireAuth>} />
               <Route path="/customers/:id" element={<RequireAuth><RouteErrorBoundary section="Dashboard"><CustomerDetail /></RouteErrorBoundary></RequireAuth>} />
               <Route path="/vehicles" element={<RequireAuth><RouteErrorBoundary section="Dashboard"><Vehicles /></RouteErrorBoundary></RequireAuth>} />

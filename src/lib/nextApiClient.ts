@@ -85,6 +85,33 @@ export const nextApi = {
     if (!parsed.success) throw new ApiClientError(502, "invalid_api_response", "Workspace response was invalid");
     return parsed.data;
   },
+  crm: {
+    access: (workspaceId: string) => request<{ data: { workspace_id: string; can_view: boolean } }>(`/v1/crm/access?workspace_id=${encodeURIComponent(workspaceId)}`),
+    profiles: {
+      list: (workspaceId: string, options: { search?: string; lifecycleStage?: string; limit?: number; offset?: number } = {}) => {
+        const params = new URLSearchParams({ workspace_id: workspaceId });
+        if (options.search) params.set("search", options.search);
+        if (options.lifecycleStage) params.set("lifecycle_stage", options.lifecycleStage);
+        if (options.limit) params.set("limit", String(options.limit));
+        if (options.offset) params.set("offset", String(options.offset));
+        return request<{ data: unknown[]; meta: { limit: number; offset: number; total: number } }>(`/v1/crm/profiles?${params.toString()}`);
+      },
+      create: (payload: Record<string, unknown>) => request<{ data: unknown }>("/v1/crm/profiles", { method: "POST", body: JSON.stringify(payload) }),
+      update: (id: string, workspaceId: string, payload: Record<string, unknown>) => request<{ data: unknown }>("/v1/crm/profiles", { method: "PATCH", body: JSON.stringify({ ...payload, id, workspace_id: workspaceId }) }),
+    },
+    activities: {
+      list: (workspaceId: string, customerId?: string) => {
+        const params = new URLSearchParams({ workspace_id: workspaceId });
+        if (customerId) params.set("customer_id", customerId);
+        return request<{ data: unknown[]; meta: { limit: number; offset: number; total: number } }>(`/v1/crm/activities?${params.toString()}`);
+      },
+      create: (payload: Record<string, unknown>) => request<{ data: unknown }>("/v1/crm/activities", { method: "POST", body: JSON.stringify(payload) }),
+    },
+    campaigns: {
+      list: (workspaceId: string) => request<{ data: unknown[]; meta: { limit: number; offset: number; total: number } }>(`/v1/crm/campaigns?workspace_id=${encodeURIComponent(workspaceId)}`),
+      createDraft: (payload: Record<string, unknown>) => request<{ data: unknown }>("/v1/crm/campaigns", { method: "POST", body: JSON.stringify(payload) }),
+    },
+  },
   identity: {
     get: () => request<{ data: { user: { id: string; email: string | null }; memberships: unknown[]; customer_links: unknown[] } }>("/v1/identity"),
   },

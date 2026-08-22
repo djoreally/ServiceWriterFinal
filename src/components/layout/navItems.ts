@@ -39,6 +39,7 @@ import {
   Tag,
   Store,
   Star,
+  ContactRound,
 } from "lucide-react";
 
 
@@ -141,6 +142,12 @@ const buildAllGroups = (terms: Terms): NavGroup[] => [
       { path: "/marketplace/leads", label: "Booking Requests", icon: Users },
       { path: "/marketplace/reviews", label: "Reviews", icon: Star },
       { path: "/marketplace/analytics", label: "Marketplace Analytics", icon: TrendingUp },
+    ],
+  },
+  {
+    label: "CRM",
+    items: [
+      { path: "/crm", label: "CRM Dashboard", icon: ContactRound },
     ],
   },
   {

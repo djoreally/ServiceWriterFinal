@@ -74,3 +74,27 @@ export const paginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),
   offset: z.coerce.number().int().min(0).default(0),
 });
+
+/**
+ * Authorizes CRM access against the active request identity and workspace.
+ * The database function remains the source of truth for capability grants and
+ * RLS still applies to every subsequent table query.
+ */
+export async function requireCrmCapability(
+  request: Request,
+  workspaceId: string,
+  capability: string,
+) {
+  const parsedWorkspace = workspaceIdSchema.safeParse(workspaceId);
+  if (!parsedWorkspace.success) throw new ApiError(400, "Invalid workspace_id", "invalid_workspace");
+
+  const { supabase, user } = await requireUser(request);
+  const { data, error } = await supabase.rpc("has_crm_capability", {
+    target_workspace_id: workspaceId,
+    required_capability: capability,
+  });
+  if (error) throw error;
+  if (data !== true) throw new ApiError(403, "CRM capability required", "crm_forbidden");
+
+  return { supabase, user };
+}

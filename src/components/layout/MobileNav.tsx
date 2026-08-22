@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useTerminology } from "@/contexts/TerminologyContext";
@@ -9,18 +9,13 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { BriefcaseBusiness, ChevronRight, SlidersHorizontal } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { getNavGroups, getFooterNavItems, type NavItem } from "./navItems";
-import {
-  filterGroupsForMode,
-  groupContainsPath,
-  navItemMatchesPath,
-  SIDEBAR_MODE_KEY,
-  type SidebarMode,
-} from "./navUtils";
+import { filterGroupsForMode, groupContainsPath, navItemMatchesPath, type SidebarMode } from "./navUtils";
 import { useTeamRole } from "@/hooks/useTeamRole";
 import { useWorkspaceBrand } from "@/hooks/useWorkspaceBrand";
 import { ProgressiveImage } from "@/components/media/ProgressiveImage";
+import { DashboardModeToggle } from "./DashboardModeToggle";
 
 interface MobileNavProps {
   open: boolean;
@@ -32,14 +27,7 @@ export const MobileNav = ({ open, onClose }: MobileNavProps) => {
   const { terms } = useTerminology();
   const { role } = useTeamRole();
   const brand = useWorkspaceBrand();
-  const [mode, setMode] = useState<SidebarMode>("daily");
-
-  useEffect(() => {
-    const storedMode = window.localStorage.getItem(SIDEBAR_MODE_KEY);
-    if (storedMode === "daily" || storedMode === "admin") {
-      setMode(storedMode);
-    }
-  }, []);
+  const mode = "daily" as SidebarMode;
 
   const allNavGroups = useMemo(() => getNavGroups(terms, role), [terms, role]);
   const navGroups = useMemo(
@@ -48,11 +36,6 @@ export const MobileNav = ({ open, onClose }: MobileNavProps) => {
   );
   const footerItems = getFooterNavItems(role);
   const isActive = (item: NavItem) => navItemMatchesPath(item, location.pathname);
-
-  const selectMode = (nextMode: SidebarMode) => {
-    setMode(nextMode);
-    window.localStorage.setItem(SIDEBAR_MODE_KEY, nextMode);
-  };
 
   const renderNavItem = (item: NavItem, nested = false) => {
     const Icon = item.icon;
@@ -119,30 +102,7 @@ export const MobileNav = ({ open, onClose }: MobileNavProps) => {
               <p className="text-xs text-muted-foreground font-normal truncate">{brand.tagline}</p>
             </div>
           </SheetTitle>
-          <div className="mt-4 grid grid-cols-2 gap-1 rounded-xl bg-muted/60 p-1">
-            <button
-              type="button"
-              onClick={() => selectMode("daily")}
-              className={cn(
-                "flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors",
-                mode === "daily" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <BriefcaseBusiness className="h-3.5 w-3.5" />
-              Daily
-            </button>
-            <button
-              type="button"
-              onClick={() => selectMode("admin")}
-              className={cn(
-                "flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors",
-                mode === "admin" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-              Admin
-            </button>
-          </div>
+          <div className="mt-4"><DashboardModeToggle onNavigate={onClose} /></div>
         </SheetHeader>
         <ScrollArea className="flex-1">
           <nav className="p-3 space-y-1">

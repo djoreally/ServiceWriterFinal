@@ -18,6 +18,7 @@ const OFFICE: AccessRole[] = ["admin", "owner", "manager"];
 const BOARD: AccessRole[] = ["admin", "owner", "manager", "dispatcher"];
 const SCHEDULING: AccessRole[] = [...BOARD, "fleet_manager"];
 const FLEET: AccessRole[] = ["admin", "owner", "manager", "dispatcher", "fleet_manager"];
+const CRM: AccessRole[] = ["admin", "owner", "manager", "dispatcher", "fleet_manager"];
 const TECH: AccessRole[] = ["technician"];
 const CUSTOMER: AccessRole[] = ["customer"];
 const EVERYONE: AccessRole[] = ["admin", "owner", "manager", "dispatcher", "fleet_manager", "technician"];
@@ -52,6 +53,11 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
 
   // --- technician field app --------------------------------------------
   { match: "/tech-app", roles: TECH },
+
+  // --- CRM workspace ----------------------------------------------------
+  // The page performs the capability check against the canonical API. This
+  // route-level rule keeps technicians and customer accounts out of CRM URLs.
+  { match: "/crm", roles: CRM },
 
   // --- owner / admin only ----------------------------------------------
   { match: "/settings", roles: ADMIN },
