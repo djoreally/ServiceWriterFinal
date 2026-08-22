@@ -39,7 +39,15 @@ export default function CRM() {
   useEffect(() => {
     let active = true;
     async function load() {
-      if (!selectedWorkspaceId) return;
+      if (!selectedWorkspaceId) {
+        setProfiles([]);
+        setCampaigns([]);
+        setActivities([]);
+        setDenied(false);
+        setError(null);
+        setLoading(false);
+        return;
+      }
       setLoading(true);
       setDenied(false);
       setError(null);
@@ -93,7 +101,15 @@ export default function CRM() {
           {selectedWorkspace && <div className="rounded-lg border bg-card px-3 py-2 text-left text-xs text-muted-foreground">Workspace<strong className="mt-0.5 block text-sm text-foreground">{selectedWorkspace.workspaces?.name}</strong></div>}
         </header>
 
-        {workspaceLoading || loading ? (
+        {workspaceLoading ? (
+          <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground" role="status">Loading available workspaces…</div>
+        ) : !selectedWorkspaceId ? (
+          <div className="rounded-xl border border-primary/20 bg-primary/5 p-6">
+            <h2 className="font-semibold">Select a workspace to open CRM</h2>
+            <p className="mt-1 text-sm text-muted-foreground">CRM data is isolated by workspace. Use the workspace selector in the header, then return here to load that workspace’s customer relationship data.</p>
+            <Link className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-primary" to="/dashboard">Open Operations workspace selector <ArrowRight className="h-4 w-4" /></Link>
+          </div>
+        ) : loading ? (
           <div className="rounded-xl border bg-card p-6 text-sm text-muted-foreground" role="status">Loading CRM workspace…</div>
         ) : denied ? (
           <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-6">
