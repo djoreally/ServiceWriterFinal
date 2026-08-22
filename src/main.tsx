@@ -11,6 +11,7 @@ import { PostHogProvider } from "@posthog/react";
 import { applySocialMeta } from "./lib/seo";
 import { checkAppVersion } from "./lib/versionCheck";
 import { getAppIdentityMismatch, publishAppIdentity, renderIdentityFailure } from "./lib/appIdentity";
+import { supabase } from "./integrations/supabase/client";
 
 // Expose only safe, allowlisted Vite env values to runtime helpers. Assigning
 // the full import.meta.env object embeds every VITE_* value into production JS,
@@ -181,7 +182,7 @@ function mountApp() {
     <ErrorBoundary>
       {isPostHogEnabled ? (
       <PostHogProvider apiKey={POSTHOG_KEY} options={posthogOptions}>
-        <AuthProvider>
+        <AuthProvider authStateSource={supabase.auth}>
           <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
             <App />
             {/* GDPR: show consent banner on first visit */}
@@ -190,7 +191,7 @@ function mountApp() {
         </AuthProvider>
       </PostHogProvider>
       ) : (
-      <AuthProvider>
+      <AuthProvider authStateSource={supabase.auth}>
         <ThemeProvider defaultTheme="light" storageKey="vite-ui-theme">
           <App />
           {/* GDPR: show consent banner on first visit */}
