@@ -1,6 +1,17 @@
 import { createSupabaseAdminClient } from "@/lib/supabase";
 import type { InboundReply, MessagingAdapter, NormalizedDeliveryEvent } from "./types";
 
+const MAX_WEBHOOK_BODY_BYTES = 256 * 1024;
+function parseWebhookPayload(rawBody: string): Record<string, unknown> | null {
+  if (new TextEncoder().encode(rawBody).byteLength > MAX_WEBHOOK_BODY_BYTES) return null;
+  try {
+    const parsed = JSON.parse(rawBody) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
 function externalEventId(request: Request, payload: Record<string, unknown>): string {
   return request.headers.get("svix-id") || request.headers.get("x-twilio-request-id") || String(payload.id || payload.MessageSid || payload.SmsSid || crypto.randomUUID());
 }
@@ -26,8 +37,8 @@ async function recordWebhookEvent(supabase: ReturnType<typeof createSupabaseAdmi
 }
 
 export async function ingestDeliveryWebhook(provider: string, adapter: MessagingAdapter, request: Request, rawBody: string): Promise<{ accepted: boolean; duplicate: boolean; count: number }> {
-  if (!adapter.verifyWebhook(request, rawBody)) return { accepted: false, duplicate: false, count: 0 };
-  const payload = JSON.parse(rawBody) as Record<string, unknown>;
+  const payload = parseWebhookPayload(rawBody);
+  if (!payload || !adapter.verifyWebhook(request, rawBody)) return { accepted: false, duplicate: false, count: 0 };
   const events = adapter.normalizeDelivery(rawBody, request);
   const supabase = createSupabaseAdminClient();
   const workspaceId = await findWorkspaceForMessage(supabase, provider, events[0]?.providerMessageId);
@@ -71,8 +82,8 @@ async function findMessageId(supabase: ReturnType<typeof createSupabaseAdminClie
 }
 
 export async function ingestInboundWebhook(provider: string, adapter: MessagingAdapter, request: Request, rawBody: string): Promise<{ accepted: boolean; duplicate: boolean; count: number }> {
-  if (!adapter.verifyWebhook(request, rawBody) || !adapter.normalizeInbound) return { accepted: false, duplicate: false, count: 0 };
-  const payload = JSON.parse(rawBody) as Record<string, unknown>;
+  const payload = parseWebhookPayload(rawBody);
+  if (!payload || !adapter.verifyWebhook(request, rawBody) || !adapter.normalizeInbound) return { accepted: false, duplicate: false, count: 0 };
   const replies: InboundReply[] = adapter.normalizeInbound(rawBody, request);
   const supabase = createSupabaseAdminClient();
   const workspaceId = await findWorkspaceByDestination(supabase, provider, replies[0]?.to);
