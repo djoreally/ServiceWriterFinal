@@ -1,9 +1,8 @@
-/**
- * Retention verification queries — snapshot counts and recent activity for the
- * one-click retention verification page. Data is scoped to the current user
- * and today's UTC day boundary (matching the previous inline behaviour).
+/** Retention verification — canonical service completion snapshot.
+ * Retention/review automation tables have not been rebuilt on Final yet.
  */
 import { supabase } from "@/integrations/supabase/client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 export interface RetentionVerificationCounts {
   servicesCompleted: number;
@@ -13,9 +12,7 @@ export interface RetentionVerificationCounts {
   reviewEmailsQueued: number;
   reviewEmailsSent: number;
 }
-
 export type RetentionVerificationRow = Record<string, unknown> & { id: string };
-
 export interface RetentionVerificationSnapshot {
   counts: RetentionVerificationCounts;
   recentEvents: RetentionVerificationRow[];
@@ -29,78 +26,28 @@ function startOfTodayIso(): string {
   return d.toISOString();
 }
 
-export async function fetchRetentionVerificationSnapshot(
-  userId: string,
-): Promise<RetentionVerificationSnapshot> {
+export async function fetchRetentionVerificationSnapshot(_userId: string): Promise<RetentionVerificationSnapshot> {
+  const context = await resolveCurrentWorkspace();
+  if (!context) {
+    return { counts: { servicesCompleted: 0, retentionEvents: 0, reviewActions: 0, reviewRequests: 0, reviewEmailsQueued: 0, reviewEmailsSent: 0 }, recentEvents: [], recentActions: [], recentEmails: [] };
+  }
   const todayIso = startOfTodayIso();
-
-  const [services, events, actions, reviews, queue, recentE, recentA, recentEm] = await Promise.all([
-    supabase
-      .from("services")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId)
-      .eq("status", "completed")
-      .gte("updated_at", todayIso),
-    supabase
-      .from("retention_events")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId)
-      .gte("occurred_at", todayIso),
-    supabase
-      .from("retention_action_executions")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId)
-      .eq("action_type", "send_review_request")
-      .gte("created_at", todayIso),
-    supabase
-      .from("review_requests")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId)
-      .gte("created_at", todayIso),
-    supabase
-      .from("email_queue")
-      .select("id, status")
-      .eq("user_id", userId)
-      .eq("email_type", "review_request")
-      .gte("created_at", todayIso),
-    supabase
-      .from("retention_events")
-      .select("id, event_name, occurred_at, processed_at, customer_id")
-      .eq("user_id", userId)
-      .gte("occurred_at", todayIso)
-      .order("occurred_at", { ascending: false })
-      .limit(10),
-    supabase
-      .from("retention_action_executions")
-      .select("id, action_type, status, executed_at, created_at")
-      .eq("user_id", userId)
-      .gte("created_at", todayIso)
-      .order("created_at", { ascending: false })
-      .limit(10),
-    supabase
-      .from("email_queue")
-      .select("id, email_type, recipient_email, status, scheduled_for, sent_at, error_message")
-      .eq("user_id", userId)
-      .eq("email_type", "review_request")
-      .gte("created_at", todayIso)
-      .order("created_at", { ascending: false })
-      .limit(10),
-  ]);
-
-  const queueRows = (queue.data as Array<{ status: string }> | null) ?? [];
-
+  const { count, error } = await supabase.from("service_records")
+    .select("id", { count: "exact", head: true })
+    .eq("workspace_id", context.workspaceId)
+    .eq("status", "completed")
+    .gte("updated_at", todayIso);
+  if (error) throw error;
   return {
     counts: {
-      servicesCompleted: services.count ?? 0,
-      retentionEvents: events.count ?? 0,
-      reviewActions: actions.count ?? 0,
-      reviewRequests: reviews.count ?? 0,
-      reviewEmailsQueued: queueRows.length,
-      reviewEmailsSent: queueRows.filter((r) => r.status === "sent").length,
+      servicesCompleted: count ?? 0,
+      retentionEvents: 0,
+      reviewActions: 0,
+      reviewRequests: 0,
+      reviewEmailsQueued: 0,
+      reviewEmailsSent: 0,
     },
-    recentEvents: ((recentE.data as RetentionVerificationRow[] | null) ?? []),
-    recentActions: ((recentA.data as RetentionVerificationRow[] | null) ?? []),
-    recentEmails: ((recentEm.data as RetentionVerificationRow[] | null) ?? []),
+    recentEvents: [], recentActions: [], recentEmails: [],
   };
 }
 
@@ -113,33 +60,27 @@ export interface CompletedServiceForBackfill {
   updated_at: string;
 }
 
-export async function fetchTodaysCompletedServices(
-  userId: string,
-): Promise<CompletedServiceForBackfill[]> {
+export async function fetchTodaysCompletedServices(_userId: string): Promise<CompletedServiceForBackfill[]> {
+  const context = await resolveCurrentWorkspace();
+  if (!context) return [];
   const todayIso = startOfTodayIso();
-  const { data, error } = await supabase
-    .from("services")
-    .select("id, customer_id, vehicle_id, total_cost, service_date, updated_at")
-    .eq("user_id", userId)
+  const { data, error } = await (supabase.from("service_records") as any)
+    .select("id,customer_id,vehicle_id,total_amount,completed_at,created_at,updated_at")
+    .eq("workspace_id", context.workspaceId)
     .eq("status", "completed")
     .gte("updated_at", todayIso);
   if (error) throw error;
-  return (data ?? []) as CompletedServiceForBackfill[];
+  return ((data ?? []) as any[]).map((row) => ({
+    id: row.id,
+    customer_id: row.customer_id ?? null,
+    vehicle_id: row.vehicle_id ?? null,
+    total_cost: row.total_amount == null ? null : Number(row.total_amount),
+    service_date: (row.completed_at ?? row.created_at)?.slice(0, 10) ?? null,
+    updated_at: row.updated_at,
+  }));
 }
 
-export async function fetchExistingRetentionEventAggregateIds(
-  userId: string,
-  aggregateIds: string[],
-): Promise<Set<string>> {
-  if (aggregateIds.length === 0) return new Set();
-  const todayIso = startOfTodayIso();
-  const { data, error } = await supabase
-    .from("retention_events")
-    .select("aggregate_id")
-    .eq("user_id", userId)
-    .eq("event_name", "service_order.completed")
-    .in("aggregate_id", aggregateIds)
-    .gte("occurred_at", todayIso);
-  if (error) throw error;
-  return new Set(((data as Array<{ aggregate_id: string }> | null) ?? []).map((r) => r.aggregate_id));
+/** No retention_events store exists on Final yet, so no aggregate IDs are persisted. */
+export async function fetchExistingRetentionEventAggregateIds(_userId: string, _aggregateIds: string[]): Promise<Set<string>> {
+  return new Set();
 }
