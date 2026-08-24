@@ -1,18 +1,9 @@
 /**
- * useWorkspaceBrand — resolves the active workspace's brand (business name +
- * tagline + logo) so every in-app surface (sidebar, mobile nav, top header,
- * etc.) stays white-labeled to the owner the user is currently working under.
- *
- * For owners (admin) → reads their own business_profiles row.
- * For team members  → reads the owner's business_profiles row (via the
- *                     ownerUserId resolved by useTeamRole).
- *
- * Falls back to the platform brand ("Service Writer") while loading or when
- * onboarding hasn't filled in a business name yet.
+ * useWorkspaceBrand — active workspace branding from the canonical workspace
+ * and workspace_settings model.
  */
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
-import { useTeamRole } from "@/hooks/useTeamRole";
+import { fetchBusinessSettings } from "@/application/queries/settings.query";
 
 export interface WorkspaceBrand {
   name: string;
@@ -33,39 +24,33 @@ const PLATFORM_FALLBACK = {
   logoUrl: null as string | null,
 };
 
-export function useWorkspaceBrand(): WorkspaceBrand {
-  const { ownerUserId, loading: roleLoading } = useTeamRole();
+function splitAddress(address: string): { city: string | null; state: string | null } {
+  const parts = address.split(",").map((part) => part.trim()).filter(Boolean);
+  return {
+    city: parts.length >= 2 ? parts[parts.length - 2] : null,
+    state: parts.length >= 1 ? parts[parts.length - 1] : null,
+  };
+}
 
+export function useWorkspaceBrand(): WorkspaceBrand {
   const { data, isLoading } = useQuery({
-    queryKey: ["workspace-brand", ownerUserId],
-    enabled: Boolean(ownerUserId),
+    queryKey: ["workspace-brand", "active"],
+    queryFn: fetchBusinessSettings,
     staleTime: 5 * 60 * 1000,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("business_profiles")
-        .select("business_name, logo_url, address, city, state, phone, email, website_url")
-        .eq("user_id", ownerUserId!)
-        .maybeSingle();
-      if (error) throw error;
-      return data;
-    },
   });
 
-  const loading = roleLoading || (Boolean(ownerUserId) && isLoading);
-  const name =
-    (data?.business_name && data.business_name.trim()) || PLATFORM_FALLBACK.name;
-  const logoUrl = data?.logo_url ?? null;
+  const parsed = splitAddress(data?.address || "");
 
   return {
-    name,
+    name: data?.business_name?.trim() || PLATFORM_FALLBACK.name,
     tagline: PLATFORM_FALLBACK.tagline,
-    logoUrl,
-    address: data?.address ?? null,
-    city: data?.city ?? null,
-    state: data?.state ?? null,
-    phone: data?.phone ?? null,
-    email: data?.email ?? null,
-    website: data?.website_url ?? null,
-    loading,
+    logoUrl: data?.logo_url || null,
+    address: data?.address || null,
+    city: parsed.city,
+    state: parsed.state,
+    phone: data?.phone || null,
+    email: data?.email || null,
+    website: null,
+    loading: isLoading,
   };
 }
