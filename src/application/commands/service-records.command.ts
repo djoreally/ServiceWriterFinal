@@ -1,13 +1,10 @@
-/**
- * Service Records Commands — Write operations for service records.
- */
-import { supabase } from "@/integrations/supabase/client";
+/** Service Records Commands — canonical write operations. */
+import { nextApi } from "@/lib/nextApiClient";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
-/** Delete a service record */
-export async function deleteServiceRecord(id: string, reason?: string): Promise<void> {
-  const { error } = await supabase.rpc('soft_delete_service', {
-    _service_id: id,
-    _reason: reason ?? null,
-  });
-  if (error) throw error;
+/** Void a service record while preserving its audit history. */
+export async function deleteServiceRecord(id: string, _reason?: string): Promise<void> {
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) throw new Error("Select a workspace before voiding a service record.");
+  await nextApi.serviceRecords.remove(workspaceId, id);
 }
