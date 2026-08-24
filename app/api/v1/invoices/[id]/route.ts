@@ -58,7 +58,7 @@ function canonicalStatus(value?: z.infer<typeof invoiceStatusInputSchema>) {
 }
 
 function mergeMetadata(current: unknown, patch: Record<string, unknown>) {
-  const base = current && typeof current === "object" ? current as Record<string, unknown> : {};
+  const base = current && typeof current === "object" && !Array.isArray(current) ? current as Record<string, unknown> : {};
   return { ...base, ...patch };
 }
 
@@ -69,7 +69,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const { supabase } = await requireWorkspaceMember(workspaceId);
     const { data, error } = await supabase
       .from("invoices")
-      .select("*, invoice_lines(*), customers(id,first_name,last_name,email,phone), vehicles(id,year,make,model,vin,license_plate)")
+      .select("*, invoice_lines(*), customers(id,first_name,last_name,company_name,email,phone,address_line1,address_line2,city,region,postal_code,metadata), vehicles(id,year,make,model,vin,license_plate)")
       .eq("id", id)
       .eq("workspace_id", workspaceId)
       .single();
