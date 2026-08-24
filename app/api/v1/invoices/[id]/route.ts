@@ -38,6 +38,16 @@ const patchSchema = z.object({
   contact_phone: z.string().max(40).nullable().optional(),
   payment_terms: z.string().max(120).nullable().optional(),
   terms_text: z.string().max(10000).nullable().optional(),
+  discount_type: z.enum(["fixed", "percentage"]).optional(),
+  discount_amount: z.number().nonnegative().optional(),
+  tax_enabled: z.boolean().optional(),
+  tax_rate: z.number().min(0).max(100).optional(),
+  waste_oil_fee_enabled: z.boolean().optional(),
+  waste_oil_fee: z.number().nonnegative().optional(),
+  shop_fee_enabled: z.boolean().optional(),
+  shop_fee: z.number().nonnegative().optional(),
+  surcharge_enabled: z.boolean().optional(),
+  surcharge: z.number().nonnegative().optional(),
   subtotal: z.number().nonnegative().optional(),
   tax_amount: z.number().nonnegative().optional(),
   total: z.number().nonnegative().optional(),
@@ -126,7 +136,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
 
     const metadataPatch: Record<string, unknown> = {};
-    for (const key of ["notes", "contact_name", "contact_email", "contact_phone", "payment_terms", "terms_text"] as const) {
+    for (const key of [
+      "notes", "contact_name", "contact_email", "contact_phone", "payment_terms", "terms_text",
+      "discount_type", "discount_amount", "tax_enabled", "tax_rate", "waste_oil_fee_enabled",
+      "waste_oil_fee", "shop_fee_enabled", "shop_fee", "surcharge_enabled", "surcharge",
+    ] as const) {
       if (body[key] !== undefined) metadataPatch[key] = body[key];
     }
 
@@ -152,12 +166,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       });
       if (atomicError) throw atomicError;
 
-      const { data, error } = await supabase
-        .from("invoices")
-        .select("*")
-        .eq("workspace_id", body.workspace_id)
-        .eq("id", id)
-        .single();
+      const { data, error } = await supabase.from("invoices").select("*").eq("workspace_id", body.workspace_id).eq("id", id).single();
       if (error) throw error;
       return json({ data });
     }
