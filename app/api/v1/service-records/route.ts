@@ -5,7 +5,10 @@ const serviceRecordSchema = z.object({
   workspace_id: z.string().uuid(),
   appointment_id: z.string().uuid().nullable().optional(),
   work_order_id: z.string().uuid().nullable().optional(),
+  customer_id: z.string().uuid().nullable().optional(),
+  vehicle_id: z.string().uuid().nullable().optional(),
   technician_id: z.string().uuid().nullable().optional(),
+  quote_id: z.string().uuid().nullable().optional(),
   status: z.enum(["draft", "in_progress", "completed", "voided"]).default("completed"),
   complaint: z.string().max(10000).nullable().optional(),
   diagnosis: z.string().max(10000).nullable().optional(),
@@ -13,6 +16,12 @@ const serviceRecordSchema = z.object({
   oil_quarts_used: z.number().finite().min(0).max(1000).nullable().optional(),
   customer_notes: z.string().max(10000).nullable().optional(),
   internal_notes: z.string().max(10000).nullable().optional(),
+  subtotal: z.number().nonnegative().nullable().optional(),
+  tax_rate: z.number().min(0).max(100).nullable().optional(),
+  tax_amount: z.number().nonnegative().nullable().optional(),
+  discount_amount: z.number().nonnegative().nullable().optional(),
+  total_amount: z.number().nonnegative().nullable().optional(),
+  currency_code: z.string().trim().length(3).toUpperCase().optional(),
   metadata: z.record(z.string(), z.unknown()).default({}),
   started_at: z.string().datetime().nullable().optional(),
   completed_at: z.string().datetime().nullable().optional(),
@@ -43,6 +52,23 @@ export async function POST(request: Request) {
     const body = serviceRecordSchema.parse(await request.json());
     const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician"]);
     const now = new Date().toISOString();
+
+    if (body.customer_id) {
+      const { data: customer, error: customerError } = await supabase
+        .from("customers").select("id").eq("workspace_id", body.workspace_id).eq("id", body.customer_id).maybeSingle();
+      if (customerError) throw customerError;
+      if (!customer) return json({ error: { code: "customer_not_found", message: "Customer does not belong to this workspace." } }, { status: 409 });
+    }
+    if (body.vehicle_id) {
+      const { data: vehicle, error: vehicleError } = await supabase
+        .from("vehicles").select("id,customer_id").eq("workspace_id", body.workspace_id).eq("id", body.vehicle_id).maybeSingle();
+      if (vehicleError) throw vehicleError;
+      if (!vehicle) return json({ error: { code: "vehicle_not_found", message: "Vehicle does not belong to this workspace." } }, { status: 409 });
+      if (body.customer_id && vehicle.customer_id && vehicle.customer_id !== body.customer_id) {
+        return json({ error: { code: "vehicle_customer_mismatch", message: "Vehicle does not belong to the selected customer." } }, { status: 409 });
+      }
+    }
+
     const payload = {
       ...body,
       completed_by: body.status === "completed" ? user.id : null,
