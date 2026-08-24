@@ -20,7 +20,6 @@ export interface CreateWorkOrderResult {
   orderNumber: string;
 }
 
-/** `created` is retained only as an old UI alias and is persisted as `draft`. */
 export type WorkOrderStatus =
   | "created"
   | "draft"
@@ -101,23 +100,17 @@ export async function completeWorkOrder(
   });
 }
 
+function checklistUnavailable(): never {
+  throw new Error("Repair-order checklist execution has not been rebuilt on Final yet.");
+}
+
+/** Final deliberately has no legacy checklist persistence/runtime yet. */
 export async function advanceChecklistStep(
-  itemId: string,
-  evidenceUrl?: string | null,
-  notes?: string | null,
+  _itemId: string,
+  _evidenceUrl?: string | null,
+  _notes?: string | null,
 ): Promise<{ status: string; item_id: string; next_item_id: string | null; execution_phase: string }> {
-  const response = await nextApi.workOrders.advanceChecklist({
-    workspace_id: workspaceId(),
-    item_id: itemId,
-    evidence_url: evidenceUrl ?? null,
-    notes: notes ?? null,
-  });
-  return z.object({
-    status: z.string(),
-    item_id: z.string().uuid(),
-    next_item_id: z.string().uuid().nullable().default(null),
-    execution_phase: z.string(),
-  }).parse(response.data);
+  return checklistUnavailable();
 }
 
 export async function captureWorkOrderVin(workOrderId: string, vin: string) {
@@ -128,17 +121,10 @@ export async function captureWorkOrderMileage(workOrderId: string, mileage: numb
   await nextApi.workOrders.update(workOrderId, { workspace_id: workspaceId(), mileage_captured: mileage });
 }
 
+/** Final deliberately has no legacy checklist persistence/runtime yet. */
 export async function updateChecklistItem(
-  itemId: string,
-  updates: { status?: string; evidenceUrl?: string; notes?: string; completedBy?: string },
-) {
-  const payload: Record<string, unknown> = { workspace_id: workspaceId() };
-  if (updates.status !== undefined) payload.status = updates.status;
-  if (updates.evidenceUrl !== undefined) payload.evidence_url = updates.evidenceUrl;
-  if (updates.notes !== undefined) payload.notes = updates.notes;
-  if (updates.status === "completed") {
-    payload.completed_at = new Date().toISOString();
-    if (updates.completedBy) payload.completed_by = updates.completedBy;
-  }
-  await nextApi.workOrders.updateChecklistItem(itemId, payload);
+  _itemId: string,
+  _updates: { status?: string; evidenceUrl?: string; notes?: string; completedBy?: string },
+): Promise<void> {
+  checklistUnavailable();
 }
