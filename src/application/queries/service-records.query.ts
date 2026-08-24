@@ -56,7 +56,7 @@ export async function fetchServiceRecordsPageData(): Promise<ServiceRecordsPageD
 
   const [servicesRes, customersRes, vehiclesRes] = await Promise.all([
     (supabase.from("service_records") as any)
-      .select("id,customer_id,vehicle_id,status,work_performed,customer_notes,internal_notes,metadata,started_at,completed_at,created_at,subtotal,total_amount,technician_id,profiles!service_records_technician_id_fkey(display_name)")
+      .select("id,customer_id,vehicle_id,status,work_performed,customer_notes,internal_notes,metadata,started_at,completed_at,created_at,subtotal,total_amount,technician_id")
       .eq("workspace_id", context.workspaceId)
       .neq("status", "voided")
       .order("completed_at", { ascending: false, nullsFirst: false })
@@ -94,7 +94,9 @@ export async function fetchServiceRecordsPageData(): Promise<ServiceRecordsPageD
       total_cost: Number(row.total_amount ?? row.subtotal ?? 0),
       status: row.status,
       notes: row.customer_notes ?? row.internal_notes ?? (metadata.notes != null ? String(metadata.notes) : null),
-      technician: row.profiles?.display_name ?? null,
+      technician: typeof metadata.technician === "string"
+        ? metadata.technician
+        : (typeof metadata.technician_name === "string" ? metadata.technician_name : null),
     };
   });
 
