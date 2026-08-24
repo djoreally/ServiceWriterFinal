@@ -1,27 +1,40 @@
 import { errorResponse, json, requireWorkspaceMember } from "@/server/api";
 import { z } from "zod";
 
+const paymentStatusSchema = z.enum(["pending", "succeeded", "failed", "refunded", "partially_refunded"]);
+const providerSchema = z.enum(["stripe", "square", "quickbooks", "google_calendar", "resend", "sms", "carfax", "mapbox", "ai", "other"]);
+
 const patchSchema = z.object({
   workspace_id: z.string().uuid(),
   invoice_id: z.string().uuid().nullable().optional(),
   customer_id: z.string().uuid().nullable().optional(),
-  provider: z.string().trim().max(40).nullable().optional(),
+  provider: providerSchema.nullable().optional(),
   provider_payment_id: z.string().trim().max(200).nullable().optional(),
-  status: z.string().trim().max(40).optional(),
+  status: paymentStatusSchema.optional(),
   amount: z.number().nonnegative().optional(),
   currency_code: z.string().trim().length(3).toUpperCase().optional(),
   paid_at: z.string().datetime().nullable().optional(),
-}).refine((value) => Object.keys(value).some((key) => key !== "workspace_id"), { message: "At least one payment field is required" });
+  metadata: z.record(z.string(), z.unknown()).optional(),
+}).refine((value) => Object.keys(value).some((key) => key !== "workspace_id"), {
+  message: "At least one payment field is required",
+});
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const id = z.string().uuid().parse((await context.params).id);
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
     const { supabase } = await requireWorkspaceMember(workspaceId);
-    const { data, error } = await supabase.from("payments").select("*").eq("id", id).eq("workspace_id", workspaceId).single();
+    const { data, error } = await supabase
+      .from("payments")
+      .select("*, invoices(id,invoice_number,total,amount_paid,status), customers(id,first_name,last_name,email)")
+      .eq("id", id)
+      .eq("workspace_id", workspaceId)
+      .single();
     if (error) throw error;
     return json({ data });
-  } catch (error) { return errorResponse(error); }
+  } catch (error) {
+    return errorResponse(error);
+  }
 }
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -30,19 +43,52 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const body = patchSchema.parse(await request.json());
     const { workspace_id, ...patch } = body;
     const { supabase } = await requireWorkspaceMember(workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"]);
-    const { data, error } = await supabase.from("payments").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id).eq("workspace_id", workspace_id).select().single();
+
+    if (body.invoice_id) {
+      const { data: invoice, error: invoiceError } = await supabase
+        .from("invoices")
+        .select("id,customer_id,status")
+        .eq("workspace_id", workspace_id)
+        .eq("id", body.invoice_id)
+        .single();
+      if (invoiceError || !invoice) throw invoiceError ?? new Error("Invoice not found");
+      if (invoice.status === "void") {
+        return json({ error: { code: "invoice_void", message: "Payments cannot be linked to a void invoice." } }, { status: 409 });
+      }
+      if (body.customer_id && body.customer_id !== invoice.customer_id) {
+        return json({ error: { code: "customer_mismatch", message: "Payment customer does not match the invoice customer." } }, { status: 409 });
+      }
+    }
+
+    if (body.status === "succeeded" && body.paid_at === undefined) {
+      patch.paid_at = new Date().toISOString();
+    }
+
+    const { data, error } = await (supabase.from("payments") as any)
+      .update(patch)
+      .eq("id", id)
+      .eq("workspace_id", workspace_id)
+      .select()
+      .single();
     if (error) throw error;
     return json({ data });
-  } catch (error) { return errorResponse(error); }
+  } catch (error) {
+    return errorResponse(error);
+  }
 }
 
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const id = z.string().uuid().parse((await context.params).id);
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
-    const { supabase, user } = await requireWorkspaceMember(workspaceId, ["owner", "admin", "manager"]);
-    const { data, error } = await supabase.from("payments").delete().eq("id", id).eq("workspace_id", workspaceId).select().single();
-    if (error) throw error;
-    return json({ data });
-  } catch (error) { return errorResponse(error); }
+    await requireWorkspaceMember(workspaceId, ["owner", "admin", "manager"]);
+    return json({
+      error: {
+        code: "ledger_record_immutable",
+        message: `Payment ${id} cannot be deleted. Use the refund or status workflow so the financial audit trail is preserved.`,
+      },
+    }, { status: 409 });
+  } catch (error) {
+    return errorResponse(error);
+  }
 }
