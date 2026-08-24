@@ -1,12 +1,7 @@
-/**
- * Dashboard Queries - Read operations for owner dashboard views
- *
- * All Supabase access for the dashboard page lives here so that
- * UI components don't talk to Supabase directly.
- */
-
+/** Dashboard query adapters for Final's canonical workspace schema. */
 import { supabase } from "@/integrations/supabase/client";
-import { format, parseISO, subDays } from "date-fns";
+import { format, subDays } from "date-fns";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 export interface DashboardStats {
   vehicles: number;
@@ -95,238 +90,215 @@ export interface DashboardOnboardingInfo {
   hasUser: boolean;
   onboardingCompleted: boolean;
   ownerName: string | null;
-  /**
-   * True only when we definitively resolved the profile (found, or confirmed
-   * none exists). When false, the caller MUST NOT use `onboardingCompleted`
-   * to redirect — a transient RLS / network blip should never force an
-   * already-onboarded user back into onboarding.
-   */
   resolved: boolean;
 }
 
-/**
- * Check onboarding status and fetch owner name for greeting.
- */
+function obj(value: unknown): Record<string, any> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
+}
+
+function customerName(value: any): string {
+  if (!value) return "Customer";
+  return [value.first_name, value.last_name].filter(Boolean).join(" ").trim() || "Customer";
+}
+
+function appointmentTitle(row: any): string {
+  const metadata = obj(row.metadata);
+  return String(metadata.title ?? metadata.service_name ?? "Appointment");
+}
+
+function appointmentLegacy(row: any): AppointmentRecord {
+  const metadata = obj(row.metadata);
+  const startsAt = new Date(row.starts_at);
+  return {
+    id: row.id,
+    title: appointmentTitle(row),
+    scheduled_date: format(startsAt, "yyyy-MM-dd"),
+    scheduled_time: format(startsAt, "HH:mm"),
+    status: row.status,
+    guest_name: metadata.guest_name ?? undefined,
+    guest_email: metadata.guest_email ?? undefined,
+    estimated_cost: metadata.estimated_cost != null ? Number(metadata.estimated_cost) : undefined,
+  };
+}
+
+function serviceLegacy(row: any): ServiceRecord {
+  const metadata = obj(row.metadata);
+  const when = row.completed_at ?? row.started_at ?? row.created_at;
+  return {
+    id: row.id,
+    service_type: String(metadata.service_type ?? metadata.title ?? row.work_performed ?? "Service"),
+    payment_status: metadata.payment_status ?? null,
+    total_cost: Number(row.total_amount ?? 0),
+    tax_amount: row.tax_amount != null ? Number(row.tax_amount) : null,
+    discount_amount: row.discount_amount != null ? Number(row.discount_amount) : null,
+    shop_supplies: metadata.shop_supplies != null ? Number(metadata.shop_supplies) : null,
+    paid_amount: metadata.paid_amount != null ? Number(metadata.paid_amount) : null,
+    service_date: format(new Date(when), "yyyy-MM-dd"),
+    status: row.status,
+    customer: row.customers ? { name: customerName(row.customers) } : null,
+    vehicle: row.vehicles ? {
+      make: row.vehicles.make ?? "",
+      model: row.vehicles.model ?? "",
+      year: Number(row.vehicles.year ?? 0),
+    } : null,
+  };
+}
+
 export async function fetchDashboardOnboardingInfo(): Promise<DashboardOnboardingInfo> {
   const { data: { session } } = await supabase.auth.getSession();
-  const user = session?.user ?? null;
-
-  if (!user) {
+  if (!session?.user) {
     return { hasUser: false, onboardingCompleted: false, ownerName: null, resolved: true };
   }
 
-  // Team members (manager/dispatcher/technician) work inside an owner's tenant
-  // and must never be sent through onboarding. Resolve their owner's profile instead.
-  const { data: link, error: linkError } = await supabase
-    .from("team_user_links")
-    .select("owner_user_id")
-    .eq("member_user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-
-  if (linkError) {
-    return { hasUser: true, onboardingCompleted: false, ownerName: null, resolved: false };
-  }
-
-  if (link?.owner_user_id) {
-    const { data: ownerProfile } = await supabase
-      .from("business_profiles")
+  try {
+    const context = await resolveCurrentWorkspace();
+    if (!context) {
+      return { hasUser: true, onboardingCompleted: false, ownerName: null, resolved: true };
+    }
+    const { data, error } = await (supabase.from("workspace_settings") as any)
       .select("owner_name")
-      .eq("user_id", link.owner_user_id)
+      .eq("workspace_id", context.workspaceId)
       .maybeSingle();
-
+    if (error) throw error;
     return {
       hasUser: true,
       onboardingCompleted: true,
-      ownerName: ownerProfile?.owner_name ?? null,
+      ownerName: data?.owner_name ?? null,
       resolved: true,
     };
-  }
-
-  const { data: profile, error } = await supabase
-    .from("business_profiles")
-    .select("onboarding_completed, owner_name")
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  if (error) {
-    // Real query error — keep caller from forcing an onboarded user to /onboarding.
+  } catch {
     return { hasUser: true, onboardingCompleted: false, ownerName: null, resolved: false };
   }
-
-  if (!profile) {
-    // Genuinely no row yet — brand-new account, needs onboarding.
-    return { hasUser: true, onboardingCompleted: false, ownerName: null, resolved: true };
-  }
-
-  return {
-    hasUser: true,
-    onboardingCompleted: Boolean(profile.onboarding_completed),
-    ownerName: profile.owner_name ?? null,
-    resolved: true,
-  };
 }
 
-/**
- * Fetch high-level dashboard stats and active/upcoming items.
- */
 export async function fetchDashboardOverview(): Promise<DashboardOverviewResult> {
-  const { data: { session } } = await supabase.auth.getSession();
-  const user = session?.user ?? null;
-  if (!user) {
-    return {
-      stats: { vehicles: 0, pendingServices: 0, lowStockItems: 0 },
-      activeServices: [],
-      upcomingAppointments: [],
-    };
+  const context = await resolveCurrentWorkspace();
+  if (!context) {
+    return { stats: { vehicles: 0, pendingServices: 0, lowStockItems: 0 }, activeServices: [], upcomingAppointments: [] };
   }
 
-  const now = new Date();
-  const today = format(now, "yyyy-MM-dd");
-
-  const [vehiclesRes, pendingServicesRes, lowStockRes, activeServicesRes, upcomingRes] = await Promise.all([
-    supabase.from("vehicles").select("id", { count: "exact", head: true }),
-    supabase.from("services").select("id", { count: "exact", head: true }).eq("status", "in_progress"),
-    supabase.from("inventory_items").select("id", { count: "exact", head: true }).lt("quantity", 5),
-    supabase
-      .from("services")
-      // Use explicit FK constraint name to disambiguate (two FKs exist on customer_id)
-      .select(`id, service_type, customer:customers!fk_services_customer(name), vehicle:vehicles(make, model, year)`)
+  const nowIso = new Date().toISOString();
+  const [vehiclesRes, pendingRes, activeRes, upcomingRes] = await Promise.all([
+    supabase.from("vehicles").select("id", { count: "exact", head: true }).eq("workspace_id", context.workspaceId).eq("status", "active"),
+    supabase.from("service_records").select("id", { count: "exact", head: true }).eq("workspace_id", context.workspaceId).eq("status", "in_progress"),
+    (supabase.from("service_records") as any)
+      .select("id,work_performed,metadata,customers(first_name,last_name),vehicles(year,make,model)")
+      .eq("workspace_id", context.workspaceId)
       .eq("status", "in_progress")
       .limit(5),
-    supabase
-      .from("appointments")
-      .select(`id, title, scheduled_date, scheduled_time, status, vehicle:vehicles(make, model, year)`)
+    (supabase.from("appointments") as any)
+      .select("id,status,starts_at,metadata,vehicles(year,make,model)")
+      .eq("workspace_id", context.workspaceId)
       .neq("source", "fleet_work_order")
-      .gte("scheduled_date", today)
+      .gte("starts_at", nowIso)
       .in("status", ["confirmed", "pending"])
-      .order("scheduled_date", { ascending: true })
-      .order("scheduled_time", { ascending: true })
-      .limit(25),
+      .order("starts_at", { ascending: true })
+      .limit(5),
   ]);
 
-  const stats: DashboardStats = {
-    vehicles: vehiclesRes.count || 0,
-    pendingServices: pendingServicesRes.count || 0,
-    lowStockItems: lowStockRes.count || 0,
-  };
+  if (vehiclesRes.error) throw vehiclesRes.error;
+  if (pendingRes.error) throw pendingRes.error;
+  if (activeRes.error) throw activeRes.error;
+  if (upcomingRes.error) throw upcomingRes.error;
 
-  let activeServices: ActiveService[] = [];
-  if (activeServicesRes.data) {
-    const activeServicesData = activeServicesRes.data as unknown as Array<{
-      id: string;
-      service_type: string;
-      customer?: { name: string } | null;
-      vehicle?: { year: number; make: string; model: string } | null;
-    }>;
+  const activeServices: ActiveService[] = ((activeRes.data ?? []) as any[]).map((row) => ({
+    id: row.id,
+    vehicle: row.vehicles ? `${row.vehicles.year ?? ""} ${row.vehicles.make ?? ""} ${row.vehicles.model ?? ""}`.trim() : "Unknown",
+    customer: customerName(row.customers),
+    serviceType: String(obj(row.metadata).service_type ?? obj(row.metadata).title ?? row.work_performed ?? "Service"),
+  }));
 
-    activeServices = activeServicesData.map((s) => ({
-      id: s.id,
-      vehicle: s.vehicle ? `${s.vehicle.year} ${s.vehicle.make} ${s.vehicle.model}` : "Unknown",
-      customer: s.customer?.name || "Customer",
-      serviceType: s.service_type,
-    }));
-  }
-
-  let upcomingAppointments: UpcomingAppointment[] = [];
-  if (upcomingRes.data) {
-    upcomingAppointments = upcomingRes.data
-      .map((a: any) => {
-        const startsAt = parseISO(`${a.scheduled_date}T${a.scheduled_time || "00:00"}`);
-        return {
-          id: a.id,
-          title: a.title,
-          date: parseISO(a.scheduled_date),
-          time: a.scheduled_time,
-          vehicle: a.vehicle ? `${a.vehicle.year} ${a.vehicle.make} ${a.vehicle.model}` : undefined,
-          status: a.status as "confirmed" | "pending",
-          startsAt,
-        };
-      })
-      .filter((a) => !Number.isNaN(a.startsAt.getTime()) && a.startsAt >= now)
-      .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime())
-      .slice(0, 5)
-      .map(({ startsAt, ...appointment }) => appointment);
-  }
-
-  return { stats, activeServices, upcomingAppointments };
-}
-
-/**
- * Fetch reporting data for charts and metrics.
- */
-export async function fetchDashboardReporting(
-  range: DashboardDateRange
-): Promise<DashboardReportingResult> {
-  const fromDate = format(range.from, "yyyy-MM-dd");
-  const toDate = format(range.to, "yyyy-MM-dd");
-
-  // Calculate previous period
-  const periodDays = Math.ceil((range.to.getTime() - range.from.getTime()) / (1000 * 60 * 60 * 24));
-  const prevFrom = format(subDays(range.from, periodDays), "yyyy-MM-dd");
-  const prevTo = format(subDays(range.from, 1), "yyyy-MM-dd");
-
-  const [paymentsRes, servicesRes, appointmentsRes, prevPaymentsRes] = await Promise.all([
-    supabase
-      .from("payments")
-      .select(
-        "id, amount, created_at, status, customer_email, customer_name, refund_amount, appointment_id, appointments(status)"
-      )
-      .gte("created_at", `${fromDate}T00:00:00`)
-      .lte("created_at", `${toDate}T23:59:59`)
-      .order("created_at", { ascending: true }),
-    supabase
-      .from("services")
-      .select(
-        `
-            id, service_type, payment_status, total_cost, tax_amount, discount_amount, shop_supplies, paid_amount, service_date, status,
-            customer:customers!fk_services_customer(name),
-            vehicle:vehicles(make, model, year)
-          `
-      )
-      .gte("service_date", fromDate)
-      .lte("service_date", toDate)
-      .order("service_date", { ascending: true }),
-    supabase
-      .from("appointments")
-      .select("id, title, scheduled_date, scheduled_time, status, guest_name, guest_email, estimated_cost")
-      .neq("source", "fleet_work_order")
-      .gte("scheduled_date", fromDate)
-      .lte("scheduled_date", toDate)
-      .order("scheduled_date", { ascending: true }),
-    supabase
-      .from("payments")
-      .select("id, amount, status, refund_amount")
-      .gte("created_at", `${prevFrom}T00:00:00`)
-      .lte("created_at", `${prevTo}T23:59:59`),
-  ]);
-
-  // Log any query errors for debugging
-  if (servicesRes.error) console.error("Dashboard services query error:", servicesRes.error);
-  if (paymentsRes.error) console.error("Dashboard payments query error:", paymentsRes.error);
-  if (appointmentsRes.error) console.error("Dashboard appointments query error:", appointmentsRes.error);
-
-  const rawPayments = (paymentsRes.data || []) as any[];
-  const cleanPayments: PaymentRecord[] = rawPayments
-    .filter((p) => !(p.status === "pending" && p.appointments?.status === "cancelled"))
-    .map((p) => ({
-      id: p.id,
-      amount: p.amount,
-      created_at: p.created_at,
-      status: p.status,
-      customer_email: p.customer_email ?? undefined,
-      customer_name: p.customer_name ?? undefined,
-      refund_amount: p.refund_amount ?? undefined,
-    }));
-
-  const services = ((servicesRes.data || []) as unknown) as ServiceRecord[];
-  const appointments = (appointmentsRes.data || []) as AppointmentRecord[];
-  const previousPeriodPayments = (prevPaymentsRes.data || []) as PreviousPeriodPayment[];
+  const upcomingAppointments: UpcomingAppointment[] = ((upcomingRes.data ?? []) as any[]).map((row) => {
+    const startsAt = new Date(row.starts_at);
+    return {
+      id: row.id,
+      title: appointmentTitle(row),
+      date: startsAt,
+      time: format(startsAt, "HH:mm"),
+      vehicle: row.vehicles ? `${row.vehicles.year ?? ""} ${row.vehicles.make ?? ""} ${row.vehicles.model ?? ""}`.trim() : undefined,
+      status: row.status as "confirmed" | "pending",
+    };
+  });
 
   return {
-    payments: cleanPayments,
-    services,
-    appointments,
+    stats: {
+      vehicles: vehiclesRes.count ?? 0,
+      pendingServices: pendingRes.count ?? 0,
+      // Final does not yet have an inventory_items table. Do not fabricate stock counts.
+      lowStockItems: 0,
+    },
+    activeServices,
+    upcomingAppointments,
+  };
+}
+
+export async function fetchDashboardReporting(range: DashboardDateRange): Promise<DashboardReportingResult> {
+  const context = await resolveCurrentWorkspace();
+  if (!context) return { payments: [], services: [], appointments: [], previousPeriodPayments: [] };
+
+  const fromIso = new Date(range.from); fromIso.setHours(0, 0, 0, 0);
+  const toIso = new Date(range.to); toIso.setHours(23, 59, 59, 999);
+  const periodDays = Math.max(1, Math.ceil((range.to.getTime() - range.from.getTime()) / 86_400_000));
+  const prevFrom = subDays(range.from, periodDays); prevFrom.setHours(0, 0, 0, 0);
+  const prevTo = subDays(range.from, 1); prevTo.setHours(23, 59, 59, 999);
+
+  const [paymentsRes, servicesRes, appointmentsRes, prevPaymentsRes] = await Promise.all([
+    (supabase.from("payments") as any)
+      .select("id,amount,created_at,status,metadata,customers(first_name,last_name,email)")
+      .eq("workspace_id", context.workspaceId)
+      .gte("created_at", fromIso.toISOString())
+      .lte("created_at", toIso.toISOString())
+      .order("created_at", { ascending: true }),
+    (supabase.from("service_records") as any)
+      .select("id,status,work_performed,metadata,started_at,completed_at,created_at,total_amount,tax_amount,discount_amount,customers(first_name,last_name),vehicles(make,model,year)")
+      .eq("workspace_id", context.workspaceId)
+      .gte("created_at", fromIso.toISOString())
+      .lte("created_at", toIso.toISOString())
+      .order("created_at", { ascending: true }),
+    (supabase.from("appointments") as any)
+      .select("id,status,starts_at,metadata")
+      .eq("workspace_id", context.workspaceId)
+      .neq("source", "fleet_work_order")
+      .gte("starts_at", fromIso.toISOString())
+      .lte("starts_at", toIso.toISOString())
+      .order("starts_at", { ascending: true }),
+    (supabase.from("payments") as any)
+      .select("id,amount,status,metadata")
+      .eq("workspace_id", context.workspaceId)
+      .gte("created_at", prevFrom.toISOString())
+      .lte("created_at", prevTo.toISOString()),
+  ]);
+
+  if (paymentsRes.error) throw paymentsRes.error;
+  if (servicesRes.error) throw servicesRes.error;
+  if (appointmentsRes.error) throw appointmentsRes.error;
+  if (prevPaymentsRes.error) throw prevPaymentsRes.error;
+
+  const payments: PaymentRecord[] = ((paymentsRes.data ?? []) as any[]).map((row) => {
+    const metadata = obj(row.metadata);
+    return {
+      id: row.id,
+      amount: Number(row.amount ?? 0),
+      created_at: row.created_at,
+      status: row.status,
+      customer_email: row.customers?.email ?? metadata.customer_email ?? undefined,
+      customer_name: row.customers ? customerName(row.customers) : metadata.customer_name ?? undefined,
+      refund_amount: row.status === "refunded" ? Number(row.amount ?? 0) : Number(metadata.refunded_amount ?? 0) || undefined,
+    };
+  });
+
+  const previousPeriodPayments: PreviousPeriodPayment[] = ((prevPaymentsRes.data ?? []) as any[]).map((row) => ({
+    id: row.id,
+    amount: Number(row.amount ?? 0),
+    status: row.status,
+    refund_amount: row.status === "refunded" ? Number(row.amount ?? 0) : Number(obj(row.metadata).refunded_amount ?? 0) || undefined,
+  }));
+
+  return {
+    payments,
+    services: ((servicesRes.data ?? []) as any[]).map(serviceLegacy),
+    appointments: ((appointmentsRes.data ?? []) as any[]).map(appointmentLegacy),
     previousPeriodPayments,
   };
 }
