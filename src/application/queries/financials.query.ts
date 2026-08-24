@@ -1,69 +1,111 @@
-/**
- * Financials Query — Abstracts all payment/financial data access for the Financials page.
- */
+/** Financials Query — canonical payment/service reads with legacy chart adapters. */
 import { supabase } from "@/integrations/supabase/client";
-
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+
 export interface FinancialOverviewData {
-  // Net collected cash this month (succeeded/refunded payment_records; cents -> dollars)
-  totalRevenue: number;
-  // Net collected cash in the prior calendar month
-  lastMonthRevenue: number;
-  totalTransactions: number;
-  // Average net collected amount per transaction this month
-  avgTicketSize: number;
-  // Pending payment_records amount after cancelled-appointment filtering
-  outstandingPayments: number;
-  totalPending: number;
-  // Succeeded net collected / (succeeded net collected + valid pending)
-  collectionRate: number;
-  // Month buckets of net collected cash
+  totalRevenue: number; lastMonthRevenue: number; totalTransactions: number; avgTicketSize: number;
+  outstandingPayments: number; totalPending: number; collectionRate: number;
   monthlyRevenue: { month: string; revenue: number }[];
-  // Method split of current-month net collected cash
   paymentMethods: { method: string; amount: number; percentage: number }[];
 }
 
-/** Get the current authenticated user ID. */
+function object(value: unknown): Record<string, any> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
+}
+
+function cents(value: unknown): number {
+  return Math.round((Number(value) || 0) * 100);
+}
+
 export async function getCurrentUserId(): Promise<string | null> {
   const { data: { user } } = await getCurrentAuthUser();
   return user?.id ?? null;
 }
 
-/** Fetch collected payment records (succeeded + refunded) for a user within a date range. */
-export async function fetchSucceededPayments(userId: string, sinceIso: string) {
-  return supabase
-    .from("cash_collection_receipts_v1")
-    .select("amount:collected_cents, refund_amount:refunded_cents, status:payment_status, created_at:collected_at, payment_type, appointment_id")
-    .eq("user_id", userId)
-    .gte("collected_at", sinceIso)
-    .order("collected_at");
+/**
+ * Final stores payment amounts in dollars. This adapter returns cents because
+ * the legacy Financials chart/currency utilities explicitly consume cents.
+ */
+export async function fetchSucceededPayments(_userId: string, sinceIso: string) {
+  const context = await resolveCurrentWorkspace();
+  if (!context) return { data: [], error: null };
+  const { data, error } = await (supabase.from("payments") as any)
+    .select("id,amount,status,provider,paid_at,created_at,metadata")
+    .eq("workspace_id", context.workspaceId)
+    .in("status", ["succeeded", "partially_refunded", "refunded"])
+    .gte("created_at", sinceIso)
+    .order("created_at");
+  if (error) return { data: null, error };
+  return {
+    data: ((data ?? []) as any[]).map((row) => {
+      const metadata = object(row.metadata);
+      return {
+        id: row.id,
+        amount: cents(row.amount),
+        refund_amount: cents(metadata.refunded_amount),
+        status: row.status,
+        created_at: row.paid_at ?? row.created_at,
+        payment_type: metadata.payment_type ?? row.provider ?? "card",
+        appointment_id: metadata.appointment_id ?? null,
+      };
+    }),
+    error: null,
+  };
 }
 
-/** Fetch pending payment records for a user. */
-export async function fetchPendingPayments(userId: string) {
-  return supabase
-    .from("payments")
-    .select("amount, appointment_id")
-    .eq("user_id", userId)
+/** Pending payments returned in legacy cents for aggregatePayments(). */
+export async function fetchPendingPayments(_userId: string) {
+  const context = await resolveCurrentWorkspace();
+  if (!context) return { data: [], error: null };
+  const { data, error } = await (supabase.from("payments") as any)
+    .select("id,amount,metadata")
+    .eq("workspace_id", context.workspaceId)
     .eq("status", "pending");
+  if (error) return { data: null, error };
+  return {
+    data: ((data ?? []) as any[]).map((row) => ({
+      id: row.id,
+      amount: cents(row.amount),
+      appointment_id: object(row.metadata).appointment_id ?? null,
+    })),
+    error: null,
+  };
 }
 
-/** Fetch appointment statuses for given IDs (used to filter cancelled appointments from pending). */
 export async function fetchAppointmentStatuses(appointmentIds: string[]) {
-  return supabase
-    .from("appointments")
-    .select("id, status")
-    .in("id", appointmentIds);
+  const context = await resolveCurrentWorkspace();
+  if (!context || appointmentIds.length === 0) return { data: [], error: null };
+  return supabase.from("appointments").select("id,status").eq("workspace_id", context.workspaceId).in("id", appointmentIds);
 }
 
-
-/** Fetch completed services for canonical completed-job financial snapshots. */
-export async function fetchCompletedServices(userId: string, sinceIso: string) {
-  return supabase
-    .from("services")
-    .select("total_cost, tax_amount, discount_amount, shop_supplies, paid_amount, payment_status, status, service_date")
-    .eq("user_id", userId)
+/** Completed job snapshots remain dollars because canonical service financial helpers consume dollars. */
+export async function fetchCompletedServices(_userId: string, sinceIso: string) {
+  const context = await resolveCurrentWorkspace();
+  if (!context) return { data: [], error: null };
+  const { data, error } = await (supabase.from("service_records") as any)
+    .select("id,total_amount,tax_amount,discount_amount,status,completed_at,created_at,updated_at,metadata")
+    .eq("workspace_id", context.workspaceId)
     .eq("status", "completed")
-    .gte("service_date", sinceIso)
-    .order("service_date");
+    .gte("completed_at", sinceIso)
+    .order("completed_at");
+  if (error) return { data: null, error };
+  return {
+    data: ((data ?? []) as any[]).map((row) => {
+      const metadata = object(row.metadata);
+      return {
+        id: row.id,
+        total_cost: Number(row.total_amount ?? metadata.total_cost ?? 0),
+        tax_amount: row.tax_amount == null ? 0 : Number(row.tax_amount),
+        discount_amount: row.discount_amount == null ? 0 : Number(row.discount_amount),
+        shop_supplies: Number(metadata.shop_supplies ?? 0),
+        paid_amount: Number(metadata.paid_amount ?? 0),
+        payment_status: metadata.payment_status ?? null,
+        status: row.status,
+        service_date: row.completed_at ?? row.created_at,
+        updated_at: row.updated_at,
+      };
+    }),
+    error: null,
+  };
 }
