@@ -26,7 +26,6 @@ function customerName(row: any): string {
   return [row?.first_name, row?.last_name].filter(Boolean).join(" ").trim() || row?.company_name || "Customer";
 }
 
-/** Fetch all data needed for the Quotes page in the existing five-result shape. */
 export async function fetchQuotesPageData() {
   const context = await resolveCurrentWorkspace();
   if (!context) {
@@ -57,38 +56,38 @@ export async function fetchQuotesPageData() {
       .order("name"),
   ]);
 
-  const quotes = ((quotesRes.data ?? []) as any[]).map((row) => {
-    const metadata = object(row.metadata);
-    return {
-      id: row.id,
-      customer_id: row.customer_id,
-      vehicle_id: row.vehicle_id,
-      quote_number: String(metadata.quote_number ?? `Q-${row.id.slice(0, 8).toUpperCase()}`),
-      quote_date: String(metadata.quote_date ?? row.created_at?.slice(0, 10) ?? ""),
-      valid_until: metadata.valid_until ?? row.expires_at?.slice(0, 10) ?? null,
-      description: String(metadata.description ?? "Quote"),
-      labor_hours: metadata.labor_hours == null ? null : Number(metadata.labor_hours),
-      labor_cost: metadata.labor_cost == null ? null : Number(metadata.labor_cost),
-      parts_cost: metadata.parts_cost == null ? null : Number(metadata.parts_cost),
-      total_cost: Number(row.total ?? 0),
-      status: uiStatus(String(row.status)),
-      notes: metadata.notes == null ? null : String(metadata.notes),
-      fleet_metadata: metadata.fleet_metadata ?? null,
-      updated_at: row.updated_at,
-    };
-  });
+  const quotes = ((quotesRes.data ?? []) as any[])
+    .filter((row) => !object(row.metadata).archived_at)
+    .map((row) => {
+      const metadata = object(row.metadata);
+      return {
+        id: row.id,
+        customer_id: row.customer_id,
+        vehicle_id: row.vehicle_id,
+        quote_number: String(metadata.quote_number ?? `Q-${row.id.slice(0, 8).toUpperCase()}`),
+        quote_date: String(metadata.quote_date ?? row.created_at?.slice(0, 10) ?? ""),
+        valid_until: metadata.valid_until ?? row.expires_at?.slice(0, 10) ?? null,
+        description: String(metadata.description ?? "Quote"),
+        labor_hours: metadata.labor_hours == null ? null : Number(metadata.labor_hours),
+        labor_cost: metadata.labor_cost == null ? null : Number(metadata.labor_cost),
+        parts_cost: metadata.parts_cost == null ? null : Number(metadata.parts_cost),
+        total_cost: Number(row.total ?? 0),
+        status: uiStatus(String(row.status)),
+        notes: metadata.notes == null ? null : String(metadata.notes),
+        fleet_metadata: metadata.fleet_metadata ?? null,
+        updated_at: row.updated_at,
+      };
+    });
 
   return [
     { data: quotes, error: quotesRes.error },
     { data: ((customersRes.data ?? []) as any[]).map((row) => ({ id: row.id, name: customerName(row) })), error: customersRes.error },
     { data: vehiclesRes.data ?? [], error: vehiclesRes.error },
-    // Inventory is intentionally not part of Final Service Writer yet. Preserve the UI slot as empty.
     { data: [], error: null },
     { data: catalogRes.data ?? [], error: catalogRes.error },
   ] as const;
 }
 
-/** Fetch workspace-scoped quote items for a specific quote. */
 export async function fetchQuoteItems(quoteId: string) {
   const context = await resolveCurrentWorkspace();
   if (!context) return { data: [], error: null };
