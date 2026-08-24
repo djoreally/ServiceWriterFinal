@@ -26,7 +26,7 @@ const lineSchema = z.object({
 
 const invoiceSchema = z.object({
   workspace_id: z.string().uuid(),
-  invoice_number: z.union([z.number().int().positive(), z.string().regex(/^\d+$/)]).optional(),
+  invoice_number: z.union([z.number().int().positive(), z.string().trim().min(1).max(80)]).optional(),
   customer_id: z.string().uuid(),
   vehicle_id: z.string().uuid().nullable().optional(),
   work_order_id: z.string().uuid().nullable().optional(),
@@ -48,6 +48,12 @@ const invoiceSchema = z.object({
 
 function isoDate(value?: string | null): string | null {
   return value ? new Date(`${value}T00:00:00.000Z`).toISOString() : null;
+}
+
+function canonicalInvoiceNumber(value: number | string | undefined): number | null {
+  if (typeof value === "number") return value;
+  if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
+  return null;
 }
 
 export async function GET(request: Request) {
@@ -79,6 +85,7 @@ export async function POST(request: Request) {
       payment_terms: body.payment_terms ?? null,
       terms_text: body.terms_text ?? null,
       bill_to_type: body.bill_to_type ?? "customer",
+      legacy_invoice_label: typeof body.invoice_number === "string" && !/^\d+$/.test(body.invoice_number) ? body.invoice_number : null,
       contact_name: body.contact_name ?? null,
       contact_email: body.contact_email ?? null,
       contact_phone: body.contact_phone ?? null,
@@ -90,7 +97,7 @@ export async function POST(request: Request) {
       vehicle_id: body.vehicle_id ?? null,
       work_order_id: body.work_order_id ?? null,
       status: body.status,
-      invoice_number: body.invoice_number == null ? null : Number(body.invoice_number),
+      invoice_number: canonicalInvoiceNumber(body.invoice_number),
       subtotal: body.subtotal,
       tax_total: body.tax_amount,
       total: body.total,
