@@ -8,7 +8,7 @@ export interface CustomerDetailResult {
   services: any[];
   quotes: any[];
   appointments: any[];
-  /** Successful Final payments; amount is stored in dollars. */
+  /** Legacy screen compatibility only: successful payment amounts exposed as cents. */
   paymentRecords: { amount: number; status: string }[];
 }
 
@@ -116,8 +116,10 @@ export async function fetchCustomerDetail(customerId: string): Promise<CustomerD
     };
   });
 
+  // Final stores dollars. The preserved CustomerDetail screen still divides by
+  // 100, so this adapter exposes cents until that legacy screen is rewritten.
   const paymentRecords = source.payments.map((payment) => ({
-    amount: Number(payment.amount ?? 0),
+    amount: Math.round(Number(payment.amount ?? 0) * 100),
     status: payment.status,
   }));
 
