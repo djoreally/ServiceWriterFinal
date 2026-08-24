@@ -1,7 +1,7 @@
 import { errorResponse, json, requireWorkspaceMember } from "@/server/api";
 import { z } from "zod";
 
-const invoiceStatusSchema = z.enum(["draft", "issued", "partially_paid", "paid", "void", "past_due"]);
+const invoiceStatusInputSchema = z.enum(["draft", "issued", "sent", "partially_paid", "partial", "paid", "void", "past_due"]);
 const lineSchema = z.object({
   vehicle_id: z.string().uuid().nullable().optional(),
   service_catalog_id: z.string().uuid().nullable().optional(),
@@ -29,7 +29,7 @@ const patchSchema = z.object({
   customer_id: z.string().uuid().optional(),
   vehicle_id: z.string().uuid().nullable().optional(),
   work_order_id: z.string().uuid().nullable().optional(),
-  status: invoiceStatusSchema.optional(),
+  status: invoiceStatusInputSchema.optional(),
   due_date: z.string().date().nullable().optional(),
   issue_date: z.string().date().nullable().optional(),
   notes: z.string().max(10000).nullable().optional(),
@@ -49,6 +49,12 @@ const patchSchema = z.object({
 function isoDate(value?: string | null): string | null | undefined {
   if (value === undefined) return undefined;
   return value ? new Date(`${value}T00:00:00.000Z`).toISOString() : null;
+}
+
+function canonicalStatus(value?: z.infer<typeof invoiceStatusInputSchema>) {
+  if (value === "sent") return "issued";
+  if (value === "partial") return "partially_paid";
+  return value;
 }
 
 function mergeMetadata(current: unknown, patch: Record<string, unknown>) {
@@ -78,6 +84,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   try {
     const id = z.string().uuid().parse((await context.params).id);
     const body = patchSchema.parse(await request.json());
+    const normalizedStatus = canonicalStatus(body.status);
     const { supabase } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"]);
 
     const { data: current, error: currentError } = await supabase
@@ -101,13 +108,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (body.customer_id !== undefined) patch.customer_id = body.customer_id;
     if (body.vehicle_id !== undefined) patch.vehicle_id = body.vehicle_id;
     if (body.work_order_id !== undefined) patch.work_order_id = body.work_order_id;
-    if (body.status !== undefined) patch.status = body.status;
+    if (normalizedStatus !== undefined) patch.status = normalizedStatus;
     if (body.subtotal !== undefined) patch.subtotal = body.subtotal;
     if (body.tax_amount !== undefined) patch.tax_total = body.tax_amount;
     if (body.total !== undefined) patch.total = body.total;
     if (body.due_date !== undefined) patch.due_at = isoDate(body.due_date);
     if (body.issue_date !== undefined) patch.issued_at = isoDate(body.issue_date);
-    if (body.status === "issued" && body.issue_date === undefined && current.status === "draft") patch.issued_at = new Date().toISOString();
+    if (normalizedStatus === "issued" && body.issue_date === undefined && current.status === "draft") patch.issued_at = new Date().toISOString();
     if (Object.keys(metadataPatch).length) patch.metadata = mergeMetadata(current.metadata, metadataPatch);
 
     const { data: invoice, error } = await (supabase.from("invoices") as any)
