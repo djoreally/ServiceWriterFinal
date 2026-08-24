@@ -42,34 +42,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = workOrderSchema.parse(await request.json());
-    const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician"]);
-
-    const { data: customer, error: customerError } = await supabase
-      .from("customers").select("id").eq("workspace_id", body.workspace_id).eq("id", body.customer_id).maybeSingle();
-    if (customerError) throw customerError;
-    if (!customer) return json({ error: { code: "customer_not_found", message: "Customer does not belong to this workspace." } }, { status: 409 });
-
-    if (body.vehicle_id) {
-      const { data: vehicle, error: vehicleError } = await supabase
-        .from("vehicles").select("id,customer_id").eq("workspace_id", body.workspace_id).eq("id", body.vehicle_id).maybeSingle();
-      if (vehicleError) throw vehicleError;
-      if (!vehicle) return json({ error: { code: "vehicle_not_found", message: "Vehicle does not belong to this workspace." } }, { status: 409 });
-      if (vehicle.customer_id && vehicle.customer_id !== body.customer_id) {
-        return json({ error: { code: "vehicle_customer_mismatch", message: "Vehicle does not belong to the selected customer." } }, { status: 409 });
-      }
-    }
-
-    if (body.technician_id) {
-      const { data: technician, error: technicianError } = await supabase
-        .from("workspace_members")
-        .select("user_id,role,is_active")
-        .eq("workspace_id", body.workspace_id)
-        .eq("user_id", body.technician_id)
-        .eq("is_active", true)
-        .maybeSingle();
-      if (technicianError) throw technicianError;
-      if (!technician) return json({ error: { code: "technician_not_found", message: "Assigned technician is not an active workspace member." } }, { status: 409 });
-    }
+    const { supabase } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician"]);
 
     const metadata = {
       ...(body.location_address ? { location_address: body.location_address } : {}),
@@ -79,37 +52,26 @@ export async function POST(request: Request) {
       ...(body.van_id ? { legacy_van_id: body.van_id } : {}),
     };
 
-    const { data, error } = await supabase.from("work_orders").insert({
-      workspace_id: body.workspace_id,
-      appointment_id: body.appointment_id ?? null,
-      customer_id: body.customer_id,
-      vehicle_id: body.vehicle_id ?? null,
-      location_id: body.location_id ?? null,
-      priority: body.priority,
-      complaint: body.complaint ?? null,
-      diagnosis: body.diagnosis ?? null,
-      technician_notes: body.technician_notes ?? null,
-      status: body.technician_id ? "assigned" : "draft",
-      created_by: user.id,
-      opened_at: new Date().toISOString(),
-      metadata,
-    }).select().single();
+    const { data, error } = await (supabase as any).rpc("create_work_order_v1", {
+      p_workspace_id: body.workspace_id,
+      p_payload: {
+        appointment_id: body.appointment_id ?? null,
+        customer_id: body.customer_id,
+        vehicle_id: body.vehicle_id ?? null,
+        location_id: body.location_id ?? null,
+        priority: body.priority,
+        complaint: body.complaint ?? null,
+        diagnosis: body.diagnosis ?? null,
+        technician_notes: body.technician_notes ?? null,
+        technician_id: body.technician_id ?? null,
+        metadata,
+      },
+    });
     if (error) throw error;
 
-    if (body.technician_id) {
-      const { error: assignmentError } = await supabase.from("work_order_assignments").insert({
-        workspace_id: body.workspace_id,
-        work_order_id: data.id,
-        user_id: body.technician_id,
-        assigned_by: user.id,
-      });
-      if (assignmentError) throw assignmentError;
-    }
-
-    if (body.appointment_id) {
-      await supabase.from("appointments").update({ status: "in_progress" }).eq("workspace_id", body.workspace_id).eq("id", body.appointment_id);
-    }
-    return json({ data }, { status: 201 });
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row?.id || row.number == null) throw new Error("Work order creation returned no identifier.");
+    return json({ data: row }, { status: 201 });
   } catch (error) {
     return errorResponse(error);
   }
