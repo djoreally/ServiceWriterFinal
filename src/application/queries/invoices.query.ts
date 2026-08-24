@@ -1,7 +1,7 @@
-/**
- * Invoices Query — Read operations for the manual invoices feature.
- */
+/** Invoice read adapters for the canonical Final ledger. */
 import { supabase } from "@/integrations/supabase/client";
+import { nextApi } from "@/lib/nextApiClient";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
 export interface InvoiceListRow {
   id: string;
@@ -64,18 +64,6 @@ export interface InvoiceFeeDefaults {
   tax_rate: number;
 }
 
-export async function fetchInvoiceList(userId: string): Promise<InvoiceListRow[]> {
-  const { data, error } = await supabase
-    .from("invoices")
-    .select("*, customers(name), fleet_clients(company_name)")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false })
-    .range(0, 9999);
-
-  if (error) throw error;
-  return (data ?? []) as unknown as InvoiceListRow[];
-}
-
 export interface InvoiceLineItemRow {
   id: string;
   invoice_id: string;
@@ -136,70 +124,205 @@ export interface InvoiceFullRow {
   invoice_line_items: InvoiceLineItemRow[];
 }
 
-export async function fetchInvoiceDetail(invoiceId: string): Promise<InvoiceFullRow> {
-  const { data, error } = await supabase
-    .from("invoices")
-    .select(
-      "*, customers(id, name, email, phone, address), fleet_clients(id, company_name, billing_email, ap_contact_email, phone), invoice_line_items(*)",
-    )
-    .eq("id", invoiceId)
-    .single();
-  if (error) throw error;
-  const row = data as unknown as InvoiceFullRow;
-  row.invoice_line_items = [...(row.invoice_line_items ?? [])].sort(
-    (a, b) => (a.display_order ?? 0) - (b.display_order ?? 0),
-  );
-  return row;
+function workspaceId(): string {
+  const id = getSelectedWorkspaceId();
+  if (!id) throw new Error("Select a workspace before viewing invoices.");
+  return id;
 }
 
-export async function fetchInvoiceFormOptions(userId: string): Promise<{
+function object(value: unknown): Record<string, any> {
+  return value && typeof value === "object" ? value as Record<string, any> : {};
+}
+
+function legacyStatus(status: string): string {
+  if (status === "issued") return "sent";
+  if (status === "partially_paid") return "partial";
+  return status;
+}
+
+function displayInvoiceNumber(row: Record<string, any>): string {
+  const metadata = object(row.metadata);
+  return typeof metadata.legacy_invoice_label === "string" && metadata.legacy_invoice_label
+    ? metadata.legacy_invoice_label
+    : `INV-${row.invoice_number}`;
+}
+
+function customerName(customer: any): string {
+  if (!customer) return "";
+  return [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim();
+}
+
+export async function fetchInvoiceList(_userId: string): Promise<InvoiceListRow[]> {
+  const id = workspaceId();
+  const response = await nextApi.invoices.list(id);
+  return ((response.data ?? []) as Record<string, any>[]).map((row) => {
+    const metadata = object(row.metadata);
+    return {
+      id: row.id,
+      invoice_number: displayInvoiceNumber(row),
+      bill_to_type: "retail",
+      customer_id: row.customer_id ?? null,
+      fleet_client_id: null,
+      contact_name: metadata.contact_name ?? null,
+      issue_date: (row.issued_at ?? row.created_at).slice(0, 10),
+      due_date: row.due_at ? row.due_at.slice(0, 10) : null,
+      status: legacyStatus(row.status),
+      total: Number(row.total ?? 0),
+      amount_paid: Number(row.amount_paid ?? 0),
+      created_at: row.created_at,
+      customers: row.customers ? { name: customerName(row.customers) } : null,
+      fleet_clients: null,
+    };
+  });
+}
+
+export async function fetchInvoiceDetail(invoiceId: string): Promise<InvoiceFullRow> {
+  const id = workspaceId();
+  const response = await nextApi.invoices.get(id, invoiceId);
+  const row = response.data as Record<string, any>;
+  const metadata = object(row.metadata);
+  const customer = row.customers;
+  const lines = ((row.invoice_lines ?? []) as Record<string, any>[])
+    .map((line): InvoiceLineItemRow => {
+      const meta = object(line.metadata);
+      return {
+        id: line.id,
+        invoice_id: line.invoice_id,
+        vehicle_id: line.vehicle_id ?? null,
+        service_catalog_id: line.service_catalog_id ?? null,
+        description: line.description,
+        quantity: Number(line.quantity ?? 0),
+        unit_price: Number(line.unit_price ?? 0),
+        line_total: Number(line.quantity ?? 0) * Number(line.unit_price ?? 0),
+        display_order: Number(line.sort_order ?? 0),
+        vin: meta.vin ?? null,
+        vehicle_year: meta.vehicle_year ?? null,
+        vehicle_make: meta.vehicle_make ?? null,
+        vehicle_model: meta.vehicle_model ?? null,
+        vehicle_trim: meta.vehicle_trim ?? null,
+        vehicle_engine: meta.vehicle_engine ?? null,
+        oil_type: meta.oil_type ?? null,
+        oil_capacity: meta.oil_capacity ?? null,
+        oil_filter: meta.oil_filter ?? null,
+      };
+    })
+    .sort((a, b) => a.display_order - b.display_order);
+
+  return {
+    id: row.id,
+    invoice_number: displayInvoiceNumber(row),
+    bill_to_type: "retail",
+    customer_id: row.customer_id ?? null,
+    fleet_client_id: null,
+    contact_name: metadata.contact_name ?? null,
+    contact_email: metadata.contact_email ?? null,
+    contact_phone: metadata.contact_phone ?? null,
+    issue_date: (row.issued_at ?? row.created_at).slice(0, 10),
+    due_date: row.due_at ? row.due_at.slice(0, 10) : null,
+    payment_terms: metadata.payment_terms ?? null,
+    status: legacyStatus(row.status),
+    notes: metadata.notes ?? null,
+    terms_text: metadata.terms_text ?? null,
+    subtotal: Number(row.subtotal ?? 0),
+    discount_type: "fixed",
+    discount_amount: 0,
+    tax_enabled: Number(row.tax_total ?? 0) > 0,
+    tax_rate: 0,
+    tax_amount: Number(row.tax_total ?? 0),
+    waste_oil_fee_enabled: false,
+    waste_oil_fee: 0,
+    shop_fee_enabled: false,
+    shop_fee: 0,
+    surcharge_enabled: false,
+    surcharge: 0,
+    total: Number(row.total ?? 0),
+    amount_paid: Number(row.amount_paid ?? 0),
+    sent_at: row.issued_at ?? null,
+    delivery_status: "not_configured",
+    delivery_last_error: null,
+    delivery_attempt_count: 0,
+    last_delivery_attempt_at: null,
+    customers: customer ? {
+      id: customer.id,
+      name: customerName(customer),
+      email: customer.email ?? null,
+      phone: customer.phone ?? null,
+      address: null,
+    } : null,
+    fleet_clients: null,
+    invoice_line_items: lines,
+  };
+}
+
+export async function fetchInvoiceFormOptions(_userId: string): Promise<{
   customers: InvoiceCustomerOption[];
   fleetClients: InvoiceFleetClient[];
   vehicles: InvoiceVehicleOption[];
   catalog: InvoiceServiceCatalogOption[];
   fees: InvoiceFeeDefaults | null;
 }> {
-  const [custRes, fleetRes, vehRes, catRes, profRes] = await Promise.all([
-    supabase.from("customers").select("id, name, email, phone").eq("user_id", userId).order("name"),
-    supabase
-      .from("fleet_clients")
-      .select("id, company_name, billing_email, ap_contact_name, ap_contact_email, phone")
-      .eq("user_id", userId)
-      .order("company_name"),
-    supabase
-      .from("vehicles")
-      .select("id, customer_id, year, make, model, license_plate")
-      .eq("user_id", userId)
-      .order("year", { ascending: false }),
-    supabase
-      .from("service_catalog")
-      .select("id, name, description, default_price")
-      .eq("user_id", userId)
+  const id = workspaceId();
+  const [customersRes, vehiclesRes, catalogRes, settingsRes] = await Promise.all([
+    nextApi.customers.list(id),
+    nextApi.vehicles.list(id),
+    (supabase.from("service_catalog") as any)
+      .select("id,name,description,labor_price")
+      .eq("workspace_id", id)
+      .eq("is_active", true)
       .order("name"),
-    supabase
-      .from("business_profiles")
-      .select(
-        "waste_oil_fee, waste_oil_fee_enabled, shop_fee_value, shop_fee_type, shop_fee_enabled, surcharge_value, surcharge_type, surcharge_enabled, tax_rate",
-      )
-      .eq("user_id", userId)
+    (supabase.from("workspace_settings") as any)
+      .select("waste_oil_fee,waste_oil_fee_enabled,shop_fee_value,shop_fee_type,shop_fee_enabled,surcharge_value,surcharge_type,surcharge_enabled,tax_rate")
+      .eq("workspace_id", id)
       .maybeSingle(),
   ]);
 
+  if (catalogRes.error) throw catalogRes.error;
+  if (settingsRes.error) throw settingsRes.error;
+
   return {
-    customers: (custRes.data ?? []) as InvoiceCustomerOption[],
-    fleetClients: (fleetRes.data ?? []) as InvoiceFleetClient[],
-    vehicles: (vehRes.data ?? []) as InvoiceVehicleOption[],
-    catalog: (catRes.data ?? []) as InvoiceServiceCatalogOption[],
-    fees: (profRes.data as InvoiceFeeDefaults | null) ?? null,
+    customers: ((customersRes.data ?? []) as Record<string, any>[]).map((row) => ({
+      id: row.id,
+      name: [row.first_name, row.last_name].filter(Boolean).join(" "),
+      email: row.email ?? null,
+      phone: row.phone ?? null,
+    })),
+    fleetClients: [],
+    vehicles: ((vehiclesRes.data ?? []) as Record<string, any>[]).map((row) => ({
+      id: row.id,
+      customer_id: row.customer_id ?? null,
+      year: Number(row.year ?? 0),
+      make: row.make ?? "",
+      model: row.model ?? "",
+      license_plate: row.license_plate ?? null,
+    })),
+    catalog: ((catalogRes.data ?? []) as Record<string, any>[]).map((row) => ({
+      id: row.id,
+      name: row.name,
+      description: row.description ?? null,
+      default_price: Number(row.labor_price ?? 0),
+    })),
+    fees: settingsRes.data ? {
+      waste_oil_fee: Number(settingsRes.data.waste_oil_fee ?? 0),
+      waste_oil_fee_enabled: Boolean(settingsRes.data.waste_oil_fee_enabled),
+      shop_fee_value: Number(settingsRes.data.shop_fee_value ?? 0),
+      shop_fee_type: settingsRes.data.shop_fee_type ?? null,
+      shop_fee_enabled: Boolean(settingsRes.data.shop_fee_enabled),
+      surcharge_value: Number(settingsRes.data.surcharge_value ?? 0),
+      surcharge_type: settingsRes.data.surcharge_type ?? null,
+      surcharge_enabled: Boolean(settingsRes.data.surcharge_enabled),
+      tax_rate: Number(settingsRes.data.tax_rate ?? 0),
+    } : null,
   };
 }
 
-/** Generates a sequential-ish invoice number scoped to user. */
-export async function generateInvoiceNumber(userId: string): Promise<string> {
-  const { count } = await supabase
+/** Display-only legacy label. The database assigns the canonical bigint. */
+export async function generateInvoiceNumber(_userId: string): Promise<string> {
+  const id = workspaceId();
+  const { count, error } = await supabase
     .from("invoices")
     .select("id", { count: "exact", head: true })
-    .eq("user_id", userId);
+    .eq("workspace_id", id);
+  if (error) throw error;
   const seq = (count ?? 0) + 1;
   const year = new Date().getFullYear();
   return `INV-${year}-${String(seq).padStart(5, "0")}`;
