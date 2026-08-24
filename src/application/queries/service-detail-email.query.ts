@@ -1,23 +1,19 @@
+/** Service detail optional integrations. */
+
 /**
- * Service detail email + inspection queries
+ * Final main currently has no email provider runtime. Keep the incomplete UI
+ * explicitly unavailable instead of invoking the retired Lovable send-email
+ * Edge Function.
  */
-import { supabase } from "@/integrations/supabase/client";
-
-/** Send a service record email via edge function */
-export async function emailServiceRecord(body: Record<string, unknown>): Promise<void> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error("Not authenticated");
-
-  const { error } = await supabase.functions.invoke("send-email", { body });
-  if (error) throw error;
+export async function emailServiceRecord(_body: Record<string, unknown>): Promise<void> {
+  throw new Error("Service-record email is not configured on Final yet.");
 }
 
-/** Fetch inspections for a service */
-export async function fetchServiceInspections(serviceId: string) {
-  const { data } = await (supabase as any)
-    .from("service_inspections")
-    .select("id, template_name, inspector_name, inspection_date, status, notes")
-    .eq("service_id", serviceId)
-    .order("inspection_date", { ascending: false });
-  return data || [];
+/**
+ * Legacy inspection storage has not been converged into Final. The inspection
+ * UI is feature-gated, so return an empty collection rather than querying a
+ * table that is not part of the canonical Service Writer contract.
+ */
+export async function fetchServiceInspections(_serviceId: string) {
+  return [];
 }
