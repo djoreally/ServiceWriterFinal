@@ -44,9 +44,33 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   try {
     const id = idSchema.parse((await context.params).id);
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
-    const { supabase } = await requireWorkspaceMember(workspaceId, ["owner", "admin", "manager", "service_advisor"]);
-    const { error } = await supabase.from("service_records").delete().eq("workspace_id", workspaceId).eq("id", id);
+    const { supabase, user } = await requireWorkspaceMember(workspaceId, ["owner", "admin", "manager", "service_advisor"]);
+
+    const { data: current, error: currentError } = await supabase
+      .from("service_records")
+      .select("id,status,metadata")
+      .eq("workspace_id", workspaceId)
+      .eq("id", id)
+      .single();
+    if (currentError || !current) throw currentError ?? new Error("Service record not found");
+
+    const metadata = current.metadata && typeof current.metadata === "object"
+      ? current.metadata as Record<string, unknown>
+      : {};
+    const { data, error } = await (supabase.from("service_records") as any)
+      .update({
+        status: "voided",
+        metadata: {
+          ...metadata,
+          voided_at: new Date().toISOString(),
+          voided_by: user.id,
+        },
+      })
+      .eq("workspace_id", workspaceId)
+      .eq("id", id)
+      .select("id,status")
+      .single();
     if (error) throw error;
-    return json({ data: { id } });
+    return json({ data });
   } catch (error) { return errorResponse(error); }
 }
