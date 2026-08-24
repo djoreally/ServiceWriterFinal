@@ -43,6 +43,16 @@ const invoiceSchema = z.object({
   contact_name: z.string().max(200).nullable().optional(),
   contact_email: z.string().email().max(320).nullable().optional(),
   contact_phone: z.string().max(40).nullable().optional(),
+  discount_type: z.enum(["fixed", "percentage"]).optional(),
+  discount_amount: z.number().nonnegative().optional(),
+  tax_enabled: z.boolean().optional(),
+  tax_rate: z.number().min(0).max(100).optional(),
+  waste_oil_fee_enabled: z.boolean().optional(),
+  waste_oil_fee: z.number().nonnegative().optional(),
+  shop_fee_enabled: z.boolean().optional(),
+  shop_fee: z.number().nonnegative().optional(),
+  surcharge_enabled: z.boolean().optional(),
+  surcharge: z.number().nonnegative().optional(),
   line_items: z.array(lineSchema).max(500).default([]),
 });
 
@@ -54,6 +64,32 @@ function canonicalInvoiceNumber(value: number | string | undefined): number | nu
   if (typeof value === "number") return value;
   if (typeof value === "string" && /^\d+$/.test(value)) return Number(value);
   return null;
+}
+
+function lineRows(items: z.infer<typeof lineSchema>[], fallbackVehicleId: string | null) {
+  return items.map((item, index) => ({
+    vehicle_id: item.vehicle_id ?? fallbackVehicleId,
+    service_catalog_id: item.service_catalog_id ?? null,
+    description: item.description,
+    quantity: item.quantity,
+    unit_price: item.unit_price,
+    tax_rate: item.tax_rate ?? 0,
+    sort_order: item.display_order ?? index,
+    metadata: {
+      vin: item.vin ?? null,
+      vehicle_year: item.vehicle_year ?? null,
+      vehicle_make: item.vehicle_make ?? null,
+      vehicle_model: item.vehicle_model ?? null,
+      vehicle_trim: item.vehicle_trim ?? null,
+      vehicle_engine: item.vehicle_engine ?? null,
+      oil_type: item.oil_type ?? null,
+      oil_capacity: item.oil_capacity ?? null,
+      oil_filter: item.oil_filter ?? null,
+      vehicle_mileage: item.vehicle_mileage ?? null,
+      license_plate: item.license_plate ?? null,
+      odometer_measure: item.odometer_measure ?? null,
+    },
+  }));
 }
 
 export async function GET(request: Request) {
@@ -78,7 +114,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = invoiceSchema.parse(await request.json());
-    const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"]);
+    const { supabase } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"]);
 
     const metadata = {
       notes: body.notes ?? null,
@@ -89,10 +125,19 @@ export async function POST(request: Request) {
       contact_name: body.contact_name ?? null,
       contact_email: body.contact_email ?? null,
       contact_phone: body.contact_phone ?? null,
+      discount_type: body.discount_type ?? "fixed",
+      discount_amount: body.discount_amount ?? 0,
+      tax_enabled: body.tax_enabled ?? body.tax_amount > 0,
+      tax_rate: body.tax_rate ?? 0,
+      waste_oil_fee_enabled: body.waste_oil_fee_enabled ?? false,
+      waste_oil_fee: body.waste_oil_fee ?? 0,
+      shop_fee_enabled: body.shop_fee_enabled ?? false,
+      shop_fee: body.shop_fee ?? 0,
+      surcharge_enabled: body.surcharge_enabled ?? false,
+      surcharge: body.surcharge ?? 0,
     };
 
     const header = {
-      workspace_id: body.workspace_id,
       customer_id: body.customer_id,
       vehicle_id: body.vehicle_id ?? null,
       work_order_id: body.work_order_id ?? null,
@@ -101,46 +146,28 @@ export async function POST(request: Request) {
       subtotal: body.subtotal,
       tax_total: body.tax_amount,
       total: body.total,
-      amount_paid: 0,
       issued_at: body.issue_date ? isoDate(body.issue_date) : body.status === "issued" ? new Date().toISOString() : null,
       due_at: isoDate(body.due_date),
-      created_by: user.id,
       metadata,
     };
 
-    const { data: invoice, error } = await (supabase.from("invoices") as any).insert(header).select().single();
-    if (error || !invoice) throw error ?? new Error("Failed to create invoice");
+    const { data: createdId, error } = await (supabase as any).rpc("create_invoice_v1", {
+      p_workspace_id: body.workspace_id,
+      p_header: header,
+      p_lines: lineRows(body.line_items, body.vehicle_id ?? null),
+    });
+    if (error) throw error;
 
-    if (body.line_items.length) {
-      const rows = body.line_items.map((item, index) => ({
-        workspace_id: body.workspace_id,
-        invoice_id: invoice.id,
-        vehicle_id: item.vehicle_id ?? body.vehicle_id ?? null,
-        service_catalog_id: item.service_catalog_id ?? null,
-        description: item.description,
-        quantity: item.quantity,
-        unit_price: item.unit_price,
-        tax_rate: item.tax_rate ?? 0,
-        sort_order: item.display_order ?? index,
-        metadata: {
-          vin: item.vin ?? null,
-          vehicle_year: item.vehicle_year ?? null,
-          vehicle_make: item.vehicle_make ?? null,
-          vehicle_model: item.vehicle_model ?? null,
-          vehicle_trim: item.vehicle_trim ?? null,
-          vehicle_engine: item.vehicle_engine ?? null,
-          oil_type: item.oil_type ?? null,
-          oil_capacity: item.oil_capacity ?? null,
-          oil_filter: item.oil_filter ?? null,
-          vehicle_mileage: item.vehicle_mileage ?? null,
-          license_plate: item.license_plate ?? null,
-          odometer_measure: item.odometer_measure ?? null,
-        },
-      }));
-      const { error: lineError } = await (supabase.from("invoice_lines") as any).insert(rows);
-      if (lineError) throw lineError;
-    }
+    const id = typeof createdId === "string" ? createdId : Array.isArray(createdId) ? createdId[0] : createdId;
+    if (!id) throw new Error("Invoice creation returned no identifier.");
 
+    const { data: invoice, error: readError } = await supabase
+      .from("invoices")
+      .select("*")
+      .eq("workspace_id", body.workspace_id)
+      .eq("id", id)
+      .single();
+    if (readError) throw readError;
     return json({ data: invoice }, { status: 201 });
   } catch (error) {
     return errorResponse(error);
