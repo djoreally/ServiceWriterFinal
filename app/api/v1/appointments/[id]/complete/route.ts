@@ -7,9 +7,16 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   try {
     const id = z.string().uuid().parse((await context.params).id);
     const { workspace_id } = schema.parse(await request.json());
-    const { supabase, user } = await requireWorkspaceMember(workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher"]);
-    const { data, error } = await supabase.rpc("complete_appointment_with_rewards" as never, { p_appointment_id: id, p_actor_id: user.id });
+    const { supabase } = await requireWorkspaceMember(workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher", "technician"]);
+
+    const { data: serviceRecordId, error } = await supabase.rpc(
+      "complete_appointment_v1" as never,
+      { p_workspace_id: workspace_id, p_appointment_id: id } as never,
+    );
     if (error) throw error;
-    return json({ data });
-  } catch (error) { return errorResponse(error); }
+
+    return json({ data: { appointment_id: id, service_record_id: serviceRecordId } });
+  } catch (error) {
+    return errorResponse(error);
+  }
 }
