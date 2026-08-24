@@ -94,19 +94,42 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (error) throw error;
 
     if (body.technician_id !== undefined) {
+      const assignmentTime = new Date().toISOString();
       await supabase.from("work_order_assignments")
-        .update({ unassigned_at: new Date().toISOString() })
+        .update({ unassigned_at: assignmentTime })
         .eq("workspace_id", body.workspace_id)
         .eq("work_order_id", id)
         .is("unassigned_at", null);
+
       if (body.technician_id) {
-        const { error: assignmentError } = await supabase.from("work_order_assignments").insert({
-          workspace_id: body.workspace_id,
-          work_order_id: id,
-          user_id: body.technician_id,
-          assigned_by: user.id,
-        });
-        if (assignmentError) throw assignmentError;
+        // PK is (work_order_id,user_id). Reactivate a prior same-user assignment
+        // instead of inserting a duplicate row when a technician is reassigned.
+        const { data: existingAssignment, error: existingAssignmentError } = await supabase
+          .from("work_order_assignments")
+          .select("work_order_id,user_id")
+          .eq("workspace_id", body.workspace_id)
+          .eq("work_order_id", id)
+          .eq("user_id", body.technician_id)
+          .maybeSingle();
+        if (existingAssignmentError) throw existingAssignmentError;
+
+        if (existingAssignment) {
+          const { error: reactivateError } = await supabase.from("work_order_assignments")
+            .update({ assigned_by: user.id, assigned_at: assignmentTime, unassigned_at: null })
+            .eq("workspace_id", body.workspace_id)
+            .eq("work_order_id", id)
+            .eq("user_id", body.technician_id);
+          if (reactivateError) throw reactivateError;
+        } else {
+          const { error: assignmentError } = await supabase.from("work_order_assignments").insert({
+            workspace_id: body.workspace_id,
+            work_order_id: id,
+            user_id: body.technician_id,
+            assigned_by: user.id,
+            assigned_at: assignmentTime,
+          });
+          if (assignmentError) throw assignmentError;
+        }
       }
     }
 
