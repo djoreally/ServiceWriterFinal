@@ -27,6 +27,17 @@ const serviceRecordSchema = z.object({
   completed_at: z.string().datetime().nullable().optional(),
 });
 
+function uuidFromMetadata(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) ? value : null;
+}
+
+function numberFromMetadata(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -52,25 +63,46 @@ export async function POST(request: Request) {
     const body = serviceRecordSchema.parse(await request.json());
     const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician"]);
     const now = new Date().toISOString();
+    const meta = body.metadata ?? {};
 
-    if (body.customer_id) {
+    // Compatibility promotion: older UI code sends these values in metadata.
+    // The canonical row always receives them as real relational/financial fields.
+    const customerId = body.customer_id ?? uuidFromMetadata(meta.customer_id);
+    const vehicleId = body.vehicle_id ?? uuidFromMetadata(meta.vehicle_id);
+    const laborCost = numberFromMetadata(meta.labor_cost) ?? 0;
+    const partsCost = numberFromMetadata(meta.parts_cost) ?? 0;
+    const shopSupplies = numberFromMetadata(meta.shop_supplies) ?? 0;
+    const promotedSubtotal = body.subtotal ?? Number((laborCost + partsCost + shopSupplies).toFixed(2));
+    const promotedTaxRate = body.tax_rate ?? numberFromMetadata(meta.tax_rate);
+    const promotedTaxAmount = body.tax_amount ?? numberFromMetadata(meta.tax_amount);
+    const promotedDiscount = body.discount_amount ?? numberFromMetadata(meta.discount_amount);
+    const promotedTotal = body.total_amount ?? numberFromMetadata(meta.total_cost);
+
+    if (customerId) {
       const { data: customer, error: customerError } = await supabase
-        .from("customers").select("id").eq("workspace_id", body.workspace_id).eq("id", body.customer_id).maybeSingle();
+        .from("customers").select("id").eq("workspace_id", body.workspace_id).eq("id", customerId).maybeSingle();
       if (customerError) throw customerError;
       if (!customer) return json({ error: { code: "customer_not_found", message: "Customer does not belong to this workspace." } }, { status: 409 });
     }
-    if (body.vehicle_id) {
+    if (vehicleId) {
       const { data: vehicle, error: vehicleError } = await supabase
-        .from("vehicles").select("id,customer_id").eq("workspace_id", body.workspace_id).eq("id", body.vehicle_id).maybeSingle();
+        .from("vehicles").select("id,customer_id").eq("workspace_id", body.workspace_id).eq("id", vehicleId).maybeSingle();
       if (vehicleError) throw vehicleError;
       if (!vehicle) return json({ error: { code: "vehicle_not_found", message: "Vehicle does not belong to this workspace." } }, { status: 409 });
-      if (body.customer_id && vehicle.customer_id && vehicle.customer_id !== body.customer_id) {
+      if (customerId && vehicle.customer_id && vehicle.customer_id !== customerId) {
         return json({ error: { code: "vehicle_customer_mismatch", message: "Vehicle does not belong to the selected customer." } }, { status: 409 });
       }
     }
 
     const payload = {
       ...body,
+      customer_id: customerId,
+      vehicle_id: vehicleId,
+      subtotal: promotedSubtotal,
+      tax_rate: promotedTaxRate,
+      tax_amount: promotedTaxAmount,
+      discount_amount: promotedDiscount,
+      total_amount: promotedTotal,
       completed_by: body.status === "completed" ? user.id : null,
       completed_at: body.status === "completed" ? body.completed_at ?? now : body.completed_at ?? null,
     };
