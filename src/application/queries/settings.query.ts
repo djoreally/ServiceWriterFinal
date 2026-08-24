@@ -40,12 +40,7 @@ const DEFAULT_PROFILE: Omit<BusinessProfileSettings, "user_id"> = {
   email: "",
   address: "",
   logo_url: "",
-  terminology: {
-    customer: "Customer",
-    vehicle: "Vehicle",
-    service: "Service",
-    quote: "Quote",
-  },
+  terminology: { customer: "Customer", vehicle: "Vehicle", service: "Service", quote: "Quote" },
   date_format: "MM/DD/YYYY hh:mm A",
   timezone: "America/New_York",
   currency: "USD",
@@ -58,20 +53,13 @@ const DEFAULT_PROFILE: Omit<BusinessProfileSettings, "user_id"> = {
   service_coordinates: null,
 };
 
-type WorkspaceContext = {
-  workspaceId: string;
-  userId: string;
-};
+export type WorkspaceContext = { workspaceId: string; userId: string };
 
-async function resolveCurrentWorkspace(): Promise<WorkspaceContext | null> {
+export async function resolveCurrentWorkspace(): Promise<WorkspaceContext | null> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return null;
 
   const client = supabase as any;
-
-  // Prefer an active membership. Owners are also represented as members in the
-  // canonical Final schema. The fallback covers older owner rows created before
-  // workspace_members became mandatory.
   const { data: membership, error: membershipError } = await client
     .from("workspace_members")
     .select("workspace_id")
@@ -79,11 +67,8 @@ async function resolveCurrentWorkspace(): Promise<WorkspaceContext | null> {
     .eq("is_active", true)
     .limit(1)
     .maybeSingle();
-
   if (membershipError) throw membershipError;
-  if (membership?.workspace_id) {
-    return { workspaceId: membership.workspace_id, userId: user.id };
-  }
+  if (membership?.workspace_id) return { workspaceId: membership.workspace_id, userId: user.id };
 
   const { data: owned, error: ownedError } = await client
     .from("workspaces")
@@ -92,15 +77,12 @@ async function resolveCurrentWorkspace(): Promise<WorkspaceContext | null> {
     .eq("is_active", true)
     .limit(1)
     .maybeSingle();
-
   if (ownedError) throw ownedError;
   return owned?.id ? { workspaceId: owned.id, userId: user.id } : null;
 }
 
 function parseTerminology(value: unknown): Terminology {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return DEFAULT_PROFILE.terminology;
-  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return DEFAULT_PROFILE.terminology;
   const raw = value as Record<string, unknown>;
   return {
     customer: typeof raw.customer === "string" ? raw.customer : "Customer",
@@ -111,35 +93,23 @@ function parseTerminology(value: unknown): Terminology {
 }
 
 function readOperationalObject(value: unknown): Record<string, any> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, any>
-    : {};
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
 }
 
 function buildAddress(settings: any): string {
   return [settings?.address_line1, settings?.address_line2, settings?.city, settings?.region, settings?.postal_code]
-    .filter(Boolean)
-    .join(", ");
+    .filter(Boolean).join(", ");
 }
 
-/** Fetch business settings for the current active workspace. */
 export async function fetchBusinessSettings(): Promise<BusinessProfileSettings | null> {
   try {
     const context = await resolveCurrentWorkspace();
     if (!context) return null;
-
     const client = supabase as any;
     const [{ data: workspace, error: workspaceError }, { data: settings, error: settingsError }] = await Promise.all([
-      client.from("workspaces")
-        .select("id, name, slug, timezone, currency_code")
-        .eq("id", context.workspaceId)
-        .maybeSingle(),
-      client.from("workspace_settings")
-        .select("*")
-        .eq("workspace_id", context.workspaceId)
-        .maybeSingle(),
+      client.from("workspaces").select("id, name, slug, timezone, currency_code").eq("id", context.workspaceId).maybeSingle(),
+      client.from("workspace_settings").select("*").eq("workspace_id", context.workspaceId).maybeSingle(),
     ]);
-
     if (workspaceError) throw workspaceError;
     if (settingsError) throw settingsError;
     if (!workspace) return null;
@@ -148,8 +118,7 @@ export async function fetchBusinessSettings(): Promise<BusinessProfileSettings |
     const coordinates = operational.service_coordinates;
     const serviceCoordinates = coordinates && typeof coordinates === "object"
       && Number.isFinite(Number(coordinates.lat)) && Number.isFinite(Number(coordinates.lng))
-      ? { lat: Number(coordinates.lat), lng: Number(coordinates.lng) }
-      : null;
+      ? { lat: Number(coordinates.lat), lng: Number(coordinates.lng) } : null;
 
     return {
       id: context.workspaceId,
@@ -177,23 +146,15 @@ export async function fetchBusinessSettings(): Promise<BusinessProfileSettings |
   }
 }
 
-/** Save business settings to the canonical workspace + workspace_settings rows. */
-export async function saveBusinessSettings(
-  profile: BusinessProfileSettings,
-  slugInput: string,
-): Promise<{ success: boolean; error?: string }> {
+export async function saveBusinessSettings(profile: BusinessProfileSettings, slugInput: string): Promise<{ success: boolean; error?: string }> {
   try {
     const context = await resolveCurrentWorkspace();
     if (!context) return { success: false, error: "Not authenticated" };
-
     const client = supabase as any;
     const slug = (slugInput || profile.booking_slug || "").trim().toLowerCase();
 
-    const { data: existingSettings, error: readError } = await client
-      .from("workspace_settings")
-      .select("operational_settings")
-      .eq("workspace_id", context.workspaceId)
-      .maybeSingle();
+    const { data: existingSettings, error: readError } = await client.from("workspace_settings")
+      .select("operational_settings").eq("workspace_id", context.workspaceId).maybeSingle();
     if (readError) throw readError;
 
     const operational = {
@@ -205,14 +166,15 @@ export async function saveBusinessSettings(
       service_coordinates: profile.service_coordinates,
     };
 
-    const workspaceUpdate = {
+    const { error: workspaceError } = await client.from("workspaces").update({
       name: profile.business_name,
       slug,
       timezone: profile.timezone || DEFAULT_PROFILE.timezone,
       currency_code: profile.currency || DEFAULT_PROFILE.currency,
-    };
+    }).eq("id", context.workspaceId);
+    if (workspaceError) throw workspaceError;
 
-    const settingsUpdate = {
+    const { error: settingsError } = await client.from("workspace_settings").update({
       owner_name: profile.owner_name || null,
       phone: profile.phone || null,
       email: profile.email || null,
@@ -224,18 +186,7 @@ export async function saveBusinessSettings(
       booking_slug: slug || null,
       service_radius_miles: profile.service_radius_miles,
       operational_settings: operational,
-    };
-
-    const { error: workspaceError } = await client
-      .from("workspaces")
-      .update(workspaceUpdate)
-      .eq("id", context.workspaceId);
-    if (workspaceError) throw workspaceError;
-
-    const { error: settingsError } = await client
-      .from("workspace_settings")
-      .update(settingsUpdate)
-      .eq("workspace_id", context.workspaceId);
+    }).eq("workspace_id", context.workspaceId);
     if (settingsError) throw settingsError;
 
     return { success: true };
@@ -247,21 +198,17 @@ export async function saveBusinessSettings(
   }
 }
 
-/** Check booking slug availability across canonical workspaces. */
 export async function checkSlugAvailability(slug: string): Promise<boolean | null> {
   if (!slug || slug.length < 3) return null;
   if (!/^[a-z0-9-]+$/.test(slug)) return false;
-
   try {
     const context = await resolveCurrentWorkspace();
     if (!context) return null;
-
     const client = supabase as any;
     const [{ data: workspaceMatch, error: workspaceError }, { data: settingsMatch, error: settingsError }] = await Promise.all([
       client.from("workspaces").select("id").eq("slug", slug).neq("id", context.workspaceId).limit(1),
       client.from("workspace_settings").select("workspace_id").eq("booking_slug", slug).neq("workspace_id", context.workspaceId).limit(1),
     ]);
-
     if (workspaceError || settingsError) return null;
     return !(workspaceMatch?.length || settingsMatch?.length);
   } catch {
