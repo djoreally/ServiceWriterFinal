@@ -45,6 +45,10 @@ function canonicalStatus(status?: string): string {
   }
 }
 
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
 function metadataFromQuote(data: LegacyQuoteWrite, existing: Record<string, unknown> = {}) {
   return {
     ...existing,
@@ -66,14 +70,12 @@ function currentWorkspace(): string {
   return workspaceId;
 }
 
-/** Create a canonical quote. A real customer is required by Final's quote contract. */
 export async function createQuote(data: LegacyQuoteWrite) {
   try {
     const workspace_id = currentWorkspace();
     if (!data.customer_id) return { data: null, error: new Error("Select or create a customer before creating a quote.") };
     const { data: { user } } = await getCurrentAuthUser();
     if (!user) return { data: null, error: new Error("Not authenticated") };
-
     const total = Number(data.total_cost ?? 0);
     const payload = {
       workspace_id,
@@ -88,26 +90,22 @@ export async function createQuote(data: LegacyQuoteWrite) {
       metadata: metadataFromQuote(data),
     };
     const { data: row, error } = await (supabase.from("quotes") as any).insert(payload).select().single();
-    if (error) return { data: null, error };
-    return { data: row, error: null };
+    return { data: row ?? null, error: error ?? null };
   } catch (error) {
     return { data: null, error: error instanceof Error ? error : new Error("Failed to create quote") };
   }
 }
 
-/** Update canonical quote fields and merge presentation metadata. */
 export async function updateQuote(id: string, data: LegacyQuoteWrite) {
   try {
     const workspace_id = currentWorkspace();
     if (data.customer_id === null) return { data: null, error: new Error("A quote must belong to a customer.") };
     const { data: current, error: currentError } = await (supabase.from("quotes") as any)
-      .select("metadata,total,subtotal,tax_total")
-      .eq("workspace_id", workspace_id)
-      .eq("id", id)
-      .single();
+      .select("metadata,total,subtotal,tax_total,status").eq("workspace_id", workspace_id).eq("id", id).single();
     if (currentError) return { data: null, error: currentError };
+    if (current?.status === "converted") return { data: null, error: new Error("Converted quotes are immutable.") };
 
-    const updates: Record<string, unknown> = { metadata: metadataFromQuote(data, current?.metadata ?? {}) };
+    const updates: Record<string, unknown> = { metadata: metadataFromQuote(data, object(current?.metadata)) };
     if (data.customer_id !== undefined) updates.customer_id = data.customer_id;
     if (data.vehicle_id !== undefined) updates.vehicle_id = data.vehicle_id || null;
     if (data.status !== undefined) updates.status = canonicalStatus(data.status);
@@ -125,19 +123,34 @@ export async function updateQuote(id: string, data: LegacyQuoteWrite) {
   }
 }
 
-/** Delete an unconverted quote. Converted quote history is retained. */
+/** UI delete archives a quote without destroying its header or line-item history. */
 export async function deleteQuote(id: string) {
   const workspace_id = currentWorkspace();
   const { data: quote, error: readError } = await (supabase.from("quotes") as any)
-    .select("status").eq("workspace_id", workspace_id).eq("id", id).single();
+    .select("status,metadata").eq("workspace_id", workspace_id).eq("id", id).single();
   if (readError) return { data: null, error: readError };
   if (quote?.status === "converted") return { data: null, error: new Error("Converted quotes cannot be deleted.") };
-  await (supabase.from("quote_items") as any).delete().eq("workspace_id", workspace_id).eq("quote_id", id);
-  return (supabase.from("quotes") as any).delete().eq("workspace_id", workspace_id).eq("id", id);
+
+  const metadata = {
+    ...object(quote?.metadata),
+    archived_at: new Date().toISOString(),
+    archived_reason: "user_delete",
+  };
+  return (supabase.from("quotes") as any)
+    .update({ status: "declined", metadata })
+    .eq("workspace_id", workspace_id)
+    .eq("id", id)
+    .select()
+    .single();
 }
 
+/** Draft-edit helper: line replacement is allowed before conversion. */
 export async function deleteQuoteItems(quoteId: string) {
   const workspace_id = currentWorkspace();
+  const { data: quote, error } = await (supabase.from("quotes") as any)
+    .select("status").eq("workspace_id", workspace_id).eq("id", quoteId).single();
+  if (error) return { data: null, error };
+  if (quote?.status === "converted") return { data: null, error: new Error("Converted quote items are immutable.") };
   return (supabase.from("quote_items") as any).delete().eq("workspace_id", workspace_id).eq("quote_id", quoteId);
 }
 
