@@ -38,6 +38,13 @@ function numberFromMetadata(value: unknown): number | null {
   return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
+function mergeMetadata(current: unknown, incoming: Record<string, unknown>): Record<string, unknown> {
+  const base = current && typeof current === "object" && !Array.isArray(current)
+    ? current as Record<string, unknown>
+    : {};
+  return { ...base, ...incoming };
+}
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -65,8 +72,6 @@ export async function POST(request: Request) {
     const now = new Date().toISOString();
     const meta = body.metadata ?? {};
 
-    // Compatibility promotion: older UI code sends these values in metadata.
-    // The canonical row always receives them as real relational/financial fields.
     const customerId = body.customer_id ?? uuidFromMetadata(meta.customer_id);
     const vehicleId = body.vehicle_id ?? uuidFromMetadata(meta.vehicle_id);
     const laborCost = numberFromMetadata(meta.labor_cost) ?? 0;
@@ -106,6 +111,32 @@ export async function POST(request: Request) {
       completed_by: body.status === "completed" ? user.id : null,
       completed_at: body.status === "completed" ? body.completed_at ?? now : body.completed_at ?? null,
     };
+
+    // Appointment completion already creates a service record transactionally.
+    // If an older client tries to create again, enrich/reuse that row instead of duplicating history.
+    if (body.appointment_id) {
+      const { data: existing, error: existingError } = await supabase
+        .from("service_records")
+        .select("id,metadata")
+        .eq("workspace_id", body.workspace_id)
+        .eq("appointment_id", body.appointment_id)
+        .neq("status", "voided")
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (existingError) throw existingError;
+      if (existing) {
+        const { data, error } = await (supabase.from("service_records") as any)
+          .update({ ...payload, metadata: mergeMetadata(existing.metadata, meta) })
+          .eq("workspace_id", body.workspace_id)
+          .eq("id", existing.id)
+          .select()
+          .single();
+        if (error) throw error;
+        return json({ data, reused: true });
+      }
+    }
+
     const { data, error } = await supabase.from("service_records").insert(payload).select().single();
     if (error) throw error;
     return json({ data }, { status: 201 });
