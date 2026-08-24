@@ -62,6 +62,32 @@ function mergeMetadata(current: unknown, patch: Record<string, unknown>) {
   return { ...base, ...patch };
 }
 
+function lineRows(items: z.infer<typeof lineSchema>[]) {
+  return items.map((item, index) => ({
+    vehicle_id: item.vehicle_id ?? null,
+    service_catalog_id: item.service_catalog_id ?? null,
+    description: item.description,
+    quantity: item.quantity,
+    unit_price: item.unit_price,
+    tax_rate: item.tax_rate ?? 0,
+    sort_order: item.display_order ?? index,
+    metadata: {
+      vin: item.vin ?? null,
+      vehicle_year: item.vehicle_year ?? null,
+      vehicle_make: item.vehicle_make ?? null,
+      vehicle_model: item.vehicle_model ?? null,
+      vehicle_trim: item.vehicle_trim ?? null,
+      vehicle_engine: item.vehicle_engine ?? null,
+      oil_type: item.oil_type ?? null,
+      oil_capacity: item.oil_capacity ?? null,
+      oil_filter: item.oil_filter ?? null,
+      vehicle_mileage: item.vehicle_mileage ?? null,
+      license_plate: item.license_plate ?? null,
+      odometer_measure: item.odometer_measure ?? null,
+    },
+  }));
+}
+
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const id = z.string().uuid().parse((await context.params).id);
@@ -117,54 +143,33 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (normalizedStatus === "issued" && body.issue_date === undefined && current.status === "draft") patch.issued_at = new Date().toISOString();
     if (Object.keys(metadataPatch).length) patch.metadata = mergeMetadata(current.metadata, metadataPatch);
 
-    const { data: invoice, error } = await (supabase.from("invoices") as any)
+    if (body.line_items !== undefined) {
+      const { error: atomicError } = await (supabase as any).rpc("patch_draft_invoice_v1", {
+        p_workspace_id: body.workspace_id,
+        p_invoice_id: id,
+        p_patch: patch,
+        p_lines: lineRows(body.line_items),
+      });
+      if (atomicError) throw atomicError;
+
+      const { data, error } = await supabase
+        .from("invoices")
+        .select("*")
+        .eq("workspace_id", body.workspace_id)
+        .eq("id", id)
+        .single();
+      if (error) throw error;
+      return json({ data });
+    }
+
+    const { data, error } = await (supabase.from("invoices") as any)
       .update(patch)
       .eq("id", id)
       .eq("workspace_id", body.workspace_id)
       .select()
       .single();
     if (error) throw error;
-
-    if (body.line_items !== undefined) {
-      const { error: deleteError } = await supabase
-        .from("invoice_lines")
-        .delete()
-        .eq("workspace_id", body.workspace_id)
-        .eq("invoice_id", id);
-      if (deleteError) throw deleteError;
-
-      if (body.line_items.length) {
-        const rows = body.line_items.map((item, index) => ({
-          workspace_id: body.workspace_id,
-          invoice_id: id,
-          vehicle_id: item.vehicle_id ?? null,
-          service_catalog_id: item.service_catalog_id ?? null,
-          description: item.description,
-          quantity: item.quantity,
-          unit_price: item.unit_price,
-          tax_rate: item.tax_rate ?? 0,
-          sort_order: item.display_order ?? index,
-          metadata: {
-            vin: item.vin ?? null,
-            vehicle_year: item.vehicle_year ?? null,
-            vehicle_make: item.vehicle_make ?? null,
-            vehicle_model: item.vehicle_model ?? null,
-            vehicle_trim: item.vehicle_trim ?? null,
-            vehicle_engine: item.vehicle_engine ?? null,
-            oil_type: item.oil_type ?? null,
-            oil_capacity: item.oil_capacity ?? null,
-            oil_filter: item.oil_filter ?? null,
-            vehicle_mileage: item.vehicle_mileage ?? null,
-            license_plate: item.license_plate ?? null,
-            odometer_measure: item.odometer_measure ?? null,
-          },
-        }));
-        const { error: insertError } = await (supabase.from("invoice_lines") as any).insert(rows);
-        if (insertError) throw insertError;
-      }
-    }
-
-    return json({ data: invoice });
+    return json({ data });
   } catch (error) {
     return errorResponse(error);
   }
