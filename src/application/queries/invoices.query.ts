@@ -131,7 +131,7 @@ function workspaceId(): string {
 }
 
 function object(value: unknown): Record<string, any> {
-  return value && typeof value === "object" ? value as Record<string, any> : {};
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
 }
 
 function legacyStatus(status: string): string {
@@ -149,7 +149,15 @@ function displayInvoiceNumber(row: Record<string, any>): string {
 
 function customerName(customer: any): string {
   if (!customer) return "";
-  return [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim();
+  return [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim() || customer.company_name || "Customer";
+}
+
+function customerAddress(customer: any): string | null {
+  if (!customer) return null;
+  const metadata = object(customer.metadata);
+  const address = [customer.address_line1, customer.address_line2, customer.city, customer.region, customer.postal_code]
+    .filter(Boolean).join(", ");
+  return address || (typeof metadata.address === "string" ? metadata.address : null);
 }
 
 export async function fetchInvoiceList(_userId: string): Promise<InvoiceListRow[]> {
@@ -224,17 +232,17 @@ export async function fetchInvoiceDetail(invoiceId: string): Promise<InvoiceFull
     notes: metadata.notes ?? null,
     terms_text: metadata.terms_text ?? null,
     subtotal: Number(row.subtotal ?? 0),
-    discount_type: "fixed",
-    discount_amount: 0,
+    discount_type: metadata.discount_type === "percentage" ? "percentage" : "fixed",
+    discount_amount: Number(metadata.discount_amount ?? 0),
     tax_enabled: Number(row.tax_total ?? 0) > 0,
-    tax_rate: 0,
+    tax_rate: Number(metadata.tax_rate ?? 0),
     tax_amount: Number(row.tax_total ?? 0),
-    waste_oil_fee_enabled: false,
-    waste_oil_fee: 0,
-    shop_fee_enabled: false,
-    shop_fee: 0,
-    surcharge_enabled: false,
-    surcharge: 0,
+    waste_oil_fee_enabled: Boolean(metadata.waste_oil_fee_enabled),
+    waste_oil_fee: Number(metadata.waste_oil_fee ?? 0),
+    shop_fee_enabled: Boolean(metadata.shop_fee_enabled),
+    shop_fee: Number(metadata.shop_fee ?? 0),
+    surcharge_enabled: Boolean(metadata.surcharge_enabled),
+    surcharge: Number(metadata.surcharge ?? 0),
     total: Number(row.total ?? 0),
     amount_paid: Number(row.amount_paid ?? 0),
     sent_at: row.issued_at ?? null,
@@ -247,7 +255,7 @@ export async function fetchInvoiceDetail(invoiceId: string): Promise<InvoiceFull
       name: customerName(customer),
       email: customer.email ?? null,
       phone: customer.phone ?? null,
-      address: null,
+      address: customerAddress(customer),
     } : null,
     fleet_clients: null,
     invoice_line_items: lines,
@@ -266,7 +274,7 @@ export async function fetchInvoiceFormOptions(_userId: string): Promise<{
     nextApi.customers.list(id),
     nextApi.vehicles.list(id),
     (supabase.from("service_catalog") as any)
-      .select("id,name,description,labor_price")
+      .select("id,name,description,default_price")
       .eq("workspace_id", id)
       .eq("is_active", true)
       .order("name"),
@@ -282,7 +290,7 @@ export async function fetchInvoiceFormOptions(_userId: string): Promise<{
   return {
     customers: ((customersRes.data ?? []) as Record<string, any>[]).map((row) => ({
       id: row.id,
-      name: [row.first_name, row.last_name].filter(Boolean).join(" "),
+      name: customerName(row),
       email: row.email ?? null,
       phone: row.phone ?? null,
     })),
@@ -299,7 +307,7 @@ export async function fetchInvoiceFormOptions(_userId: string): Promise<{
       id: row.id,
       name: row.name,
       description: row.description ?? null,
-      default_price: Number(row.labor_price ?? 0),
+      default_price: Number(row.default_price ?? 0),
     })),
     fees: settingsRes.data ? {
       waste_oil_fee: Number(settingsRes.data.waste_oil_fee ?? 0),
