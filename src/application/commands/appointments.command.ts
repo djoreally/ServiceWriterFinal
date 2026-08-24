@@ -5,6 +5,7 @@ import type { AppointmentFormState } from "@/shared/types/forms";
 import { requestAppointmentProviderSync } from "./provider-sync.command";
 import { nextApi } from "@/lib/nextApiClient";
 import { fetchBusinessSettings, resolveCurrentWorkspace } from "@/application/queries/settings.query";
+import { syncAppointmentPrimaryService } from "@/lib/appointmentItemsApi";
 
 export interface SaveAppointmentOptions {
   existingAppointmentId?: string;
@@ -44,9 +45,7 @@ export async function saveAppointment(
   if (!context) throw new Error("Select a workspace before saving an appointment.");
 
   const customerId = uuidOrNull(formData.customer_id);
-  if (!customerId) {
-    throw new Error("Select or create a customer before saving this appointment.");
-  }
+  if (!customerId) throw new Error("Select or create a customer before saving this appointment.");
 
   const vehicleId = uuidOrNull(formData.vehicle_id);
   const serviceCatalogId = uuidOrNull(formData.service_catalog_id);
@@ -59,8 +58,6 @@ export async function saveAppointment(
   if (resolvedTaxAmount == null && formData.estimated_cost != null) {
     const settings = await fetchBusinessSettings();
     if (settings) {
-      // The detailed fee hook owns surcharge/waste/shop fees. This preserves
-      // the historical flat tax behavior without the retired tax RPC.
       const { data } = await (supabase as any)
         .from("workspace_settings")
         .select("tax_rate")
@@ -112,6 +109,11 @@ export async function saveAppointment(
   const shouldUpdate = Boolean(options.existingAppointmentId && !options.isPrefillNew);
   if (shouldUpdate && options.existingAppointmentId) {
     await nextApi.appointments.update(options.existingAppointmentId, payload);
+    await syncAppointmentPrimaryService({
+      workspaceId: context.workspaceId,
+      appointmentId: options.existingAppointmentId,
+      serviceCatalogId,
+    });
     return { appointmentId: options.existingAppointmentId, isUpdate: true };
   }
 
@@ -119,12 +121,17 @@ export async function saveAppointment(
   const createdRecord = created as { id?: string };
   if (!createdRecord.id) throw new Error("Failed to create appointment");
 
+  await syncAppointmentPrimaryService({
+    workspaceId: context.workspaceId,
+    appointmentId: createdRecord.id,
+    serviceCatalogId,
+  });
+
   requestAppointmentProviderSync({
     appointmentId: createdRecord.id,
     syncMode: "appointment_created",
     guestEmail: formData.guest_email?.trim() || null,
   }).catch((syncError) => {
-    // Provider sync is supplemental; the canonical appointment is already saved.
     console.warn("[saveAppointment] provider sync failed", syncError);
   });
 
@@ -136,10 +143,6 @@ export interface AutoDispatchResult {
   topRecommendationName?: string | null;
 }
 
-/**
- * Auto-dispatch is disabled unless the canonical workspace explicitly enables
- * it. The retired Lovable dispatch-engine function is intentionally not called.
- */
 export async function tryAutoDispatchAppointment(
   _appointmentId: string,
   _formData: AppointmentFormState,
