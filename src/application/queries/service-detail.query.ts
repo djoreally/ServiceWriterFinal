@@ -1,12 +1,9 @@
-/**
- * Service Detail Query - Fetches all data needed for the service detail page.
- * Consolidates multiple supabase.from() calls that were previously in the page component.
- */
-
+/** Service Detail Query — canonical service-record detail with legacy UI adapter. */
 import { supabase } from "@/integrations/supabase/client";
 import { bankersRound } from "@/lib/financialMath";
-
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+
 export interface ServiceDetailData {
   id: string;
   service_number: string | null;
@@ -24,7 +21,6 @@ export interface ServiceDetailData {
   oil_quarts_used: number | null;
   created_at: string;
   updated_at: string;
-  // Carfax-compliant vehicle snapshot captured at time of service
   mileage: number | null;
   vin_captured: string | null;
   vehicle_year: number | null;
@@ -86,114 +82,181 @@ export interface ServiceDetailResult {
   oilType: string | null;
 }
 
-/**
- * Fetch all data needed for a service detail page in parallel where possible.
- * Returns null if service not found or user not authenticated.
- */
+function object(value: unknown): Record<string, any> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
+}
+
+function customerAdapter(row: any): ServiceDetailCustomer | null {
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: [row.first_name, row.last_name].filter(Boolean).join(" ").trim() || row.company_name || "Customer",
+    email: row.email ?? null,
+    phone: row.phone ?? null,
+    address: [row.address_line1, row.address_line2, row.city, row.region, row.postal_code].filter(Boolean).join(", ") || null,
+    created_at: row.created_at,
+  };
+}
+
 export async function fetchServiceDetail(serviceId: string): Promise<ServiceDetailResult | null> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return null;
+  const context = await resolveCurrentWorkspace();
+  if (!context) return null;
+  const client = supabase as any;
 
-  // 1. Fetch the service record with IDOR protection
-  const { data: serviceData, error: serviceError } = await supabase
-    .from("services")
+  const { data: row, error } = await client
+    .from("service_records")
     .select("*")
+    .eq("workspace_id", context.workspaceId)
     .eq("id", serviceId)
-    .eq("user_id", user.id)
     .single();
+  if (error || !row) return null;
 
-  if (serviceError || !serviceData) return null;
-
-  // 2. Fetch related data in parallel
-  const [laborRes, timelineRes, profileRes] = await Promise.all([
-    supabase.from("labor_items").select("id, description, hours").eq("service_id", serviceId).order("created_at"),
-    supabase.from("service_timeline").select("*").eq("service_id", serviceId).order("timestamp", { ascending: true }),
-    supabase.from("business_profiles").select("business_name, email").eq("user_id", user.id).single(),
+  const metadata = object(row.metadata);
+  const [customerRes, vehicleRes, linesRes, settingsRes, workspaceRes, appointmentRes] = await Promise.all([
+    row.customer_id
+      ? client.from("customers").select("*").eq("workspace_id", context.workspaceId).eq("id", row.customer_id).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    row.vehicle_id
+      ? client.from("vehicles").select("*").eq("workspace_id", context.workspaceId).eq("id", row.vehicle_id).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    client.from("service_record_line_items")
+      .select("id,item_type,description,quantity,unit_price,total_price,labor_hours,labor_rate,metadata,created_at")
+      .eq("workspace_id", context.workspaceId)
+      .eq("service_record_id", serviceId)
+      .order("sort_order"),
+    client.from("workspace_settings").select("email").eq("workspace_id", context.workspaceId).maybeSingle(),
+    client.from("workspaces").select("name").eq("id", context.workspaceId).maybeSingle(),
+    row.appointment_id
+      ? client.from("appointments").select("id,customer_id,vehicle_id,metadata,notes,starts_at").eq("workspace_id", context.workspaceId).eq("id", row.appointment_id).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
   ]);
 
-  let customer: ServiceDetailCustomer | null = null;
-  let vehicle: ServiceDetailVehicle | null = null;
-  let guestInfo: ServiceDetailResult["guestInfo"] = null;
-  let catalogDescription: string | null = null;
-  let catalogLaborHours: number | null = null;
-  let oilType: string | null = null;
-
-  // 3. Fetch customer and vehicle in parallel if IDs exist
-  const [customerRes, vehicleRes] = await Promise.all([
-    serviceData.customer_id
-      ? supabase.from("customers").select("*").eq("id", serviceData.customer_id).single()
-      : Promise.resolve({ data: null }),
-    serviceData.vehicle_id
-      ? supabase.from("vehicles").select("*").eq("id", serviceData.vehicle_id).single()
-      : Promise.resolve({ data: null }),
-  ]);
-
-  if (customerRes.data) customer = customerRes.data as ServiceDetailCustomer;
-  if (vehicleRes.data) {
-    vehicle = vehicleRes.data as ServiceDetailVehicle;
-    // NOTE: do NOT seed oilType from the vehicle's current oil_type — that would
-    // make every historical service record show the *current* oil. Per-service
-    // oil is extracted from the description below; vehicle.oil_type is only a
-    // last-resort fallback if nothing per-service was captured.
+  let customer = customerAdapter(customerRes.data);
+  const rawVehicle = vehicleRes.data;
+  let specs: any = null;
+  if (row.vehicle_id) {
+    const specRes = await client.from("vehicle_service_specs")
+      .select("engine,oil_type,oil_capacity,oil_filter,metadata")
+      .eq("workspace_id", context.workspaceId)
+      .eq("vehicle_id", row.vehicle_id)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    specs = specRes.data;
   }
 
-  // 4. Resolve guest info and catalog data from linked appointment
-  if (serviceData.appointment_id) {
-    const { data: apptData } = await supabase
-      .from("appointments")
-      .select("guest_name, guest_email, guest_phone, customer_id, service_catalog_id")
-      .eq("id", serviceData.appointment_id)
-      .single();
+  if (!customer && appointmentRes.data?.customer_id) {
+    const fallbackCustomer = await client.from("customers").select("*")
+      .eq("workspace_id", context.workspaceId).eq("id", appointmentRes.data.customer_id).maybeSingle();
+    customer = customerAdapter(fallbackCustomer.data);
+  }
 
-    if (apptData) {
-      // Fill customer from appointment if not already found
-      if (!customer && apptData.customer_id) {
-        const { data: custData } = await supabase.from("customers").select("*").eq("id", apptData.customer_id).single();
-        if (custData) customer = custData as ServiceDetailCustomer;
+  const appointmentMeta = object(appointmentRes.data?.metadata);
+  const guestInfo = !customer && (appointmentMeta.guest_name || appointmentMeta.customer_name)
+    ? {
+        name: String(appointmentMeta.guest_name ?? appointmentMeta.customer_name),
+        email: appointmentMeta.guest_email ? String(appointmentMeta.guest_email) : undefined,
+        phone: appointmentMeta.guest_phone ? String(appointmentMeta.guest_phone) : undefined,
       }
+    : null;
 
-      // Guest info fallback
-      if (!customer && apptData.guest_name) {
-        guestInfo = {
-          name: apptData.guest_name,
-          email: apptData.guest_email || undefined,
-          phone: apptData.guest_phone || undefined,
-        };
-      }
-
-      // Catalog description and labor hours
-      if (apptData.service_catalog_id) {
-        const { data: catalogData } = await supabase
-          .from("service_catalog")
-          .select("description, name, estimated_duration")
-          .eq("id", apptData.service_catalog_id)
-          .single();
-        if (catalogData?.description) catalogDescription = catalogData.description;
-        if (catalogData?.estimated_duration) {
-          catalogLaborHours = bankersRound(catalogData.estimated_duration / 60, 2);
-        }
-      }
+  let catalogDescription: string | null = null;
+  let catalogLaborHours: number | null = null;
+  if (row.appointment_id) {
+    const { data: appointmentItems } = await client.from("appointment_items")
+      .select("service_catalog_id,description,quantity,unit_price,service_catalog(name,description,estimated_duration)")
+      .eq("workspace_id", context.workspaceId)
+      .eq("appointment_id", row.appointment_id)
+      .order("created_at")
+      .limit(1);
+    const item = appointmentItems?.[0];
+    if (item?.service_catalog?.description) catalogDescription = item.service_catalog.description;
+    else if (item?.description) catalogDescription = item.description;
+    if (item?.service_catalog?.estimated_duration != null) {
+      catalogLaborHours = bankersRound(Number(item.service_catalog.estimated_duration) / 60, 2);
     }
   }
 
-  // Per-service oil type extracted from description (captured at completion)
-  if (!oilType && serviceData.description) {
-    const oilMatch = serviceData.description.match(/Oil:\s*[\d.]+\s*qt\s+(.+)/i);
-    if (oilMatch) oilType = oilMatch[1].trim();
-  }
+  const serviceDate = row.completed_at ?? row.started_at ?? row.created_at;
+  const vehicleSnapshot = object(metadata.vehicle_snapshot);
+  const vehicle: ServiceDetailVehicle | null = rawVehicle ? {
+    id: rawVehicle.id,
+    make: rawVehicle.make,
+    model: rawVehicle.model,
+    year: Number(rawVehicle.year),
+    license_plate: rawVehicle.license_plate ?? null,
+    vin: rawVehicle.vin ?? null,
+    mileage: rawVehicle.mileage ?? null,
+    color: rawVehicle.color ?? null,
+    oil_type: specs?.oil_type ?? null,
+    oil_capacity: specs?.oil_capacity ?? null,
+    engine: specs?.engine ?? object(rawVehicle.metadata).engine ?? null,
+  } : null;
 
-  // Last-resort fallback: vehicle's current oil_type (only when nothing was
-  // captured per service). Older records without captured data will show this.
-  if (!oilType && vehicle?.oil_type) oilType = vehicle.oil_type;
+  const lineRows = (linesRes.data ?? []) as any[];
+  const laborItems: ServiceDetailLaborItem[] = lineRows
+    .filter((line) => Number(line.labor_hours ?? 0) > 0 || line.item_type === "labor")
+    .map((line) => ({ id: line.id, description: line.description, hours: Number(line.labor_hours ?? line.quantity ?? 0) }));
+
+  const partsUsed = metadata.parts_used != null
+    ? String(metadata.parts_used)
+    : lineRows.filter((line) => line.item_type !== "labor").map((line) => line.description).join(", ") || null;
+
+  const laborHours = metadata.labor_hours != null
+    ? Number(metadata.labor_hours)
+    : laborItems.length ? bankersRound(laborItems.reduce((sum, item) => sum + item.hours, 0), 2) : null;
+
+  const service: ServiceDetailData = {
+    id: row.id,
+    service_number: metadata.service_number ? String(metadata.service_number) : null,
+    customer_id: row.customer_id ?? null,
+    vehicle_id: row.vehicle_id ?? null,
+    appointment_id: row.appointment_id ?? null,
+    service_date: serviceDate?.slice(0, 10) ?? "",
+    service_type: String(metadata.service_type ?? metadata.title ?? row.work_performed ?? "Service"),
+    description: row.work_performed ?? String(metadata.description ?? ""),
+    parts_used: partsUsed,
+    labor_hours: laborHours,
+    status: row.status,
+    notes: row.customer_notes ?? row.internal_notes ?? (metadata.notes != null ? String(metadata.notes) : null),
+    technician: metadata.technician ? String(metadata.technician) : null,
+    oil_quarts_used: row.oil_quarts_used == null ? null : Number(row.oil_quarts_used),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    mileage: metadata.mileage != null ? Number(metadata.mileage) : null,
+    vin_captured: metadata.vin ? String(metadata.vin) : vehicleSnapshot.vin ? String(vehicleSnapshot.vin) : null,
+    vehicle_year: vehicleSnapshot.year != null ? Number(vehicleSnapshot.year) : rawVehicle?.year ?? null,
+    vehicle_make: vehicleSnapshot.make ?? rawVehicle?.make ?? null,
+    vehicle_model: vehicleSnapshot.model ?? rawVehicle?.model ?? null,
+    vehicle_trim: vehicleSnapshot.trim ?? rawVehicle?.trim ?? null,
+    vehicle_engine: vehicleSnapshot.engine ?? specs?.engine ?? object(rawVehicle?.metadata).engine ?? null,
+    license_plate: vehicleSnapshot.license_plate ?? rawVehicle?.license_plate ?? null,
+    odometer_measure: metadata.odometer_measure ? String(metadata.odometer_measure) : rawVehicle?.mileage_unit ?? "mi",
+  };
+
+  let oilType: string | null = metadata.oil_type ? String(metadata.oil_type) : null;
+  if (!oilType && partsUsed) {
+    const match = partsUsed.match(/Oil:\s*[\d.]+\s*qt\s+(.+)/i);
+    if (match) oilType = match[1].trim();
+  }
+  if (!oilType) oilType = specs?.oil_type ?? null;
+
+  const timeline: ServiceDetailTimelineEvent[] = [
+    { id: `${row.id}-created`, status: "created", timestamp: row.created_at, notes: null },
+    ...(row.started_at ? [{ id: `${row.id}-started`, status: "in_progress", timestamp: row.started_at, notes: null }] : []),
+    ...(row.completed_at ? [{ id: `${row.id}-completed`, status: "completed", timestamp: row.completed_at, notes: row.internal_notes ?? null }] : []),
+  ];
 
   return {
-    service: serviceData as ServiceDetailData,
+    service,
     customer,
     vehicle,
-    laborItems: (laborRes.data ?? []) as ServiceDetailLaborItem[],
-    timeline: (timelineRes.data ?? []) as ServiceDetailTimelineEvent[],
-    businessName: profileRes.data?.business_name || "",
-    businessEmail: profileRes.data?.email || "",
+    laborItems,
+    timeline,
+    businessName: workspaceRes.data?.name || "",
+    businessEmail: settingsRes.data?.email || "",
     guestInfo,
     catalogDescription,
     catalogLaborHours,
