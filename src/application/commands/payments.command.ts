@@ -6,7 +6,6 @@ import {
   sendInvoiceResponseSchema,
   paymentLinkResponseSchema,
   manualPaymentResponseSchema,
-  type PaymentLinkResponse,
 } from "@/lib/edge-function-schemas";
 
 export interface RefundPaymentRequest {
