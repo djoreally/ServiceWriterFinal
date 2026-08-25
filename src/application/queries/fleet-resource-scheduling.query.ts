@@ -28,9 +28,6 @@ export async function assignFleetWorkOrderSlot(input: {
     jobSource: "work_order",
     jobId: input.workOrderId,
     technicianId: input.technicianId,
-    date: input.date,
-    start: input.start,
-    durationMinutes: input.durationMinutes,
-    expectedUpdatedAt: input.expectedUpdatedAt,
+    notes: `Requested slot ${input.date} ${input.start} (${input.durationMinutes} minutes); expected version ${input.expectedUpdatedAt}`,
   });
 }
