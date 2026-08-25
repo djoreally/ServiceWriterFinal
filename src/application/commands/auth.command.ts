@@ -6,6 +6,7 @@ import { isTransientBackendError } from "@/lib/transient-backend";
 import { withOperationTimeout } from "@/lib/operation-timeout";
 
 type SignInError = { message?: string; status?: number; code?: string };
+type PasswordSignInResponse = { error: SignInError | null };
 
 /**
  * A transport-level failure (gateway timeout, upstream 5xx, offline) is NOT a
@@ -86,8 +87,9 @@ export async function signInWithPassword(email: string, password: string): Promi
     const remaining = SIGN_IN_TOTAL_BUDGET_MS - (Date.now() - startedAt);
     if (attempt > 1 && remaining < 5_000) break;
     try {
-      const result = await withOperationTimeout(
-        authSupabase.auth.signInWithPassword({ email, password }),
+      const signInOperation = authSupabase.auth.signInWithPassword({ email, password }) as Promise<PasswordSignInResponse>;
+      const result = await withOperationTimeout<PasswordSignInResponse>(
+        signInOperation,
         Math.min(SIGN_IN_REQUEST_TIMEOUT_MS, Math.max(remaining, 5_000)),
         "The sign-in request timed out before the authentication service responded.",
       );
