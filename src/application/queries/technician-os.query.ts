@@ -1,94 +1,111 @@
-/**
- * Technician OS Query — Read-only data access for the TechnicianOS page.
- * All write operations have been moved to technician-os.command.ts.
- */
+/** Canonical Technician Hub reads for Final. */
 import { supabase } from "@/integrations/supabase/client";
-
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
-/** Get the current authenticated user. */
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+import { fetchOperationalJobsByDate } from "@/application/queries/operational-jobs.query";
+import { format } from "date-fns";
+
+export interface TechnicianRosterRow {
+  id: string;
+  name: string;
+  phone: string | null;
+  avatar_url: string | null;
+  role: string;
+  is_active: boolean;
+  jobs_today: number;
+  active_jobs: number;
+  completed_today: number;
+}
+
 export async function getCurrentUser() {
   const { data: { user } } = await getCurrentAuthUser();
-  if (!user) return null;
-  const { data: workspaceOwnerId, error } = await supabase.rpc("current_workspace_owner_user_id");
-  if (error) throw error;
-  return { ...user, id: workspaceOwnerId || user.id };
+  return user ?? null;
 }
 
-/** Fetch the complete technician roster for a workspace, including inactive records. */
-export async function fetchTechnicians(userId: string) {
-  return supabase
-    .from("technicians")
-    .select("*")
-    .eq("user_id", userId)
-    .order("name");
+export async function fetchTechnicianRoster(): Promise<{ data: TechnicianRosterRow[]; error: any }> {
+  try {
+    const context = await resolveCurrentWorkspace();
+    if (!context) return { data: [], error: null };
+    const today = format(new Date(), "yyyy-MM-dd");
+    const [membersRes, jobsRes] = await Promise.all([
+      (supabase.from("workspace_members") as any)
+        .select("user_id,role,is_active,profiles!workspace_members_user_id_fkey(display_name,phone,avatar_url)")
+        .eq("workspace_id", context.workspaceId)
+        .in("role", ["technician", "owner", "manager"])
+        .order("created_at"),
+      fetchOperationalJobsByDate("", today),
+    ]);
+    if (membersRes.error) return { data: [], error: membersRes.error };
+    if (jobsRes.error) return { data: [], error: jobsRes.error };
+
+    const jobs = jobsRes.data ?? [];
+    const data = (membersRes.data ?? []).map((member: any) => {
+      const assigned = jobs.filter((job) => job.assigned_technician_id === member.user_id);
+      const completed = assigned.filter((job) => job.status === "completed");
+      const active = assigned.filter((job) => !["completed", "cancelled", "no_show"].includes(String(job.status)));
+      return {
+        id: member.user_id,
+        name: member.profiles?.display_name || (member.role === "owner" ? "Owner" : "Technician"),
+        phone: member.profiles?.phone ?? null,
+        avatar_url: member.profiles?.avatar_url ?? null,
+        role: String(member.role),
+        is_active: Boolean(member.is_active),
+        jobs_today: assigned.length,
+        active_jobs: active.length,
+        completed_today: completed.length,
+      } satisfies TechnicianRosterRow;
+    });
+    return { data, error: null };
+  } catch (error) {
+    return { data: [], error: error instanceof Error ? error : new Error("Failed to load technician roster") };
+  }
 }
 
-export interface TeamOsTechnicianSnapshot {
-  technician_id: string;
-  workspace_user_id: string;
-  access_state: "roster_only" | "invited" | "linked" | "locked" | "deactivated";
-  employment_state: "active" | "inactive";
-  field_status: string;
-  assigned_van_id: string | null;
-  assigned_van_name: string | null;
-  completed_jobs: number;
-  collected_revenue: number;
-  productive_minutes: number;
-  available_minutes: number;
-  utilization: number;
-  active_skill_count: number;
-  expiring_skill_count: number;
-  compliance_issue_count: number;
-  onboarding_open_count: number;
-  current_job: Record<string, unknown> | null;
-  next_job: Record<string, unknown> | null;
-  data_fresh_at: string;
+/** Compatibility adapter used by older callers while Team OS is simplified. */
+export async function fetchTechnicians(_userId: string) {
+  return fetchTechnicianRoster();
 }
 
-/** Canonical Team OS roster snapshot and metrics for an explicit period. */
-export async function fetchTeamOsTechnicianSnapshot(fromDate: string, toDate: string): Promise<TeamOsTechnicianSnapshot[]> {
-  const { data, error } = await (supabase as any).rpc("get_team_os_technician_snapshot_v1", {
-    p_from: fromDate,
-    p_to: toDate,
-  });
-  if (error) throw error;
-  return (data ?? []) as TeamOsTechnicianSnapshot[];
-}
-
-/** Fetch active vans for a user. */
-export async function fetchVans(userId: string) {
-  return supabase
-    .from("vans")
-    .select("id, name, assigned_technician_id")
-    .eq("user_id", userId)
-    .eq("is_active", true)
-    .order("name");
-}
-
-/** Fetch the van assigned to a technician. */
-export async function fetchAssignedVan(techId: string) {
-  return supabase
-    .from("vans")
-    .select("id")
-    .eq("assigned_technician_id", techId)
-    .maybeSingle();
-}
-
-/** Fetch all detail data for a single technician (skills, payroll, incidents, etc.). */
-export async function fetchTechDetails(techId: string) {
-  const [skills, payroll, incidents, onboarding, leave, appraisals, docs] = await Promise.all([
-    supabase.from("technician_skills").select("*").eq("technician_id", techId).eq("is_active", true).order("skill_type"),
-    supabase.from("technician_payroll_cycles").select("*").eq("technician_id", techId).order("cycle_start", { ascending: false }).limit(6),
-    supabase.from("technician_incidents").select("*").eq("technician_id", techId).order("incident_date", { ascending: false }).limit(10),
-    supabase.from("technician_onboarding_tasks").select("*").eq("technician_id", techId).order("created_at"),
-    supabase.from("technician_leave_requests").select("*").eq("technician_id", techId).order("start_date", { ascending: false }),
-    supabase.from("technician_appraisals").select("*").eq("technician_id", techId).order("review_date", { ascending: false }),
-    supabase.from("technician_documents").select("*").eq("technician_id", techId).order("created_at", { ascending: false }),
-  ]);
-  return { skills, payroll, incidents, onboarding, leave, appraisals, docs };
-}
-
-/** Fetch a single technician by ID. */
 export async function fetchTechnicianById(techId: string) {
-  return supabase.from("technicians").select("*").eq("id", techId).single();
+  const { data, error } = await fetchTechnicianRoster();
+  return { data: data.find((tech) => tech.id === techId) ?? null, error };
+}
+
+export async function fetchVans(_userId: string) {
+  return { data: [], error: null };
+}
+
+export async function fetchAssignedVan(_techId: string) {
+  return { data: null, error: null };
+}
+
+export async function fetchTechDetails(_techId: string) {
+  const empty = { data: [], error: null };
+  return { skills: empty, payroll: empty, incidents: empty, onboarding: empty, leave: empty, appraisals: empty, docs: empty };
+}
+
+export async function fetchTeamOsTechnicianSnapshot(_fromDate: string, _toDate: string) {
+  const { data, error } = await fetchTechnicianRoster();
+  if (error) throw error;
+  return data.map((tech) => ({
+    technician_id: tech.id,
+    workspace_user_id: tech.id,
+    access_state: tech.is_active ? "linked" : "deactivated",
+    employment_state: tech.is_active ? "active" : "inactive",
+    field_status: tech.active_jobs > 0 ? "working" : "available",
+    assigned_van_id: null,
+    assigned_van_name: null,
+    completed_jobs: tech.completed_today,
+    collected_revenue: 0,
+    productive_minutes: 0,
+    available_minutes: 0,
+    utilization: 0,
+    active_skill_count: 0,
+    expiring_skill_count: 0,
+    compliance_issue_count: 0,
+    onboarding_open_count: 0,
+    current_job: null,
+    next_job: null,
+    data_fresh_at: new Date().toISOString(),
+  }));
 }
