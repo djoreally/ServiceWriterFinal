@@ -18,10 +18,8 @@ import {
   CreditCard,
   Megaphone,
   Database,
-  Repeat,
   BadgeDollarSign,
   LifeBuoy,
-  Truck,
   TrendingUp,
   Zap,
   Mail,
@@ -30,7 +28,6 @@ import {
   Video,
   Sparkles,
   CircleGauge,
-  Compass,
   Signal,
   Radio,
   Receipt,
@@ -42,7 +39,6 @@ import {
   ContactRound,
   Upload,
 } from "lucide-react";
-
 
 export type NavItem = {
   path: string;
@@ -66,30 +62,20 @@ type Terms = {
 
 export type RoleScope = "admin" | "owner" | "manager" | "dispatcher" | "fleet_manager" | "technician" | null;
 
-/**
- * Grouped navigation for desktop Sidebar.
- * Flat list kept via getPrimaryNavItems() for MobileNav / BottomNav.
- *
- * Filtering is delegated to the shared access policy
- * (`@/domain/auth/access-policy`) so the sidebar can never show a link whose
- * route guard would deny it.
- */
 export const getNavGroups = (terms: Terms, role: RoleScope = "admin"): NavGroup[] => {
   const all = buildAllGroups(terms);
   if (!role || role === "admin") return all;
-
   return all
-    .map((g) => ({ ...g, items: g.items.filter((i) => canAccessRoute(role, i.path)) }))
-    .filter((g) => g.items.length > 0);
+    .map((group) => ({ ...group, items: group.items.filter((item) => canAccessRoute(role, item.path)) }))
+    .filter((group) => group.items.length > 0);
 };
-
 
 const buildAllGroups = (terms: Terms): NavGroup[] => [
   {
     label: "Dashboard",
     items: [
       { path: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-      { path: "/command-center", label: "Today", icon: Radio },
+      { path: "/command-center", label: "Dispatch", icon: Radio },
       { path: "/reports", label: "Reports", icon: FileText },
     ],
   },
@@ -101,7 +87,6 @@ const buildAllGroups = (terms: Terms): NavGroup[] => [
       { path: "/weather-guard", label: "Weather Alerts", icon: CloudRain },
       { path: "/services", label: "Work Orders & History", icon: ClipboardList },
       { path: "/team-os", label: "Technician Hub", icon: Zap },
-      { path: "/fleet-os", label: "Fleet OS", icon: Truck },
     ],
   },
   {
@@ -191,23 +176,16 @@ const buildAllGroups = (terms: Terms): NavGroup[] => [
   },
 ];
 
-/** Flat list for MobileNav + BottomNavBar backwards compat */
 export const getPrimaryNavItems = (terms: Terms, role: RoleScope = "admin"): NavItem[] =>
-  getNavGroups(terms, role).flatMap((g) =>
-    g.items.flatMap((item) => (item.children && item.children.length > 0 ? [item, ...item.children] : [item]))
+  getNavGroups(terms, role).flatMap((group) =>
+    group.items.flatMap((item) => (item.children && item.children.length > 0 ? [item, ...item.children] : [item]))
   );
 
 export const footerNavItems: NavItem[] = [
-  {
-    path: "/settings",
-    label: "Settings",
-    icon: Settings,
-  },
+  { path: "/settings", label: "Settings", icon: Settings },
 ];
 
-/** Footer items filtered through the shared access policy. */
 export const getFooterNavItems = (role: RoleScope = "admin"): NavItem[] => {
   if (!role) return [];
   return footerNavItems.filter((item) => canAccessRoute(role, item.path));
 };
-
