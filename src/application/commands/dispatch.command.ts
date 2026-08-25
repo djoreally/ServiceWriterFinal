@@ -1,34 +1,20 @@
-/**
- * Dispatch Command - Write operations for dispatching and job assignment.
- */
-
-import { supabase } from "@/integrations/supabase/client";
+/** Dispatch commands for the unified Service Writer Command Center. */
 import { nextApi } from "@/lib/nextApiClient";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
 export interface DispatchAssignmentInput {
-  jobSource: "appointment" | "fleet_work_order";
+  jobSource: "appointment" | "work_order";
   jobId: string;
   technicianId?: string | null;
-  vanId?: string | null;
-  date?: string | null;
-  start?: string | null;
-  durationMinutes?: number;
-  expectedUpdatedAt?: string | null;
   notes?: string | null;
 }
 
 const DISPATCH_ASSIGNMENT_ERROR_MESSAGES: Record<string, string> = {
-  appointment_not_found: "Appointment not found. Refresh the dispatch board and try again.",
-  fleet_work_order_not_found: "Fleet work order not found. Refresh the dispatch board and try again.",
-  technician_schedule_conflict: "This technician already has work during the selected time.",
-  work_order_changed_refresh_before_assigning: "This work order changed. Refresh before assigning.",
-  assignment_target_required: "Choose a technician or van before assigning this job.",
-  technician_required: "Choose a technician before assigning this fleet work order.",
+  appointment_not_found: "Appointment not found. Refresh Dispatch and try again.",
+  work_order_not_found: "Repair order not found. Refresh Dispatch and try again.",
   technician_unavailable: "This technician is unavailable or inactive.",
-  van_unavailable: "This van is unavailable or inactive.",
-  scheduled_date_required: "Choose a scheduled date before assigning this fleet work order.",
   dispatch_assignment_access_denied: "You do not have permission to assign dispatch jobs.",
+  unsupported_dispatch_source: "This job type is not supported by Service Writer Dispatch.",
 };
 
 function formatDispatchAssignmentError(message?: string): string {
@@ -36,7 +22,6 @@ function formatDispatchAssignmentError(message?: string): string {
   return DISPATCH_ASSIGNMENT_ERROR_MESSAGES[message] ?? message;
 }
 
-/** Route every assignment through the shared, permission-checked, source-aware backend boundary. */
 export async function assignDispatchJob(input: DispatchAssignmentInput): Promise<void> {
   const workspace_id = getSelectedWorkspaceId();
   if (!workspace_id) throw new Error("Select a workspace before assigning dispatch work.");
@@ -46,11 +31,6 @@ export async function assignDispatchJob(input: DispatchAssignmentInput): Promise
       job_source: input.jobSource,
       job_id: input.jobId,
       technician_id: input.technicianId ?? null,
-      van_id: input.vanId ?? null,
-      date: input.date || null,
-      start: input.start || null,
-      duration_minutes: input.durationMinutes ?? 60,
-      expected_updated_at: input.expectedUpdatedAt || null,
       notes: input.notes ?? null,
     });
   } catch (error) {
@@ -58,63 +38,37 @@ export async function assignDispatchJob(input: DispatchAssignmentInput): Promise
   }
 }
 
-/**
- * Public (guest) booking auto-dispatch.
- *
- * `assign_dispatch_job_v1` is authenticated-only and derives the workspace from
- * `auth.uid()`, so anonymous visitors cannot call it. This wrapper RPC performs
- * the same appointment assignment server-side for a freshly created booking.
- */
-export async function autoDispatchPublicBooking(input: {
+/** Public bookings remain unassigned until a dispatcher/staff member assigns them. */
+export async function autoDispatchPublicBooking(_input: {
   businessUserId: string;
   appointmentId: string;
   zipCode?: string | null;
   notes?: string | null;
-}): Promise<{ assigned: boolean; van_id?: string | null; technician_id?: string | null; reason?: string }> {
-  const { data, error } = await (supabase as any).rpc("auto_dispatch_public_booking_v1", {
-    p_business_user_id: input.businessUserId,
-    p_appointment_id: input.appointmentId,
-    p_zip_code: input.zipCode ?? null,
-    p_notes: input.notes ?? null,
-  });
-  if (error) throw new Error(formatDispatchAssignmentError(error.message));
-  return (data ?? { assigned: false }) as { assigned: boolean };
+}): Promise<{ assigned: boolean; technician_id?: string | null; reason?: string }> {
+  return { assigned: false, technician_id: null, reason: "manual_dispatch_required" };
 }
 
-/** Assign through the shared, permission-checked and audited dispatch boundary. */
-export async function assignTechnician(
-  appointmentId: string,
-  technicianId: string,
-  notes?: string | null,
-): Promise<void> {
-  return assignDispatchJob({
-    jobSource: "appointment",
-    jobId: appointmentId,
-    technicianId,
-    notes,
-  });
+export async function assignTechnician(appointmentId: string, technicianId: string, notes?: string | null): Promise<void> {
+  return assignDispatchJob({ jobSource: "appointment", jobId: appointmentId, technicianId, notes });
 }
 
-/** Assign a van through the same audited dispatch boundary. */
-export async function assignVan(
-  appointmentId: string,
-  vanId: string,
-): Promise<void> {
-  return assignDispatchJob({
-    jobSource: "appointment", jobId: appointmentId, vanId,
-  });
+export async function assignWorkOrderTechnician(workOrderId: string, technicianId: string, notes?: string | null): Promise<void> {
+  return assignDispatchJob({ jobSource: "work_order", jobId: workOrderId, technicianId, notes });
 }
 
-/** Return an appointment back to the unassigned dispatch board queue. */
 export async function unassignAppointment(appointmentId: string): Promise<void> {
-  return assignDispatchJob({
-    jobSource: "appointment", jobId: appointmentId, durationMinutes: 0,
-  });
+  return assignDispatchJob({ jobSource: "appointment", jobId: appointmentId, technicianId: null });
 }
 
-/** Return a fleet work order back to the unassigned fleet dispatch queue. */
-export async function unassignFleetWorkOrder(workOrderId: string): Promise<void> {
-  return assignDispatchJob({
-    jobSource: "fleet_work_order", jobId: workOrderId, durationMinutes: 0,
-  });
+export async function unassignWorkOrder(workOrderId: string): Promise<void> {
+  return assignDispatchJob({ jobSource: "work_order", jobId: workOrderId, technicianId: null });
+}
+
+/** Deprecated compatibility exports: vans/Fleet are outside Service Writer Dispatch. */
+export async function assignVan(_appointmentId: string, _vanId: string): Promise<void> {
+  throw new Error("Van assignment is not part of Service Writer Dispatch.");
+}
+
+export async function unassignFleetWorkOrder(_workOrderId: string): Promise<void> {
+  throw new Error("Fleet dispatch is separate from Service Writer.");
 }
