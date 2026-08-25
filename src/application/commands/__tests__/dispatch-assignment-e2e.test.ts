@@ -139,7 +139,7 @@ function mockResetStore() {
 function mockApplyAssignment(args: any) {
   const appointmentId = args.p_appointment_id ?? (args.p_job_source === "appointment" ? args.p_job_id : null);
   const fleetWorkOrderId = args.p_work_order_id ?? (args.p_job_source === "fleet_work_order" ? args.p_job_id : null);
-  const assigning = args.p_unassign ? false : args.p_duration_minutes !== 0;
+  const assigning = Boolean(args.p_technician_id ?? args.p_van_id);
   if (appointmentId) {
     const row = mockStore.appointments.find((a) => a.id === appointmentId);
     if (!row) return { data: null, error: { message: "Job not found" } };
@@ -210,6 +210,8 @@ function operationalJobRows() {
 
 function tableRows(table: string): any[] {
   switch (table) {
+    case "workspace_members":
+      return [{ workspace_id: "00000000-0000-4000-8000-000000000001", user_id: mockOwner, is_active: true }];
     case "dispatch_operational_jobs_v1":
       return operationalJobRows();
     case "appointments":
@@ -369,13 +371,9 @@ describe("dispatch assignment paths → technician dashboards (E2E)", () => {
     expect((await techDashboardJobs(TECH_B)).map((j) => j.id)).toEqual(["appt-2"]);
   });
 
-  it("van-only assignment keeps the job assigned and off every technician dashboard", async () => {
-    await assignVan("appt-1", "van-1");
-
-    expect(await techDashboardJobs(TECH_A)).toHaveLength(0);
-    const board = operationalJobRows().find((r) => r.job_id === "appt-1");
-    expect(board?.dispatch_status).toBe("assigned");
-    expect(board?.assigned_van_id).toBe("van-1");
+  it("rejects van-only assignment because Fleet dispatch is a separate product boundary", async () => {
+    await expect(assignVan("appt-1", "van-1")).rejects.toThrow(/Fleet dispatch|not part of Service Writer Dispatch/i);
+    expect(operationalJobRows().find((r) => r.job_id === "appt-1")?.assigned_van_id).toBeNull();
   });
 
   it("unassignment returns the appointment to the queue and removes it from the dashboard", async () => {
@@ -390,59 +388,35 @@ describe("dispatch assignment paths → technician dashboards (E2E)", () => {
     expect(board?.assigned_technician_id).toBeNull();
   });
 
-  it("Fleet calendar slot assignment shows the work order on the technician Fleet tab", async () => {
-    await assignFleetWorkOrderSlot({
+  it("rejects Fleet calendar assignment because Fleet dispatch is a separate product boundary", async () => {
+    await expect(assignFleetWorkOrderSlot({
       workOrderId: "fwo-1",
       technicianId: TECH_A,
       date: TODAY,
       start: "11:00:00",
       durationMinutes: 120,
       expectedUpdatedAt: "2026-08-01T00:00:00.000Z",
-    });
-
-    const fleetForA = await fetchTechFleetAssignments(identity(TECH_A));
-    const fleetForB = await fetchTechFleetAssignments(identity(TECH_B));
-
-    expect(fleetForA.map((f) => f.id)).toEqual(["fwo-1"]);
-    expect(fleetForA[0].order_number).toBe("FWO-1001");
-    expect(fleetForA[0].status).toBe("assigned");
-    expect(fleetForA[0].scheduled_time).toBe("11:00:00");
-    expect(fleetForB).toHaveLength(0);
-
-    // Fleet work orders now surface on the technician dashboard alongside retail jobs.
-    expect((await techDashboardJobs(TECH_A)).map((j) => j.id)).toContain("fwo-1");
+    })).rejects.toThrow(/Fleet dispatch is separated/i);
   });
 
-  it("Fleet scored dispatch assigns without a start time and still reaches the dashboard", async () => {
-    await dispatchFleetWorkOrder("fwo-2", TECH_B);
-
-    const fleetForB = await fetchTechFleetAssignments(identity(TECH_B));
-    expect(fleetForB.map((f) => f.id)).toEqual(["fwo-2"]);
-    expect(fleetForB[0].scheduled_time).toBeNull();
-    expect((await techDashboardJobs(TECH_B)).map((j) => j.id)).toContain("fwo-2");
+  it("rejects scored Fleet dispatch because Fleet dispatch is a separate product boundary", async () => {
+    await expect(dispatchFleetWorkOrder("fwo-2", TECH_B)).rejects.toThrow(/Fleet dispatch is separated/i);
   });
 
-  it("Fleet override dispatch logs the audit trail and assigns through the shared RPC", async () => {
-    await assignFleetWorkOrderWithOverride({ workOrderId: "fwo-1", technicianId: TECH_A, overrideReason: "closest van" });
-
-    expect(mockStore.rpcCalls.some((c) => c.name === "assign_dispatch_job_v1" && c.args.p_job_source === "fleet_work_order")).toBe(true);
-    expect(mockStore.fleet_activity_logs).toHaveLength(1);
-    expect((await fetchTechFleetAssignments(identity(TECH_A))).map((f) => f.id)).toEqual(["fwo-1"]);
+  it("rejects Fleet override dispatch because Fleet dispatch is a separate product boundary", async () => {
+    await expect(assignFleetWorkOrderWithOverride({ workOrderId: "fwo-1", technicianId: TECH_A, overrideReason: "closest van" })).rejects.toThrow(/Fleet dispatch is separated/i);
+    expect(mockStore.fleet_activity_logs).toHaveLength(0);
   });
 
-  it("stale fleet work orders fail optimistic concurrency instead of silently assigning", async () => {
-    await expect(
-      assignFleetWorkOrderSlot({
-        workOrderId: "fwo-1",
-        technicianId: TECH_A,
-        date: TODAY,
-        start: "11:00:00",
-        durationMinutes: 60,
-        expectedUpdatedAt: "1999-01-01T00:00:00.000Z",
-      }),
-    ).rejects.toThrow(/changed since/i);
-
-    expect(await fetchTechFleetAssignments(identity(TECH_A))).toHaveLength(0);
+  it("rejects Fleet optimistic-concurrency assignment because Fleet dispatch is a separate product boundary", async () => {
+    await expect(assignFleetWorkOrderSlot({
+      workOrderId: "fwo-1",
+      technicianId: TECH_A,
+      date: TODAY,
+      start: "11:00:00",
+      durationMinutes: 60,
+      expectedUpdatedAt: "1999-01-01T00:00:00.000Z",
+    })).rejects.toThrow(/Fleet dispatch is separated/i);
   });
 
   it("unassigned jobs stay in the workspace queue and on no technician dashboard", async () => {

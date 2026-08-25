@@ -39,6 +39,6 @@ describe("oil usage reporting-only contract", () => {
     );
     const completedBranch = statusBody.slice(0, statusBody.indexOf("export async function rescheduleAppointment"));
     expect(completedBranch).not.toContain("consumeAppointmentReservations");
-    expect(completedBranch).toContain("Completion records oil");
+    expect(completedBranch).toContain("nextApi.appointments.complete");
   });
 });

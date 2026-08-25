@@ -19,7 +19,9 @@ export interface TechnicianRosterRow {
 
 export async function getCurrentUser() {
   const { data: { user } } = await getCurrentAuthUser();
-  return user ?? null;
+  if (!user) return null;
+  const { data: ownerId, error } = await (supabase as any).rpc("current_workspace_owner_user_id");
+  return !error && typeof ownerId === "string" && ownerId ? { ...user, id: ownerId } : user;
 }
 
 export async function fetchTechnicianRoster(): Promise<{ data: TechnicianRosterRow[]; error: any }> {
@@ -107,6 +109,13 @@ export async function fetchTechDetails(_techId: string) {
 }
 
 export async function fetchTeamOsTechnicianSnapshot(_fromDate: string, _toDate: string): Promise<TeamOsTechnicianSnapshot[]> {
+  const rpcResult = await (supabase as any).rpc("get_team_os_technician_snapshot_v1", {
+    p_from: _fromDate,
+    p_to: _toDate,
+  });
+  if (!rpcResult.error && Array.isArray(rpcResult.data)) {
+    return rpcResult.data as TeamOsTechnicianSnapshot[];
+  }
   const { data, error } = await fetchTechnicianRoster();
   if (error) throw error;
   return data.map((tech) => ({

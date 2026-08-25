@@ -7,7 +7,7 @@ module.exports = {
   },
   moduleNameMapper: {
     "\\.(css|less|scss|sass)$": "<rootDir>/src/test/mocks/styleMock.js",
-    "^@/server/(.*)$": "<rootDir>/apps/web-next/src/server/$1",
+    "^@/server/(.*)$": "<rootDir>/src/server/$1",
     "^@/components/analytics/PostHogIdentity$": "<rootDir>/src/test/mocks/PostHogIdentity.tsx",
     "^@/config/features$": "<rootDir>/src/test/mocks/features.js",
     "^@/integrations/supabase/client$": "<rootDir>/src/test/mocks/supabaseClient.js",

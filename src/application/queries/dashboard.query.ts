@@ -245,7 +245,7 @@ export async function fetchDashboardReporting(range: DashboardDateRange): Promis
 
   const [paymentsRes, servicesRes, appointmentsRes, prevPaymentsRes] = await Promise.all([
     (supabase.from("payments") as any)
-      .select("id,amount,created_at,status,metadata,customers(first_name,last_name,email)")
+      .select("id,amount,created_at,status,metadata,customers(first_name,last_name,email),appointments(status)")
       .eq("workspace_id", context.workspaceId)
       .gte("created_at", fromIso.toISOString())
       .lte("created_at", toIso.toISOString())
@@ -275,18 +275,27 @@ export async function fetchDashboardReporting(range: DashboardDateRange): Promis
   if (appointmentsRes.error) throw appointmentsRes.error;
   if (prevPaymentsRes.error) throw prevPaymentsRes.error;
 
-  const payments: PaymentRecord[] = ((paymentsRes.data ?? []) as any[]).map((row) => {
-    const metadata = obj(row.metadata);
-    return {
-      id: row.id,
-      amount: Number(row.amount ?? 0),
-      created_at: row.created_at,
-      status: row.status,
-      customer_email: row.customers?.email ?? metadata.customer_email ?? undefined,
-      customer_name: row.customers ? customerName(row.customers) : metadata.customer_name ?? undefined,
-      refund_amount: row.status === "refunded" ? Number(row.amount ?? 0) : Number(metadata.refunded_amount ?? 0) || undefined,
-    };
-  });
+  const payments: PaymentRecord[] = ((paymentsRes.data ?? []) as any[])
+    .filter((row) => {
+      const metadata = obj(row.metadata);
+      const appointmentStatus = row.appointments?.status ?? metadata.appointment_status;
+      return !(row.status === "pending" && appointmentStatus === "cancelled");
+    })
+    .map((row) => {
+      const metadata = obj(row.metadata);
+      return {
+        id: row.id,
+        amount: Number(row.amount ?? 0),
+        created_at: row.created_at,
+        status: row.status,
+        customer_email: row.customers?.email ?? row.customer_email ?? metadata.customer_email ?? undefined,
+        customer_name: row.customers ? customerName(row.customers) : row.customer_name ?? metadata.customer_name ?? undefined,
+        refund_amount:
+          row.status === "refunded"
+            ? Number(row.amount ?? 0)
+            : Number(row.refund_amount ?? metadata.refunded_amount ?? 0) || undefined,
+      };
+    });
 
   const previousPeriodPayments: PreviousPeriodPayment[] = ((prevPaymentsRes.data ?? []) as any[]).map((row) => ({
     id: row.id,
