@@ -1,6 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { Database, Json } from "@/integrations/supabase/types";
-import { assignDispatchJob } from "@/application/commands/dispatch.command";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface DispatchScoreBreakdown {
@@ -17,9 +16,7 @@ type FleetWorkOrderDispatchRow = Pick<
 >;
 type TechnicianDispatchRow = Pick<Database["public"]["Tables"]["technicians"]["Row"], "id" | "name">;
 
-const ASSIGNABLE_STATUSES = new Set(["draft", "pending_review", "scheduled", "assigned", "en_route", "in_progress"]);
 const ACTIVE_ASSIGNMENT_STATUSES = ["assigned", "scheduled", "en_route", "in_progress"];
-const STATUSES_ALREADY_DISPATCHED = new Set(["assigned", "en_route", "in_progress"]);
 
 async function getCurrentUserId(): Promise<string> {
   const {
@@ -27,18 +24,6 @@ async function getCurrentUserId(): Promise<string> {
   } = await getCurrentAuthUser();
   if (!user) throw new Error("You must be logged in to dispatch work orders.");
   return user.id;
-}
-
-async function transitionWorkOrderToAssigned(workOrderId: string, technicianId: string, vanId?: string | null): Promise<void> {
-  const { error } = await supabase.rpc("transition_fleet_work_order", {
-    p_work_order_id: workOrderId,
-    p_target_status: "assigned",
-    p_actor_role: "provider",
-    p_reason_code: "dispatch_assigned",
-    p_details: { technician_id: technicianId, van_id: vanId ?? null },
-  });
-
-  if (error) throw new Error(error.message || "Failed lifecycle transition");
 }
 
 export async function getFleetDispatchScoreBreakdown(workOrderId: string): Promise<DispatchScoreBreakdown[]> {
@@ -148,30 +133,15 @@ export async function assignFleetWorkOrderWithOverride(input: {
   });
 }
 
-export async function dispatchFleetWorkOrder(workOrderId: string, technicianId: string, vanId?: string | null): Promise<void> {
-  await getCurrentUserId();
-  const { data: order, error: orderError } = await supabase
-    .from("fleet_work_orders")
-    .select("id,user_id,fleet_client_id,priority,status,assigned_technician_id,scheduled_date,scheduled_time,updated_at")
-    .eq("id", workOrderId)
-    .maybeSingle();
-
-  if (orderError) throw new Error(orderError.message || "Failed to load work order");
-  if (!order) throw new Error("Work order not found.");
-
-  const typedOrder = order as FleetWorkOrderDispatchRow;
-  if (!ASSIGNABLE_STATUSES.has(typedOrder.status)) {
-    throw new Error(`Work order status '${typedOrder.status}' cannot be assigned.`);
-  }
-
-  const scheduledOrder = order as typeof order & { scheduled_date: string | null; scheduled_time: string | null; updated_at: string };
-  await assignDispatchJob({
-    jobSource: "fleet_work_order",
-    jobId: workOrderId,
-    technicianId,
-    vanId,
-    date: scheduledOrder.scheduled_date,
-    start: scheduledOrder.scheduled_time,
-    expectedUpdatedAt: scheduledOrder.updated_at,
-  });
+/**
+ * Fleet dispatch is intentionally outside the rebuilt Service Writer dispatch domain.
+ * Keep this compatibility export so legacy Fleet screens compile, but do not route
+ * Fleet work orders through the Service Writer appointment/repair-order dispatcher.
+ */
+export async function dispatchFleetWorkOrder(
+  _workOrderId: string,
+  _technicianId: string,
+  _vanId?: string | null,
+): Promise<void> {
+  throw new Error("Fleet dispatch is separated from Service Writer. Use the Fleet application for Fleet assignments.");
 }
