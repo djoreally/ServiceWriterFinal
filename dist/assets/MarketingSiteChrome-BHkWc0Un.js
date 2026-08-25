@@ -1,1 +1,0 @@
-import{D as s,v as t}from"./index-BxnhNaIA.js";import{u as e,e as n,f as a}from"./MarketingLayout-TyftAUJW.js";function u(){e();const{session:r}=s();return r?null:t.jsx(n,{})}function f(){return e(),t.jsx(a,{})}export{u as M,f as a};

@@ -1,1 +1,0 @@
-var o={};function t(){return globalThis.__RUNTIME_ENV__?globalThis.__RUNTIME_ENV__:(typeof globalThis<"u"&&"process"in globalThis&&o?o:void 0)??{}}function i(n){const e=t()[n];if(typeof e=="string")return e;if(typeof e=="boolean")return e?"true":"false"}export{i as g};

@@ -1,1 +1,0 @@
-import{F as s}from"./index-BxnhNaIA.js";async function f(a){let e=s.from("audit_logs").select("*").order("created_at",{ascending:!1}).limit(100);a&&a!=="all"&&(e=e.eq("action",a));const{data:r,error:t}=await e;if(t)throw t;return r??[]}export{f};
