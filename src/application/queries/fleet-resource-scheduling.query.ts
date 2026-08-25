@@ -25,7 +25,7 @@ export async function assignFleetWorkOrderSlot(input: {
   workOrderId: string; technicianId: string; date: string; start: string; durationMinutes: number; expectedUpdatedAt: string;
 }): Promise<void> {
   await assignDispatchJob({
-    jobSource: "fleet_work_order",
+    jobSource: "work_order",
     jobId: input.workOrderId,
     technicianId: input.technicianId,
     date: input.date,
