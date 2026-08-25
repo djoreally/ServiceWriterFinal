@@ -227,7 +227,12 @@ const tracedFetch: typeof fetch = async (input: RequestInfo | URL, init: Request
   }
 };
 
-export const supabase = createClient<Database>(CLIENT_SUPABASE_URL, CLIENT_SUPABASE_KEY, {
+// Recovery compatibility boundary: the checked-in generated Database type still
+// describes the old V2/Lovable schema and does not yet include Final's canonical
+// workspace tables. Runtime calls are validated by PostgREST/RLS and our Next API
+// schemas; temporarily expose the browser client untyped until types are regenerated
+// from Final main so valid canonical tables do not fail the production build.
+export const supabase: any = createClient<Database>(CLIENT_SUPABASE_URL, CLIENT_SUPABASE_KEY, {
   auth: {
     storage: isBrowser ? localStorage : undefined,
     persistSession: true,
