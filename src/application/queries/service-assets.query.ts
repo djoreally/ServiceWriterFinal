@@ -1,7 +1,6 @@
-/**
- * Queries for CRM ↔ Assets linkage and folder listing.
- */
+/** Queries for CRM ↔ Assets linkage. Asset storage itself is not yet rebuilt on Final. */
 import { supabase } from "@/integrations/supabase/client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import type { AssetRecord } from "@/application/commands/assets.command";
 
 export interface ServiceSummary {
@@ -13,64 +12,45 @@ export interface ServiceSummary {
   customer_name: string | null;
 }
 
-/** Lightweight search across the user's services + linked customer name. */
-export async function searchServicesForLinking(
-  query: string,
-  limit = 25,
-): Promise<ServiceSummary[]> {
-  let q = supabase
-    .from("services")
-    .select(
-      "id, service_number, service_type, service_date, customer_id, customers!fk_services_customer(first_name,last_name)",
-    )
-    .order("service_date", { ascending: false })
-    .limit(limit);
-
-  const term = query.trim();
-  if (term) {
-    q = q.or(
-      `service_number.ilike.%${term}%,service_type.ilike.%${term}%,description.ilike.%${term}%`,
-    );
-  }
-
-  const { data, error } = await q;
-  if (error) throw error;
-
-  return (data ?? []).map((row: any) => ({
-    id: row.id,
-    service_number: row.service_number,
-    service_type: row.service_type,
-    service_date: row.service_date,
-    customer_id: row.customer_id,
-    customer_name: row.customers
-      ? [row.customers.first_name, row.customers.last_name].filter(Boolean).join(" ") || null
-      : null,
-  }));
+function object(value: unknown): Record<string, any> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
 }
 
-/** Distinct folders for the current user (excluding soft-deleted). */
+/** Lightweight search across canonical service records + linked customer name. */
+export async function searchServicesForLinking(query: string, limit = 25): Promise<ServiceSummary[]> {
+  const context = await resolveCurrentWorkspace();
+  if (!context) return [];
+  const { data, error } = await (supabase.from("service_records") as any)
+    .select("id,customer_id,work_performed,metadata,completed_at,created_at,customers(first_name,last_name,company_name)")
+    .eq("workspace_id", context.workspaceId)
+    .neq("status", "voided")
+    .order("completed_at", { ascending: false, nullsFirst: false })
+    .limit(Math.max(limit * 4, limit));
+  if (error) throw error;
+
+  const term = query.trim().toLowerCase();
+  return ((data ?? []) as any[])
+    .map((row): ServiceSummary => {
+      const metadata = object(row.metadata);
+      const customer = row.customers;
+      const serviceNumber = metadata.service_number ? String(metadata.service_number) : row.id.slice(0, 8).toUpperCase();
+      const serviceType = String(metadata.service_type ?? metadata.title ?? row.work_performed ?? "Service");
+      const serviceDate = (row.completed_at ?? row.created_at)?.slice(0, 10) ?? "";
+      const customerName = customer
+        ? [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim() || customer.company_name || null
+        : null;
+      return { id: row.id, service_number: serviceNumber, service_type: serviceType, service_date: serviceDate, customer_id: row.customer_id ?? null, customer_name: customerName };
+    })
+    .filter((row) => !term || [row.service_number, row.service_type, row.customer_name].some((value) => value?.toLowerCase().includes(term)))
+    .slice(0, limit);
+}
+
+/** Final does not have the retired assets subsystem yet. */
 export async function listAssetFolders(): Promise<string[]> {
-  const { data, error } = await supabase
-    .from("assets")
-    .select("folder")
-    .is("deleted_at", null)
-    .not("folder", "is", null);
-  if (error) throw error;
-  const set = new Set<string>();
-  (data ?? []).forEach((r: any) => {
-    if (r.folder && typeof r.folder === "string") set.add(r.folder);
-  });
-  return Array.from(set).sort((a, b) => a.localeCompare(b));
+  return [];
 }
 
-/** Assets attached to a given service record. */
-export async function listAssetsForService(serviceId: string): Promise<AssetRecord[]> {
-  const { data, error } = await supabase
-    .from("service_assets")
-    .select("asset:assets!service_assets_asset_id_fkey(*)")
-    .eq("service_id", serviceId);
-  if (error) throw error;
-  return (data ?? [])
-    .map((r: any) => r.asset as AssetRecord)
-    .filter((a) => a && !a.deleted_at);
+/** Final does not have the retired service_assets linkage yet. */
+export async function listAssetsForService(_serviceId: string): Promise<AssetRecord[]> {
+  return [];
 }

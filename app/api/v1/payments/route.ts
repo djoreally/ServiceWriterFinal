@@ -1,37 +1,82 @@
 import { errorResponse, json, paginationSchema, requireWorkspaceMember } from "@/server/api";
 import { z } from "zod";
 
+const paymentStatusSchema = z.enum(["pending", "succeeded", "failed", "refunded", "partially_refunded"]);
+const providerSchema = z.enum(["stripe", "square", "quickbooks", "google_calendar", "resend", "sms", "carfax", "mapbox", "ai", "other"]);
+
 const paymentSchema = z.object({
   workspace_id: z.string().uuid(),
   invoice_id: z.string().uuid().nullable().optional(),
   customer_id: z.string().uuid().nullable().optional(),
-  provider: z.string().trim().max(40).nullable().optional(),
+  provider: providerSchema.nullable().optional(),
   provider_payment_id: z.string().trim().max(200).nullable().optional(),
-  status: z.string().trim().max(40).default("pending"),
+  status: paymentStatusSchema.default("pending"),
   amount: z.number().nonnegative(),
   currency_code: z.string().trim().length(3).toUpperCase().default("USD"),
   paid_at: z.string().datetime().nullable().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const workspaceId = z.string().uuid().parse(url.searchParams.get("workspace_id"));
-    const { supabase, user } = await requireWorkspaceMember(workspaceId);
+    const { supabase } = await requireWorkspaceMember(workspaceId);
     const { limit, offset } = paginationSchema.parse(Object.fromEntries(url.searchParams));
-    const { data, error } = await supabase.from("payments").select("*").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).range(offset, offset + limit - 1);
+    const { data, error } = await supabase
+      .from("payments")
+      .select("*, invoices(id,invoice_number,total,amount_paid,status), customers(id,first_name,last_name,email)")
+      .eq("workspace_id", workspaceId)
+      .order("created_at", { ascending: false })
+      .range(offset, offset + limit - 1);
     if (error) throw error;
     return json({ data: data ?? [], pagination: { limit, offset } });
-  } catch (error) { return errorResponse(error); }
+  } catch (error) {
+    return errorResponse(error);
+  }
 }
 
 export async function POST(request: Request) {
   try {
     const body = paymentSchema.parse(await request.json());
-    const { workspace_id, ...payload } = body;
-    const { supabase, user } = await requireWorkspaceMember(workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"]);
-    const { data, error } = await supabase.from("payments").insert({ ...payload, workspace_id, created_by: user.id }).select().single();
+    const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"]);
+
+    if (body.invoice_id) {
+      const { data: invoice, error: invoiceError } = await supabase
+        .from("invoices")
+        .select("id,customer_id,status")
+        .eq("workspace_id", body.workspace_id)
+        .eq("id", body.invoice_id)
+        .single();
+      if (invoiceError || !invoice) throw invoiceError ?? new Error("Invoice not found");
+      if (invoice.status === "void") {
+        return json({ error: { code: "invoice_void", message: "Payments cannot be posted to a void invoice." } }, { status: 409 });
+      }
+      if (body.customer_id && body.customer_id !== invoice.customer_id) {
+        return json({ error: { code: "customer_mismatch", message: "Payment customer does not match the invoice customer." } }, { status: 409 });
+      }
+    }
+
+    const paidAt = body.status === "succeeded" && !body.paid_at ? new Date().toISOString() : body.paid_at ?? null;
+    const { data, error } = await (supabase.from("payments") as any)
+      .insert({
+        workspace_id: body.workspace_id,
+        invoice_id: body.invoice_id ?? null,
+        customer_id: body.customer_id ?? null,
+        provider: body.provider ?? null,
+        provider_payment_id: body.provider_payment_id ?? null,
+        status: body.status,
+        amount: body.amount,
+        currency_code: body.currency_code,
+        paid_at: paidAt,
+        created_by: user.id,
+        metadata: body.metadata ?? {},
+      })
+      .select()
+      .single();
     if (error) throw error;
     return json({ data }, { status: 201 });
-  } catch (error) { return errorResponse(error); }
+  } catch (error) {
+    return errorResponse(error);
+  }
 }

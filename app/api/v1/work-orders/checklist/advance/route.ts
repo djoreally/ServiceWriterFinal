@@ -1,4 +1,4 @@
-import { errorResponse, json, requireWorkspaceMember } from "@/server/api";
+import { json, requireWorkspaceMember } from "@/server/api";
 import { z } from "zod";
 
 const schema = z.object({
@@ -8,16 +8,18 @@ const schema = z.object({
   notes: z.string().max(10000).nullable().optional(),
 });
 
+/**
+ * Final intentionally does not carry the retired work_order_checklist_items /
+ * advance_checklist_step implementation. Keep the API route explicit rather
+ * than issuing queries against objects that do not exist.
+ */
 export async function POST(request: Request) {
-  try {
-    const body = schema.parse(await request.json());
-    const { supabase } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician", "fleet_manager"]);
-    const { data: item, error: itemError } = await supabase.from("work_order_checklist_items").select("id, work_order_id, work_orders!inner(workspace_id)").eq("id", body.item_id).eq("work_orders.workspace_id", body.workspace_id).single();
-    if (itemError || !item) throw itemError ?? new Error("Checklist item was not found in this workspace.");
-    const { data, error } = await supabase.rpc("advance_checklist_step" as never, { p_item_id: body.item_id, p_evidence_url: body.evidence_url ?? null, p_notes: body.notes ?? null });
-    if (error) throw error;
-    return json({ data });
-  } catch (error) {
-    return errorResponse(error);
-  }
+  const body = schema.parse(await request.json());
+  await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician"]);
+  return json({
+    error: {
+      code: "checklist_not_configured",
+      message: "Work-order checklist workflow has not been rebuilt on Final yet.",
+    },
+  }, { status: 501 });
 }

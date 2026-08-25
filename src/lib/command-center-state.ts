@@ -34,7 +34,7 @@ export interface CommandCenterDerivedState {
 function normalizeAppointmentStatus(status: MaybeString): "completed" | "cancelled" | "active" {
   const normalized = normalizeJobStatus(status);
   if (normalized === "completed") return "completed";
-  if (normalized === "cancelled") return "cancelled";
+  if (normalized === "cancelled" || normalized === "no_show") return "cancelled";
   return "active";
 }
 
@@ -47,10 +47,6 @@ function mapDispatchToLifecycle(dispatchStatus: DispatchStatus): CommandCenterLi
   return "unassigned";
 }
 
-/**
- * Canonical command-center state derivation.
- * Prevents false negatives caused by mismatched appointment vs dispatch statuses.
- */
 export function deriveCommandCenterState(input: CommandCenterJobStateInput): CommandCenterDerivedState {
   const rawDispatch = (input.dispatch_status ?? "").toLowerCase().trim();
   const knownRawDispatch = rawDispatch.length === 0 || [
@@ -79,7 +75,6 @@ export function deriveCommandCenterState(input: CommandCenterJobStateInput): Com
   const isCancelled = lifecycleState === "cancelled";
   const isCompleted = lifecycleState === "completed";
   const isActive = !isCancelled && !isCompleted;
-
   const hasUnknownMapping = !knownRawDispatch;
 
   return {
@@ -105,7 +100,6 @@ export function logUnknownOperationalStateForTriage(
   const rawStatus = (input.status ?? "null").toString();
   const rawDispatchStatus = (input.dispatch_status ?? "null").toString();
   const key = `${context}:${rawStatus}:${rawDispatchStatus}`;
-
   if (unknownStateSeen.has(key)) return;
   unknownStateSeen.add(key);
 

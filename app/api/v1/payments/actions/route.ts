@@ -10,22 +10,68 @@ const schema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("verify_booking"), workspace_id: z.string().uuid(), session_id: z.string().min(1).max(200) }),
 ]);
 
-const functions: Record<string, string> = {
-  refund: "stripe-refund",
-  send_invoice: "send-invoice",
-  send_manual_invoice: "send-manual-invoice",
-  payment_link: "create-invoice-payment-link",
-  manual_payment: "record-manual-payment",
-  verify_booking: "verify-booking-payment",
-};
-
 export async function POST(request: Request) {
   try {
     const body = schema.parse(await request.json());
     const { supabase } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"]);
-    const { action, workspace_id: _workspaceId, ...payload } = body;
-    const { data, error } = await supabase.functions.invoke(functions[action], { body: payload });
-    if (error) throw error;
-    return json({ data });
-  } catch (error) { return errorResponse(error); }
+
+    if (body.action === "manual_payment") {
+      if (body.waive_fees || body.waive_tax || body.waive_remaining) {
+        return json({ error: { code: "adjustment_required", message: "Fee, tax, and remaining-balance waivers require the adjustment workflow and cannot be embedded in a payment receipt." } }, { status: 409 });
+      }
+
+      const { data: current, error: currentError } = await supabase
+        .from("payments")
+        .select("id,invoice_id,customer_id,status,metadata")
+        .eq("workspace_id", body.workspace_id)
+        .eq("id", body.payment_id)
+        .single();
+      if (currentError || !current) throw currentError ?? new Error("Payment not found");
+      if (current.status === "succeeded") {
+        return json({ data: { success: true, payment_id: current.id, already_recorded: true } });
+      }
+      if (current.status === "refunded" || current.status === "partially_refunded") {
+        return json({ error: { code: "invalid_payment_state", message: "A refunded payment cannot be re-recorded as a manual payment." } }, { status: 409 });
+      }
+
+      // Legacy UI sends cents. Final's canonical ledger stores dollars.
+      const amountDollars = Number((body.amount / 100).toFixed(2));
+      if (amountDollars <= 0) {
+        return json({ error: { code: "invalid_amount", message: "Payment amount must be greater than zero." } }, { status: 400 });
+      }
+
+      const metadata = current.metadata && typeof current.metadata === "object"
+        ? current.metadata as Record<string, unknown>
+        : {};
+      const { data, error } = await (supabase.from("payments") as any)
+        .update({
+          amount: amountDollars,
+          status: "succeeded",
+          provider: "other",
+          paid_at: new Date().toISOString(),
+          metadata: {
+            ...metadata,
+            payment_method: body.payment_method,
+            notes: body.notes ?? null,
+            recorded_manually: true,
+          },
+        })
+        .eq("workspace_id", body.workspace_id)
+        .eq("id", body.payment_id)
+        .select()
+        .single();
+      if (error) throw error;
+
+      return json({ data: { success: true, payment_id: data.id, amount: data.amount, status: data.status } });
+    }
+
+    return json({
+      error: {
+        code: "provider_not_configured",
+        message: `${body.action} requires an external payment/email provider that is not configured in Final yet.`,
+      },
+    }, { status: 501 });
+  } catch (error) {
+    return errorResponse(error);
+  }
 }
