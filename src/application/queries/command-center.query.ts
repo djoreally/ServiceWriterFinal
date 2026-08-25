@@ -21,7 +21,8 @@ export async function fetchActiveTechnicians(_userId: string) {
   try {
     const context = await resolveCurrentWorkspace();
     if (!context) return { data: [], error: null };
-    const { data, error } = await (supabase.from("workspace_members") as any)
+    const { data, error } = await (supabase as any)
+      .from("workspace_members")
       .select("user_id,role,profiles!workspace_members_user_id_fkey(display_name,avatar_url)")
       .eq("workspace_id", context.workspaceId)
       .eq("is_active", true)
