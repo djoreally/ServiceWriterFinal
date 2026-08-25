@@ -58,11 +58,18 @@ export async function fetchDispatchableAppointments() {
 }
 
 /** Run dispatch engine check (monitor mode, no auto-assign) */
-export async function invokeDispatchEngine(body: Record<string, unknown>): Promise<{ data: DispatchMonitorResult | null; error: any }> {
+export async function invokeDispatchEngine(
+  body: Record<string, unknown>,
+): Promise<{ data: DispatchMonitorResult | null; error: unknown }> {
   const estimatedDuration = Number(body.estimated_duration_minutes ?? body.estimated_duration ?? 60);
-  return supabase.functions.invoke<DispatchMonitorResult>("dispatch-engine", {
+  const result = await supabase.functions.invoke("dispatch-engine", {
     body: { ...body, estimated_duration_minutes: estimatedDuration },
   });
+
+  return {
+    data: result.data as DispatchMonitorResult | null,
+    error: result.error,
+  };
 }
 
 /** Assign a technician to an appointment via RPC */
