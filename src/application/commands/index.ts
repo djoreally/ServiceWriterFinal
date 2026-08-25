@@ -113,12 +113,10 @@ export {
   saveAppointment,
   tryAutoDispatchAppointment,
   updateAppointmentStatus,
-  updateAppointmentSchedule,
   type SaveAppointmentOptions,
   type SaveAppointmentResult,
   type AutoDispatchResult,
 } from './appointments.command';
-
 
 export {
   refundPayment,
@@ -338,7 +336,6 @@ export {
   type FleetContractPayload,
 } from './fleet-contract.command';
 
-// ── New (post-tranche) modules registered in the barrel ──────────────
 export {
   startMessagingAddonCheckout,
 } from './billing-settings.command';
@@ -366,7 +363,6 @@ export {
   type VoiceBookingToolResult,
   type VoiceTokenResponse,
 } from './voice-agent.command';
-
 
 export {
   recordBookingConsent,
