@@ -164,6 +164,39 @@ export async function tryAutoDispatchAppointment(
   return { autoDispatchEnabled: enabled, topRecommendationName: null };
 }
 
+/** Reschedule an appointment while preserving its existing duration. */
+export async function updateAppointmentSchedule(
+  appointmentId: string,
+  scheduledDate: string,
+  scheduledTime: string,
+): Promise<void> {
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("Select a workspace before rescheduling an appointment.");
+
+  const { data: existing, error } = await (supabase as any)
+    .from("appointments")
+    .select("starts_at,ends_at")
+    .eq("workspace_id", context.workspaceId)
+    .eq("id", appointmentId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!existing) throw new Error("Appointment not found");
+
+  const startsAt = localAppointmentIso(scheduledDate, scheduledTime);
+  const previousStart = Date.parse(existing.starts_at);
+  const previousEnd = Date.parse(existing.ends_at);
+  const durationMs = Number.isFinite(previousStart) && Number.isFinite(previousEnd) && previousEnd > previousStart
+    ? previousEnd - previousStart
+    : 60 * 60_000;
+  const endsAt = new Date(Date.parse(startsAt) + durationMs).toISOString();
+
+  await nextApi.appointments.update(appointmentId, {
+    workspace_id: context.workspaceId,
+    starts_at: startsAt,
+    ends_at: endsAt,
+  });
+}
+
 export async function updateAppointmentStatus(
   appointmentId: string,
   newStatus: string,
