@@ -113,6 +113,12 @@ export {
   type AutoDispatchResult,
 } from './appointments.command';
 
+// Onboarding and payment-provider setup.
+export {
+  checkStripeOnboardingStatus,
+  startStripeOnboarding,
+} from './onboarding.command';
+
 // Canonical Service Writer payments.
 export {
   refundPayment,
@@ -159,6 +165,14 @@ export {
   unassignFleetWorkOrder,
   type DispatchAssignmentInput,
 } from './dispatch.command';
+
+// Technician work-order execution compatibility commands.
+export {
+  advanceChecklistStep,
+  captureWorkOrderVin,
+  captureWorkOrderMileage,
+  updateChecklistItem,
+} from './work-order.command';
 
 // Retention compatibility surface still referenced by the preserved UI.
 export { saveLoyaltyProgram } from './loyalty.command';

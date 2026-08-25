@@ -30,6 +30,9 @@ export interface OperationalJobRow {
   location_lng: number | null;
   estimated_cost: number | null;
   source: OperationalJobSource;
+  fleet_job_id?: string | null;
+  fleet_job_number?: string | null;
+  fleet_job_vehicle_count?: number | null;
   customer_name: string | null;
   customer_phone: string | null;
   vehicle_year: number | null;
@@ -137,6 +140,11 @@ function workOrderJob(row: any, assignmentByOrder: Map<string, string>, profileN
     location_lng: location?.longitude == null ? (meta.location_lng == null ? null : Number(meta.location_lng)) : Number(location.longitude),
     estimated_cost: meta.estimated_cost == null ? null : Number(meta.estimated_cost),
     source: "work_order",
+    fleet_job_id: row.fleet_job_id ?? meta.fleet_job_id ?? null,
+    fleet_job_number: row.fleet_job_number ?? meta.fleet_job_number ?? null,
+    fleet_job_vehicle_count:
+      row.fleet_job_vehicle_count ??
+      (meta.fleet_vehicle_count == null ? null : Number(meta.fleet_vehicle_count)),
     customer_name: customerName(customer),
     customer_phone: customer?.phone ?? null,
     vehicle_year: vehicle?.year ?? null,

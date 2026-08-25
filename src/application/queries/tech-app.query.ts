@@ -457,7 +457,7 @@ export async function fetchTechDispatchParityByDate(identity: TechIdentityLike, 
 }
 
 export function mapOperationalRowToTechJob(job: OperationalJobRow): TechOperationalJob {
-  const isFleet = job.source === "fleet_work_order";
+  const isFleet = job.source === "work_order";
   return {
     id: job.job_id,
     source: isFleet ? "fleet_work_order" : "appointment",

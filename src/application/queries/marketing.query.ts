@@ -150,12 +150,12 @@ export async function fetchMarketingAnalytics(): Promise<MarketingAnalyticsResul
     return acc;
   }, {} as Record<string, number>);
 
-  const emailQueueStats = Object.entries(emailTypeCount).map(
+  const emailQueueStats: { email_type: string; count: number }[] = Object.entries(emailTypeCount).map(
     ([type, count]) => ({
       email_type: type
         .replace(/_/g, " ")
         .replace(/\b\w/g, (l) => l.toUpperCase()),
-      count,
+      count: Number(count),
     })
   );
 

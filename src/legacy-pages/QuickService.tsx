@@ -238,7 +238,8 @@ const QuickService = () => {
           notes: customerData.notes || null,
         });
         if (customerError) throw customerError;
-        customerId = newCustomer.id;
+        if (!newCustomer) throw new Error("Customer creation returned no record.");
+        customerId = (newCustomer as { id: string }).id;
       }
 
       // Step 2: Create or use existing vehicle
@@ -255,7 +256,8 @@ const QuickService = () => {
           notes: vehicleData.notes || null,
         });
         if (vehicleError) throw vehicleError;
-        vehicleId = newVehicle.id;
+        if (!newVehicle) throw new Error("Vehicle creation returned no record.");
+        vehicleId = (newVehicle as { id: string }).id;
       }
 
       const totalCost = calculateTotal();

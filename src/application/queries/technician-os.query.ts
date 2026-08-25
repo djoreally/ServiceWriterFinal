@@ -61,6 +61,28 @@ export async function fetchTechnicianRoster(): Promise<{ data: TechnicianRosterR
   }
 }
 
+export interface TeamOsTechnicianSnapshot {
+  technician_id: string;
+  workspace_user_id: string;
+  access_state: string;
+  employment_state: string;
+  field_status: string;
+  assigned_van_id: string | null;
+  assigned_van_name: string | null;
+  completed_jobs: number;
+  collected_revenue: number;
+  productive_minutes: number;
+  available_minutes: number;
+  utilization: number;
+  active_skill_count: number;
+  expiring_skill_count: number;
+  compliance_issue_count: number;
+  onboarding_open_count: number;
+  current_job: Record<string, unknown> | null;
+  next_job: Record<string, unknown> | null;
+  data_fresh_at: string;
+}
+
 /** Compatibility adapter used by older callers while Team OS is simplified. */
 export async function fetchTechnicians(_userId: string) {
   return fetchTechnicianRoster();
@@ -84,7 +106,7 @@ export async function fetchTechDetails(_techId: string) {
   return { skills: empty, payroll: empty, incidents: empty, onboarding: empty, leave: empty, appraisals: empty, docs: empty };
 }
 
-export async function fetchTeamOsTechnicianSnapshot(_fromDate: string, _toDate: string) {
+export async function fetchTeamOsTechnicianSnapshot(_fromDate: string, _toDate: string): Promise<TeamOsTechnicianSnapshot[]> {
   const { data, error } = await fetchTechnicianRoster();
   if (error) throw error;
   return data.map((tech) => ({

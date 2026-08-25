@@ -111,7 +111,7 @@ export function useAppAccessGate(): State & { refresh: () => Promise<void> } {
 
     const request = (async (): Promise<AccessGateDecision> => {
       try {
-        const { data, error } = await withGateTimeout(
+        const { data, error } = await withGateTimeout<{ data: unknown; error: unknown }>(
           supabase.functions.invoke("gate-app-access", {
             headers: { Authorization: `Bearer ${accessToken}` },
           }),
