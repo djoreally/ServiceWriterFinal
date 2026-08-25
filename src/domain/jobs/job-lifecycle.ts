@@ -29,8 +29,10 @@ export const JOB_LIFECYCLE_TRANSITIONS: Record<CanonicalJobStatus, CanonicalJobS
 };
 
 const LEGACY_STATUS_ALIASES: Record<string, CanonicalJobStatus> = {
+  requested: "scheduled",
   pending: "scheduled",
   confirmed: "scheduled",
+  checked_in: "arrived",
   unassigned: "scheduled",
   auto_assigned: "assigned",
   acknowledged: "assigned",
