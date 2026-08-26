@@ -39,9 +39,10 @@ export function CalendarIntegration() {
       const { data, error } = await startGoogleCalendarOAuth(redirectUri);
       if (error) throw error;
       if (data?.error) throw new Error(data.error);
-      if (data?.url) {
+      const authorizationUrl = data?.authorization_url ?? data?.url;
+      if (authorizationUrl) {
         markGoogleOAuthConsentPrompted();
-        window.location.href = data.url;
+        window.location.href = authorizationUrl;
         return;
       }
       throw new Error("Google did not return an authorization URL");

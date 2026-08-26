@@ -29,7 +29,8 @@ export default function GoogleCalendarCallback() {
           await completeGoogleInsightsOAuth(code, state, redirectUri);
           toast.success("Google Analytics and Business Profile authorized");
         } else {
-          const { data, error: fnError } = await completeGoogleCalendarOAuth(code, redirectUri);
+          if (!state) throw new Error("Google did not return a secure authorization state.");
+          const { data, error: fnError } = await completeGoogleCalendarOAuth(code, state, redirectUri);
           if (fnError) throw fnError;
           if (data?.error) throw new Error(data.error);
           const pushed = data?.backfill?.pushed ?? 0;

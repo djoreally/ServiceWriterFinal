@@ -18,13 +18,13 @@ export async function startGoogleCalendarOAuth(redirectUri: string): Promise<any
 }
 
 /** Complete the standalone Google Calendar OAuth flow with the returned code. */
-export async function completeGoogleCalendarOAuth(code: string, redirectUri: string): Promise<any> {
+export async function completeGoogleCalendarOAuth(code: string, state: string, redirectUri: string): Promise<any> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error("Not authenticated");
 
   return supabase.functions.invoke("google-calendar-sync", {
     headers: { Authorization: `Bearer ${session.access_token}` },
-    body: { mode: "oauth_callback", code, redirect_uri: redirectUri },
+    body: { mode: "oauth_callback", code, state, redirect_uri: redirectUri },
   });
 }
 
