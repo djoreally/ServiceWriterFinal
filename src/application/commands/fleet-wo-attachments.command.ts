@@ -38,7 +38,12 @@ export async function listDraftAttachments(draftId: string): Promise<DraftAttach
   const paths = rows.map((r) => r.storage_path);
   if (paths.length === 0) return rows;
   const { data: signed } = await supabase.storage.from(BUCKET).createSignedUrls(paths, 60 * 60);
-  const urlByPath = new Map((signed ?? []).map((s) => [s.path ?? "", s.signedUrl ?? null] as const));
+  const urlByPath = new Map<string, string | null>(
+    ((signed ?? []) as Array<{ path?: string | null; signedUrl?: string | null }>).map((s) => [
+      s.path ?? "",
+      s.signedUrl ?? null,
+    ]),
+  );
   return rows.map((r) => ({ ...r, signed_url: urlByPath.get(r.storage_path) ?? null }));
 }
 

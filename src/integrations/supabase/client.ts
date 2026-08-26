@@ -11,8 +11,8 @@ import { generateCorrelationId, reportClientError } from '@/lib/client-observabi
 // pointed at another, so every data call carried a token the data project could
 // not verify -> `401 PGRST301 "No suitable key was found to decode the JWT"`.
 //
-// The project is resolved exclusively from the build environment (Vite injects
-// VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY / VITE_SUPABASE_PROJECT_ID).
+// The project is resolved exclusively from the build environment (Next.js injects
+// NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY / NEXT_PUBLIC_SUPABASE_PROJECT_ID).
 // No publishable key is ever embedded in this file: a stale hard-coded key is
 // how production once shipped an invalid anon JWT, and rewriting this source at
 // build time is how it once shipped a malformed client bundle.
@@ -49,7 +49,7 @@ const CLIENT_SUPABASE_URL = SUPABASE_URL || 'http://127.0.0.1:54321';
 const CLIENT_SUPABASE_KEY = SUPABASE_PUBLISHABLE_KEY || 'local-development-key';
 
 if (!SUPABASE_CONFIGURED) {
-  console.warn('[supabase] Backend is not configured. UI is running in disconnected development mode; configure VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY before using authenticated data flows.');
+  console.warn('[supabase] Backend is not configured. UI is running in disconnected development mode; configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY before using authenticated data flows.');
 }
 
 const SUPABASE_PROJECT_ID =
@@ -257,7 +257,7 @@ export const authSupabase = supabase;
 /**
  * Canonical Supabase URL for the active build, resolved from the environment.
  * Consumers that construct edge-function URLs must import this instead of
- * reading `import.meta.env.VITE_SUPABASE_URL` directly.
+ * reading `process.env.NEXT_PUBLIC_SUPABASE_URL` directly.
  */
 export const SUPABASE_URL_RESOLVED: string = SUPABASE_URL;
 

@@ -30,6 +30,8 @@ export interface DispatchRunResult {
   status: string;
 }
 
+type WorkOrderLocation = RoutePoint;
+
 // ─── Commands ─────────────────────────────────────────────────────────────
 
 /** Create a new dispatch run for a technician on a given date. */
@@ -137,8 +139,11 @@ export const optimizeRunRoute = async (
     .select('id, location_lat, location_lng')
     .in('id', woIds);
 
-  const woLocationMap = new Map(
-    (workOrders ?? []).map(wo => [wo.id, { lat: Number(wo.location_lat), lng: Number(wo.location_lng) }])
+  const woLocationMap = new Map<string, WorkOrderLocation>(
+    (workOrders ?? []).map(wo => [
+      String(wo.id),
+      { lat: Number(wo.location_lat), lng: Number(wo.location_lng) },
+    ] as const)
   );
 
   // Build ordered location array: start → stop1 → stop2 → ...
@@ -147,8 +152,8 @@ export const optimizeRunRoute = async (
     points.push({ lat: Number(run.start_location_lat), lng: Number(run.start_location_lng) });
   }
   for (const stop of stops) {
-    const loc = woLocationMap.get(stop.work_order_id);
-    if (loc && !isNaN(loc.lat) && !isNaN(loc.lng)) {
+    const loc = woLocationMap.get(String(stop.work_order_id));
+    if (loc && !Number.isNaN(loc.lat) && !Number.isNaN(loc.lng)) {
       points.push(loc);
     }
   }

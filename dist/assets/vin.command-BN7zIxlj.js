@@ -1,1 +1,0 @@
-import{F as a}from"./index-BxnhNaIA.js";async function i(n){const{data:r,error:o}=await a.functions.invoke("vin-ocr",{body:{imageBase64:n}});if(o)throw o;return r}async function e(n){const{data:r,error:o}=await a.functions.invoke("vin-decode",{body:{vin:n}});if(o)throw o;return r}export{e as d,i as o};

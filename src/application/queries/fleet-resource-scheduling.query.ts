@@ -1,6 +1,4 @@
 import { supabase } from "@/integrations/supabase/client";
-import { assignDispatchJob } from "@/application/commands/dispatch.command";
-
 export interface FleetResourceCapacity {
   technician_id: string;
   technician_name: string;
@@ -21,16 +19,8 @@ export async function fetchFleetResourceCapacity(date: string): Promise<FleetRes
   return data ?? [];
 }
 
-export async function assignFleetWorkOrderSlot(input: {
+export async function assignFleetWorkOrderSlot(_input: {
   workOrderId: string; technicianId: string; date: string; start: string; durationMinutes: number; expectedUpdatedAt: string;
 }): Promise<void> {
-  await assignDispatchJob({
-    jobSource: "fleet_work_order",
-    jobId: input.workOrderId,
-    technicianId: input.technicianId,
-    date: input.date,
-    start: input.start,
-    durationMinutes: input.durationMinutes,
-    expectedUpdatedAt: input.expectedUpdatedAt,
-  });
+  throw new Error("Fleet dispatch is separated from Service Writer. Use the Fleet application for Fleet assignments.");
 }

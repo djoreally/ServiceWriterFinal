@@ -1,1 +1,0 @@
-import{F as a}from"./index-BxnhNaIA.js";async function f(e,c,o){const{data:r,error:i}=await a.from("fleet_clients").insert({...c,user_id:e}).select("id").single();if(i)throw i;const n=o.filter(t=>t.name.trim());if(n.length>0){const{error:t}=await a.from("fleet_contacts").insert(n.map(s=>({...s,fleet_client_id:r.id,user_id:e})));if(t)throw t}return r}export{f as c};

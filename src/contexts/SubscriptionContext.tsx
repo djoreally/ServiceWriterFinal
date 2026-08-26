@@ -262,7 +262,7 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
 
     try {
       setLoading((current) => current);
-      const { data, error: fnError } = await withSubscriptionTimeout(
+      const { data, error: fnError } = await withSubscriptionTimeout<{ data: unknown; error: unknown }>(
         supabase.functions.invoke('check-platform-subscription', {
           headers: { Authorization: `Bearer ${session.access_token}` },
         }),

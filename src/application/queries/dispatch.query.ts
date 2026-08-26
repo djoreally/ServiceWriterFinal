@@ -30,7 +30,7 @@ export interface DispatchVan {
 
 export interface DispatchJob {
   id: string;
-  source: "appointment" | "fleet_work_order";
+  source: "appointment" | "work_order";
   title: string;
   scheduled_date: string;
   scheduled_time: string;
@@ -90,10 +90,9 @@ export async function fetchDispatchBoardData(selectedDate: Date, viewMode: "day"
     technicians: (techRes.data ?? []) as unknown as DispatchTechnician[],
     vans,
     jobs: ((jobRes.data ?? []) as OperationalJobRow[])
-      .filter((job) => job.source !== "fleet_work_order")
       .map((job) => ({
         id: job.job_id,
-        source: job.source === "fleet_work_order" ? "fleet_work_order" : "appointment",
+        source: job.source,
         title: job.title,
         scheduled_date: job.scheduled_date,
         scheduled_time: job.scheduled_time,

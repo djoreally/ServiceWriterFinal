@@ -125,7 +125,7 @@ export async function fetchOilUsage(
   if (servicesRes.error) throw new Error(servicesRes.error.message);
 
   const availableVans = (vansRes.data ?? []).map((v: any) => ({ id: v.id, name: v.name }));
-  const vanNameById = new Map(availableVans.map((v) => [v.id, v.name]));
+  const vanNameById = new Map<string, string>(availableVans.map((v) => [v.id, v.name] as [string, string]));
 
   const serviceRows = ((servicesRes.data ?? []) as any[]).filter((r) => {
     const oilType = r.appointments?.vehicles?.oil_type ?? "Motor Oil";

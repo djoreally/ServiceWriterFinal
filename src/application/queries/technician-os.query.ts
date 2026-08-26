@@ -19,7 +19,9 @@ export interface TechnicianRosterRow {
 
 export async function getCurrentUser() {
   const { data: { user } } = await getCurrentAuthUser();
-  return user ?? null;
+  if (!user) return null;
+  const { data: ownerId, error } = await (supabase as any).rpc("current_workspace_owner_user_id");
+  return !error && typeof ownerId === "string" && ownerId ? { ...user, id: ownerId } : user;
 }
 
 export async function fetchTechnicianRoster(): Promise<{ data: TechnicianRosterRow[]; error: any }> {
@@ -61,6 +63,28 @@ export async function fetchTechnicianRoster(): Promise<{ data: TechnicianRosterR
   }
 }
 
+export interface TeamOsTechnicianSnapshot {
+  technician_id: string;
+  workspace_user_id: string;
+  access_state: string;
+  employment_state: string;
+  field_status: string;
+  assigned_van_id: string | null;
+  assigned_van_name: string | null;
+  completed_jobs: number;
+  collected_revenue: number;
+  productive_minutes: number;
+  available_minutes: number;
+  utilization: number;
+  active_skill_count: number;
+  expiring_skill_count: number;
+  compliance_issue_count: number;
+  onboarding_open_count: number;
+  current_job: Record<string, unknown> | null;
+  next_job: Record<string, unknown> | null;
+  data_fresh_at: string;
+}
+
 /** Compatibility adapter used by older callers while Team OS is simplified. */
 export async function fetchTechnicians(_userId: string) {
   return fetchTechnicianRoster();
@@ -84,7 +108,14 @@ export async function fetchTechDetails(_techId: string) {
   return { skills: empty, payroll: empty, incidents: empty, onboarding: empty, leave: empty, appraisals: empty, docs: empty };
 }
 
-export async function fetchTeamOsTechnicianSnapshot(_fromDate: string, _toDate: string) {
+export async function fetchTeamOsTechnicianSnapshot(_fromDate: string, _toDate: string): Promise<TeamOsTechnicianSnapshot[]> {
+  const rpcResult = await (supabase as any).rpc("get_team_os_technician_snapshot_v1", {
+    p_from: _fromDate,
+    p_to: _toDate,
+  });
+  if (!rpcResult.error && Array.isArray(rpcResult.data)) {
+    return rpcResult.data as TeamOsTechnicianSnapshot[];
+  }
   const { data, error } = await fetchTechnicianRoster();
   if (error) throw error;
   return data.map((tech) => ({

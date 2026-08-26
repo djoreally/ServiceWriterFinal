@@ -258,7 +258,7 @@ const Quotes = () => {
     setVehiclesLoading(false);
 
     if (inventoryRes.error) { setInventoryError(inventoryRes.error.message || "Failed to load inventory"); toast.error("Failed to load inventory"); }
-    if (inventoryRes.data) setInventory(inventoryRes.data);
+    if (inventoryRes.data) setInventory(inventoryRes.data as InventoryItem[]);
     setInventoryLoading(false);
 
     if (catalogRes.error) { setCatalogError(catalogRes.error.message || "Failed to load service catalog"); toast.error("Failed to load service catalog"); }

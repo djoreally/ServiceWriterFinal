@@ -54,6 +54,11 @@ export class FakeBackend {
 
     this.tables = {
       business_profiles: [biz],
+      workspace_members: [
+        { workspace_id: "00000000-0000-4000-8000-000000000001", user_id: "00000000-0000-0000-0000-000000000001", is_active: true, role: "owner" },
+        { workspace_id: "00000000-0000-4000-8000-000000000001", user_id: "00000000-0000-0000-0000-000000000002", is_active: true, role: "dispatcher" },
+        { workspace_id: "00000000-0000-4000-8000-000000000001", user_id: "00000000-0000-0000-0000-000000000003", is_active: true, role: "technician" },
+      ],
       service_catalog: [...services],
       appointments: [appt],
       fleet_work_orders: [wo],

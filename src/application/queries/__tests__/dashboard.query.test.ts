@@ -4,6 +4,10 @@ jest.mock("@/integrations/supabase/client", () => ({
   },
 }));
 
+jest.mock("@/application/queries/settings.query", () => ({
+  resolveCurrentWorkspace: jest.fn(async () => ({ workspaceId: "workspace-1", userId: "user-1" })),
+}));
+
 import { supabase } from "@/integrations/supabase/client";
 import { fetchDashboardReporting } from "@/application/queries/dashboard.query";
 
@@ -25,6 +29,7 @@ function makeThenableQuery(result: QueryResult) {
   const builder: any = {
     select: jest.fn(() => builder),
     neq: jest.fn(() => builder),
+    eq: jest.fn(() => builder),
     gte: jest.fn(() => builder),
     lte: jest.fn(() => builder),
     order: jest.fn(() => builder),

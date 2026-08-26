@@ -731,9 +731,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
               zipCode,
               notes: filterMatchNote ?? null,
             });
-            if (dispatchResult.assigned) {
-              assignedVanId = (dispatchResult.van_id as string) ?? null;
-            } else {
+            if (!dispatchResult.assigned) {
               console.info("[Booking] Auto-dispatch skipped:", dispatchResult.reason);
             }
           } catch (e) {

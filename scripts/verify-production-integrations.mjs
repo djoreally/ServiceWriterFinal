@@ -1,9 +1,6 @@
 const mode = process.env.INTEGRATION_ENV || process.env.NODE_ENV || "development";
 const allowMissing = process.env.ALLOW_MISSING_INTEGRATIONS === "true" || mode !== "production";
 const checks = [
-  ["VITE_SUPABASE_URL", "frontend Supabase URL", true],
-  ["VITE_SUPABASE_PROJECT_ID", "frontend Supabase project reference", true],
-  ["VITE_SUPABASE_PUBLISHABLE_KEY", "frontend Supabase publishable key", true],
   ["NEXT_PUBLIC_SUPABASE_URL", "API Supabase URL", true],
   ["NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "API Supabase publishable key", true],
   ["NEXT_PUBLIC_APP_URL", "application public URL", true],
@@ -25,13 +22,10 @@ const checks = [
 ];
 
 const missing = checks.filter(([name]) => !process.env[name]);
-const publicSupabaseURL = process.env.VITE_SUPABASE_URL;
-const nextSupabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const origin = process.env.NEXT_PUBLIC_APP_URL;
 const corsOrigin = process.env.NEXT_PUBLIC_CORS_ORIGIN;
 const failures = [];
 
-if (publicSupabaseURL && nextSupabaseURL && publicSupabaseURL !== nextSupabaseURL) failures.push("Vite and Next.js Supabase URLs do not match.");
 if (origin && !/^https:\/\//i.test(origin) && mode === "production") failures.push("NEXT_PUBLIC_APP_URL must use HTTPS in production.");
 if (corsOrigin && /\/$/.test(corsOrigin)) failures.push("NEXT_PUBLIC_CORS_ORIGIN must not have a trailing slash.");
 if (origin && corsOrigin && new URL(origin).hostname === new URL(corsOrigin).hostname && origin !== corsOrigin) {

@@ -1,1 +1,0 @@
-import{F as e}from"./index-BxnhNaIA.js";async function c(){return e.auth.signOut()}async function o(n){return e.from("customer_accounts").select("id, email, full_name, phone").eq("user_id",n).maybeSingle()}async function s(n,t){return e.rpc("cancel_appointment_by_token",{p_management_token:n,p_cancellation_reason:t||void 0})}export{s as c,o as f,c as s};

@@ -106,8 +106,11 @@ export function useAppointmentImport() {
       .select('id, name, email, phone')
       .eq('user_id', user.id);
 
-    const customerMap = new Map(
-      existingCustomers?.map(c => [c.name.toLowerCase(), c]) || []
+    type ImportedCustomer = { id: string; name: string; email: string | null; phone: string | null };
+    const customerMap = new Map<string, ImportedCustomer>(
+      ((existingCustomers ?? []) as ImportedCustomer[]).map(
+        (customer) => [customer.name.toLowerCase(), customer] as [string, ImportedCustomer],
+      ),
     );
 
     const today = format(new Date(), 'yyyy-MM-dd');

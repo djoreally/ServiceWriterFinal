@@ -1,1 +1,0 @@
-import{u as a}from"./index-BxnhNaIA.js";function p(n,D){const t=a(n.start),s=a(n.end);let r=+t>+s;const c=r?+t:+s,e=r?s:t;e.setHours(0,0,0,0);let u=1;const o=[];for(;+e<=c;)o.push(a(e)),e.setDate(e.getDate()+u),e.setHours(0,0,0,0);return r?o.reverse():o}export{p as e};

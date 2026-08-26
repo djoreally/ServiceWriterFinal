@@ -126,7 +126,7 @@ describe("quote conversion API concurrency contract", () => {
       body: JSON.stringify({ workspace_id: WORKSPACE_A, idempotency_key: "api-concurrent-key-001" }),
       headers: { "content-type": "application/json" },
     }));
-    const { POST } = await import("../../../../apps/web-next/src/app/api/v1/quotes/[id]/convert/route");
+    const { POST } = await import("../../../../app/api/v1/quotes/[id]/convert/route");
     const responses = await Promise.all(requests.map((request) => POST(request, { params: Promise.resolve({ id: QUOTE_ID }) })));
     const bodies = await Promise.all(responses.map((response) => response.json()));
 
@@ -145,7 +145,7 @@ describe("quote conversion API concurrency contract", () => {
       return { data: winner, error: null };
     });
 
-    const { POST } = await import("../../../../apps/web-next/src/app/api/v1/quotes/[id]/convert/route");
+    const { POST } = await import("../../../../app/api/v1/quotes/[id]/convert/route");
     const responses = await Promise.all(["first-key-001234", "second-key-00123"].map((idempotency_key) => POST(
       new Request(`http://localhost/api/v1/quotes/${QUOTE_ID}/convert`, { method: "POST", body: JSON.stringify({ workspace_id: WORKSPACE_A, idempotency_key }), headers: { "content-type": "application/json" } }),
       { params: Promise.resolve({ id: QUOTE_ID }) },
@@ -156,7 +156,7 @@ describe("quote conversion API concurrency contract", () => {
   });
 
   it("rejects malformed workspace and idempotency input before calling the RPC", async () => {
-    const { POST } = await import("../../../../apps/web-next/src/app/api/v1/quotes/[id]/convert/route");
+    const { POST } = await import("../../../../app/api/v1/quotes/[id]/convert/route");
     const response = await POST(
       new Request(`http://localhost/api/v1/quotes/${QUOTE_ID}/convert`, { method: "POST", body: JSON.stringify({ workspace_id: "not-a-uuid", idempotency_key: "short" }), headers: { "content-type": "application/json" } }),
       { params: Promise.resolve({ id: QUOTE_ID }) },

@@ -102,25 +102,29 @@ function mapCatalog(row: any): ServiceCatalogItem {
 }
 
 function mapAppointment(row: any, customerMap: Map<string, Customer>, vehicleMap: Map<string, Vehicle>): AppointmentWithSource {
+  const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata as Record<string, any> : {};
   const customer = customerMap.get(row.customer_id) ?? null;
   const vehicle = row.vehicle_id ? vehicleMap.get(row.vehicle_id) ?? null : null;
-  const start = localDateTime(row.starts_at);
-  const duration = Math.max(15, Math.round((Date.parse(row.ends_at) - Date.parse(row.starts_at)) / 60000));
+  const startsAt = row.starts_at ?? `${row.scheduled_date}T${row.scheduled_time ?? "00:00"}:00`;
+  const endsAt = row.ends_at ?? new Date(Date.parse(startsAt) + Number(row.duration_minutes ?? 60) * 60_000).toISOString();
+  const start = localDateTime(startsAt);
+  const duration = Math.max(15, Math.round((Date.parse(endsAt) - Date.parse(startsAt)) / 60000));
   const vehicleLabel = vehicle ? `${vehicle.year} ${vehicle.make} ${vehicle.model}` : "Vehicle";
+  const title = row.title ?? metadata.title ?? metadata.service_name ?? (customer ? `${customer.name} — ${vehicleLabel}` : vehicleLabel);
   return {
     id: row.id,
-    title: customer ? `${customer.name} — ${vehicleLabel}` : vehicleLabel,
+    title,
     scheduled_date: start.date,
     scheduled_time: start.time,
     duration_minutes: duration,
     status: row.status,
     customer,
     vehicle,
-    guest_name: customer?.name ?? null,
-    guest_email: customer?.email ?? null,
-    guest_phone: customer?.phone ?? null,
-    notes: row.notes ?? undefined,
-    description: row.notes ?? undefined,
+    guest_name: row.guest_name ?? customer?.name ?? null,
+    guest_email: row.guest_email ?? customer?.email ?? null,
+    guest_phone: row.guest_phone ?? customer?.phone ?? null,
+    notes: row.notes ?? metadata.notes ?? undefined,
+    description: row.notes ?? metadata.description ?? undefined,
     assigned_technician_id: row.assigned_user_id ?? null,
     source: row.source,
     intake_responses: row.metadata && typeof row.metadata === "object" ? row.metadata : null,
@@ -160,7 +164,9 @@ export async function fetchAppointmentsPageData(): Promise<AppointmentsPageData>
   const vehicles = (vehicleRows as any[]).map(mapVehicle);
   const customerMap = new Map(customers.map((customer) => [customer.id, customer]));
   const vehicleMap = new Map(vehicles.map((vehicle) => [vehicle.id, vehicle]));
-  const appointments = (appointmentRows as any[]).map((row) => mapAppointment(row, customerMap, vehicleMap));
+  const appointments = (appointmentRows as any[])
+    .filter((row) => row.source !== "fleet_work_order" && !(row.metadata && typeof row.metadata === "object" && row.metadata.fleet_work_order_id))
+    .map((row) => mapAppointment(row, customerMap, vehicleMap));
   const serviceCatalog = (catalogRows as any[]).map(mapCatalog);
 
   const settings = settingsResult.status === "fulfilled" ? settingsResult.value : null;

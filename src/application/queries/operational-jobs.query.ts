@@ -19,8 +19,8 @@ export interface OperationalJobRow {
   duration_minutes: number | null;
   assigned_technician_id: string | null;
   assigned_technician_name: string | null;
-  assigned_van_id: null;
-  assigned_van_name: null;
+  assigned_van_id: string | null;
+  assigned_van_name: string | null;
   assigned_at: string | null;
   dispatch_notes: string | null;
   guest_name: string | null;
@@ -30,6 +30,9 @@ export interface OperationalJobRow {
   location_lng: number | null;
   estimated_cost: number | null;
   source: OperationalJobSource;
+  fleet_job_id?: string | null;
+  fleet_job_number?: string | null;
+  fleet_job_vehicle_count?: number | null;
   customer_name: string | null;
   customer_phone: string | null;
   vehicle_year: number | null;
@@ -137,6 +140,11 @@ function workOrderJob(row: any, assignmentByOrder: Map<string, string>, profileN
     location_lng: location?.longitude == null ? (meta.location_lng == null ? null : Number(meta.location_lng)) : Number(location.longitude),
     estimated_cost: meta.estimated_cost == null ? null : Number(meta.estimated_cost),
     source: "work_order",
+    fleet_job_id: row.fleet_job_id ?? meta.fleet_job_id ?? null,
+    fleet_job_number: row.fleet_job_number ?? meta.fleet_job_number ?? null,
+    fleet_job_vehicle_count:
+      row.fleet_job_vehicle_count ??
+      (meta.fleet_vehicle_count == null ? null : Number(meta.fleet_vehicle_count)),
     customer_name: customerName(customer),
     customer_phone: customer?.phone ?? null,
     vehicle_year: vehicle?.year ?? null,
@@ -148,6 +156,47 @@ function workOrderJob(row: any, assignmentByOrder: Map<string, string>, profileN
   };
 }
 
+function normalizeDispatchViewRow(row: any): OperationalJobRow {
+  const source = row.source === "fleet_work_order" ? "work_order" : row.source === "work_order" ? "work_order" : "appointment";
+  return {
+    job_id: String(row.job_id ?? row.id),
+    user_id: String(row.user_id ?? ""),
+    title: String(row.title ?? "Service Appointment"),
+    scheduled_date: String(row.scheduled_date ?? ""),
+    scheduled_time: String(row.scheduled_time ?? "00:00:00"),
+    status: row.status ?? null,
+    dispatch_status: row.dispatch_status ?? null,
+    canonical_state: String(row.canonical_state ?? row.status ?? "queued"),
+    job_priority: row.job_priority ?? null,
+    estimated_duration_minutes: row.estimated_duration_minutes == null ? null : Number(row.estimated_duration_minutes),
+    duration_minutes: row.duration_minutes == null ? null : Number(row.duration_minutes),
+    assigned_technician_id: row.assigned_technician_id ?? null,
+    assigned_technician_name: row.assigned_technician_name ?? null,
+    assigned_van_id: row.assigned_van_id ?? null,
+    assigned_van_name: row.assigned_van_name ?? null,
+    assigned_at: row.assigned_at ?? null,
+    dispatch_notes: row.dispatch_notes ?? null,
+    guest_name: row.guest_name ?? null,
+    guest_phone: row.guest_phone ?? null,
+    location_address: row.location_address ?? null,
+    location_lat: row.location_lat == null ? null : Number(row.location_lat),
+    location_lng: row.location_lng == null ? null : Number(row.location_lng),
+    estimated_cost: row.estimated_cost == null ? null : Number(row.estimated_cost),
+    source,
+    fleet_job_id: row.fleet_job_id ?? null,
+    fleet_job_number: row.fleet_job_number ?? null,
+    fleet_job_vehicle_count: row.fleet_job_vehicle_count == null ? null : Number(row.fleet_job_vehicle_count),
+    customer_name: row.customer_name ?? null,
+    customer_phone: row.customer_phone ?? null,
+    vehicle_year: row.vehicle_year == null ? null : Number(row.vehicle_year),
+    vehicle_make: row.vehicle_make ?? null,
+    vehicle_model: row.vehicle_model ?? null,
+    service_catalog_name: row.service_catalog_name ?? null,
+    last_event_at: row.last_event_at ?? null,
+    source_freshness_ms: row.source_freshness_ms == null ? null : Number(row.source_freshness_ms),
+  };
+}
+
 async function fetchCanonicalJobs(fromDate: string, toDate: string): Promise<{ data: OperationalJobRow[]; error: any }> {
   const context = await resolveCurrentWorkspace();
   if (!context) return { data: [], error: null };
@@ -155,6 +204,16 @@ async function fetchCanonicalJobs(fromDate: string, toDate: string): Promise<{ d
   const client = supabase as any;
   const startIso = new Date(`${fromDate}T00:00:00`).toISOString();
   const endIso = new Date(`${toDate}T23:59:59.999`).toISOString();
+
+  const viewResult = await client.from("dispatch_operational_jobs_v1")
+    .select("*")
+    .eq("user_id", context.userId)
+    .gte("scheduled_date", fromDate)
+    .lte("scheduled_date", toDate)
+    .order("scheduled_date");
+  if (!viewResult.error && Array.isArray(viewResult.data)) {
+    return { data: viewResult.data.map(normalizeDispatchViewRow), error: null };
+  }
 
   const [appointmentsRes, workOrdersRes, membersRes] = await Promise.all([
     client.from("appointments")
