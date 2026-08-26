@@ -21,7 +21,6 @@ import {
   insertBookingPaymentRecord,
   signUpBookingUser,
   createCustomerAccount,
-  recordBookingConsent,
   reserveBookingReward,
   applyBookingReward,
   redeemBookingReward,
@@ -47,6 +46,7 @@ import {
 } from "@/lib/bookingFilterMatch";
 
 import { supabase } from "@/integrations/supabase/client";
+import { nextApi } from "@/lib/nextApiClient";
 
 import { parseCheckoutError } from "@/components/booking/checkoutErrors.utils";
 import type { CheckoutErrorType } from "@/components/booking/CheckoutErrors";
@@ -606,7 +606,12 @@ export function useBookingSubmit(deps: SubmitDeps) {
 
       if (appointmentError) {
         const message = appointmentError.message || "";
-        if (message.includes("WEATHER_BLOCKED") || message.includes("WEATHER_UNVERIFIED") || message.includes("DATE_BLOCKED")) {
+        if (message.includes("DATE_BLOCKED")) {
+          toast.error("That time is outside the provider's current booking hours or advance-booking window. Please choose another time.");
+          dispatch({ type: "SET_STEP", step: 4 });
+          return;
+        }
+        if (message.includes("WEATHER_BLOCKED") || message.includes("WEATHER_UNVERIFIED")) {
           toast.error(
             message.includes("WEATHER_UNVERIFIED")
               ? "Weather Guard could not verify that appointment time. Please refresh and choose another slot."
@@ -657,33 +662,6 @@ export function useBookingSubmit(deps: SubmitDeps) {
           vehicle_count: vehicles.length,
         });
       }
-
-      // Persist customer communication consent. Guests are authorized by the
-      // appointment binding (verified server-side); signed-in users by their JWT.
-      if (appointmentId) {
-        try {
-          await recordBookingConsent({
-            userId: business.user_id,
-            customerId,
-            appointmentId: String(appointmentId),
-            email: validationResult.data.email,
-            phone: validationResult.data.phone || null,
-            transactionalSmsConsent,
-            marketingSmsConsent,
-            marketingEmailConsent,
-            consentTexts: {
-              transactionalSms: TRANSACTIONAL_SMS_CONSENT_TEXT,
-              marketingSms: MARKETING_SMS_CONSENT_TEXT,
-              marketingEmail: MARKETING_EMAIL_CONSENT_TEXT,
-            },
-            source: resolveBookingSource(),
-          });
-        } catch (consentError) {
-          console.warn("[Booking] Consent capture failed:", consentError);
-        }
-      }
-
-
 
       if (appointmentId && selectedRewardInstanceId) {
         try {
@@ -895,6 +873,34 @@ export function useBookingSubmit(deps: SubmitDeps) {
       }
 
 
+
+      // Send the transactional confirmation before showing the success screen.
+      // The appointment remains valid if the provider is temporarily unavailable,
+      // but the UI must report the delivery state truthfully.
+      dispatch({ type: "SET_CONFIRMATION_EMAIL_STATUS", status: "pending" });
+      if (appointmentId && slug) {
+        try {
+          await nextApi.publicBooking.sendConfirmation(String(slug), {
+            appointment_id: String(appointmentId),
+            email: validationResult.data.email,
+            phone: validationResult.data.phone || null,
+            transactional_sms_consent: transactionalSmsConsent,
+            marketing_sms_consent: marketingSmsConsent,
+            marketing_email_consent: marketingEmailConsent,
+            consent_texts: {
+              transactional_sms: TRANSACTIONAL_SMS_CONSENT_TEXT,
+              marketing_sms: MARKETING_SMS_CONSENT_TEXT,
+              marketing_email: MARKETING_EMAIL_CONSENT_TEXT,
+            },
+          });
+          dispatch({ type: "SET_CONFIRMATION_EMAIL_STATUS", status: "sent" });
+        } catch (emailError) {
+          console.error("[Booking] Confirmation email failed", { appointmentId, emailError });
+          dispatch({ type: "SET_CONFIRMATION_EMAIL_STATUS", status: "failed" });
+        }
+      } else {
+        dispatch({ type: "SET_CONFIRMATION_EMAIL_STATUS", status: "failed" });
+      }
 
       // Complete booking context
       if (bookingContextId) {

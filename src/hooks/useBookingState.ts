@@ -93,6 +93,7 @@ export interface BookingState {
   submitting: boolean;
   lastSubmissionTime: number;
   submissionCount: number;
+  confirmationEmailStatus: "pending" | "sent" | "failed";
 
   // Checkout error
   checkoutError: { type: CheckoutErrorType; message?: string } | null;
@@ -154,6 +155,7 @@ export type BookingAction =
   | { type: "SET_PROCESSING_PAYMENT"; processing: boolean }
   | { type: "SET_SUBMITTING"; submitting: boolean }
   | { type: "RECORD_SUBMISSION" }
+  | { type: "SET_CONFIRMATION_EMAIL_STATUS"; status: BookingState["confirmationEmailStatus"] }
   // Checkout error
   | { type: "SET_CHECKOUT_ERROR"; error: BookingState["checkoutError"] }
   // Auth dialog
@@ -282,6 +284,8 @@ function bookingReducer(state: BookingState, action: BookingAction): BookingStat
       return { ...state, processingPayment: action.processing };
     case "SET_SUBMITTING":
       return { ...state, submitting: action.submitting };
+    case "SET_CONFIRMATION_EMAIL_STATUS":
+      return { ...state, confirmationEmailStatus: action.status };
     case "RECORD_SUBMISSION":
       return {
         ...state,
@@ -391,6 +395,7 @@ function createInitialState(savedData: Record<string, any> | null, initialStep: 
     submitting: false,
     lastSubmissionTime: 0,
     submissionCount: 0,
+    confirmationEmailStatus: "pending",
     checkoutError: null,
     emailVerified: false,
     showAuthDialog: false,
