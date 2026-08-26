@@ -1,4 +1,5 @@
 import { errorResponse, json, paginationSchema, requireWorkspaceMember } from "@/server/api";
+import { dispatchPaymentLifecycle, LIFECYCLE_EVENT_KEYS } from "@/server/messaging/quote-payment-events";
 import { z } from "zod";
 
 const paymentStatusSchema = z.enum(["pending", "succeeded", "failed", "refunded", "partially_refunded"]);
@@ -75,6 +76,33 @@ export async function POST(request: Request) {
       .select()
       .single();
     if (error) throw error;
+
+    if (data?.customer_id && (data.status === "succeeded" || data.status === "failed")) {
+      const { data: customer } = await supabase
+        .from("customers")
+        .select("first_name,last_name,email")
+        .eq("workspace_id", body.workspace_id)
+        .eq("id", data.customer_id)
+        .maybeSingle();
+      if (customer?.email) {
+        const eventKey = data.status === "succeeded"
+          ? LIFECYCLE_EVENT_KEYS.paymentReceipt
+          : LIFECYCLE_EVENT_KEYS.paymentFailed;
+        void dispatchPaymentLifecycle({
+          eventKey,
+          eventId: data.id,
+          payment: {
+            ...data,
+            customer_email: customer.email,
+            customer_name: [customer.first_name, customer.last_name].filter(Boolean).join(" "),
+          },
+          workspaceName: String((data.metadata as Record<string, unknown> | null)?.workspace_name || "Service Writer workspace"),
+          workspaceTimezone: "UTC",
+          actionUrl: String((data.metadata as Record<string, unknown> | null)?.payment_url || `/payments/${data.id}`),
+        }).catch((dispatchError) => console.error("[Lifecycle] payment creation email failed", dispatchError));
+      }
+    }
+
     return json({ data }, { status: 201 });
   } catch (error) {
     return errorResponse(error);

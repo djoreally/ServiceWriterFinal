@@ -1,5 +1,4 @@
-import { createSupabaseAdminClient } from "@/lib/supabase";
-import { ResendEmailAdapter } from "@/server/messaging/resend";
+import { dispatchLifecycleEvent, LIFECYCLE_EVENT_KEYS } from "@/server/messaging/lifecycle-events";
 
 type AppointmentRow = {
   id: string;
@@ -12,102 +11,69 @@ type AppointmentRow = {
   metadata: Record<string, unknown> | null;
 };
 
+function formatDateTime(value: string, timezone: string) {
+  const date = new Date(value);
+  return {
+    date: new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    }).format(date),
+    time: new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(date),
+  };
+}
+
 export async function sendBookingConfirmation(input: {
   appointment: AppointmentRow;
   workspaceName: string;
   workspaceTimezone: string;
   recipientEmail: string;
 }) {
-  const supabase = createSupabaseAdminClient();
   const metadata = input.appointment.metadata ?? {};
-  const idempotencyKey = `booking-confirmation:${input.appointment.id}`;
-  const existing = await supabase
-    .from("message_logs")
-    .select("provider_message_id,status")
-    .eq("workspace_id", input.appointment.workspace_id)
-    .eq("idempotency_key", idempotencyKey)
-    .maybeSingle();
-  if (existing.data?.provider_message_id && ["accepted", "sent", "delivered"].includes(existing.data.status)) {
-    return { providerMessageId: existing.data.provider_message_id, status: existing.data.status };
-  }
-
-  const startsAt = new Date(input.appointment.starts_at);
-  const date = new Intl.DateTimeFormat("en-US", {
-    timeZone: input.workspaceTimezone,
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  }).format(startsAt);
-  const time = new Intl.DateTimeFormat("en-US", {
-    timeZone: input.workspaceTimezone,
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(startsAt);
+  const appointmentDateTime = formatDateTime(input.appointment.starts_at, input.workspaceTimezone);
   const title = String(metadata.title || "Service appointment");
   const guestName = String(metadata.guest_name || "Customer");
-  const description = String(metadata.description || "");
-  const total = Number(metadata.estimated_cost || 0).toLocaleString("en-US", { style: "currency", currency: "USD" });
-  const body = [
-    `Hi ${guestName},`,
-    "",
-    `Your appointment with ${input.workspaceName} is confirmed.`,
-    "",
-    `Service: ${title}`,
-    `Date: ${date}`,
-    `Time: ${time}`,
-    `Total: ${total}`,
-    "Payment: Pay at time of service",
-    description ? "" : null,
-    description || null,
-    "",
-    `Confirmation: ${input.appointment.id.slice(0, 8).toUpperCase()}`,
-    "",
-    "If you need to make a change, reply to this email or contact the service provider.",
-  ].filter((line): line is string => line !== null).join("\n");
+  const vehicleInfo = String(metadata.vehicle_info || "Vehicle details not provided");
+  const address = String(metadata.service_address || metadata.address || "Address provided by the shop");
+  const paymentMethod = String(metadata.payment_method || "Pay at time of service");
+  const estimatedCost = Number(metadata.estimated_cost || 0);
+  const total = Number.isFinite(estimatedCost)
+    ? estimatedCost.toLocaleString("en-US", { style: "currency", currency: "USD" })
+    : String(metadata.estimated_cost || "See appointment details");
+  const confirmationCode = input.appointment.id.slice(0, 8).toUpperCase();
+  const manageUrl = String(metadata.manage_url || "{{appointment.manage_url}}");
 
-  const queued = await supabase.from("message_logs").upsert({
-    workspace_id: input.appointment.workspace_id,
-    customer_id: input.appointment.customer_id,
-    channel: "email",
-    purpose: "transactional",
-    provider: "resend",
-    idempotency_key: idempotencyKey,
-    recipient_email: input.recipientEmail,
-    template_key: "booking_confirmation",
-    subject: `Booking confirmed — ${input.workspaceName}`,
-    body_redacted: "Booking confirmation",
-    status: "queued",
-    metadata: { appointment_id: input.appointment.id },
-  }, { onConflict: "workspace_id,idempotency_key" }).select("id").single();
-  if (queued.error) throw queued.error;
-
-  try {
-    const sent = await new ResendEmailAdapter().send({
-      workspaceId: input.appointment.workspace_id,
-      recipient: { email: input.recipientEmail },
-      purpose: "transactional",
-      templateKey: "booking_confirmation",
-      subject: `Booking confirmed — ${input.workspaceName}`,
-      body,
-      idempotencyKey,
-      metadata: { appointmentId: input.appointment.id },
-    });
-    const updated = await supabase.from("message_logs").update({
-      provider_message_id: sent.providerMessageId,
-      status: sent.status,
-      sent_at: sent.acceptedAt,
-      failure_code: null,
-      failure_reason: null,
-    }).eq("id", queued.data.id);
-    if (updated.error) throw updated.error;
-    return sent;
-  } catch (error) {
-    await supabase.from("message_logs").update({
-      status: "failed",
-      failed_at: new Date().toISOString(),
-      failure_reason: error instanceof Error ? error.message.slice(0, 500) : "Email provider failed",
-    }).eq("id", queued.data.id);
-    throw error;
-  }
+  return dispatchLifecycleEvent({
+    workspaceId: input.appointment.workspace_id,
+    customerId: input.appointment.customer_id,
+    recipientEmail: input.recipientEmail,
+    recipientRole: "customer",
+    templateKey: LIFECYCLE_EVENT_KEYS.bookingCreated,
+    eventId: input.appointment.id,
+    variables: {
+      "business.name": input.workspaceName,
+      "business.timezone": input.workspaceTimezone,
+      "customer.first_name": guestName.split(/\s+/)[0],
+      "customer.full_name": guestName,
+      "appointment.service": title,
+      "appointment.date": appointmentDateTime.date,
+      "appointment.time": appointmentDateTime.time,
+      "appointment.address": address,
+      "appointment.total": total,
+      "appointment.confirmation_code": confirmationCode,
+      "appointment.payment_method": paymentMethod,
+      "appointment.manage_url": manageUrl,
+      "vehicle.year": vehicleInfo,
+      "vehicle.make": "",
+      "vehicle.model": "",
+      "email.primary_action_url": manageUrl,
+    },
+    metadata: { appointmentId: input.appointment.id },
+  });
 }

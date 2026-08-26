@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ApiError, errorResponse, json, requireWorkspaceMember } from "@/server/api";
+import { dispatchQuoteLifecycle, LIFECYCLE_EVENT_KEYS } from "@/server/messaging/quote-payment-events";
 
 const conversionRequestSchema = z.object({
   workspace_id: z.string().uuid(),
@@ -51,6 +52,46 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       p_expected_quote_updated_at: body.expected_quote_updated_at ?? null,
     });
     if (error) normalizeConversionError(error);
+
+    try {
+      if (typeof (supabase as { from?: unknown }).from !== "function") return json({ data });
+      const { data: quote } = await supabase
+        .from("quotes")
+        .select("id,workspace_id,customer_id,total,expires_at,status,metadata")
+        .eq("workspace_id", body.workspace_id)
+        .eq("id", quoteId)
+        .maybeSingle();
+      if (quote?.customer_id) {
+      const { data: customer } = await supabase
+        .from("customers")
+        .select("first_name,last_name,email")
+        .eq("workspace_id", body.workspace_id)
+        .eq("id", quote.customer_id)
+        .maybeSingle();
+      if (customer?.email) {
+        const { data: workspace } = await supabase
+          .from("workspaces")
+          .select("name,timezone")
+          .eq("id", body.workspace_id)
+          .maybeSingle();
+        void dispatchQuoteLifecycle({
+          eventKey: LIFECYCLE_EVENT_KEYS.estimateConverted,
+          eventId: `${quoteId}:${body.idempotency_key}`,
+          quote: {
+            ...quote,
+            customer_email: customer.email,
+            customer_name: [customer.first_name, customer.last_name].filter(Boolean).join(" "),
+          },
+          workspaceName: workspace?.name || "Service Writer workspace",
+          workspaceTimezone: workspace?.timezone || "UTC",
+          actionUrl: body.appointment_id ? `/appointments/${body.appointment_id}` : `/quotes/${quoteId}`,
+          }).catch((dispatchError) => console.error("[Lifecycle] quote conversion email failed", dispatchError));
+        }
+      }
+    } catch (dispatchLookupError) {
+      console.error("[Lifecycle] quote conversion enrichment failed", dispatchLookupError);
+    }
+
     return json({ data });
   } catch (error) {
     if (error instanceof z.ZodError) {
