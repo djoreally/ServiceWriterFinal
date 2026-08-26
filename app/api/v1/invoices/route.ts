@@ -172,7 +172,7 @@ export async function POST(request: Request) {
     if (readError) throw readError;
 
     const customer = Array.isArray(invoice.customers) ? invoice.customers[0] : invoice.customers;
-    if (customer?.email) {
+    if (customer?.email && invoice.status !== "draft") {
       try {
         const { data: workspace } = await supabase.from("workspaces").select("name,timezone").eq("id", body.workspace_id).single();
         const customerName = [customer.first_name, customer.last_name].filter(Boolean).join(" ") || "Customer";

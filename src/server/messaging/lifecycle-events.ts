@@ -124,6 +124,8 @@ export const LIFECYCLE_EVENT_KEYS = {
   quoteReady: "quotes_and_service_authorization.your_quote_is_ready",
   quoteApproved: "quotes_and_service_authorization.quote_approved",
   quoteDeclined: "quotes_and_service_authorization.quote_declined",
+  customerApprovalReceived: "quotes_and_service_authorization.customer_approval_received",
+  customerDeclineReceived: "quotes_and_service_authorization.customer_decline_received",
   estimateConverted: "quotes_and_service_authorization.estimate_converted_to_appointment",
   invoiceCreated: "invoice_and_payment_sequence.invoice_created",
   paymentRequested: "invoice_and_payment_sequence.payment_requested",

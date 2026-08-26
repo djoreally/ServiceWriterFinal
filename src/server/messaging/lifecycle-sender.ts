@@ -62,9 +62,46 @@ export async function enqueueLifecycleEmail(input: LifecycleSendInput & {
   return { id: String(Array.isArray(data) ? data[0] : data), status: "queued" };
 }
 
-export async function sendLifecycleEmail(input: LifecycleSendInput) {
+export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ providerMessageId?: string; status: string }> {
   const rendered = renderLifecycleEmail(input.templateKey, input.variables);
   const supabase = createSupabaseAdminClient();
+  const recipientEmail = assertEmail(input.recipientEmail);
+  const checkedAt = new Date().toISOString();
+  const suppression = await supabase.rpc("messaging_has_active_suppression", {
+    target_workspace_id: input.workspaceId,
+    target_channel: "email",
+    target_purpose: rendered.purpose,
+    target_email: recipientEmail,
+    target_phone: null,
+  });
+  if (suppression.error) throw suppression.error;
+  const consent = rendered.purpose === "marketing"
+    ? await supabase.from("messaging_consents").select("status").eq("workspace_id", input.workspaceId).eq("channel", "email").eq("purpose", "marketing").eq("contact_email", recipientEmail).order("updated_at", { ascending: false }).limit(1).maybeSingle()
+    : { data: { status: "not_required" }, error: null };
+  if (consent.error) throw consent.error;
+  const suppressed = Boolean(suppression.data) || (rendered.purpose === "marketing" && consent.data?.status !== "granted");
+  if (suppressed) {
+    const canceled = await supabase.from("message_logs").upsert({
+      workspace_id: input.workspaceId,
+      customer_id: input.customerId ?? null,
+      channel: "email",
+      purpose: rendered.purpose,
+      provider: "resend",
+      idempotency_key: input.idempotencyKey,
+      recipient_email: recipientEmail,
+      template_key: rendered.templateKey,
+      subject: rendered.subject,
+      body_redacted: rendered.body.slice(0, 240),
+      status: "canceled",
+      failure_code: rendered.purpose === "marketing" ? "consent_required" : "suppressed",
+      failure_reason: rendered.purpose === "marketing" ? "Marketing consent is not granted" : "Recipient is actively suppressed",
+      consent_checked_at: checkedAt,
+      suppression_checked_at: checkedAt,
+      metadata: input.metadata ?? {},
+    }, { onConflict: "workspace_id,idempotency_key" }).select("id").single();
+    if (canceled.error) throw canceled.error;
+    return { status: "suppressed" };
+  }
   const existing = await supabase
     .from("message_logs")
     .select("id,provider_message_id,status")
@@ -83,11 +120,13 @@ export async function sendLifecycleEmail(input: LifecycleSendInput) {
     purpose: rendered.purpose,
     provider: "resend",
     idempotency_key: input.idempotencyKey,
-    recipient_email: assertEmail(input.recipientEmail),
+    recipient_email: recipientEmail,
     template_key: rendered.templateKey,
     subject: rendered.subject,
     body_redacted: rendered.body.slice(0, 240),
     status: "queued",
+    consent_checked_at: checkedAt,
+    suppression_checked_at: checkedAt,
     metadata: input.metadata ?? {},
   }, { onConflict: "workspace_id,idempotency_key" }).select("id").single();
 
@@ -96,11 +135,14 @@ export async function sendLifecycleEmail(input: LifecycleSendInput) {
   try {
     const sent = await new ResendEmailAdapter().send({
       workspaceId: input.workspaceId,
-      recipient: { email: assertEmail(input.recipientEmail) },
+      recipient: { email: recipientEmail },
       purpose: rendered.purpose,
       templateKey: rendered.templateKey,
       subject: rendered.subject,
       body: rendered.text,
+      html: rendered.html,
+      fromName: typeof input.variables["business.name"] === "string" ? String(input.variables["business.name"]) : "Service Writer",
+      replyTo: typeof input.variables["business.email"] === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(input.variables["business.email"])) ? String(input.variables["business.email"]) : undefined,
       idempotencyKey: input.idempotencyKey,
       metadata: input.metadata ?? {},
     });
@@ -110,6 +152,7 @@ export async function sendLifecycleEmail(input: LifecycleSendInput) {
       sent_at: sent.acceptedAt,
       failure_code: null,
       failure_reason: null,
+      failed_at: null,
     }).eq("id", queued.data.id);
     if (updated.error) throw updated.error;
     return sent;
@@ -136,12 +179,12 @@ export async function processLifecycleEventOutbox(limit = 50, workerId = `vercel
     try {
       if (!row.recipient_email) throw new Error("Lifecycle outbox row has no customer recipient");
       const payload = row.payload ?? {};
-      await sendLifecycleEmail({
+      const delivery = await sendLifecycleEmail({
         workspaceId: row.workspace_id,
         recipientEmail: row.recipient_email,
         customerId: payload.customerId,
         templateKey: row.event_key,
-        idempotencyKey: `lifecycle:${row.event_key}:${row.idempotency_key}:${row.recipient_email.toLowerCase()}`,
+        idempotencyKey: row.idempotency_key,
         variables: payload.variables ?? {},
         metadata: payload.metadata ?? { lifecycleEventId: row.id, recipientRole: row.recipient_role },
       });
@@ -153,7 +196,8 @@ export async function processLifecycleEventOutbox(limit = 50, workerId = `vercel
         p_retry_seconds: 300,
       });
       if (completed.error) throw completed.error;
-      results.sent += 1;
+      if (delivery.status === "suppressed") results.failed += 1;
+      else results.sent += 1;
     } catch (sendError) {
       const completed = await supabase.rpc("complete_lifecycle_event", {
         p_id: row.id,

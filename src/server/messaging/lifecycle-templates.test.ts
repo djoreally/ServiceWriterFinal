@@ -7,9 +7,9 @@ import { LIFECYCLE_EVENT_CATALOG } from "@/server/messaging/lifecycle-events";
 
 describe("Service Writer lifecycle template registry", () => {
   it("contains the complete lifecycle set", () => {
-    expect(LIFECYCLE_TEMPLATE_COUNT).toBe(173);
-    expect(LIFECYCLE_EVENT_CATALOG).toHaveLength(173);
-    expect(new Set(LIFECYCLE_EVENT_CATALOG.map((event) => event.key)).size).toBe(173);
+    expect(LIFECYCLE_TEMPLATE_COUNT).toBe(175);
+    expect(LIFECYCLE_EVENT_CATALOG).toHaveLength(175);
+    expect(new Set(LIFECYCLE_EVENT_CATALOG.map((event) => event.key)).size).toBe(175);
     expect(getLifecycleTemplate("appointment_booking_sequence.booking_confirmation").title).toBe("Booking confirmation");
     expect(getLifecycleTemplate("invoice_and_payment_sequence.payment_receipt").title).toBe("Payment receipt");
   });
@@ -37,6 +37,25 @@ describe("Service Writer lifecycle template registry", () => {
     expect(result.body).toContain("Your service appointment is confirmed.");
     expect(result.text).toContain("View appointment: https://example.com/appointments/ABC12345");
     expect(result.text).toContain("Powered by Service Writer.");
+    expect(result.html).toContain("<html lang=\"en\">");
+    expect(result.html).toContain("View appointment");
+  });
+
+  it("rejects unresolved variables before delivery", () => {
+    expect(() => renderLifecycleEmail("appointment_booking_sequence.booking_confirmation", {
+      "business.name": "Service Writer",
+      "business.timezone": "UTC",
+      "customer.full_name": "Jordan Lee",
+      "appointment.service": "Service",
+      "appointment.date": "Friday",
+      "appointment.time": "10:00 AM",
+      "appointment.address": "123 Main Street",
+      "appointment.total": "$89.00",
+      "appointment.confirmation_code": "ABC12345",
+      "vehicle.year": "2019",
+      "vehicle.make": "Honda",
+      "email.primary_action_url": "https://example.com/appointment",
+    })).toThrow(/missing required variables/);
   });
 
   it("rejects unknown lifecycle keys", () => {

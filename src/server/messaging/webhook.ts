@@ -71,6 +71,14 @@ export async function ingestDeliveryWebhook(provider: string, adapter: Messaging
       target_failure_code: event.failureCode ?? null,
       target_failure_reason: event.failureReason ?? null,
     });
+    if (workspaceId && event.recipient?.includes("@") && (event.status === "bounced" || event.status === "complained")) {
+      const suppressionResult = await supabase.rpc("messaging_record_delivery_suppression", {
+        target_workspace_id: workspaceId,
+        target_email: event.recipient,
+        target_reason: event.status,
+      });
+      if (suppressionResult.error) console.error("[Messaging] failed to record delivery suppression", suppressionResult.error);
+    }
   }
   await supabase.from("webhook_events").update({ status: "processed", processed_at: new Date().toISOString() }).eq("id", webhookId);
   return { accepted: true, duplicate: inserted === 0, count: inserted };

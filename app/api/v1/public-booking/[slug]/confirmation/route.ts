@@ -90,6 +90,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       workspaceName: workspaceResult.data.name,
       workspaceTimezone: workspaceResult.data.timezone,
       recipientEmail: body.email.toLowerCase(),
+      actionUrl: new URL(`/booking/${slug}/confirmation?appointment_id=${appointment.id}`, request.url).toString(),
     });
     return json({ data: { status: result.status, provider_message_id: result.providerMessageId } }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

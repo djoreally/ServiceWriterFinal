@@ -10,7 +10,8 @@ export type LifecyclePurpose =
   | "service_reminder"
   | "appointment_update"
   | "payment_request"
-  | "authentication";
+  | "authentication"
+  | "marketing";
 
 export type LifecycleTemplate = {
   key: string;
@@ -31,7 +32,22 @@ const VARIABLE_PATTERN = /\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g;
 
 function valueFor(variables: LifecycleVariables, path: string): string {
   const value = variables[path];
-  return value === null || value === undefined ? `{{${path}}}` : String(value);
+  return value === null || value === undefined || value === "" ? `{{${path}}}` : String(value);
+}
+
+function requiredVariables(template: LifecycleTemplate): string[] {
+  const source = [template.subject, template.preview, template.headline, template.body, template.essentialInformation].join("\n");
+  return [...new Set([...source.matchAll(VARIABLE_PATTERN)].map((match) => match[1]))];
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  })[character] ?? character);
 }
 
 export function interpolate(value: string, variables: LifecycleVariables): string {
@@ -116,6 +132,8 @@ export const LIFECYCLE_TEMPLATES = {
   "quotes_and_service_authorization.quote_reminder": { key: "quotes_and_service_authorization.quote_reminder", category: "6. Quotes and service authorization", title: "Quote reminder", subject: "Your quote is waiting for your review", preview: "Your quote has not been opened or completed. Review it before the available pricing or timing changes.", headline: "Your quote is waiting for your review", body: "Your quote has not been opened or completed. Review it before the available pricing or timing changes.", ctaLabel: "Review quote", essentialInformation: "Quote expires: {{quote.expires_at}}", purpose: "payment_request" },
   "quotes_and_service_authorization.quote_expiring_soon": { key: "quotes_and_service_authorization.quote_expiring_soon", category: "6. Quotes and service authorization", title: "Quote expiring soon", subject: "Your quote expires soon", preview: "Your quote is approaching its expiration date. Review it if you would like to approve the proposed work.", headline: "Your quote expires soon", body: "Your quote is approaching its expiration date. Review it if you would like to approve the proposed work.", ctaLabel: "Review quote", essentialInformation: "Expires: {{quote.expires_at}}", purpose: "payment_request" },
   "quotes_and_service_authorization.quote_expired": { key: "quotes_and_service_authorization.quote_expired", category: "6. Quotes and service authorization", title: "Quote expired", subject: "Your quote has expired", preview: "This quote is no longer available for approval. Contact {{business.name}} if you would like an updated quote.", headline: "Your quote has expired", body: "This quote is no longer available for approval. Contact {{business.name}} if you would like an updated quote.", ctaLabel: "Contact the shop", essentialInformation: "Quote: {{quote.number}}", purpose: "payment_request" },
+  "quotes_and_service_authorization.customer_approval_received": { key: "quotes_and_service_authorization.customer_approval_received", category: "6. Quotes and service authorization", title: "Approval received", subject: "Your quote approval was received", preview: "Thanks for approving your quote with {{business.name}}. The shop can now continue with the next step.", headline: "Your quote approval was received", body: "Thanks for approving your quote with {{business.name}}. The shop can now continue with the next step.", ctaLabel: "View approved quote", essentialInformation: "Quote: {{quote.number}} | Total: {{quote.total}}", purpose: "payment_request" },
+  "quotes_and_service_authorization.customer_decline_received": { key: "quotes_and_service_authorization.customer_decline_received", category: "6. Quotes and service authorization", title: "Response received", subject: "Your quote response was received", preview: "Your response to the quote from {{business.name}} was recorded. Contact the shop if you would like to discuss other options.", headline: "Your quote response was received", body: "Your response to the quote from {{business.name}} was recorded. Contact the shop if you would like to discuss other options.", ctaLabel: "View quote", essentialInformation: "Quote: {{quote.number}}", purpose: "payment_request" },
   "quotes_and_service_authorization.quote_approved": { key: "quotes_and_service_authorization.quote_approved", category: "6. Quotes and service authorization", title: "Quote approved", subject: "Quote approved", preview: "The customer approved the quote and the shop can now continue with the next step.", headline: "Quote approved", body: "The customer approved the quote and the shop can now continue with the next step.", ctaLabel: "View approved quote", essentialInformation: "Customer: {{customer.full_name}} | Total: {{quote.total}}", purpose: "payment_request" },
   "quotes_and_service_authorization.quote_declined": { key: "quotes_and_service_authorization.quote_declined", category: "6. Quotes and service authorization", title: "Quote declined", subject: "Quote declined", preview: "The customer declined the quote. Review the response and decide whether follow-up is needed.", headline: "Quote declined", body: "The customer declined the quote. Review the response and decide whether follow-up is needed.", ctaLabel: "View quote response", essentialInformation: "Customer: {{customer.full_name}}", purpose: "payment_request" },
   "quotes_and_service_authorization.deposit_required": { key: "quotes_and_service_authorization.deposit_required", category: "6. Quotes and service authorization", title: "Deposit required", subject: "Deposit required to continue", preview: "A deposit is required before the approved work can be scheduled or started.", headline: "Deposit required to continue", body: "A deposit is required before the approved work can be scheduled or started.", ctaLabel: "Pay deposit", essentialInformation: "Deposit: {{deposit.amount}} | Due: {{deposit.due_at}}", purpose: "payment_request" },
@@ -228,29 +246,26 @@ export function renderLifecycleEmail(key: string, variables: LifecycleVariables)
   preview: string;
   body: string;
   text: string;
+  html: string;
   purpose: LifecyclePurpose;
 } {
   const template = getLifecycleTemplate(key);
+  const missing = requiredVariables(template).filter((path) => valueFor(variables, path).startsWith("{{"));
+  const missingActionUrl = valueFor(variables, "email.primary_action_url").startsWith("{{");
+  if (missingActionUrl) missing.push("email.primary_action_url");
+  if (missing.length) throw new Error(`Lifecycle template ${template.key} is missing required variables: ${[...new Set(missing)].join(", ")}`);
+
   const subject = interpolate(template.subject, variables);
   const preview = interpolate(template.preview, variables);
+  const headline = interpolate(template.headline, variables);
   const body = interpolate(template.body, variables);
   const essentialInformation = interpolate(template.essentialInformation, variables);
   const ctaUrl = valueFor(variables, "email.primary_action_url");
   const cta = `${template.ctaLabel}: ${ctaUrl}`;
-  const text = [
-    interpolate(template.headline, variables),
-    "",
-    body,
-    "",
-    essentialInformation,
-    "",
-    cta,
-    "",
-    "Need help? Contact {{business.phone}} or {{business.email}}.",
-    "",
-    "Powered by Service Writer.",
-  ].map((line) => interpolate(line, variables)).join("\n");
-  return { templateKey: template.key, subject, preview, body, text, purpose: template.purpose };
+  const help = "Need help? Reply to this email or open your Service Writer workspace.";
+  const text = [headline, "", body, "", essentialInformation, "", cta, "", help, "", "Powered by Service Writer."].join("\n");
+  const html = `<!doctype html><html lang="en"><body style="margin:0;background:#f5f7fb;color:#172033;font-family:Arial,Helvetica,sans-serif"><div style="display:none;max-height:0;overflow:hidden;opacity:0">${escapeHtml(preview)}</div><main style="max-width:600px;margin:0 auto;padding:28px 16px"><section style="background:#ffffff;border:1px solid #e4e8f0;border-radius:16px;overflow:hidden"><header style="background:#172033;padding:22px 24px;color:#ffffff;font-size:20px;font-weight:700">Service Writer</header><article style="padding:28px 24px"><p style="margin:0 0 10px;color:#687386;font-size:14px">${escapeHtml(template.title)}</p><h1 style="margin:0 0 18px;font-size:26px;line-height:1.2">${escapeHtml(headline)}</h1><p style="font-size:16px;line-height:1.6">${escapeHtml(body)}</p><div style="margin:22px 0;padding:16px;border-radius:10px;background:#f5f7fb;font-size:14px;line-height:1.6">${escapeHtml(essentialInformation)}</div><p><a href="${escapeHtml(ctaUrl)}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;padding:12px 18px;font-weight:700">${escapeHtml(template.ctaLabel)}</a></p><p style="margin:24px 0 0;color:#687386;font-size:13px;line-height:1.5">${escapeHtml(help)}</p></article><footer style="border-top:1px solid #e4e8f0;padding:18px 24px;color:#687386;font-size:12px">Powered by Service Writer.</footer></section></main></body></html>`;
+  return { templateKey: template.key, subject, preview, body, text, html, purpose: template.purpose };
 }
 
 export const LIFECYCLE_TEMPLATE_COUNT = Object.keys(LIFECYCLE_TEMPLATES).length;

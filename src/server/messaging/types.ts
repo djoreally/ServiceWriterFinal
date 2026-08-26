@@ -20,6 +20,9 @@ export const sendMessageSchema = z.object({
   templateKey: z.string().trim().min(1).max(120),
   subject: z.string().trim().max(200).optional(),
   body: z.string().trim().min(1).max(100_000),
+  html: z.string().trim().min(1).max(500_000).optional(),
+  fromName: z.string().trim().min(1).max(120).optional(),
+  replyTo: z.string().email().optional(),
   idempotencyKey: z.string().trim().min(16).max(200),
   metadata: z.record(z.string(), z.string()).default({}),
 });

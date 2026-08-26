@@ -34,6 +34,8 @@ function mapResendStatus(type: string): DeliveryStatus {
     case "email.bounced": return "bounced";
     case "email.complained": return "complained";
     case "email.failed": return "failed";
+    case "email.suppressed": return "undeliverable";
+    case "email.delivery_delayed": return "accepted";
     default: return "accepted";
   }
 }
@@ -51,10 +53,12 @@ export class ResendEmailAdapter implements MessagingAdapter {
         "Idempotency-Key": request.idempotencyKey,
       },
       body: JSON.stringify({
-        from: requiredEnv("RESEND_FROM_EMAIL"),
+        from: `${request.fromName ?? "Service Writer"} <${requiredEnv("RESEND_FROM_EMAIL")}>`,
         to: [request.recipient.email],
         subject: request.subject ?? request.templateKey,
+        html: request.html,
         text: request.body,
+        reply_to: request.replyTo,
         headers: { "X-Workspace-ID": request.workspaceId },
       }),
     });
@@ -88,7 +92,8 @@ export class ResendEmailAdapter implements MessagingAdapter {
       status: mapResendStatus(payload.type ?? ""),
       occurredAt: payload.created_at || new Date().toISOString(),
       recipient: typeof data.to === "string" ? data.to : Array.isArray(data.to) ? String(data.to[0] ?? "") : undefined,
-      failureReason: typeof data.reason === "string" ? data.reason : undefined,
+      failureCode: typeof data.code === "string" ? data.code : undefined,
+      failureReason: typeof data.reason === "string" ? data.reason : (payload.type === "email.delivery_delayed" ? "Provider delivery is delayed" : payload.type === "email.suppressed" ? "Provider suppressed this recipient" : undefined),
       rawPayload: payload as Record<string, unknown>,
     }];
   }

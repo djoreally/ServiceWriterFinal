@@ -34,6 +34,7 @@ export async function sendBookingConfirmation(input: {
   workspaceName: string;
   workspaceTimezone: string;
   recipientEmail: string;
+  actionUrl: string;
 }) {
   const metadata = input.appointment.metadata ?? {};
   const appointmentDateTime = formatDateTime(input.appointment.starts_at, input.workspaceTimezone);
@@ -47,7 +48,8 @@ export async function sendBookingConfirmation(input: {
     ? estimatedCost.toLocaleString("en-US", { style: "currency", currency: "USD" })
     : String(metadata.estimated_cost || "See appointment details");
   const confirmationCode = input.appointment.id.slice(0, 8).toUpperCase();
-  const manageUrl = String(metadata.manage_url || "{{appointment.manage_url}}");
+  const configuredManageUrl = typeof metadata.manage_url === "string" && /^https?:\/\//i.test(metadata.manage_url) ? metadata.manage_url : null;
+  const manageUrl = configuredManageUrl ?? input.actionUrl;
 
   return dispatchLifecycleEvent({
     workspaceId: input.appointment.workspace_id,
@@ -59,6 +61,8 @@ export async function sendBookingConfirmation(input: {
     variables: {
       "business.name": input.workspaceName,
       "business.timezone": input.workspaceTimezone,
+      "business.email": typeof metadata.business_email === "string" ? metadata.business_email : undefined,
+      "business.phone": typeof metadata.business_phone === "string" ? metadata.business_phone : undefined,
       "customer.first_name": guestName.split(/\s+/)[0],
       "customer.full_name": guestName,
       "appointment.service": title,
@@ -70,8 +74,8 @@ export async function sendBookingConfirmation(input: {
       "appointment.payment_method": paymentMethod,
       "appointment.manage_url": manageUrl,
       "vehicle.year": vehicleInfo,
-      "vehicle.make": "",
-      "vehicle.model": "",
+      "vehicle.make": "Not provided",
+      "vehicle.model": "Not provided",
       "email.primary_action_url": manageUrl,
     },
     metadata: { appointmentId: input.appointment.id },

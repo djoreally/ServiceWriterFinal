@@ -6,6 +6,7 @@ const checks = [
   ["NEXT_PUBLIC_APP_URL", "application public URL", true],
   ["NEXT_PUBLIC_CORS_ORIGIN", "API CORS origin", true],
   ["SUPABASE_SERVICE_ROLE_KEY", "server Supabase service role key", true],
+  ["CRON_SECRET", "Vercel lifecycle cron secret", true],
   ["RESEND_API_KEY", "Resend API key", false],
   ["RESEND_FROM_EMAIL", "Resend sender identity", false],
   ["RESEND_WEBHOOK_SIGNING_SECRET", "Resend webhook signing secret", false],

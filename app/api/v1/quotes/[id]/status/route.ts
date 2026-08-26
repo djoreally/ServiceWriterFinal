@@ -12,7 +12,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   try {
     const quoteId = z.string().uuid().parse((await context.params).id);
     const body = bodySchema.parse(await request.json());
-    const { supabase } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"], request);
+    const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"], request);
 
     const { data: current, error: currentError } = await supabase
       .from("quotes")
@@ -38,23 +38,31 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const customer = Array.isArray(updated.customers) ? updated.customers[0] : updated.customers;
     const customerName = [customer?.first_name, customer?.last_name].filter(Boolean).join(" ") || "Customer";
     const { data: workspace } = await supabase.from("workspaces").select("name,timezone").eq("id", body.workspace_id).single();
-    if (customer?.email) {
-      try {
+    try {
+      if (customer?.email) {
         await dispatchQuoteLifecycle({
-          eventKey: body.status === "approved" ? LIFECYCLE_EVENT_KEYS.quoteApproved : LIFECYCLE_EVENT_KEYS.quoteDeclined,
-          eventId: `${quoteId}:${body.status}:${updated.updated_at}`,
-          quote: {
-            ...updated,
-            customer_email: customer.email,
-            customer_name: customerName,
-          },
+          eventKey: body.status === "approved" ? LIFECYCLE_EVENT_KEYS.customerApprovalReceived : LIFECYCLE_EVENT_KEYS.customerDeclineReceived,
+          eventId: `${quoteId}:customer:${body.status}:${updated.updated_at}`,
+          quote: { ...updated, customer_email: customer.email, customer_name: customerName },
           workspaceName: workspace?.name ?? "Service Writer",
           workspaceTimezone: workspace?.timezone ?? "UTC",
           actionUrl: new URL(`/quotes/${quoteId}`, request.url).toString(),
         });
-      } catch (dispatchError) {
-        console.error("[Lifecycle] quote status email enqueue failed", dispatchError);
       }
+      if (user.email) {
+        await dispatchQuoteLifecycle({
+          eventKey: body.status === "approved" ? LIFECYCLE_EVENT_KEYS.quoteApproved : LIFECYCLE_EVENT_KEYS.quoteDeclined,
+          eventId: `${quoteId}:staff:${body.status}:${updated.updated_at}`,
+          quote: { ...updated, customer_email: customer.email, customer_name: customerName },
+          workspaceName: workspace?.name ?? "Service Writer",
+          workspaceTimezone: workspace?.timezone ?? "UTC",
+          actionUrl: new URL(`/quotes/${quoteId}`, request.url).toString(),
+          recipientEmail: user.email,
+          recipientRole: "staff",
+        });
+      }
+    } catch (dispatchError) {
+      console.error("[Lifecycle] quote status email enqueue failed", dispatchError);
     }
 
     return json({ data: updated });
