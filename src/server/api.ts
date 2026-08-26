@@ -37,7 +37,7 @@ export function errorResponse(error: unknown) {
 
 export async function requireUser(request?: Request) {
   const authorization = request?.headers.get("authorization");
-  const bearerToken = authorization?.match(/^Bearer\\s+(.+)$/i)?.[1];
+  const bearerToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
 
   if (bearerToken) {
     const supabase = createSupabaseRequestClient(bearerToken);
