@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { fetchFleetClientsForContract, createFleetContract, updateFleetContract, type FleetContractRulePayload } from "@/application/commands/fleet-contract.command";
 import { useAuth } from "@packages/auth";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { FileText, ShieldCheck, Receipt, CalendarClock, ClipboardList, Package } from "lucide-react";
 import { ContractServicesStep } from "./ContractServicesStep";
 

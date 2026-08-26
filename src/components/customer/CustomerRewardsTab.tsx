@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Clock, Copy, Gift, History, Loader2, Sparkles, Tag, Trophy } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { fetchCustomerPortalExperience, type CustomerAccountData, type CustomerPortalExperience } from "@/application/queries/customer-dashboard.query";
 import { formatMoney } from "@/lib/financialMath";
 

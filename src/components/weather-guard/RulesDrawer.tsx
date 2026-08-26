@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { updateDispatchRule, type DispatchRule } from "@/application/queries/weather-guard.query";
 
 export function RulesDrawer({

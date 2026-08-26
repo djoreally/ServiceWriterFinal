@@ -21,7 +21,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Mail, Server, Save, Loader2, TestTube, CheckCircle2, AlertTriangle, Eye, EyeOff } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 interface EmailSettingsData {
   from_name: string;

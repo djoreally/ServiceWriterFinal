@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { updateChecklistItem } from '@/application/commands';
-import { toast } from 'sonner';
+import { toast } from '@/components/ui/sonner';
 import { ProgressiveImage } from "@/components/media/ProgressiveImage";
 
 // ─── Types ────────────────────────────────────────────────────────────────

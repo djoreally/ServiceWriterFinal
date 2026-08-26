@@ -47,7 +47,7 @@ import {
   Upload,
   Save,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { format, parseISO, isToday, isFuture } from "date-fns";
 import { getSemanticStatus } from "@/lib/semantic-status";
 

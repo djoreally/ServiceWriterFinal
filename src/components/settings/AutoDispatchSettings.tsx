@@ -25,7 +25,7 @@ import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { Zap, MapPin, BarChart2, DollarSign, Route, Info, Loader2 } from "lucide-react";
 
 const DEFAULT_CONFIG: DispatchConfig = {

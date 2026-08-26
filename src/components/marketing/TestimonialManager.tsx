@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { MessageSquare, Star, Check, X, Copy, ExternalLink, Loader2, Video, Quote } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { format } from "date-fns";
 import { fetchTestimonials as fetchTestimonialsQuery, fetchBusinessSlug as fetchBusinessSlugQuery, type TestimonialRow } from "@/application/queries/marketing.query";
 import { updateTestimonialStatus, toggleTestimonialFeatured } from "@/application/commands/marketing.command";

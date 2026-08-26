@@ -24,7 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import {
   Signal, Zap, Gift, Bot, Activity, AlertTriangle, CheckCircle2, Clock,
   TrendingUp, Users, Car, RefreshCw, Plus, Pencil, Trash2, Trophy, BarChart3,

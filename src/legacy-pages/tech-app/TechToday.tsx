@@ -50,7 +50,7 @@ import { TechPresenceActionBar, type TechPresenceAction } from "@/components/tec
 import { TechMissionAlerts } from "@/components/tech-app/TechMissionAlerts";
 import { useTechJobEta } from "@/hooks/useTechJobEta";
 import { useTechShiftManagement } from "@/hooks/useTechShiftManagement";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useTechContext } from "./TechAppLayout";
 

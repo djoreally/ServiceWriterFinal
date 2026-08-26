@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, Loader2 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { completeFleetWorkOrderWithDetails } from "@/application/commands";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";

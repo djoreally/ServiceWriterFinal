@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Printer, X, User, Car, Phone, Mail, MapPin, Wrench, Package, Send } from "lucide-react";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { format } from "date-fns";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { getActiveFleetVehicles, readFleetQuoteStorage } from "@/lib/fleet-quote";
 import type { Json } from "@/integrations/supabase/types";
 import { ProgressiveImage } from "@/components/media/ProgressiveImage";

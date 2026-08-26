@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { format, differenceInMinutes } from "date-fns";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { useTechContext } from "./TechAppLayout";
 import { useTechShiftManagement } from "@/hooks/useTechShiftManagement";
 

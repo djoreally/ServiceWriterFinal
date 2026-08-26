@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/table";
 import { Plus, Search, Users, Car, Edit, Trash2, Eye, Upload, Download } from "lucide-react";
 import { ClickablePhone, ClickableEmail } from "@/components/ui/clickable-contact";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { useTerminology } from "@/contexts/TerminologyContext";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { customerSchema, getFirstError } from "@/lib/validation";

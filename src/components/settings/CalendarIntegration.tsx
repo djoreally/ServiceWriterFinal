@@ -20,7 +20,7 @@ import {
 import { useGoogleCalendar } from "@/hooks/useGoogleCalendar";
 
 import { GOOGLE_CALENDAR_REDIRECT_PATH, startGoogleCalendarOAuth } from "@/application/commands/google-calendar.command";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { hasGoogleOAuthConsentCookie, markGoogleOAuthConsentPrompted } from "@/lib/security/googleOAuthConsent";
 import { formatDistanceToNow } from "date-fns";
 

@@ -44,7 +44,7 @@ import {
   Coffee,
   SignalZero,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { format, formatDistanceToNow, parseISO } from "date-fns";
 import { cn } from "@/lib/utils";
 import { MAPBOX_DEFAULT_STYLE, requireMapboxToken } from "@/lib/mapbox";

@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils';
 import { useRealTimeTechStatus } from '@/hooks/useRealTimeTechStatus';
 import { format } from 'date-fns';
 import { formatTimeLabel, formatDateLabel } from "@/lib/datetime";
-import { toast } from 'sonner';
+import { toast } from '@/components/ui/sonner';
 
 interface MobileDispatchViewProps {
   appointment: {

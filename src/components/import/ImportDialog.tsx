@@ -10,7 +10,7 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Upload, FileSpreadsheet, CheckCircle, AlertCircle, Loader2, X } from "lucide-react";
 import { parseImportFile, ParsedData, ParsedRow, autoMapHeaders } from "@/lib/importParser";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
 
 export interface FieldMapping {

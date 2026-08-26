@@ -43,7 +43,7 @@ import {
   toggleServicePackageActive,
   loadTemplatePackages,
 } from "@/application/commands";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { Plus, Pencil, Trash2, Package, PackageCheck, Search, X, Clock, Percent, Download, Loader2 } from "lucide-react";
 import { formatDollarsAsCurrency } from "@/lib/financialMath";
 

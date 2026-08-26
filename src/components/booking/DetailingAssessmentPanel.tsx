@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import type { VehicleData } from "@/components/booking/VehicleEntry";
 import { resolveDetailingRule, type DetailingPricingRule } from "@/lib/detailing-pricing";
 import { uploadBookingAssessmentPhoto } from "@/application/commands/booking-assessment.command";

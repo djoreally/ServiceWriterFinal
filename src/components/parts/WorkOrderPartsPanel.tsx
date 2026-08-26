@@ -16,7 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Package, Plus, Trash2, Save, CheckCircle2, AlertTriangle } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import {
   fetchStockOptions,
   fetchVanStock,

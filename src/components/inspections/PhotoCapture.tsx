@@ -2,7 +2,7 @@ import { useState, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Camera, X, RotateCcw, Plus, Trash2 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
 import { ProgressiveImage } from "@/components/media/ProgressiveImage";
 

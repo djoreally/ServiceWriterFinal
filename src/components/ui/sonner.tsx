@@ -1,31 +1,65 @@
 /* eslint-disable react-refresh/only-export-components */
 import type { ComponentProps } from "react";
-import { Toaster as Sonner, toast } from "sonner";
+import { Toaster as Sonner, toast as sonnerToast } from "sonner";
 import { useTheme } from "@/hooks/useTheme";
 import { addToastHistoryItem, getToastHistory } from "@/lib/toast-history";
 
 type ToasterProps = ComponentProps<typeof Sonner>;
+type ToastOptions = Parameters<typeof sonnerToast>[1] & { dedupeKey?: string };
+type ToastMessage = Parameters<typeof sonnerToast>[0];
 
 const recentToastKeys = new Map<string, number>();
+const DEDUPE_WINDOW_MS = 2500;
 
 export { getToastHistory };
 
-export const notify = (title: string, options: Parameters<typeof toast>[1] & { dedupeKey?: string } = {}) => {
-  const { dedupeKey = title, description, ...toastOptions } = options;
-  const now = Date.now();
-  const lastSeen = recentToastKeys.get(dedupeKey) ?? 0;
+const stringifyMessage = (value: unknown) =>
+  typeof value === "string" ? value : value instanceof Error ? value.message : String(value ?? "");
 
-  if (now - lastSeen < 2500) return undefined;
-  recentToastKeys.set(dedupeKey, now);
+const makeDedupeKey = (method: string, title: ToastMessage, description?: unknown, explicit?: string) =>
+  explicit ?? `${method}:${stringifyMessage(title)}:${stringifyMessage(description)}`;
+
+const recordAndShow = (method: string, title: ToastMessage, options: ToastOptions = {}) => {
+  const { dedupeKey, description, ...toastOptions } = options;
+  const key = makeDedupeKey(method, title, description, dedupeKey);
+  const now = Date.now();
+  const lastSeen = recentToastKeys.get(key) ?? 0;
+  if (now - lastSeen < DEDUPE_WINDOW_MS) return undefined;
+
+  recentToastKeys.set(key, now);
   addToastHistoryItem({
-    id: `${now}-${dedupeKey}`,
-    title,
+    id: `${now}-${key}`,
+    title: stringifyMessage(title),
     description: typeof description === "string" ? description : undefined,
     createdAt: new Date(now).toISOString(),
   });
 
-  return toast(title, { description, ...toastOptions });
+  const variant = sonnerToast[method as keyof typeof sonnerToast];
+  if (typeof variant === "function") {
+    return (variant as (message: ToastMessage, options?: ToastOptions) => unknown)(title, {
+      description,
+      ...toastOptions,
+    });
+  }
+  return sonnerToast(title, { description, ...toastOptions });
 };
+
+export const notify = (title: string, options: ToastOptions = {}) => recordAndShow("default", title, options);
+
+export const toast = Object.assign(
+  (title: ToastMessage, options?: ToastOptions) => recordAndShow("default", title, options),
+  {
+    success: (title: ToastMessage, options?: ToastOptions) => recordAndShow("success", title, options),
+    error: (title: ToastMessage, options?: ToastOptions) => recordAndShow("error", title, options),
+    info: (title: ToastMessage, options?: ToastOptions) => recordAndShow("info", title, options),
+    message: (title: ToastMessage, options?: ToastOptions) => recordAndShow("message", title, options),
+    warning: (title: ToastMessage, options?: ToastOptions) => recordAndShow("warning", title, options),
+    loading: (title: ToastMessage, options?: ToastOptions) => recordAndShow("loading", title, options),
+    promise: sonnerToast.promise,
+    dismiss: sonnerToast.dismiss,
+    custom: sonnerToast.custom,
+  },
+);
 
 const Toaster = ({ ...props }: ToasterProps) => {
   const { theme = "system" } = useTheme();
@@ -48,4 +82,4 @@ const Toaster = ({ ...props }: ToasterProps) => {
   );
 };
 
-export { Toaster, toast };
+export { Toaster };

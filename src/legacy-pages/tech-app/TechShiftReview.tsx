@@ -11,7 +11,7 @@ import { useNavigate } from "react-router-dom";
 import { format } from "date-fns";
 import { ArrowLeft, CheckCircle2, Clock, Loader2, Power, ShieldAlert, Camera } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { fetchTechnicianSession, type TechSessionJob } from "@/application/queries/tech-app.query";
 import { buildTechMissionBoard } from "@/lib/tech-mission-board";
 import { useTechShiftManagement } from "@/hooks/useTechShiftManagement";

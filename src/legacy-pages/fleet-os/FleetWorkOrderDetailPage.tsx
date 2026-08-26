@@ -26,7 +26,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { FleetActivityFeed } from "@/components/fleet/FleetActivityFeed";
 import { WorkOrderPartsPanel } from "@/components/parts/WorkOrderPartsPanel";
 import { VehicleFilterMatchCard } from "@/components/vehicles/VehicleFilterMatchCard";

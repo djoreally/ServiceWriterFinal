@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { cancelAppointmentByToken } from "@/application/queries/customer-booking.query";
 import { sendBookingLifecycleSms } from "@/application/commands/sms.command";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import {
   Dialog,
   DialogContent,

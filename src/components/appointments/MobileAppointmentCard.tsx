@@ -10,6 +10,7 @@ import { formatMoney } from "@/lib/financialMath";
 import { computeAppointmentTotal } from "@/lib/appointmentTotal";
 import { useFeeSettings } from "@/hooks/useFeeSettings";
 import { getAppointmentStatusStyle } from "./statusStyles";
+import { formatTimeLabel } from "@/lib/datetime";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -74,14 +75,14 @@ export const MobileAppointmentCard = memo(function MobileAppointmentCard({ appoi
       onClick={() => onClick(appointment)}
     >
       <CardContent className="p-4">
-        <div className="flex gap-4">
+        <div className="flex min-w-0 gap-3 sm:gap-4">
           {/* Left Side: Details */}
-          <div className="flex-1 flex flex-col">
-            <div className="flex justify-between items-start">
+          <div className="min-w-0 flex-1 flex flex-col">
+            <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
               <p className="text-xl font-bold tracking-wider">
-                {formatTime(appointment.scheduled_time)}
+                {formatTimeLabel(appointment.scheduled_time, "h:mm a", "Time unavailable")}
               </p>
-              <div className="flex items-center gap-2">
+              <div className="flex max-w-full flex-wrap items-center justify-end gap-1.5">
                 {appointment.source === 'ai_intake' && (
                   <Badge variant="outline" className="gap-1 text-xs bg-primary/10 text-primary border-primary/30">
                     <Bot className="h-3 w-3" />
@@ -96,6 +97,7 @@ export const MobileAppointmentCard = memo(function MobileAppointmentCard({ appoi
                     <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
                       <Button variant="ghost" size="icon" className="h-7 w-7">
                         <MoreVertical className="h-4 w-4" />
+                        <span className="sr-only">Appointment actions</span>
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
@@ -130,17 +132,17 @@ export const MobileAppointmentCard = memo(function MobileAppointmentCard({ appoi
             <div className="text-sm text-muted-foreground mt-2 space-y-1">
               <div className="flex items-center gap-2">
                 <User className="w-4 h-4" />
-                <span>{customerName}</span>
+                <span className="truncate">{customerName}</span>
               </div>
               <div className="flex items-center gap-2">
                 <Car className="w-4 h-4" />
-                <span>{vehicleName}</span>
+                <span className="truncate">{vehicleName}</span>
               </div>
             </div>
           </div>
 
           {/* Right Side: Image */}
-          <div className="w-24 h-24 shrink-0 rounded-lg overflow-hidden">
+          <div className="hidden h-24 w-24 shrink-0 overflow-hidden rounded-lg sm:block">
              <img 
               src={`https://source.unsplash.com/400x300/?${appointment.vehicle?.make || 'car'},${appointment.vehicle?.model || ''}`}
               alt={vehicleName}

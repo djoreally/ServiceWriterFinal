@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2, Mail, Pencil, Printer, Trash2, Car } from "lucide-react";
 import { format, parseISO } from "date-fns";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import {
   fetchInvoiceDetail,

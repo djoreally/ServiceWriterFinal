@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { fetchFleetClientOptionsForContact, createFleetContact, updateFleetContact } from "@/application/commands";
 import { useAuth } from "@packages/auth";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { UserPlus } from "lucide-react";
 
 // Smart defaults per role

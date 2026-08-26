@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { createFleetClient, type FleetClientContactPayload } from "@/application/commands/fleet-client.command";
 import { useAuth } from "@packages/auth";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { Plus, Trash2, Building2, DollarSign, Shield } from "lucide-react";
 
 // Smart defaults per role for contact permissions

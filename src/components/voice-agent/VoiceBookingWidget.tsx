@@ -12,7 +12,7 @@ import {
   fetchVoiceConversationToken,
 } from "@/application/commands/voice-agent.command";
 
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 interface VoiceBookingWidgetProps {
   slug: string;

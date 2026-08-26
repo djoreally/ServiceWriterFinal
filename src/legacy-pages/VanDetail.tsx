@@ -16,7 +16,7 @@ import { lazy, Suspense } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const TerritoryMap = lazy(() => import("@/components/fleet/TerritoryMap").then(m => ({ default: m.TerritoryMap })));
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { format } from "date-fns";
 

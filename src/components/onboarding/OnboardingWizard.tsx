@@ -6,7 +6,7 @@ import {
   addOnboardingService,
   addOnboardingServices,
 } from "@/application/commands/onboarding-wizard.command";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { OnboardingProgress } from "./OnboardingProgress";
 import { SiteImportStep } from "./steps/SiteImportStep";
 import { BusinessInfoStep } from "./steps/BusinessInfoStep";

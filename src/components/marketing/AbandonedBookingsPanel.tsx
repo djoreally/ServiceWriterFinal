@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/table";
 import { Loader2, ShoppingCart, Mail, RefreshCw, UserX, Send, CheckCircle2 } from "lucide-react";
 import { formatDistanceToNow, parseISO } from "date-fns";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 interface AbandonedBookingRow {
   id: string;

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@packages/auth";
 import { ChevronRight, LogIn, UserPlus } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { signInWithPassword, signUpWithEmail } from "@/application/commands/auth.command";
 import { Button } from "@/components/ui/button";

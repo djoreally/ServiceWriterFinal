@@ -7,7 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { recordBookingConsent } from "@/application/commands/customer-messaging.command";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 const TRANSACTIONAL_SMS_TEXT = "Text me appointment confirmations, reminders, and service updates. Message/data rates may apply. Reply STOP to opt out.";
 const MARKETING_SMS_TEXT = "Send me promotional text offers and service specials. Message/data rates may apply. Reply STOP to unsubscribe.";

@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { LazyServiceAreaMap } from "@/components/settings/LazyServiceAreaMap";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/mapbox";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 interface ServiceAreaData {
   service_address: string;

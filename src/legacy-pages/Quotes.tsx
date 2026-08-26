@@ -33,7 +33,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Plus, Edit, Trash2, FileText, Calendar, CheckCircle, UserX, Car, Wrench, Loader2, Sparkles, AlertCircle, Search } from "lucide-react";
 import QuoteDocument from "@/components/QuoteDocument";
 import { VehicleYMMSelector } from "@/components/vehicles/VehicleYMMSelector";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { format } from "date-fns";
 import { useTerminology } from "@/contexts/TerminologyContext";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";

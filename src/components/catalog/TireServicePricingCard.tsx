@@ -11,7 +11,7 @@ import { fetchCatalogItems, type CatalogItem } from "@/application/queries/servi
 import { fetchTireServicePricingRules } from "@/application/queries/tire-pricing.query";
 import { saveTireServicePricingRule } from "@/application/commands/tire-pricing.command";
 import { defaultTirePricingRule, type TireServicePricingRule } from "@/lib/tire-pricing";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 const intents = [
   { value: "replacement", label: "Replacement / installation" },

@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, CheckCircle, FileText, Filter, Car, Droplets, Banknote, Send, WalletCards } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { useTerminology } from "@/contexts/TerminologyContext";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { completeAppointmentWithServiceRecord } from "@/application/commands/service-record.command";

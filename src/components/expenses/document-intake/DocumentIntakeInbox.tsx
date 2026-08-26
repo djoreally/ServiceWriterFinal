@@ -19,7 +19,7 @@ import {
   type IntakeReviewStatus,
 } from "@/application/queries/document-intake.query";
 import { useAuth } from "@packages/auth";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 

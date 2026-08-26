@@ -27,7 +27,7 @@ import { CompleteFleetWorkOrderDialog } from "@/components/fleet/CompleteFleetWo
 import { formatMoney } from "@/lib/financialMath";
 import { calculateFleetInvoiceTotals } from "@/lib/fleetInvoiceTotals";
 import { evaluateFleetInvoiceCompliance } from "@/application/presenters/fleet-invoice-compliance";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import {
   fetchDispatcherFleetWorkOrders,
   type DispatcherFleetWorkOrder as WorkOrder,

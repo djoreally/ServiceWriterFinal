@@ -62,7 +62,7 @@ import {
   Clock,
   ArrowRightLeft,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { format, formatDistanceToNow } from "date-fns";
 
 interface QBOSettings {

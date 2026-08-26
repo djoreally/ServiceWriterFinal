@@ -11,7 +11,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchSmsPreferences, type SmsPreferences } from "@/application/queries/sms-preferences.query";
 import { upsertSmsPreferences } from "@/application/commands/sms-preferences.command";
 
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";

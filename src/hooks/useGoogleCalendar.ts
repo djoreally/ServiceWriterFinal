@@ -15,7 +15,7 @@ import {
   disconnectGoogleCalendar,
   runGoogleCalendarBackfill,
 } from "@/application/commands/google-calendar.command";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 export interface GoogleCalendarStatus {
   connected: boolean;

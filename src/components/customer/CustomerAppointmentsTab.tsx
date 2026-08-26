@@ -19,6 +19,7 @@ import { CancelDialog } from "./CancelDialog";
 import { AppointmentStatusTimeline } from "./AppointmentStatusTimeline";
 import { UpcomingAppointmentWidget } from "./UpcomingAppointmentWidget";
 import { formatMoney } from "@/lib/financialMath";
+import { combineDateAndTime, formatDateLabel, formatTimeLabel } from "@/lib/datetime";
 
 export interface CustomerAppointment {
   id: string;
@@ -58,6 +59,7 @@ interface Props {
 
 export function CustomerAppointmentsTab({ account }: Props) {
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [appointments, setAppointments] = useState<CustomerAppointment[]>([]);
   const [subTab, setSubTab] = useState<"upcoming" | "past">("upcoming");
   const [rescheduleAppt, setRescheduleAppt] =
@@ -68,39 +70,41 @@ export function CustomerAppointmentsTab({ account }: Props) {
 
   const fetchAppointments = useCallback(async () => {
     setLoading(true);
-    const data = await fetchCustomerAppointments(account.id);
-    setAppointments(data as CustomerAppointment[]);
-    setLoading(false);
+    setLoadError(null);
+    try {
+      const data = await fetchCustomerAppointments(account.id);
+      setAppointments(data as CustomerAppointment[]);
+    } catch (error) {
+      console.error("[CustomerAppointmentsTab] Failed to load appointments", error);
+      setLoadError(error instanceof Error ? error.message : "Appointments are temporarily unavailable.");
+    } finally {
+      setLoading(false);
+    }
   }, [account.id]);
 
   useEffect(() => {
     fetchAppointments();
   }, [fetchAppointments]);
 
-  const upcoming = appointments.filter(
-    (a) =>
-      (isFuture(parseISO(a.scheduled_date)) ||
-        isToday(parseISO(a.scheduled_date))) &&
-      canModifyAppointment(a.status)
-  );
+  const upcoming = appointments.filter((a) => {
+    const date = combineDateAndTime(a.scheduled_date, a.scheduled_time);
+    return date !== null && (isFuture(date) || isToday(date)) && canModifyAppointment(a.status);
+  });
 
-  const past = appointments.filter(
-    (a) =>
-      (isPast(parseISO(a.scheduled_date)) &&
-        !isToday(parseISO(a.scheduled_date))) ||
-      a.status === "completed" ||
-      a.status === "cancelled"
-  );
+  const past = appointments.filter((a) => {
+    const date = combineDateAndTime(a.scheduled_date, a.scheduled_time);
+    return (!date || (isPast(date) && !isToday(date))) || a.status === "completed" || a.status === "cancelled";
+  });
 
   const nextUpcoming = [...upcoming].sort((a, b) => {
-    const at = new Date(`${a.scheduled_date}T${a.scheduled_time}`).getTime();
-    const bt = new Date(`${b.scheduled_date}T${b.scheduled_time}`).getTime();
+    const at = combineDateAndTime(a.scheduled_date, a.scheduled_time)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+    const bt = combineDateAndTime(b.scheduled_date, b.scheduled_time)?.getTime() ?? Number.MAX_SAFE_INTEGER;
     return at - bt;
   })[0];
   const renderCard = (appt: CustomerAppointment) => {
-    const date = parseISO(appt.scheduled_date);
+    const date = combineDateAndTime(appt.scheduled_date, appt.scheduled_time);
     const isUpcoming =
-      (isFuture(date) || isToday(date)) && canModifyAppointment(appt.status);
+      date !== null && (isFuture(date) || isToday(date)) && canModifyAppointment(appt.status);
 
     return (
       <Card key={appt.id} className="border-border/50">
@@ -140,17 +144,12 @@ export function CustomerAppointmentsTab({ account }: Props) {
               <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
                 <div className="flex items-center gap-1">
                   <Calendar className="h-4 w-4" />
-                  <span>{format(date, "EEEE, MMMM d, yyyy")}</span>
+                  <span>{formatDateLabel(date, "EEEE, MMMM d, yyyy", "Date unavailable")}</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <Clock className="h-4 w-4" />
                   <span>
-                    {format(
-                      parseISO(
-                        `${appt.scheduled_date}T${appt.scheduled_time}`
-                      ),
-                      "h:mm a"
-                    )}
+                    {formatTimeLabel(appt.scheduled_time, "h:mm a", "Time unavailable")}
                     {appt.duration_minutes > 0 &&
                       ` (${appt.duration_minutes} min)`}
                   </span>
@@ -220,9 +219,23 @@ export function CustomerAppointmentsTab({ account }: Props) {
 
   if (loading) {
     return (
-      <div className="flex justify-center py-12">
+      <div className="flex justify-center py-12" aria-live="polite">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <span className="sr-only">Loading appointments</span>
       </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <Card className="border-border/50">
+        <CardContent className="flex flex-col items-center gap-3 p-8 text-center">
+          <Calendar className="h-10 w-10 text-muted-foreground" />
+          <h3 className="font-semibold">Appointments unavailable</h3>
+          <p className="max-w-md text-sm text-muted-foreground">We could not load your appointments right now. Your account is safe; please try again.</p>
+          <Button variant="outline" onClick={fetchAppointments}>Try again</Button>
+        </CardContent>
+      </Card>
     );
   }
 

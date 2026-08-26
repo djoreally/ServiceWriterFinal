@@ -7,7 +7,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { Bot, Send, X, Loader2, Sparkles, CheckCircle, AlertCircle, Camera, Mic, MicOff, ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getSessionToken, transcribeAudio as invokeTranscribeAudio } from "@/application/queries/ai-session.query";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { useAuth } from "@packages/auth";
 import { fetchActiveAiAgents } from "@/application/queries/ai-session.query";

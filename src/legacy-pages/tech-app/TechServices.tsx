@@ -22,7 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   Plus, Search, Wrench, AlertCircle, Zap, FileText, Edit, Loader2,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { ServiceRecordForm } from "@/components/services/ServiceRecordForm";
 import ServiceInvoice from "@/components/ServiceInvoice";
 import { useTechContext } from "./TechAppLayout";

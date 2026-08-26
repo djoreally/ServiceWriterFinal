@@ -8,7 +8,7 @@ import { Code, Copy, CheckCircle2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 const TENANT_BASE_DOMAIN = "servicewriter.xyz";
 

@@ -28,7 +28,7 @@ import {
 import { buildFleetJobGroups, type FleetJobGroup } from "@/lib/fleet-job-groups";
 import { features } from "@/config/features";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 function isTerminal(status?: string | null) {
   return status === "completed" || status === "invoiced" || status === "paid";

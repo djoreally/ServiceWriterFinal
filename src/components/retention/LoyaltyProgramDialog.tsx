@@ -18,7 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { saveLoyaltyProgram } from "@/application/commands";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 interface LoyaltyProgram {
   id: string;

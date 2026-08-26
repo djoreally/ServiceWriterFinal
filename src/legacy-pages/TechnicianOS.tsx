@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchTechnicianRoster, type TechnicianRosterRow } from "@/application/queries/technician-os.query";
 import { Briefcase, CheckCircle2, Plus, UserRound, Users, Wrench } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 export default function TechnicianOS() {
   const navigate = useNavigate();

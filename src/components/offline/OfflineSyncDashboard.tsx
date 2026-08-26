@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { RefreshCw, AlertTriangle, CheckCircle2, Clock, Loader2, Trash2, RotateCcw } from "lucide-react";
 import { isOfflineEligibleForCurrentUser } from "@/offline/rollout";
 import type { OfflineObservabilitySnapshot } from "@/offline/observability";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 const REFRESH_INTERVAL_MS = 30_000;
 

@@ -11,7 +11,7 @@ import { fetchDetailingPricingRules } from "@/application/queries/detailing-pric
 import { fetchCatalogItems, type CatalogItem } from "@/application/queries/service-catalog.query";
 import { saveDetailingPricingRulesForService } from "@/application/commands/detailing-pricing.command";
 import { defaultDetailingRule, type DetailingCondition, type DetailingPricingRule, type DetailingSize } from "@/lib/detailing-pricing";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 const SIZES: DetailingSize[] = ["compact", "midsize", "large", "oversize"];
 const CONDITIONS: DetailingCondition[] = ["light", "moderate", "heavy"];

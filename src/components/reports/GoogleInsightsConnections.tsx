@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CheckCircle2, Loader2, RefreshCw, Unplug } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { disconnectGoogleInsights, fetchGoogleInsightsResources, fetchGoogleInsightsStatus, GOOGLE_INSIGHTS_REDIRECT_PATH, selectGoogleInsightsResources, startGoogleInsightsOAuth, type GoogleInsightsResources, type GoogleInsightsStatus } from "@/application/commands/google-insights";
 
 export function GoogleInsightsConnections() {

@@ -13,7 +13,7 @@ import {
   searchFilterCrossRefs, fetchMaintenanceSchedule, decodePlate as decodePlateEdge,
   fetchYmmtSpecs, seedVehicleSpecsChunk, seedFilters as seedFiltersEdge,
 } from "@/application/queries/vehicle-specs-page.query";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import {
   Search,
   Droplet,

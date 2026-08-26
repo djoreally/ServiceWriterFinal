@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Building2, Upload, Loader2 } from "lucide-react";
 import { uploadBusinessLogo } from "@/application/commands/logo-upload.command";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 interface BusinessInfoData {
   business_name: string;

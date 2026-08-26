@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Star, ExternalLink, RefreshCw, Loader2, Send, CheckCircle, Clock, MousePointer, BarChart2 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { format } from "date-fns";
 import { fetchReviewDashboardData, type ReviewRequestRow, type ReviewAnalyticsData } from "@/application/queries/marketing.query";
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart";

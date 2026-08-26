@@ -22,7 +22,7 @@ import {
   Download,
   Settings
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 export function AdminCarfaxSettings() {
   const [loading, setLoading] = useState(true);

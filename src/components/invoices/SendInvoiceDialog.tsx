@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, Mail } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { sendManualInvoiceEmail, markInvoiceStatus } from "@/application/commands/invoices.command";
 import type { InvoiceFullRow } from "@/application/queries/invoices.query";

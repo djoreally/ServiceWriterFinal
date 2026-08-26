@@ -28,7 +28,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Tag, Loader2, Search, Edit2, Copy, CheckCircle2 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { bankersRound } from "@/lib/financialMath";
 
 interface Override {

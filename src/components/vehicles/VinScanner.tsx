@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Camera, X, Loader2, Search, ScanLine } from "lucide-react";
 import { ocrVinFromImage, decodeVinNumber, type VinDecodeResult } from "@/application/commands/vin.command";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 interface VinScannerProps {
   onVinDecoded?: (result: VinDecodeResult) => void;

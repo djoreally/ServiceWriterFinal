@@ -33,7 +33,7 @@ import {
   Mic,
   ClipboardCheck,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { format } from "date-fns";
 import { useTerminology } from "@/contexts/TerminologyContext";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";

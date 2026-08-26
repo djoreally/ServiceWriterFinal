@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { rescheduleAppointment } from "@/application/commands/customer-portal.command";
 import { sendBookingLifecycleSms } from "@/application/commands/sms.command";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import {
   Dialog,
   DialogContent,

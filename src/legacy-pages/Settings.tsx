@@ -16,7 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Building, Upload, Save, Loader2, Tags, Globe, Clock, Link, Copy, ExternalLink, CheckCircle2, XCircle, MapPin, Navigation, DollarSign, ClipboardCheck, Bot } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { useTerminology, Terminology } from "@/contexts/TerminologyContext";
 import { useRegionalSettings, CURRENCIES, TIMEZONES } from "@/contexts/RegionalSettingsContext";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";

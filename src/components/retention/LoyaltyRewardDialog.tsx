@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { saveLoyaltyReward } from "@/application/commands/loyalty-reward.command";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 const REWARD_TYPES = [
   { value: "credit", label: "Account Credit" },

@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Search, Car, CheckCircle2, AlertCircle } from "lucide-react";
 import { lookupVin, type VinLookupResult } from "@/application/queries/vin-lookup.query";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 const US_STATES = [
   { code: "AL", name: "Alabama" }, { code: "AK", name: "Alaska" }, { code: "AZ", name: "Arizona" },

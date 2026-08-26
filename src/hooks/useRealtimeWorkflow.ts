@@ -6,7 +6,7 @@ import {
   type RealtimePostgresChangesPayload,
 } from "@/application/queries/realtime-workflow.query";
 import { deriveDispatchStatusFromAppointment } from "@/lib/dispatch-state";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 type WorkflowEvent = 
   | { type: "appointment"; action: "INSERT" | "UPDATE" | "DELETE"; record: Record<string, unknown> }

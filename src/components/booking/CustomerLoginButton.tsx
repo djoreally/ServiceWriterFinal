@@ -16,7 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { LogIn, LogOut, LayoutDashboard } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import CustomerAuth from "@/legacy-pages/CustomerAuth";
 import { useAuth } from "@packages/auth";
 

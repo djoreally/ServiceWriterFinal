@@ -18,7 +18,7 @@ import {
   RefreshCw,
   Info
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 interface VehicleRepairsProps {
   vin: string | null;

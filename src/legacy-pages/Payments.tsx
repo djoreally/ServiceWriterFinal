@@ -59,7 +59,7 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import OfflinePaymentIndicator from "@/components/OfflinePaymentIndicator";
 import { DataTableEnhancementToolbar } from "@/components/data-table/DataTableEnhancementToolbar";
 import { PayoutsDashboard } from "@/components/payments/PayoutsDashboard";

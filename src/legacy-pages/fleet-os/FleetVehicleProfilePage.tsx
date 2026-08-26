@@ -19,7 +19,7 @@ import { VehicleFilterMatchCard } from "@/components/vehicles/VehicleFilterMatch
 import { invokeAIVehicleSpecs } from "@/application/queries/vehicle-specs.query";
 import { AddVehicleDialog } from "@/components/fleet/AddVehicleDialog";
 import { VehiclePartsManager } from "@/components/parts/VehiclePartsManager";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import {
   ArrowLeft,
   Car,

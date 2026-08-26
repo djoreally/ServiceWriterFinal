@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { AlertTriangle, CheckCircle, XCircle, Clock, ShieldCheck, DollarSign } from "lucide-react";
 import { respondToFleetApproval } from "@/application/commands/fleet-approval.command";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 interface Approval {
   id: string;

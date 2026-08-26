@@ -19,6 +19,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { getAppointmentStatusStyle } from './statusStyles';
+import { combineDateAndTime, formatDateLabel } from '@/lib/datetime';
 
 type ViewMode = 'list' | 'calendar' | 'month';
 type FilterMode = 'all' | 'today' | 'confirmed' | 'completed' | 'cancelled' | 'upcoming';
@@ -81,7 +82,10 @@ export const MobileAppointmentView = ({
     const items = [...appointments];
     switch (filterMode) {
       case 'today':
-        return items.filter(a => isToday(parseISO(a.scheduled_date)));
+        return items.filter(a => {
+          const date = combineDateAndTime(a.scheduled_date, null);
+          return date ? isToday(date) : false;
+        });
       case 'confirmed':
         return items.filter(a => a.status === 'confirmed');
       case 'completed':
@@ -95,9 +99,9 @@ export const MobileAppointmentView = ({
         return items
           .map((apt) => ({
             appointment: apt,
-            when: new Date(`${apt.scheduled_date}T${apt.scheduled_time || '00:00'}`),
+            when: combineDateAndTime(apt.scheduled_date, apt.scheduled_time),
           }))
-          .filter(({ when }) => !Number.isNaN(when.getTime()) && when >= now && when <= sevenDaysOut)
+          .filter(({ when }) => when !== null && !Number.isNaN(when.getTime()) && when >= now && when <= sevenDaysOut)
           .sort((a, b) => a.when.getTime() - b.when.getTime())
           .map(({ appointment }) => appointment);
       }
@@ -108,18 +112,20 @@ export const MobileAppointmentView = ({
   }, [appointments, filterMode]);
   
   const groupedAppointments = useMemo(() => {
-    const sorted = filteredAppointments.sort((a, b) => 
-      parseISO(`${a.scheduled_date}T${a.scheduled_time}`).getTime() - 
-      parseISO(`${b.scheduled_date}T${b.scheduled_time}`).getTime()
-    );
+    const sorted = [...filteredAppointments].sort((a, b) => {
+      const aTime = combineDateAndTime(a.scheduled_date, a.scheduled_time)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      const bTime = combineDateAndTime(b.scheduled_date, b.scheduled_time)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+      return aTime - bTime;
+    });
     return groupBy(sorted, 'scheduled_date');
   }, [filteredAppointments]);
 
   const sortedGroupKeys = useMemo(() => {
      const keys = Object.keys(groupedAppointments);
      keys.sort((a, b) => {
-         const dateA = parseISO(a);
-         const dateB = parseISO(b);
+         const dateA = combineDateAndTime(a, null);
+         const dateB = combineDateAndTime(b, null);
+         if (!dateA || !dateB) return dateA ? -1 : dateB ? 1 : 0;
          const aIsPast = isPast(dateA) && !isToday(dateA);
          const bIsPast = isPast(dateB) && !isToday(dateB);
 
@@ -150,7 +156,9 @@ export const MobileAppointmentView = ({
         <div className="p-4 space-y-6">
           {sortedGroupKeys.length > 0 ? (
             sortedGroupKeys.map(date => {
-              const dayOfMonth = parseInt(format(parseISO(date), 'd'));
+              const parsedDate = combineDateAndTime(date, null);
+              if (!parsedDate) return null;
+              const dayOfMonth = parsedDate.getDate();
               const colorClass = dayColors[dayOfMonth % dayColors.length];
               const bgColorClass = dayBgColors[dayOfMonth % dayBgColors.length];
 
@@ -158,7 +166,7 @@ export const MobileAppointmentView = ({
                 <div key={date} className={`p-4 rounded-lg ${bgColorClass} border-l-4 ${colorClass}`}>
                   <div className="flex justify-between items-center mb-3">
                     <h3 className="text-lg font-semibold tracking-wide text-card-foreground">
-                      {format(parseISO(date), "EEEE, MMM d")}
+                      {formatDateLabel(parsedDate, "EEEE, MMM d", "Date unavailable")}
                     </h3>
                     <span className="text-sm text-muted-foreground">
                       {groupedAppointments[date].length} Appointments
@@ -299,37 +307,37 @@ export const MobileAppointmentView = ({
   return (
     <div className="h-full flex flex-col bg-background">
       {/* Main Header */}
-      <div className="flex items-center justify-between p-4 border-b border-border/50 bg-card/20 backdrop-blur-sm">
-        <h1 className="text-2xl font-bold">Appointments</h1>
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border/50 bg-card/20 p-3 backdrop-blur-sm sm:p-4">
+        <h1 className="min-w-0 truncate text-xl font-bold sm:text-2xl">Appointments</h1>
         <div className="flex items-center gap-2">
-            <Button size="icon" variant="ghost"><Search className="w-5 h-5"/></Button>
-            <Button size="icon" onClick={() => onAddAppointment()} className="rounded-md">
+            <Button size="icon" variant="ghost" aria-label="Search appointments"><Search className="w-5 h-5"/></Button>
+            <Button size="icon" onClick={() => onAddAppointment()} className="rounded-md" aria-label="Add appointment">
               <Plus />
             </Button>
         </div>
       </div>
 
       {/* View Toggle */}
-      <div className="p-2 bg-card/20">
-        <div className="grid grid-cols-3 gap-2 p-1 rounded-md bg-muted/30 border border-border/30">
+      <div className="shrink-0 overflow-x-auto bg-card/20 p-2">
+        <div className="grid min-w-[18rem] grid-cols-3 gap-2 rounded-md border border-border/30 bg-muted/30 p-1">
           <Button
             variant={viewMode === 'list' ? 'default' : 'ghost'}
             onClick={() => setViewMode('list')}
-            className="rounded-md"
+            className="min-w-0 rounded-md px-2"
           >
             List
           </Button>
           <Button
             variant={viewMode === 'calendar' ? 'default' : 'ghost'}
             onClick={() => setViewMode('calendar')}
-            className="rounded-md"
+            className="min-w-0 rounded-md px-2"
           >
             Day
           </Button>
           <Button
             variant={viewMode === 'month' ? 'default' : 'ghost'}
             onClick={() => setViewMode('month')}
-            className="rounded-md"
+            className="min-w-0 rounded-md px-2"
           >
             <Calendar className="h-4 w-4 mr-1" />
             Month
@@ -338,7 +346,7 @@ export const MobileAppointmentView = ({
       </div>
       
       {viewMode === 'list' && (
-        <div className="p-2 border-b border-border/50">
+        <div className="shrink-0 border-b border-border/50 p-2">
             <ScrollArea className="w-full whitespace-nowrap">
                 <div className="flex gap-2 pb-2 items-center">
                   {(['today', 'confirmed', 'completed', 'cancelled', 'upcoming', 'all'] as FilterMode[]).map(filter => (

@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Building2, Star, MapPin, MessageSquare, Phone, ExternalLink, Loader2, RefreshCw, AlertTriangle } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import {
   GOOGLE_INSIGHTS_REDIRECT_PATH,
   fetchGbpOverview,

@@ -18,7 +18,7 @@ import {
   ArrowLeft, Search, Droplet, ScanLine, Filter, Loader2, Car, CheckCircle, AlertTriangle,
   Database,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import {
   decodeVin as decodeVinEdge,
   searchVehicleSpecs,

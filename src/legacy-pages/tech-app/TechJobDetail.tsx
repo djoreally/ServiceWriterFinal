@@ -37,7 +37,7 @@ import {
   uploadTechJobPhoto,
 } from "@/application/commands/tech-app.command";
 import { useTechJobEta } from "@/hooks/useTechJobEta";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { getTechPrimaryAction } from "@/lib/tech-mission-board";
 import { fetchJobThreadTimeline, type JobThreadTimelineItem } from "@/application/queries/job-thread.query";
 import { createJobThreadException, sendJobThreadHumanMessage } from "@/application/commands/job-thread.command";

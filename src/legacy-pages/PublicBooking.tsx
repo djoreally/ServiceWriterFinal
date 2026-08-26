@@ -42,7 +42,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StickyActionBar } from "@/components/layout/PagePrimitives";
 
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { Wrench, ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
 import { format, parse } from "date-fns";
 import { geocodeAddress } from "@/application/queries/mapbox";

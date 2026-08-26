@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useReducer, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { ArrowLeft } from "lucide-react";
 import { FleetOSLayout } from "@/components/layout/FleetOSLayout";
 import { Button } from "@/components/ui/button";

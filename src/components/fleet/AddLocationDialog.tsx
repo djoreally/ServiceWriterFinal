@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { fetchFleetLocationRegistrationOptions } from "@/application/queries/fleet-location.query";
 import { insertFleetLocation, updateFleetLocation, type FleetLocationRegistrationPayload } from "@/application/commands/fleet-location.command";
 import { useAuth } from "@packages/auth";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { Building2, FileText, LockKeyhole, ReceiptText, CalendarClock } from "lucide-react";
 import { logAudit } from "@/lib/security/audit";
 

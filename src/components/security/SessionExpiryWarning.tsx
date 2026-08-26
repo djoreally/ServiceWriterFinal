@@ -6,7 +6,7 @@
  */
 
 import { useEffect } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/components/ui/sonner';
 import { useSessionSecurity } from '@packages/auth';
 import { useAuth } from '@packages/auth';
 import { logAudit } from '@/lib/security/audit';

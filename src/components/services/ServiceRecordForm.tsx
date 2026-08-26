@@ -9,7 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { getAuthUser, fetchServiceFormOptions, findVehicleByVin, upsertBookingVehicle, upsertCustomerRpc, updateServiceRecord } from "@/application/queries/service-form.query";
 import { decodeVinNumber } from "@/application/commands/vin.command";
 import { Loader2, User, Car, Wrench, Search, Plus, Check, ChevronDown } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { format } from "date-fns";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { useTerminology } from "@/contexts/TerminologyContext";

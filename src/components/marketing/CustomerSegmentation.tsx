@@ -73,7 +73,7 @@ import {
   Mail,
   Phone,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { ProximityPicker } from "@/components/marketing/ProximityPicker";

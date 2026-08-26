@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { MailPlus, RefreshCw, ShieldCheck, UserRoundPlus, XCircle } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";

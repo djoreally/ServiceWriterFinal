@@ -64,3 +64,15 @@ export function timeToMinutes(time: string | null | undefined): number | null {
   if (!match) return null;
   return Number(match[1]) * 60 + Number(match[2]);
 }
+
+/** Combines a calendar date and optional clock value without ever returning Invalid Date. */
+export function combineDateAndTime(
+  date: string | null | undefined,
+  time: string | null | undefined,
+): Date | null {
+  const day = safeParseDate(date);
+  if (!day) return null;
+  const minutes = timeToMinutes(time);
+  if (minutes === null) return new Date(day.getFullYear(), day.getMonth(), day.getDate());
+  return new Date(day.getFullYear(), day.getMonth(), day.getDate(), Math.floor(minutes / 60), minutes % 60);
+}

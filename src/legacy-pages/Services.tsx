@@ -16,7 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Plus, Search, Calendar, Wrench, AlertCircle, Zap, FileText, Edit, Trash2, Eye, Download } from "lucide-react";
 import ServiceInvoice from "@/components/ServiceInvoice";
 import { ServiceRecordForm } from "@/components/services/ServiceRecordForm";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { useTerminology } from "@/contexts/TerminologyContext";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { getServiceStatusBadgeClass, getServiceStatusLabel } from "@/lib/statusStyles";

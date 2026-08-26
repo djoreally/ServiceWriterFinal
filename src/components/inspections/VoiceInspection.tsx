@@ -13,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Mic, Camera, Brain, Save, ArrowLeft } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { AudioRecorder } from "./AudioRecorder";
 import { PhotoCapture, type CapturedPhoto } from "./PhotoCapture";
 import { TranscriptReview, type InspectionFinding } from "./TranscriptReview";

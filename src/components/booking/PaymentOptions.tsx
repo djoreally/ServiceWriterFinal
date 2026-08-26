@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { CreditCard, Banknote, Loader2, Shield, Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
 

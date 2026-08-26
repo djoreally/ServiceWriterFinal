@@ -13,7 +13,7 @@ import type { OperationalJobRow } from "@/application/queries/operational-jobs.q
 import { buildCommandCenterBuckets } from "@/lib/command-center-filters";
 import { format } from "date-fns";
 import { AlertTriangle, CalendarClock, CheckCircle2, Clock, Plus, Radio, UserRound, Wrench } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 interface QueueJob extends OperationalJobRow {
   id: string;

@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { MessageSquare, RefreshCw, Send, Loader2, ShieldCheck, CheckCheck } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";

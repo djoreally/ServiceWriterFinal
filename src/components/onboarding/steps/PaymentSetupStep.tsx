@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CreditCard, CheckCircle2, Loader2, ExternalLink, DollarSign, Shield, Zap } from "lucide-react";
 import { checkStripeOnboardingStatus, startStripeOnboarding } from "@/application/commands";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 interface PaymentSetupStepProps {
   onNext: () => void;

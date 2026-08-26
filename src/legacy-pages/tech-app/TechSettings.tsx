@@ -16,7 +16,7 @@ import {
 import { saveTechNotificationPreferences, signOutCurrentUser } from "@/application/commands/tech-app.command";
 import { fetchTechNotificationSettingsForCurrentUser } from "@/application/queries/tech-app.query";
 import { DEFAULT_TECH_NOTIFICATION_PREFERENCES, type TechnicianNotificationPreferences } from "@/lib/technician-notification-preferences";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { ThemeModeSelect } from "@/components/ThemeModeSelect";
 import { CalendarIntegration } from "@/components/settings/CalendarIntegration";
 

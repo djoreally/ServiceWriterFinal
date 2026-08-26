@@ -19,7 +19,7 @@ import {
 import { format, parseISO } from "date-fns";
 import { formatTimeLabel, formatDateLabel } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { MAPBOX_DEFAULT_STYLE, requireMapboxToken } from "@/lib/mapbox";

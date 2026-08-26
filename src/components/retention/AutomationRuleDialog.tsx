@@ -33,7 +33,7 @@ import {
   updateAutomationRule,
   type AutomationRulePayload,
 } from "@/application/commands/automation-rules.command";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { Plus, Trash2, Eye, Settings2 } from "lucide-react";
 import {
   TEMPLATE_VARIABLES,

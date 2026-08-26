@@ -3,7 +3,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Wifi, WifiOff, RefreshCw, DownloadCloud } from 'lucide-react';
 import { isOfflineEligibleForCurrentUser } from '@/offline/rollout';
-import { toast } from 'sonner';
+import { toast } from '@/components/ui/sonner';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;

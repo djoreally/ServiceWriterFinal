@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { processOfflinePayment } from "@/application/commands/offline-payment.command";
 import { useOfflineSyncQueue, type OfflineSyncItem } from "@/hooks/useOfflineSyncQueue";
 import { isOfflineEligibleForCurrentUser } from "@/offline/rollout";

@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Printer, X, User, Car, Phone, Mail, MapPin, Wrench, Package, Send, Bell } from "lucide-react";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { format } from "date-fns";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { bankersRound } from '@/lib/financialMath';
 import { ProgressiveImage } from "@/components/media/ProgressiveImage";
 

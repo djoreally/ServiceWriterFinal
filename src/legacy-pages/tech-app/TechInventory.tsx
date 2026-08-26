@@ -20,7 +20,7 @@ import { cn } from "@/lib/utils";
 import { fetchTechInventoryDataForCurrentUser } from "@/application/queries/tech-app.query";
 import { recordVanInventoryMovement, requestVanRestock } from "@/application/commands/tech-app.command";
 import { queueInventoryMovement } from "@/offline/outbox";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 interface VanInventoryItem {
   id: string;

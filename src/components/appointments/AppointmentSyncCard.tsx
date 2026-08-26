@@ -10,7 +10,7 @@ import {
   RefreshCw, CheckCircle2, AlertTriangle, Loader2, Activity,
   Clock, XCircle, Send,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import {
   fetchAppointmentSyncRecords,
   fetchAppointmentSyncLogs,

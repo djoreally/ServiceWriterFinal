@@ -8,7 +8,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Play, ClipboardCheck, CheckCircle2, Loader2, FileText } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { useNavigate } from "react-router-dom";
 import { startAppointmentJob } from "@/application/commands/appointment-detail.command";
 import {

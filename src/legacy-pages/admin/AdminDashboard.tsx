@@ -26,7 +26,7 @@ import {
   Building2,
   Bot,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 const AdminCarfaxSettings = lazy(() => import("@/components/admin/AdminCarfaxSettings").then((module) => ({ default: module.AdminCarfaxSettings })));
 const AdminPlatformStats = lazy(() => import("@/components/admin/AdminPlatformStats").then((module) => ({ default: module.AdminPlatformStats })));
 const AdminUserManagement = lazy(() => import("@/components/admin/AdminUserManagement").then((module) => ({ default: module.AdminUserManagement })));

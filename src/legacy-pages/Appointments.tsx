@@ -27,7 +27,7 @@ import {
   updateAppointmentStatus,
 } from "@/application/commands";
 // ENTERPRISE: In-app notifications are now created server-side by transactional-email-worker
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { Loader2, Calendar, Download, LayoutGrid } from "lucide-react";
 import { TableSkeleton } from "@/components/loading/PageSkeletons";
 import { DispatchBoard } from "@/components/workflow/DispatchBoard";

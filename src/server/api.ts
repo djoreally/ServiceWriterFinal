@@ -31,6 +31,25 @@ export function json<T>(data: T, init?: ResponseInit) {
 
 export function errorResponse(error: unknown) {
   if (error instanceof ApiError) return json({ error: { code: error.code, message: error.message } }, { status: error.status });
+
+  const candidate = error as { code?: string; message?: string; status?: number } | null;
+  const code = candidate?.code;
+  if (code === "PGRST116") {
+    return json({ error: { code: "not_found", message: "The requested record is no longer available." } }, { status: 404 });
+  }
+  if (code === "23505") {
+    return json({ error: { code: "conflict", message: "This record already exists." } }, { status: 409 });
+  }
+  if (code === "23503") {
+    return json({ error: { code: "invalid_reference", message: "A related record could not be found." } }, { status: 409 });
+  }
+  if (code === "22P02" || code === "22007" || code === "22023") {
+    return json({ error: { code: "invalid_input", message: "One or more values are invalid." } }, { status: 400 });
+  }
+  if (candidate?.status && candidate.status >= 400 && candidate.status < 600) {
+    return json({ error: { code: code ?? "request_failed", message: candidate.message ?? "The request could not be completed." } }, { status: candidate.status });
+  }
+
   console.error("[api] unexpected error", error instanceof Error ? error.message : "unknown");
   return json({ error: { code: "internal_error", message: "An unexpected error occurred." } }, { status: 500 });
 }

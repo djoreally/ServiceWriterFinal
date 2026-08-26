@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@packages/auth";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import {
   MapPin, LogIn, LogOut, Camera, Clock, Car, CheckCircle,
   Loader2, AlertTriangle, Navigation, ClipboardList,

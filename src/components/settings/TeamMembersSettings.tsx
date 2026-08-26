@@ -67,7 +67,7 @@ import {
   DollarSign,
   Calendar,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import type { Json } from "@/integrations/supabase/types";

@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/collapsible";
 import { LOYALTY_TEMPLATES, type LoyaltyTemplate } from "@/lib/retention/loyalty-templates";
 import { seedLoyaltyTemplate } from "@/application/commands/loyalty-template.command";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 interface LoyaltyTemplateGalleryProps {
   userId: string;

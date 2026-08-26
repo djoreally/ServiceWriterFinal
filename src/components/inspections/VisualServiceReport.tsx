@@ -18,7 +18,7 @@ import {
   Wrench,
   Loader2,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
 import { ProgressiveImage } from "@/components/media/ProgressiveImage";
 

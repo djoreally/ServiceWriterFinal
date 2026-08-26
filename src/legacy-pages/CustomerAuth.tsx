@@ -15,7 +15,7 @@ import { beginAuthInteraction } from "@/lib/authInteractionLock";
 
 import { Button } from "@/components/ui/button";
 import { IconInput } from "@/components/ui/icon-input";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { Loader2, User, Lock, Phone, Mail, KeyRound, ArrowLeft } from "lucide-react";
 import { z } from "zod";
 

@@ -42,7 +42,7 @@ import {
   MailWarning,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 // Types imported from application layer
 

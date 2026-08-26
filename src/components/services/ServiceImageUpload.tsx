@@ -8,7 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ProgressiveImage } from "@/components/media/ProgressiveImage";
 import { Camera, Upload, X, Trash2, ImageIcon } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 import {
   fetchServiceImages,

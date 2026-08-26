@@ -21,7 +21,7 @@ import {
   Wrench,
   CheckCircle2
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { format, addMonths, isPast, isBefore, addDays } from "date-fns";
 import {
   Dialog,

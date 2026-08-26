@@ -9,7 +9,7 @@ import { useCallback, useEffect } from "react";
 import { fetchRouteSafeSlots } from "@/application/queries/booking-context.query";
 import { fetchBookedSlotsForDate } from "@/application/queries/public-booking.query";
 import { format, isBefore, addDays, addMinutes, addHours, setHours, setMinutes, startOfDay, parse } from "date-fns";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import type { BookingAction, BookingState } from "@/hooks/useBookingState";
 import { isOperatingDay, resolveDayWindow, type DayHoursMap } from "@/lib/business-hours";
 

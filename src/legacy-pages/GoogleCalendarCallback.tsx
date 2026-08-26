@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { completeGoogleCalendarOAuth, GOOGLE_CALENDAR_REDIRECT_PATH } from "@/application/commands/google-calendar.command";
 import { completeGoogleInsightsOAuth } from "@/application/commands/google-insights";
 

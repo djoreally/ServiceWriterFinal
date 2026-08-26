@@ -82,7 +82,7 @@ import { CompleteAppointmentDialog } from '@/components/appointments/CompleteApp
 import { JobActionButton } from '@/components/appointments/JobActionButton';
 import { MobileDispatchView } from '@/components/tech/MobileDispatchView';
 import { AppointmentSmsTimeline } from '@/components/appointments/AppointmentSmsTimeline';
-import { toast } from 'sonner';
+import { toast } from '@/components/ui/sonner';
 import { useServiceCategoryPolicy } from '@/hooks/useServiceCategoryPolicy';
 
 const STATUS_STYLES: Record<string, { className: string; label: string }> = {

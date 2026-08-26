@@ -58,7 +58,7 @@ import {
   History,
   TrendingUp,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { format, formatDistanceToNow, parseISO, differenceInMinutes, startOfWeek, endOfWeek, isToday, isSameWeek } from "date-fns";
 import { cn } from "@/lib/utils";
 

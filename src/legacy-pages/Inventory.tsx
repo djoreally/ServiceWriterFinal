@@ -14,7 +14,7 @@ import { Plus, Search, Package, AlertTriangle, Edit, Trash2, Truck, ArrowRightLe
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { OilUsageTab } from "@/components/inventory/OilUsageTab";
 import { OIL_SEED_ITEMS, OIL_SEED_DEFAULT_QUANTITY } from "@/lib/inventorySeeds";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import {

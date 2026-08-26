@@ -19,7 +19,7 @@ import {
   signOutCurrentUser,
 } from "@/application/commands/tech-app.command";
 import { fetchTechMoreDataForCurrentUser } from "@/application/queries/tech-app.query";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { ThemeModeSelect } from "@/components/ThemeModeSelect";
 
 interface TechProfile {

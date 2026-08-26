@@ -52,7 +52,7 @@ import {
   Wrench,
   Loader2
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { useTerminology } from "@/contexts/TerminologyContext";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { format } from "date-fns";

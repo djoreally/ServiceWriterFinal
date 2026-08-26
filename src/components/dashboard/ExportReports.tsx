@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Download, FileSpreadsheet, Loader2 } from "lucide-react";
 import { format } from "date-fns";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { centsToDollars, formatMoney, toCents } from "@/lib/financialMath";
 

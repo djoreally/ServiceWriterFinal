@@ -7,7 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Globe, Loader2, Sparkles, AlertTriangle } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { importSiteForOnboarding } from "@/application/queries/onboarding-site-import.query";
 import {
   defaultSelection,

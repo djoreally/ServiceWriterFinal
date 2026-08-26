@@ -14,7 +14,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { format, parseISO, isPast, isFuture, isToday } from "date-fns";
 import {
   Loader2,

@@ -19,7 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Loader2, Save, Calendar } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { editAppointment } from "@/application/commands/edit-appointment.command";
 import { Appointment } from "@/shared/types";
 import { format, parseISO, parse } from "date-fns";

@@ -25,7 +25,7 @@ import {
   deleteIntakeQuestion as deleteIntakeQuestionApi,
   toggleIntakeQuestionActive,
 } from "@/application/commands/availability-settings.command";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { Save, Ban, Clock, Globe, Timer, CalendarDays, CalendarRange, Hourglass, FileText, Shield, Plus, Trash2, GripVertical, CheckSquare } from "lucide-react";
 import { format, isSameDay } from "date-fns";
 import { cn } from "@/lib/utils";

@@ -32,7 +32,7 @@ import {
   ShieldCheck,
   Lock,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 interface CustomerAccountPromptProps {
   email: string;

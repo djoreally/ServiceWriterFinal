@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/table";
 import { Plus, Search, Car, Wrench, Edit, Trash2, UserX, Eye, Loader2, Download } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { useTerminology } from "@/contexts/TerminologyContext";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { vehicleSchema, getFirstError } from "@/lib/validation";

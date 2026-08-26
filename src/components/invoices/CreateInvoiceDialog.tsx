@@ -32,7 +32,7 @@ import {
   Wand2,
   Droplet,
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { format } from "date-fns";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { useAuth } from "@packages/auth";

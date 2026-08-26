@@ -17,7 +17,7 @@ import {
   removeServiceFromContract,
   updateContractService,
 } from "@/application/commands/fleet-contract-services.command";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 interface Props {
   contractId: string | null;

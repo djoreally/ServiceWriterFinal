@@ -8,7 +8,7 @@ import {
   triggerDocumentParse,
   type IntakeProfile,
 } from "@/application/queries/document-intake.query";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { useAuth } from "@packages/auth";
 import { cn } from "@/lib/utils";
 

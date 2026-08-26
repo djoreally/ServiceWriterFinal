@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Download, Loader2, RefreshCw, ShieldAlert, Smartphone, XCircle } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { useTeamRole } from "@/hooks/useTeamRole";
 import {
   listMobileReleases,

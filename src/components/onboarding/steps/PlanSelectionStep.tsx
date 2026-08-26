@@ -13,7 +13,7 @@ import { PlanCards, PLANS } from '@/components/subscription/PlanCards';
 import { ArrowLeft, CreditCard } from 'lucide-react';
 import type { PlanName } from '@/contexts/SubscriptionContext';
 import { useSubscription } from '@/contexts/SubscriptionContext';
-import { toast } from 'sonner';
+import { toast } from '@/components/ui/sonner';
 
 interface PlanSelectionStepProps {
   onNext: () => void;

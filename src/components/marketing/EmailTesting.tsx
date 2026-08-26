@@ -26,7 +26,7 @@ import {
   Mail, Send, CheckCircle2, XCircle, Clock, Loader2, 
   AlertTriangle, RefreshCw, TestTube, Eye, Settings
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { format, formatDistanceToNow } from "date-fns";
 
 // Email template types that can be tested

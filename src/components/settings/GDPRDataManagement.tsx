@@ -22,7 +22,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Download, Loader2, Shield, Trash2, AlertTriangle, XCircle } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { getCurrentSession, signOutCurrentUser } from "@/application/commands/gdpr.command";
 import { useNavigate } from "react-router-dom";
 

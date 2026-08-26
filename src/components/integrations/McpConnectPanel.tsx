@@ -15,7 +15,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Bot, Copy, Check, Lock, ShieldCheck, Info, RefreshCw, Server, ExternalLink } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import {
   MCP_CLIENT_GUIDES,
   MCP_CURSOR_SNIPPET,

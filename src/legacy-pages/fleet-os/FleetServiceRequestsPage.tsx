@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AlertTriangle, Building2, Car, CheckCircle2, Clock3, Inbox, Loader2, MapPin, Plus, Search, UserCheck, Users } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { FleetOSLayout } from "@/components/layout/FleetOSLayout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";

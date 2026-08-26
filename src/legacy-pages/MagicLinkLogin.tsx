@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Mail, ArrowLeft, CheckCircle2 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { z } from "zod";
 import { requestMagicLink } from "@/application/commands/auth.command";
 import { Button } from "@/components/ui/button";

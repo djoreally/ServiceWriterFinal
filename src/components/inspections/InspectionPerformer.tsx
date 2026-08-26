@@ -17,7 +17,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { ClipboardCheck, CheckCircle2, XCircle, AlertTriangle, Minus, Play, Save } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 interface InspectionPerformerProps {
   serviceId?: string;

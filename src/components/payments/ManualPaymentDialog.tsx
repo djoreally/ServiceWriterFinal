@@ -18,7 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Loader2, Banknote, CheckCircle2, ArrowLeft } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { recordManualPayment } from "@/application/commands";
 import {
   centsToDollars,

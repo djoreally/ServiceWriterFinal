@@ -19,7 +19,7 @@ import { CompleteFleetWorkOrderDialog } from "@/components/fleet/CompleteFleetWo
 import { createInvoiceFromFleetWorkOrders } from "@/application/commands/invoices.command";
 import { fetchInvoiceDetail, type InvoiceFullRow } from "@/application/queries/invoices.query";
 import { SendInvoiceDialog } from "@/components/invoices/SendInvoiceDialog";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import {
   ClipboardList,
   Search,

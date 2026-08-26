@@ -3,7 +3,7 @@ import { FleetOSLayout } from "@/components/layout/FleetOSLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@packages/auth";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import {
   fetchFleetReportPageData,
   type FleetReportPageData,

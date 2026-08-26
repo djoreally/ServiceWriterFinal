@@ -10,7 +10,7 @@ import {
   type CatalogServiceInfo,
 } from "@/application/queries/appointment-services.query";
 import { removeAppointmentService } from "@/application/commands/appointment-services.command";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { useTerminology } from "@/contexts/TerminologyContext";
 import { ServiceLineItem, type AppointmentService } from "./ServiceLineItem";

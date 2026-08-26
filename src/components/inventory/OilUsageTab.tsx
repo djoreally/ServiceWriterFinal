@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { StatCard } from "@/components/dashboard/StatCard";
 import { DateRangeFilter, getDateRangeFromPreset, type DateRangePreset } from "@/components/dashboard/DateRangeFilter";
 import { Droplets, Gauge, Wrench, Trophy, Download, Truck, X, Search } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import {
   ResponsiveContainer,
   BarChart,

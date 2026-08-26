@@ -14,7 +14,7 @@ import {
 import { Sparkles, Loader2, Check, RotateCcw } from "lucide-react";
 import { AUTOMATION_TEMPLATES, type AutomationTemplate } from "@/lib/retention/automation-templates";
 import { seedAllDefaults, seedAutomationTemplate } from "@/application/commands/automation-template.command";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 
 interface AutomationTemplateGalleryProps {
   userId: string;

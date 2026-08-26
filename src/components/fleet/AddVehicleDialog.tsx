@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Textarea } from "@/components/ui/textarea";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import { Car, Check, ChevronsUpDown, MapPin, ScanLine } from "lucide-react";
 import { fetchFleetVehicleFormOptions, type FleetVehicleFormOptions } from "@/application/queries";
 import { createFleetVehicle, updateFleetVehicle, decodeVinNumber, type CreateFleetVehiclePayload } from "@/application/commands";

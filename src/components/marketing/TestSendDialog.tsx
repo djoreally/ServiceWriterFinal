@@ -21,7 +21,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Mail, MessageSquare, Target, Clock, Loader2, Send } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/sonner";
 import type { FollowUpRule } from "@/application/queries";
 
 interface TestSendDialogProps {
