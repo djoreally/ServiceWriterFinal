@@ -78,6 +78,19 @@ export const nextApi = {
       if (date) params.set("date", date);
       return request<{ data: unknown }>(`/v1/public-booking/${encodeURIComponent(slug)}?${params.toString()}`);
     },
+    sendConfirmation: (slug: string, payload: {
+      appointment_id: string;
+      email: string;
+      phone?: string | null;
+      transactional_sms_consent: boolean;
+      marketing_sms_consent: boolean;
+      marketing_email_consent: boolean;
+      consent_texts: { transactional_sms: string; marketing_sms: string; marketing_email: string };
+    }) =>
+      request<{ data: { status: "accepted" | "sent" | "delivered"; provider_message_id: string } }>(
+        `/v1/public-booking/${encodeURIComponent(slug)}/confirmation`,
+        { method: "POST", body: JSON.stringify(payload) },
+      ),
   },
   workspaces: async (): Promise<WorkspaceMembership[]> => {
     const response = await request<{ data: unknown[] }>("/v1/workspaces");

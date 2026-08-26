@@ -1412,6 +1412,7 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
             paymentChoice={bs.paymentChoice}
             formatCurrency={pricing.formatCurrency}
             getGrandTotal={pricing.getGrandTotal}
+            confirmationEmailStatus={bs.confirmationEmailStatus}
           />
         )}
 
