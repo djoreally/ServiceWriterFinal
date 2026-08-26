@@ -163,9 +163,9 @@ export async function fetchPublicBlockedDates(bookingSlug: string): Promise<stri
 }
 
 /** Fetch extended business settings (fees, payment provider, square, weather guard). */
-export async function fetchPublicBusinessExtendedSettings(userId: string) {
+export async function fetchPublicBusinessExtendedSettings(bookingSlug: string) {
   try {
-    const response = await nextApi.publicBooking.get(userId, "settings");
+    const response = await nextApi.publicBooking.get(bookingSlug, "settings");
     return { data: (response.data ?? null) as Record<string, unknown> | null, error: null as unknown };
   } catch (error) {
     return { data: null as unknown, error };
