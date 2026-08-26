@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createSupabaseServerClient } from "@/lib/supabase";
+import { createSupabaseRequestClient, createSupabaseServerClient } from "@/lib/supabase";
 
 export const workspaceIdSchema = z.string().uuid();
 
@@ -40,8 +40,8 @@ export async function requireUser(request?: Request) {
   const bearerToken = authorization?.match(/^Bearer\\s+(.+)$/i)?.[1];
 
   if (bearerToken) {
-    const supabase = await createSupabaseServerClient();
-    const { data, error } = await supabase.auth.getUser(bearerToken);
+    const supabase = createSupabaseRequestClient(bearerToken);
+    const { data, error } = await supabase.auth.getUser();
     if (error || !data.user) throw new ApiError(401, "Authentication required", "unauthenticated");
     return { supabase, user: data.user };
   }

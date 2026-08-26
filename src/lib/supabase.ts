@@ -36,6 +36,18 @@ export async function createSupabaseServerClient() {
   );
 }
 
+export function createSupabaseRequestClient(accessToken: string) {
+  // Server-only request client. The bearer token remains the effective user
+  // identity for Auth/PostgREST; the service-role key is used only as the
+  // server-side apikey when the Vercel publishable key is stale or mismatched.
+  const url = required("NEXT_PUBLIC_SUPABASE_URL");
+  const apiKey = process.env.SUPABASE_SERVICE_ROLE_KEY || required("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
+  return createClient(url, apiKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+    global: { headers: { Authorization: `Bearer ${accessToken}` } },
+  });
+}
+
 export function createSupabaseAdminClient() {
   // Use only in trusted server jobs/webhooks. Never expose this client to the browser.
   return createClient(required("NEXT_PUBLIC_SUPABASE_URL"), required("SUPABASE_SERVICE_ROLE_KEY"), {
