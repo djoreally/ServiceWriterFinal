@@ -1,8 +1,8 @@
 import { errorResponse, json, requireUser } from "@/server/api";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const { supabase, user } = await requireUser();
+    const { supabase, user } = await requireUser(request);
     const [{ data: memberships, error: membershipError }, { data: customerLinks, error: customerError }] = await Promise.all([
       supabase
         .from("workspace_members")
