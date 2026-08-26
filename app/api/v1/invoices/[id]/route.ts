@@ -1,4 +1,5 @@
 import { errorResponse, json, requireWorkspaceMember } from "@/server/api";
+import { dispatchInvoiceTransition } from "@/server/messaging/invoice-events";
 import { z } from "zod";
 
 const invoiceStatusInputSchema = z.enum(["draft", "issued", "sent", "partially_paid", "partial", "paid", "void", "past_due"]);
@@ -98,6 +99,31 @@ function lineRows(items: z.infer<typeof lineSchema>[]) {
   }));
 }
 
+async function notifyInvoiceTransition(
+  supabase: any,
+  request: Request,
+  invoice: any,
+  previousStatus: string | null,
+  workspaceId: string,
+) {
+  const customer = Array.isArray(invoice?.customers) ? invoice.customers[0] : invoice?.customers;
+  if (!customer?.email || invoice?.status === previousStatus) return;
+  try {
+    const { data: workspace } = await supabase.from("workspaces").select("name,timezone").eq("id", workspaceId).single();
+    const customerName = [customer.first_name, customer.last_name].filter(Boolean).join(" ") || "Customer";
+    await dispatchInvoiceTransition({
+      invoice: { ...invoice, customer_email: customer.email, customer_name: customerName },
+      previousStatus,
+      eventId: `${invoice.id}:${invoice.status}:${invoice.updated_at ?? new Date().toISOString()}`,
+      workspaceName: workspace?.name ?? "Service Writer",
+      workspaceTimezone: workspace?.timezone ?? "UTC",
+      actionUrl: new URL(`/invoices/${invoice.id}`, request.url).toString(),
+    });
+  } catch (dispatchError) {
+    console.error("[Lifecycle] invoice transition email enqueue failed", dispatchError);
+  }
+}
+
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const id = z.string().uuid().parse((await context.params).id);
@@ -166,8 +192,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       });
       if (atomicError) throw atomicError;
 
-      const { data, error } = await supabase.from("invoices").select("*").eq("workspace_id", body.workspace_id).eq("id", id).single();
+      const { data, error } = await supabase.from("invoices").select("*, customers(id,first_name,last_name,email)").eq("workspace_id", body.workspace_id).eq("id", id).single();
       if (error) throw error;
+      await notifyInvoiceTransition(supabase, request, data, current.status, body.workspace_id);
       return json({ data });
     }
 
@@ -175,9 +202,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       .update(patch)
       .eq("id", id)
       .eq("workspace_id", body.workspace_id)
-      .select()
+      .select("*, customers(id,first_name,last_name,email)")
       .single();
     if (error) throw error;
+    await notifyInvoiceTransition(supabase, request, data, current.status, body.workspace_id);
     return json({ data });
   } catch (error) {
     return errorResponse(error);

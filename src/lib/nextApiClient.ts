@@ -156,6 +156,7 @@ export const nextApi = {
   },
   quotes: {
     convert: (quoteId: string, payload: Record<string, unknown>) => request<{ data: unknown }>(`/v1/quotes/${encodeURIComponent(quoteId)}/convert`, { method: "POST", body: JSON.stringify(payload) }),
+    updateStatus: (quoteId: string, payload: { workspace_id: string; status: "approved" | "declined"; expected_updated_at?: string | null }) => request<{ data: unknown }>(`/v1/quotes/${encodeURIComponent(quoteId)}/status`, { method: "POST", body: JSON.stringify(payload) }),
   },
   appointments: {
     list: (workspaceId: string) => request<{ data: unknown[] }>(`/v1/appointments?workspace_id=${encodeURIComponent(workspaceId)}`),

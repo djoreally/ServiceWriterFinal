@@ -162,7 +162,16 @@ export async function insertQuoteItems(items: LegacyQuoteItemWrite[]) {
 
 export async function updateQuoteStatus(id: string, status: string) {
   const workspace_id = currentWorkspace();
-  return (supabase.from("quotes") as any).update({ status: canonicalStatus(status) }).eq("workspace_id", workspace_id).eq("id", id);
+  const canonical = canonicalStatus(status);
+  if (canonical === "approved" || canonical === "declined") {
+    try {
+      const response = await nextApi.quotes.updateStatus(id, { workspace_id, status: canonical });
+      return { data: response.data, error: null };
+    } catch (error) {
+      return { data: null, error: error instanceof Error ? error : new Error("Failed to update quote status") };
+    }
+  }
+  return (supabase.from("quotes") as any).update({ status: canonical }).eq("workspace_id", workspace_id).eq("id", id);
 }
 
 export interface ConvertQuoteInput {

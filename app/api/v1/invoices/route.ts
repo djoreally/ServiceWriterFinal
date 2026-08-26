@@ -1,4 +1,6 @@
 import { errorResponse, json, paginationSchema, requireWorkspaceMember } from "@/server/api";
+import { dispatchInvoiceTransition } from "@/server/messaging/invoice-events";
+import { LIFECYCLE_EVENT_KEYS } from "@/server/messaging/lifecycle-events";
 import { z } from "zod";
 
 const invoiceStatusSchema = z.enum(["draft", "issued", "partially_paid", "paid", "void", "past_due"]);
@@ -163,11 +165,29 @@ export async function POST(request: Request) {
 
     const { data: invoice, error: readError } = await supabase
       .from("invoices")
-      .select("*")
+      .select("*, customers(id,first_name,last_name,email)")
       .eq("workspace_id", body.workspace_id)
       .eq("id", id)
       .single();
     if (readError) throw readError;
+
+    const customer = Array.isArray(invoice.customers) ? invoice.customers[0] : invoice.customers;
+    if (customer?.email) {
+      try {
+        const { data: workspace } = await supabase.from("workspaces").select("name,timezone").eq("id", body.workspace_id).single();
+        const customerName = [customer.first_name, customer.last_name].filter(Boolean).join(" ") || "Customer";
+        await dispatchInvoiceTransition({
+          forceKey: LIFECYCLE_EVENT_KEYS.invoiceCreated,
+          eventId: `${id}:created:${invoice.created_at ?? new Date().toISOString()}`,
+          invoice: { ...invoice, customer_email: customer.email, customer_name: customerName },
+          workspaceName: workspace?.name ?? "Service Writer",
+          workspaceTimezone: workspace?.timezone ?? "UTC",
+          actionUrl: new URL(`/invoices/${id}`, request.url).toString(),
+        });
+      } catch (dispatchError) {
+        console.error("[Lifecycle] invoice-created email enqueue failed", dispatchError);
+      }
+    }
     return json({ data: invoice }, { status: 201 });
   } catch (error) {
     return errorResponse(error);

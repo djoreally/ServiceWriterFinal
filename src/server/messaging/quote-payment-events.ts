@@ -15,6 +15,20 @@ export type QuoteLifecycleRecord = {
   metadata?: Record<string, unknown> | null;
 };
 
+export type InvoiceLifecycleRecord = {
+  id: string;
+  workspace_id: string;
+  customer_id?: string | null;
+  customer_email?: string | null;
+  customer_name?: string | null;
+  invoice_number?: string | number | null;
+  total?: number | string | null;
+  due_at?: string | null;
+  status?: string | null;
+  currency_code?: string | null;
+  metadata?: Record<string, unknown> | null;
+};
+
 export type PaymentLifecycleRecord = {
   id: string;
   workspace_id: string;
@@ -62,6 +76,22 @@ function variablesForQuote(quote: QuoteLifecycleRecord, workspaceName: string, w
   };
 }
 
+function variablesForInvoice(invoice: InvoiceLifecycleRecord, workspaceName: string, workspaceTimezone: string, actionUrl: string): LifecycleVariables {
+  const name = stringValue(invoice.customer_name, "Customer");
+  return {
+    "business.name": workspaceName,
+    "business.timezone": workspaceTimezone,
+    "customer.first_name": firstName(name),
+    "customer.full_name": name,
+    "invoice.number": stringValue(invoice.invoice_number, invoice.id.slice(0, 8).toUpperCase()),
+    "invoice.total": amount(invoice.total, invoice.currency_code || "USD"),
+    "invoice.balance": amount(invoice.total, invoice.currency_code || "USD"),
+    "invoice.due_at": stringValue(invoice.due_at, "See invoice details"),
+    "invoice.status": stringValue(invoice.status, "updated"),
+    "email.primary_action_url": actionUrl,
+  };
+}
+
 function variablesForPayment(payment: PaymentLifecycleRecord, workspaceName: string, workspaceTimezone: string, actionUrl: string): LifecycleVariables {
   const name = stringValue(payment.customer_name, "Customer");
   return {
@@ -98,6 +128,29 @@ export async function dispatchQuoteLifecycle(input: {
     recipientRole: "customer",
     variables: variablesForQuote(input.quote, input.workspaceName, input.workspaceTimezone, input.actionUrl),
     metadata: { quoteId: input.quote.id },
+  });
+}
+
+export async function dispatchInvoiceLifecycle(input: {
+  eventKey: string;
+  eventId: string;
+  invoice: InvoiceLifecycleRecord;
+  workspaceName: string;
+  workspaceTimezone: string;
+  actionUrl: string;
+}): Promise<void> {
+  if (!input.invoice.customer_email) return;
+  await dispatchLifecycleEvent({
+    templateKey: input.eventKey,
+    eventId: input.eventId,
+    entityType: "invoice",
+    entityId: input.invoice.id,
+    workspaceId: input.invoice.workspace_id,
+    customerId: input.invoice.customer_id,
+    recipientEmail: input.invoice.customer_email,
+    recipientRole: "customer",
+    variables: variablesForInvoice(input.invoice, input.workspaceName, input.workspaceTimezone, input.actionUrl),
+    metadata: { invoiceId: input.invoice.id },
   });
 }
 
