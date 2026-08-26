@@ -12,7 +12,7 @@ const assignmentSchema = z.object({
 export async function POST(request: Request) {
   try {
     const body = assignmentSchema.parse(await request.json());
-    const { supabase } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher"]);
+    const { supabase } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher"], request);
     const { data, error } = await supabase.rpc("assign_dispatch_job_v1", {
       p_workspace_id: body.workspace_id,
       p_job_source: body.job_source,

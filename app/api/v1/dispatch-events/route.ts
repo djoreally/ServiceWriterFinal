@@ -21,7 +21,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const workspaceId = url.searchParams.get("workspace_id");
     if (!workspaceId) throw new Error("workspace_id is required");
-    const { supabase } = await requireWorkspaceMember(workspaceId);
+    const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
     const { limit, offset } = paginationSchema.parse(Object.fromEntries(url.searchParams));
     const { data, error } = await supabase
       .from("dispatch_events")
@@ -39,7 +39,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = dispatchEventSchema.parse(await request.json());
-    const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician", "fleet_manager"]);
+    const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician", "fleet_manager"], request);
     const { data, error } = await supabase.from("dispatch_events").insert({ ...body, performed_by: user.id }).select().single();
     if (error) throw error;
     return json({ data }, { status: 201 });

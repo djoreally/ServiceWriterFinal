@@ -5,7 +5,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   try {
     const vehicleId = z.string().uuid().parse((await context.params).id);
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
-    const { supabase } = await requireWorkspaceMember(workspaceId);
+    const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
 
     const { data: vehicle, error: vehicleError } = await supabase
       .from("vehicles")

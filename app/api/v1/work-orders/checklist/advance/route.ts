@@ -15,7 +15,7 @@ const schema = z.object({
  */
 export async function POST(request: Request) {
   const body = schema.parse(await request.json());
-  await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician"]);
+  await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician"], request);
   return json({
     error: {
       code: "checklist_not_configured",

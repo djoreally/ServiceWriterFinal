@@ -96,7 +96,7 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const workspaceId = z.string().uuid().parse(url.searchParams.get("workspace_id"));
-    const { supabase } = await requireWorkspaceMember(workspaceId);
+    const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
     const { limit, offset } = paginationSchema.parse(Object.fromEntries(url.searchParams));
     const { data, error } = await supabase
       .from("invoices")
@@ -114,7 +114,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = invoiceSchema.parse(await request.json());
-    const { supabase } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"]);
+    const { supabase } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"], request);
 
     const metadata = {
       notes: body.notes ?? null,

@@ -32,7 +32,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   try {
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
     const id = z.string().uuid().parse((await context.params).id);
-    const { supabase } = await requireWorkspaceMember(workspaceId);
+    const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
     const { data, error } = await supabase
       .from("vehicles")
       .select("*,customers(id,first_name,last_name,email,phone),vehicle_service_specs(engine,oil_type,oil_capacity,oil_filter,metadata)")
@@ -50,7 +50,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   try {
     const body = vehicleUpdateSchema.parse(await request.json());
     const id = z.string().uuid().parse((await context.params).id);
-    const { supabase } = await requireWorkspaceMember(body.workspace_id, [...writeRoles]);
+    const { supabase } = await requireWorkspaceMember(body.workspace_id, [...writeRoles], request);
     const { workspace_id, engine, oil_type, oil_capacity, oil_filter, odometer_measure, plate_state, ...vehicleInput } = body;
 
     const patch: Record<string, unknown> = { ...vehicleInput };
@@ -109,7 +109,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   try {
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
     const id = z.string().uuid().parse((await context.params).id);
-    const { supabase } = await requireWorkspaceMember(workspaceId, [...writeRoles]);
+    const { supabase } = await requireWorkspaceMember(workspaceId, [...writeRoles], request);
     const { data, error } = await supabase
       .from("vehicles")
       .update({ status: "archived" } as never)

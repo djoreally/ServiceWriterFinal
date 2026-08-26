@@ -24,7 +24,7 @@ export async function GET(request: Request) {
     if (!workspaceId) {
       return json({ error: { code: "missing_workspace", message: "workspace_id is required" } }, { status: 400 });
     }
-    const { supabase } = await requireWorkspaceMember(workspaceId);
+    const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
     const { limit, offset } = paginationSchema.parse(Object.fromEntries(url.searchParams));
     const search = url.searchParams.get("search")?.trim();
     let query = supabase
@@ -49,7 +49,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = customerCreateSchema.parse(await request.json());
-    const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"]);
+    const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"], request);
     const { workspace_id, address, ...customer } = body;
     const { data, error } = await supabase.from("customers").insert({
       ...customer,

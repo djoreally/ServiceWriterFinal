@@ -23,7 +23,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   try {
     const id = z.string().uuid().parse((await context.params).id);
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
-    const { supabase } = await requireWorkspaceMember(workspaceId);
+    const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
     const { data, error } = await supabase
       .from("payments")
       .select("*, invoices(id,invoice_number,total,amount_paid,status), customers(id,first_name,last_name,email)")
@@ -81,7 +81,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   try {
     const id = z.string().uuid().parse((await context.params).id);
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
-    await requireWorkspaceMember(workspaceId, ["owner", "admin", "manager"]);
+    await requireWorkspaceMember(workspaceId, ["owner", "admin", "manager"], request);
     return json({
       error: {
         code: "ledger_record_immutable",

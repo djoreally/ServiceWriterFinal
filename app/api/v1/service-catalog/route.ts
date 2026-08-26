@@ -8,7 +8,7 @@ export async function GET(request: Request) {
       return json({ error: { code: "missing_workspace", message: "workspace_id is required" } }, { status: 400 });
     }
 
-    const { supabase } = await requireWorkspaceMember(workspaceId);
+    const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
     const { data, error } = await supabase
       .from("service_catalog")
       .select("*")

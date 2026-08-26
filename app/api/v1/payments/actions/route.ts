@@ -13,7 +13,7 @@ const schema = z.discriminatedUnion("action", [
 export async function POST(request: Request) {
   try {
     const body = schema.parse(await request.json());
-    const { supabase } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"]);
+    const { supabase } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"], request);
 
     if (body.action === "manual_payment") {
       if (body.waive_fees || body.waive_tax || body.waive_remaining) {

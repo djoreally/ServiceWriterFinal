@@ -38,7 +38,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const workspaceId = url.searchParams.get("workspace_id");
     if (!workspaceId) return json({ error: { code: "missing_workspace", message: "workspace_id is required" } }, { status: 400 });
-    const { supabase } = await requireWorkspaceMember(workspaceId, ["owner", "admin"]);
+    const { supabase } = await requireWorkspaceMember(workspaceId, ["owner", "admin"], request);
     const { limit, offset } = paginationSchema.parse(Object.fromEntries(url.searchParams));
     const { data, error } = await supabase.from("invitations").select(invitationSelect).eq("workspace_id", workspaceId).order("created_at", { ascending: false }).range(offset, offset + limit - 1);
     if (error) throw error;
@@ -51,7 +51,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = createInvitationSchema.parse(await request.json());
-    const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin"]);
+    const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin"], request);
     if (body.invited_role === "customer" && !body.customer_id) return json({ error: { code: "customer_required", message: "customer_id is required for customer invitations" } }, { status: 400 });
     await assertSendRateLimit(supabase, body.workspace_id, body.invited_email);
     const { data: existing, error: existingError } = await supabase.from("invitations").select("id").eq("workspace_id", body.workspace_id).ilike("invited_email", body.invited_email).is("accepted_at", null).is("revoked_at", null).gt("expires_at", new Date().toISOString()).limit(1);

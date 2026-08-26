@@ -12,7 +12,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const workspaceId = z.string().uuid().parse(url.searchParams.get("workspace_id"));
     const appointmentId = url.searchParams.get("appointment_id");
-    const { supabase } = await requireWorkspaceMember(workspaceId);
+    const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
 
     let query = supabase
       .from("appointment_items")

@@ -50,7 +50,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   try {
     const id = z.string().uuid().parse((await context.params).id);
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
-    const { supabase } = await requireWorkspaceMember(workspaceId);
+    const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
     const { data, error } = await supabase
       .from("appointments")
       .select("*,customers(id,first_name,last_name,email,phone),vehicles(id,customer_id,year,make,model,vin,license_plate,plate_region,color,mileage,notes)")
@@ -149,7 +149,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   try {
     const id = z.string().uuid().parse((await context.params).id);
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
-    const { supabase } = await requireWorkspaceMember(workspaceId, ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher"]);
+    const { supabase } = await requireWorkspaceMember(workspaceId, ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher"], request);
     const { data, error } = await supabase
       .from("appointments")
       .update({ status: "cancelled", updated_at: new Date().toISOString() })

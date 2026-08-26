@@ -14,7 +14,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ itemI
   try {
     const body = schema.parse(await request.json());
     const itemId = z.string().uuid().parse((await context.params).itemId);
-    const { supabase } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician", "fleet_manager"]);
+    const { supabase } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician", "fleet_manager"], request);
     const { data: item, error: itemError } = await supabase.from("work_order_checklist_items").select("id, work_order_id, work_orders!inner(workspace_id)").eq("id", itemId).eq("work_orders.workspace_id", body.workspace_id).single();
     if (itemError || !item) throw itemError ?? new Error("Checklist item was not found in this workspace.");
     const { workspace_id, ...patch } = body;

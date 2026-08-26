@@ -30,7 +30,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   try {
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
     const id = customerIdFromParams(await context.params);
-    const { supabase } = await requireWorkspaceMember(workspaceId);
+    const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
     const { data, error } = await supabase
       .from("customers")
       .select("*")
@@ -48,7 +48,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   try {
     const body = customerUpdateSchema.parse(await request.json());
     const id = customerIdFromParams(await context.params);
-    const { supabase } = await requireWorkspaceMember(body.workspace_id, [...writeRoles]);
+    const { supabase } = await requireWorkspaceMember(body.workspace_id, [...writeRoles], request);
     const { workspace_id, address, ...customer } = body;
     const patch: Record<string, unknown> = { ...customer };
     if (Object.prototype.hasOwnProperty.call(body, "address")) {
@@ -73,7 +73,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
     const url = new URL(request.url);
     const workspaceId = z.string().uuid().parse(url.searchParams.get("workspace_id"));
     const id = customerIdFromParams(await context.params);
-    const { supabase } = await requireWorkspaceMember(workspaceId, [...writeRoles]);
+    const { supabase } = await requireWorkspaceMember(workspaceId, [...writeRoles], request);
     const { data, error } = await supabase
       .from("customers")
       .update({ status: "archived" } as never)

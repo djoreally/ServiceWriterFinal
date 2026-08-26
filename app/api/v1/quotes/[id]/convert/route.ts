@@ -37,7 +37,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   try {
     const quoteId = quoteIdSchema.parse((await context.params).id);
     const body = conversionRequestSchema.parse(await request.json());
-    const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor"]);
+    const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor"], request);
     const { data, error } = await supabase.rpc("convert_quote_to_service_record_v1", {
       p_workspace_id: body.workspace_id,
       p_quote_id: quoteId,

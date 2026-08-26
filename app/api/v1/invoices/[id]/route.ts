@@ -102,7 +102,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   try {
     const id = z.string().uuid().parse((await context.params).id);
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
-    const { supabase } = await requireWorkspaceMember(workspaceId);
+    const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
     const { data, error } = await supabase
       .from("invoices")
       .select("*, invoice_lines(*), customers(id,first_name,last_name,company_name,email,phone,address_line1,address_line2,city,region,postal_code,metadata), vehicles(id,year,make,model,vin,license_plate)")
@@ -121,7 +121,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const id = z.string().uuid().parse((await context.params).id);
     const body = patchSchema.parse(await request.json());
     const normalizedStatus = canonicalStatus(body.status);
-    const { supabase } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"]);
+    const { supabase } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"], request);
 
     const { data: current, error: currentError } = await supabase
       .from("invoices")
@@ -188,7 +188,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   try {
     const id = z.string().uuid().parse((await context.params).id);
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
-    const { supabase } = await requireWorkspaceMember(workspaceId, ["owner", "admin", "manager"]);
+    const { supabase } = await requireWorkspaceMember(workspaceId, ["owner", "admin", "manager"], request);
     const { data, error } = await supabase
       .from("invoices")
       .update({ status: "void" })

@@ -31,7 +31,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   try {
     const id = idSchema.parse((await context.params).id);
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
-    const { supabase } = await requireWorkspaceMember(workspaceId);
+    const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
     const { data, error } = await supabase.from("service_records").select("*").eq("workspace_id", workspaceId).eq("id", id).single();
     if (error) throw error;
     return json({ data });
@@ -42,7 +42,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   try {
     const id = idSchema.parse((await context.params).id);
     const body = updateSchema.parse(await request.json());
-    const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician"]);
+    const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician"], request);
     const { workspace_id, ...updates } = body;
 
     if (updates.customer_id) {
@@ -70,7 +70,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   try {
     const id = idSchema.parse((await context.params).id);
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
-    const { supabase, user } = await requireWorkspaceMember(workspaceId, ["owner", "admin", "manager", "service_advisor"]);
+    const { supabase, user } = await requireWorkspaceMember(workspaceId, ["owner", "admin", "manager", "service_advisor"], request);
 
     const { data: current, error: currentError } = await supabase
       .from("service_records")
