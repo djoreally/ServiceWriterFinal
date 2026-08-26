@@ -1,0 +1,226 @@
+[
+  {
+    "route": "/",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/"
+  },
+  {
+    "route": "/how-it-works",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/how-it-works"
+  },
+  {
+    "route": "/features-guide",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/features-guide"
+  },
+  {
+    "route": "/pricing",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/pricing"
+  },
+  {
+    "route": "/find-provider",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/find-provider"
+  },
+  {
+    "route": "/faqs",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/faqs"
+  },
+  {
+    "route": "/contact",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/contact"
+  },
+  {
+    "route": "/about",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/about"
+  },
+  {
+    "route": "/advertising-network",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/advertising-network"
+  },
+  {
+    "route": "/partner-program",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/partner-program"
+  },
+  {
+    "route": "/white-glove-onboarding",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/white-glove-onboarding"
+  },
+  {
+    "route": "/blog",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/blog"
+  },
+  {
+    "route": "/blog/all-features-showcase",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/blog/all-features-showcase"
+  },
+  {
+    "route": "/insights",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/insights"
+  },
+  {
+    "route": "/careers",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/careers"
+  },
+  {
+    "route": "/support",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/support"
+  },
+  {
+    "route": "/knowledge-base",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/knowledge-base"
+  },
+  {
+    "route": "/privacy-policy",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/privacy-policy"
+  },
+  {
+    "route": "/terms",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/terms"
+  },
+  {
+    "route": "/security",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/security"
+  },
+  {
+    "route": "/login",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/login"
+  },
+  {
+    "route": "/login/business",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/login/business"
+  },
+  {
+    "route": "/login/dispatch",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/login/dispatch"
+  },
+  {
+    "route": "/login/technician",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/login/technician"
+  },
+  {
+    "route": "/login/magic-link",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/login/magic-link"
+  },
+  {
+    "route": "/admin/login",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/admin/login"
+  },
+  {
+    "route": "/signup",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/signup"
+  },
+  {
+    "route": "/forgot-password",
+    "status": 200,
+    "title": "Service Writer - Auto Shop Management Software",
+    "h1": [],
+    "h2": [],
+    "final_url": "https://service-writer-final.vercel.app/forgot-password"
+  }
+]

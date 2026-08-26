@@ -54,7 +54,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const workspaceId = url.searchParams.get("workspace_id");
     if (!workspaceId) throw new Error("workspace_id is required");
-    const { supabase } = await requireWorkspaceMember(workspaceId);
+    const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
     const { limit, offset } = paginationSchema.parse(Object.fromEntries(url.searchParams));
     const { data, error } = await supabase
       .from("appointments")
@@ -72,7 +72,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = appointmentSchema.parse(await request.json());
-    const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher"]);
+    const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher"], request);
 
     const { data: conflicts, error: conflictError } = await supabase
       .from("appointments")
