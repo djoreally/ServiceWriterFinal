@@ -16,7 +16,7 @@ const admin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json", "access-control-allow-origin": "*" },
+        headers: { "content-type": "application/json", "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, x-client-info, apikey, content-type", "access-control-allow-methods": "POST, OPTIONS" },
   });
 
 function b64url(bytes: Uint8Array): string {
@@ -186,6 +186,7 @@ async function syncAppointment(userId: string, appointment: Record<string, unkno
 }
 
 async function handle(request: Request): Promise<Response> {
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, x-client-info, apikey, content-type", "access-control-allow-methods": "POST, OPTIONS" } });
   if (request.method !== "POST") return json({ error: "Method Not Allowed" }, 405);
   const user = await authenticatedUser(request);
   const body = await request.json().catch(() => ({})) as Record<string, unknown>;
