@@ -28,7 +28,7 @@ export async function GET(request: Request) {
     const { limit, offset } = paginationSchema.parse(Object.fromEntries(url.searchParams));
     const { data, error } = await supabase
       .from("work_orders")
-      .select("*,customers(id,first_name,last_name,email,phone),vehicles(id,year,make,model,license_plate),locations(id,name),work_order_assignments(user_id,assigned_at,unassigned_at)")
+      .select("*")
       .eq("workspace_id", workspaceId)
       .order("created_at", { ascending: false })
       .range(offset, offset + limit - 1);
