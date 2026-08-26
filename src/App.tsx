@@ -161,7 +161,6 @@ const KnowledgeBaseCategory = lazyRetry(() => import("./legacy-pages/KnowledgeBa
 const Tutorials = lazyRetry(() => import("./legacy-pages/Tutorials"));
 const WhatsNew = lazyRetry(() => import("./legacy-pages/WhatsNew"));
 const NotFound = lazyRetry(() => import("./legacy-pages/NotFound"));
-const BookingRedirect = lazyRetry(() => import("./legacy-pages/BookingRedirect"));
 const PublicSubscriptions = lazyRetry(() => import("./legacy-pages/PublicSubscriptions"));
 const PublicServices = lazyRetry(() => import("./legacy-pages/PublicServices"));
 const Reports = lazyRetry(() => import("./legacy-pages/Reports"));
@@ -541,8 +540,8 @@ export const AppRoutes = () => {
               {/* Public service and subscription signup */}
               <Route path="/public-services/:slug" element={<PublicServices />} />
               <Route path="/subscribe/:slug" element={<PublicSubscriptions />} />
-              {/* Legacy redirect for old /book/:slug URLs */}
-              <Route path="/book/:slug" element={<BookingRedirect />} />
+              {/* Keep canonical booking links inside this deployment. */}
+              <Route path="/book/:slug" element={<PublicBooking />} />
               <Route path="*" element={<NotFound />} />
             </>
           )}

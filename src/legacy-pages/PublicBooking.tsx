@@ -586,7 +586,7 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
       const profile = businessData[0];
 
       const { data: additionalSettings, error: additionalSettingsError } =
-        (await fetchPublicBusinessExtendedSettings(profile.user_id)) as { data: any | null; error: unknown };
+        (await fetchPublicBusinessExtendedSettings(slug)) as { data: any | null; error: unknown };
       if (additionalSettingsError) {
         console.warn("Public booking: extended settings query failed; using profile defaults.", additionalSettingsError);
       }
