@@ -8,9 +8,9 @@ const bodySchema = z.object({
   appointment_id: z.string().uuid(),
   email: z.string().trim().email().max(320),
   phone: z.string().trim().max(32).nullable().optional(),
-  transactional_sms_consent: z.boolean().default(false),
-  marketing_sms_consent: z.boolean().default(false),
-  marketing_email_consent: z.boolean().default(false),
+  transactional_sms_consent: z.boolean().optional(),
+  marketing_sms_consent: z.boolean().optional(),
+  marketing_email_consent: z.boolean().optional(),
   consent_texts: z.object({
     transactional_sms: z.string().max(4000),
     marketing_sms: z.string().max(4000),
@@ -55,7 +55,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       { channel: "sms", purpose: "transactional", granted: body.transactional_sms_consent, text: body.consent_texts?.transactional_sms },
       { channel: "sms", purpose: "marketing", granted: body.marketing_sms_consent, text: body.consent_texts?.marketing_sms },
       { channel: "email", purpose: "marketing", granted: body.marketing_email_consent, text: body.consent_texts?.marketing_email },
-    ];
+    ].filter((consent): consent is typeof consent & { granted: boolean } => typeof consent.granted === "boolean");
     for (const consent of consentRows) {
       const evidence = { appointment_id: appointment.id, consent_text: consent.text || null };
       const existing = await admin.from("messaging_consents")
