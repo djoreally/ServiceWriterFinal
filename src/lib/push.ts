@@ -1,61 +1,41 @@
-// Client-side helper for Web Push subscriptions
-// Usage: call registerForPush() after a user gesture (button click)
+/**
+ * Compatibility wrappers for the canonical PWA push registration flow.
+ *
+ * All registration is now handled by tech-push.ts, which obtains the public
+ * VAPID key from the same-origin endpoint and persists subscriptions through
+ * the authenticated Supabase client.
+ */
+import {
+  getPushRegistrationState,
+  registerTechPushDevice,
+  type PushRegistrationState,
+} from "@/lib/tech-push";
 
-const VAPID_PUBLIC = "REPLACE_WITH_VAPID_PUBLIC"; // replace with generated public key or use env to inject
+export type { PushRegistrationState };
+export { getPushRegistrationState };
 
 export async function registerServiceWorker(): Promise<ServiceWorkerRegistration | null> {
-  if (!('serviceWorker' in navigator)) return null;
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return null;
   try {
-    const reg = await navigator.serviceWorker.register('/sw.js');
-    return reg;
-  } catch (err) {
-    console.error('Failed to register service worker', err);
+    return await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+  } catch (error) {
+    console.error("[Push] Failed to register service worker", error);
     return null;
   }
-}
-
-export function urlBase64ToUint8Array(base64String: string) {
-  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const rawData = atob(base64);
-  const outputArray = new Uint8Array(rawData.length);
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i);
-  }
-  return outputArray;
 }
 
 export async function subscribeToPush(): Promise<PushSubscription | null> {
-  try {
-    const reg = await registerServiceWorker();
-    if (!reg) return null;
-
-    const permission = await Notification.requestPermission();
-    if (permission !== 'granted') return null;
-
-    const subscription = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC),
-    });
-
-    return subscription;
-  } catch (err) {
-    console.error('subscribeToPush failed', err);
-    return null;
-  }
+  const endpoint = await registerTechPushDevice();
+  if (!endpoint || typeof navigator === "undefined") return null;
+  const registration = await navigator.serviceWorker.ready;
+  return registration.pushManager.getSubscription();
 }
 
-export async function sendSubscriptionToServer(subscription: PushSubscription) {
-  try {
-    // POST to the register-push function
-    const res = await fetch('/.netlify/functions/register-push', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ subscription }),
-    });
-    return res.ok;
-  } catch (err) {
-    console.error('sendSubscriptionToServer failed', err);
-    return false;
-  }
+/**
+ * Retained for callers from the old API. The canonical registration function
+ * persists the subscription itself, so this is deliberately a no-op success
+ * for an already-created browser subscription.
+ */
+export async function sendSubscriptionToServer(subscription: PushSubscription): Promise<boolean> {
+  return Boolean(subscription?.endpoint);
 }

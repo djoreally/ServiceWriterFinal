@@ -7161,33 +7161,48 @@ export type Database = {
       in_app_notifications: {
         Row: {
           created_at: string
+          dedupe_key: string
+          dismissed_at: string | null
           id: string
           message: string
-          metadata: Json | null
-          read: boolean | null
+          metadata: Json
+          read: boolean
+          read_at: string | null
+          source_event_id: string | null
           title: string
           type: string
           user_id: string
+          workspace_id: string | null
         }
         Insert: {
           created_at?: string
+          dedupe_key?: string
+          dismissed_at?: string | null
           id?: string
           message: string
-          metadata?: Json | null
-          read?: boolean | null
+          metadata?: Json
+          read?: boolean
+          read_at?: string | null
+          source_event_id?: string | null
           title: string
           type: string
           user_id: string
+          workspace_id?: string | null
         }
         Update: {
           created_at?: string
+          dedupe_key?: string
+          dismissed_at?: string | null
           id?: string
           message?: string
-          metadata?: Json | null
-          read?: boolean | null
+          metadata?: Json
+          read?: boolean
+          read_at?: string | null
+          source_event_id?: string | null
           title?: string
           type?: string
           user_id?: string
+          workspace_id?: string | null
         }
         Relationships: []
       }
@@ -15121,11 +15136,12 @@ export type Database = {
           disabled_at: string | null
           endpoint: string
           id: string
-          last_success_at: string | null
+          last_seen_at: string
           p256dh: string
           updated_at: string
           user_agent: string | null
           user_id: string
+          workspace_id: string | null
         }
         Insert: {
           auth_key: string
@@ -15133,11 +15149,12 @@ export type Database = {
           disabled_at?: string | null
           endpoint: string
           id?: string
-          last_success_at?: string | null
+          last_seen_at?: string
           p256dh: string
           updated_at?: string
           user_agent?: string | null
           user_id: string
+          workspace_id?: string | null
         }
         Update: {
           auth_key?: string
@@ -15145,11 +15162,12 @@ export type Database = {
           disabled_at?: string | null
           endpoint?: string
           id?: string
-          last_success_at?: string | null
+          last_seen_at?: string
           p256dh?: string
           updated_at?: string
           user_agent?: string | null
           user_id?: string
+          workspace_id?: string | null
         }
         Relationships: []
       }

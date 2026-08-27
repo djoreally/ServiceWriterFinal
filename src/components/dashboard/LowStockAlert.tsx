@@ -38,7 +38,10 @@ export const LowStockAlert = () => {
           previouslyNotified.add(item.id);
           
           // Create in-app notification
-          await notifyLowInventory(item.name, item.quantity, item.low_stock_threshold);
+          await notifyLowInventory(item.name, item.quantity, item.low_stock_threshold, {
+            dedupeKey: `low_inventory:${item.id}:${new Date().toISOString().slice(0, 10)}`,
+            sourceEventId: `inventory:${item.id}:${new Date().toISOString().slice(0, 10)}`,
+          });
         }
       }
 

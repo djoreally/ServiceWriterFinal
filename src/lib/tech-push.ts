@@ -47,15 +47,20 @@ export async function registerTechPushDevice(): Promise<string | null> {
   const permission = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
   if (permission !== "granted") return null;
 
-  const registration = await navigator.serviceWorker.ready;
+  const registration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+  await registration.update().catch(() => undefined);
+  const readyRegistration = await navigator.serviceWorker.ready;
 
-  const { data, error } = await supabase.functions.invoke("send-tech-push", {
-    body: { action: "public_key" },
+  const publicKeyResponse = await fetch("/api/notifications/push/public-key", {
+    method: "GET",
+    credentials: "same-origin",
+    headers: { accept: "application/json" },
   });
-  const publicKey = (data as { publicKey?: string } | null)?.publicKey;
-  if (error || !publicKey) return null;
+  if (!publicKeyResponse.ok) return null;
+  const { publicKey } = await publicKeyResponse.json() as { publicKey?: string };
+  if (!publicKey) return null;
 
-  let subscription = await registration.pushManager.getSubscription();
+  let subscription = await readyRegistration.pushManager.getSubscription();
   if (subscription && arrayBufferToBase64Url(subscription.options.applicationServerKey ?? null) !== publicKey) {
     // Key rotated: drop the stale subscription so the device is not silently unreachable.
     await subscription.unsubscribe();
@@ -63,7 +68,7 @@ export async function registerTechPushDevice(): Promise<string | null> {
   }
 
   if (!subscription) {
-    subscription = await registration.pushManager.subscribe({
+    subscription = await readyRegistration.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: urlBase64ToUint8Array(publicKey) as unknown as BufferSource,
     });

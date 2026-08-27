@@ -7,6 +7,10 @@
     {
       "path": "/api/internal/lifecycle/outbox",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/internal/notifications/push/outbox",
+      "schedule": "* * * * *"
     }
   ]
 }

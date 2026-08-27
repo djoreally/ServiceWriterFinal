@@ -1,93 +1,78 @@
 /**
- * In-App Notification Creator
- * 
- * Utility function to create in-app notifications from the frontend.
- * Uses the authenticated user's session via the application command layer.
+ * Legacy-compatible notification helpers.
+ *
+ * New domain producers should pass `workspaceId` and an event-derived
+ * `dedupeKey`/`sourceEventId`. Without those fields, the command intentionally
+ * treats the call as a distinct manual notification.
  */
-
 import {
   createNotification,
+  type CreateNotificationParams,
   type NotificationType,
 } from "@/application/commands/notifications.command";
 
 export type { NotificationType };
 
-/**
- * Create a low inventory notification
- */
-export async function notifyLowInventory(itemName: string, quantity: number, threshold: number): Promise<boolean> {
+type ProducerOptions = Pick<CreateNotificationParams, "workspaceId" | "dedupeKey" | "sourceEventId">;
+
+export async function notifyLowInventory(
+  itemName: string,
+  quantity: number,
+  threshold: number,
+  options: ProducerOptions = {},
+): Promise<boolean> {
   return createNotification({
-    type: 'low_inventory',
-    title: '📦 Low Inventory Alert',
+    type: "low_inventory",
+    title: "Low inventory alert",
     message: `${itemName} is running low: ${quantity} remaining (threshold: ${threshold})`,
-    metadata: {
-      item_name: itemName,
-      quantity,
-      threshold,
-    },
+    metadata: { item_name: itemName, quantity, threshold },
+    ...options,
   });
 }
 
-/**
- * Create a new booking notification
- */
 export async function notifyNewBooking(
   customerName: string,
   serviceName: string,
-  scheduledDate: string
+  scheduledDate: string,
+  options: ProducerOptions = {},
 ): Promise<boolean> {
   return createNotification({
-    type: 'new_booking',
-    title: '🎉 New Booking!',
+    type: "new_booking",
+    title: "New booking",
     message: `${customerName} booked ${serviceName} for ${scheduledDate}`,
-    metadata: {
-      customer_name: customerName,
-      service_name: serviceName,
-      scheduled_date: scheduledDate,
-    },
+    metadata: { customer_name: customerName, service_name: serviceName, scheduled_date: scheduledDate },
+    ...options,
   });
 }
 
-/**
- * Create a payment received notification
- */
 export async function notifyPaymentReceived(
   customerName: string,
-  amount: string
+  amount: string,
+  options: ProducerOptions = {},
 ): Promise<boolean> {
   return createNotification({
-    type: 'payment_received',
-    title: '💰 Payment Received',
+    type: "payment_received",
+    title: "Payment received",
     message: `${amount} received from ${customerName}`,
-    metadata: {
-      customer_name: customerName,
-      amount,
-    },
+    metadata: { customer_name: customerName, amount },
+    ...options,
   });
 }
 
-/**
- * Create a booking update notification
- */
 export async function notifyBookingUpdate(
-  action: 'cancelled' | 'rescheduled' | 'completed',
+  action: "cancelled" | "rescheduled" | "completed",
   customerName: string,
-  serviceName?: string
+  serviceName?: string,
+  options: ProducerOptions = {},
 ): Promise<boolean> {
-  const actionEmoji = action === 'cancelled' ? '❌' : action === 'rescheduled' ? '📅' : '✅';
-  const actionText = action === 'cancelled' ? 'cancelled' : action === 'rescheduled' ? 'rescheduled' : 'completed';
-  
+  const actionText = action === "cancelled" ? "cancelled" : action === "rescheduled" ? "rescheduled" : "completed";
   return createNotification({
-    type: 'booking_update',
-    title: `${actionEmoji} Appointment ${actionText.charAt(0).toUpperCase() + actionText.slice(1)}`,
-    message: `${customerName}'s ${serviceName || 'appointment'} has been ${actionText}`,
-    metadata: {
-      action,
-      customer_name: customerName,
-      service_name: serviceName,
-    },
+    type: "booking_update",
+    title: `Appointment ${actionText}`,
+    message: `${customerName}'s ${serviceName || "appointment"} has been ${actionText}`,
+    metadata: { action, customer_name: customerName, service_name: serviceName ?? null },
+    ...options,
   });
 }
 
-// Re-export createNotification for direct use
 export { createNotification };

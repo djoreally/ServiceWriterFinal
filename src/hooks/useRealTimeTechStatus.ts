@@ -9,7 +9,6 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
-import { useAuth } from '@packages/auth';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/components/ui/sonner';
 import { 
@@ -29,7 +28,6 @@ import {
   type TechnicianOperationalStatus,
 } from '@/lib/dispatch-state';
 
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface TechOperationalState {
   technician_id: string;
   status: TechnicianOperationalStatus;
@@ -46,27 +44,8 @@ export interface RealTimeUpdate {
 }
 
 export function useRealTimeTechStatus(technician_id?: string) {
-  const { session } = useAuth();
-  const userId = session?.user?.id ?? null;
   const [state, setState] = useState<TechOperationalState | null>(null);
   const [loading, setLoading] = useState(true);
-  const [notifications, setNotifications] = useState<any[]>([]);
-
-  // ⚡ Fetch in-app notifications
-  const fetchNotifications = useCallback(async () => {
-    const { data: { user } } = await getCurrentAuthUser();
-    if (!user) return;
-
-    const { data } = await supabase
-      .from('in_app_notifications')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(10);
-
-    setNotifications(data || []);
-  }, []);
-
   // ⚡ Real-time subscription for dispatch events
   useEffect(() => {
     if (!technician_id) return;
@@ -115,27 +94,12 @@ export function useRealTimeTechStatus(technician_id?: string) {
       handleRealTimeUpdate({ type: 'status_sync', payload });
     });
 
-    if (userId) {
-      channel.on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'in_app_notifications',
-        filter: `user_id=eq.${userId}`,
-      }, (payload: any) => {
-        if (payload.new && typeof payload.new === 'object' && payload.new.type === 'job_assignment') {
-          console.info('⚡ Real-time notification:', payload);
-          toast.info(payload.new.title || 'New Notification', { description: payload.new.message });
-          fetchNotifications();
-        }
-      });
-    }
-
     channel.subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [technician_id, userId, fetchNotifications]);
+  }, [technician_id]);
 
   // ⚡ Fetch technician operational state
   const fetchTechState = useCallback(async () => {
@@ -200,8 +164,7 @@ export function useRealTimeTechStatus(technician_id?: string) {
 
   useEffect(() => {
     fetchTechState();
-    fetchNotifications();
-  }, [fetchTechState, fetchNotifications]);
+  }, [fetchTechState]);
 
   const handleRealTimeUpdate = (update: RealTimeUpdate) => {
     switch (update.type) {
@@ -275,7 +238,6 @@ export function useRealTimeTechStatus(technician_id?: string) {
   return {
     state,
     loading,
-    notifications,
     // Enterprise status transitions
     transitionToEnRoute,
     transitionToArrived,
@@ -287,6 +249,5 @@ export function useRealTimeTechStatus(technician_id?: string) {
     handleEndBreak,
     // Data refresh
     refetch: fetchTechState,
-    refetchNotifications: fetchNotifications,
   };
 }
