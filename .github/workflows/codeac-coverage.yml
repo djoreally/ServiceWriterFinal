@@ -1,0 +1,46 @@
+name: Codeac coverage
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests with LCOV coverage
+        run: npm test -- --coverage --coverageReporters=lcovonly --coverageReporters=text-summary
+
+      - name: Upload coverage to Codeac
+        if: ${{ secrets.CODEAC_REPOSITORY_TOKEN != '' }}
+        env:
+          CODEAC_REPOSITORY_TOKEN: ${{ secrets.CODEAC_REPOSITORY_TOKEN }}
+          CODEAC_COMMIT_SHA: ${{ github.sha }}
+          CODEAC_BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          test -s coverage/lcov.info
+          curl --fail --silent --show-error --retry 3 \
+            -X POST \
+            -H "x-repository-token: ${CODEAC_REPOSITORY_TOKEN}" \
+            --data-binary @coverage/lcov.info \
+            "https://api.codeac.io/v1/coverage/${CODEAC_COMMIT_SHA}?branch=${CODEAC_BRANCH}&language=JavaScript"
