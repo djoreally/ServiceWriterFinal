@@ -54,7 +54,7 @@ export function interpolate(value: string, variables: LifecycleVariables): strin
   return value.replace(VARIABLE_PATTERN, (_match, path: string) => valueFor(variables, path));
 }
 
-export const LIFECYCLE_TEMPLATES = {
+const BASE_LIFECYCLE_TEMPLATES = {
   "new_platform_subscriber_sequence.verify_your_email": { key: "new_platform_subscriber_sequence.verify_your_email", category: "1. New platform subscriber sequence", title: "Verify your email", subject: "Verify your Service Writer email", preview: "Confirm your email to activate your Service Writer account.", headline: "Verify your Service Writer email", body: "Hello,\n\nThis message concerns your Service Writer workspace. Confirm your email to activate your Service Writer account.\n\nHere is the information currently associated with this update: Verification link, expires {{verification.expiration}}. Please review it carefully, especially any date, time, amount, status, recipient, vehicle, or account detail that may affect what happens next. The information is shown using the local context configured for the relevant workspace whenever that information is available.\n\nThis message is part of the service record for the account or workspace identified above. Keeping these details available helps the right people understand what changed, what is expected next, and which record should be reviewed if questions arise. Review the workspace details and complete the next step when you are ready. If the primary action is no longer available, the record may have changed since this message was generated; open the latest record or contact the responsible team instead of relying on an outdated link.\n\nIf you need help configuring your business, your account settings and support resources are available from the dashboard. A member of the service team can clarify the scope, timing, account status, or next step without requiring you to disclose unnecessary sensitive information.\n\nThank you for your attention to this update. Service Writer helps keep the communication record clear, timely, and connected to the underlying service or account activity.", ctaLabel: "Confirm email", essentialInformation: "Verification link, expires {{verification.expiration}}", purpose: "transactional" },
   "new_platform_subscriber_sequence.welcome_to_service_writer": { key: "new_platform_subscriber_sequence.welcome_to_service_writer", category: "1. New platform subscriber sequence", title: "Welcome to Service Writer", subject: "Welcome to Service Writer", preview: "Your account is ready. Let’s finish the essential setup so your business can start accepting bookings.", headline: "Welcome to Service Writer", body: "Hello,\n\nThis message concerns your Service Writer workspace. Your account is ready. Let’s finish the essential setup so your business can start accepting bookings.\n\nHere is the information currently associated with this update: Workspace: {{workspace.name}}. Please review it carefully, especially any date, time, amount, status, recipient, vehicle, or account detail that may affect what happens next. The information is shown using the local context configured for the relevant workspace whenever that information is available.\n\nThis message is part of the service record for the account or workspace identified above. Keeping these details available helps the right people understand what changed, what is expected next, and which record should be reviewed if questions arise. Review the workspace details and complete the next step when you are ready. If the primary action is no longer available, the record may have changed since this message was generated; open the latest record or contact the responsible team instead of relying on an outdated link.\n\nIf you need help configuring your business, your account settings and support resources are available from the dashboard. A member of the service team can clarify the scope, timing, account status, or next step without requiring you to disclose unnecessary sensitive information.\n\nThank you for your attention to this update. Service Writer helps keep the communication record clear, timely, and connected to the underlying service or account activity.", ctaLabel: "Open dashboard", essentialInformation: "Workspace: {{workspace.name}}", purpose: "transactional" },
   "new_platform_subscriber_sequence.finish_setting_up_your_business": { key: "new_platform_subscriber_sequence.finish_setting_up_your_business", category: "1. New platform subscriber sequence", title: "Finish setting up your business", subject: "Your business setup is waiting", preview: "You started setting up {{business.name}} but there are still a few steps to complete before your workspace is ready.", headline: "Your business setup is waiting", body: "Hello,\n\nThis message concerns your Service Writer workspace. You started setting up {{business.name}} but there are still a few steps to complete before your workspace is ready.\n\nHere is the information currently associated with this update: Setup progress: {{onboarding.progress}}. Please review it carefully, especially any date, time, amount, status, recipient, vehicle, or account detail that may affect what happens next. The information is shown using the local context configured for the relevant workspace whenever that information is available.\n\nThis message is part of the service record for the account or workspace identified above. Keeping these details available helps the right people understand what changed, what is expected next, and which record should be reviewed if questions arise. Review the workspace details and complete the next step when you are ready. If the primary action is no longer available, the record may have changed since this message was generated; open the latest record or contact the responsible team instead of relying on an outdated link.\n\nIf you need help configuring your business, your account settings and support resources are available from the dashboard. A member of the service team can clarify the scope, timing, account status, or next step without requiring you to disclose unnecessary sensitive information.\n\nThank you for your attention to this update. Service Writer helps keep the communication record clear, timely, and connected to the underlying service or account activity.", ctaLabel: "Continue setup", essentialInformation: "Setup progress: {{onboarding.progress}}", purpose: "transactional" },
@@ -230,12 +230,238 @@ export const LIFECYCLE_TEMPLATES = {
   "platform_owner_and_support_notifications.sms_delivery_failure": { key: "platform_owner_and_support_notifications.sms_delivery_failure", category: "12. Platform owner and support notifications", title: "SMS delivery failure", subject: "Transactional SMS delivery failed", preview: "A transactional SMS could not be delivered. Review the event, recipient, and provider response.", headline: "Transactional SMS delivery failed", body: "Hello,\n\nThis message concerns a Service Writer account, delivery, support, or platform event that may require review. A transactional SMS could not be delivered. Review the event, recipient, and provider response.\n\nHere is the information currently associated with this update: Recipient: {{delivery.recipient}} | Event: {{delivery.event}}. Please review it carefully, especially any date, time, amount, status, recipient, vehicle, or account detail that may affect what happens next. The information is shown using the local context configured for the relevant workspace whenever that information is available.\n\nThis message is part of the service record for the account or workspace identified above. Keeping these details available helps the right people understand what changed, what is expected next, and which record should be reviewed if questions arise. Review the information below and use the primary action to open the relevant record. If the primary action is no longer available, the record may have changed since this message was generated; open the latest record or contact the responsible team instead of relying on an outdated link.\n\nIf you need assistance, contact the appropriate Service Writer administrator or support contact through your approved channel. A member of the service team can clarify the scope, timing, account status, or next step without requiring you to disclose unnecessary sensitive information.\n\nThank you for your attention to this update. Service Writer helps keep the communication record clear, timely, and connected to the underlying service or account activity.", ctaLabel: "Review delivery event", essentialInformation: "Recipient: {{delivery.recipient}} | Event: {{delivery.event}}", purpose: "transactional" },
 } as const satisfies Record<string, LifecycleTemplate>;
 
+/**
+ * Launch-critical copy is kept here so it stays concise, audience-correct, and
+ * reviewable without editing the generated long-tail catalog. New events can
+ * be added here while the base catalog remains the stable inventory.
+ */
+const LIFECYCLE_TEMPLATE_OVERRIDES = {
+  "appointment_booking_sequence.booking_confirmation": {
+    key: "appointment_booking_sequence.booking_confirmation",
+    category: "3. Appointment booking sequence",
+    title: "Booking confirmation",
+    subject: "Your appointment with {{business.name}} is confirmed",
+    preview: "Your appointment is confirmed. Review the service, time, address, and confirmation code.",
+    headline: "Your appointment is confirmed",
+    body: "Hello,\n\n{{business.name}} has reserved your appointment. Review the details below and keep this email for your records.\n\nIf anything is incorrect or your plans change, use the appointment link or reply to this email before the scheduled time.",
+    ctaLabel: "Manage appointment",
+    essentialInformation: "Service: {{appointment.service}} | Date: {{appointment.date}} at {{appointment.time}} {{business.timezone}} | Vehicle: {{vehicle.description}} | Address: {{appointment.address}} | Estimate: {{appointment.total}} | Payment: {{appointment.payment_method}} | Confirmation: {{appointment.confirmation_code}}",
+    purpose: "appointment_update",
+  },
+  "quotes_and_service_authorization.quote_approved": {
+    key: "quotes_and_service_authorization.quote_approved",
+    category: "6. Quotes and service authorization",
+    title: "Quote approved",
+    subject: "We received your approval for quote {{quote.number}}",
+    preview: "Your approval was recorded and {{business.name}} can prepare the next step.",
+    headline: "Your quote is approved",
+    body: "Hello,\n\nWe recorded your approval for quote {{quote.number}}. {{business.name}} can now prepare the authorized work and contact you if scheduling or payment is needed.\n\nReply to this email if you approved by mistake or need to discuss the scope before work begins.",
+    ctaLabel: "View approved quote",
+    essentialInformation: "Quote: {{quote.number}} | Total: {{quote.total}} | Status: Approved",
+    purpose: "payment_request",
+  },
+  "quotes_and_service_authorization.quote_declined": {
+    key: "quotes_and_service_authorization.quote_declined",
+    category: "6. Quotes and service authorization",
+    title: "Quote declined",
+    subject: "We received your response to quote {{quote.number}}",
+    preview: "Your decision was recorded. No work from this quote will be authorized from this response.",
+    headline: "Your response is recorded",
+    body: "Hello,\n\nWe recorded your decision to decline quote {{quote.number}}. {{business.name}} will not treat the quoted work as authorized from this response.\n\nReply to this email if you declined by mistake or want to discuss another service option.",
+    ctaLabel: "View quote",
+    essentialInformation: "Quote: {{quote.number}} | Total: {{quote.total}} | Status: Declined",
+    purpose: "payment_request",
+  },
+  "quotes_and_service_authorization.quote_approved_staff": {
+    key: "quotes_and_service_authorization.quote_approved_staff",
+    category: "6. Quotes and service authorization",
+    title: "Customer approved quote",
+    subject: "{{customer.full_name}} approved quote {{quote.number}}",
+    preview: "The customer approved the quote. Review it and continue the service workflow.",
+    headline: "Customer approved quote {{quote.number}}",
+    body: "Hello,\n\n{{customer.full_name}} approved the quoted work. Review the authorization record before scheduling work, collecting a deposit, or changing the job scope.",
+    ctaLabel: "Open quote",
+    essentialInformation: "Customer: {{customer.full_name}} | Quote: {{quote.number}} | Total: {{quote.total}} | Status: Approved",
+    purpose: "transactional",
+  },
+  "quotes_and_service_authorization.quote_declined_staff": {
+    key: "quotes_and_service_authorization.quote_declined_staff",
+    category: "6. Quotes and service authorization",
+    title: "Customer declined quote",
+    subject: "{{customer.full_name}} declined quote {{quote.number}}",
+    preview: "The customer declined the quote. Review the response before following up.",
+    headline: "Customer declined quote {{quote.number}}",
+    body: "Hello,\n\n{{customer.full_name}} declined the quoted work. Do not treat the quote as authorized. Review the response before offering another option or contacting the customer.",
+    ctaLabel: "Open quote",
+    essentialInformation: "Customer: {{customer.full_name}} | Quote: {{quote.number}} | Total: {{quote.total}} | Status: Declined",
+    purpose: "transactional",
+  },
+  "invoice_and_payment_sequence.invoice_created": {
+    key: "invoice_and_payment_sequence.invoice_created",
+    category: "7. Invoice and payment sequence",
+    title: "Invoice issued",
+    subject: "Invoice {{invoice.number}} from {{business.name}}",
+    preview: "Your invoice is ready. Review the total, due date, and secure payment options.",
+    headline: "Your invoice is ready",
+    body: "Hello,\n\n{{business.name}} issued invoice {{invoice.number}}. Review the services and amount before paying.\n\nFor billing questions, reply to this email. Never send a full card number, password, or authentication code by email.",
+    ctaLabel: "View invoice",
+    essentialInformation: "Invoice: {{invoice.number}} | Total: {{invoice.total}} | Due: {{invoice.due_at}}",
+    purpose: "payment_request",
+  },
+  "invoice_and_payment_sequence.payment_requested": {
+    key: "invoice_and_payment_sequence.payment_requested",
+    category: "7. Invoice and payment sequence",
+    title: "Payment requested",
+    subject: "Payment requested for invoice {{invoice.number}}",
+    preview: "A balance is ready for payment through the secure invoice page.",
+    headline: "Payment is requested",
+    body: "Hello,\n\nA balance is ready for payment to {{business.name}}. Review the invoice before using the secure payment page.\n\nFor billing questions, reply to this email. Never send payment credentials by email.",
+    ctaLabel: "Pay invoice",
+    essentialInformation: "Invoice: {{invoice.number}} | Balance due: {{invoice.balance}} | Due: {{invoice.due_at}}",
+    purpose: "payment_request",
+  },
+  "invoice_and_payment_sequence.payment_receipt": {
+    key: "invoice_and_payment_sequence.payment_receipt",
+    category: "7. Invoice and payment sequence",
+    title: "Payment receipt",
+    subject: "Payment received by {{business.name}}",
+    preview: "Your payment was successful. Keep this email as your receipt.",
+    headline: "Thank you—your payment was received",
+    body: "Hello,\n\n{{business.name}} received your payment. Keep this message with your service records.\n\nReply to this email if the amount or transaction reference does not match your records.",
+    ctaLabel: "View receipt",
+    essentialInformation: "Amount paid: {{payment.amount}} | Receipt: {{payment.receipt_number}} | Date: {{payment.date}}",
+    purpose: "transactional",
+  },
+  "invoice_and_payment_sequence.payment_received": {
+    key: "invoice_and_payment_sequence.payment_received",
+    category: "7. Invoice and payment sequence",
+    title: "Invoice paid",
+    subject: "Invoice {{invoice.number}} is paid",
+    preview: "The invoice balance was marked paid. Keep this email with your records.",
+    headline: "Your invoice is paid",
+    body: "Hello,\n\n{{business.name}} recorded invoice {{invoice.number}} as paid. Keep this message with your service records.\n\nReply to this email if the invoice status does not match your records.",
+    ctaLabel: "View invoice",
+    essentialInformation: "Invoice: {{invoice.number}} | Amount: {{payment.amount}} | Status: Paid",
+    purpose: "transactional",
+  },
+  "invoice_and_payment_sequence.payment_failed": {
+    key: "invoice_and_payment_sequence.payment_failed",
+    category: "7. Invoice and payment sequence",
+    title: "Payment failed",
+    subject: "Your payment to {{business.name}} did not go through",
+    preview: "The payment could not be completed. Review the payment method or try again securely.",
+    headline: "Your payment did not go through",
+    body: "Hello,\n\nThe payment attempt was not completed. No successful payment was recorded for this attempt.\n\nUse the secure payment page to try again or reply to {{business.name}} for help. Never send payment credentials by email.",
+    ctaLabel: "Retry payment",
+    essentialInformation: "Amount: {{payment.amount}} | Invoice: {{invoice.number}} | Status: Failed",
+    purpose: "payment_request",
+  },
+  "invoice_and_payment_sequence.refund_issued": {
+    key: "invoice_and_payment_sequence.refund_issued",
+    category: "7. Invoice and payment sequence",
+    title: "Refund issued",
+    subject: "Your refund from {{business.name}} was issued",
+    preview: "The refund was submitted. Your bank determines when it appears in your account.",
+    headline: "Your refund was issued",
+    body: "Hello,\n\n{{business.name}} submitted your refund. Your bank or card provider determines when the funds appear.\n\nReply to this email if the refund details do not match your records.",
+    ctaLabel: "View refund",
+    essentialInformation: "Refund: {{refund.amount}} | Reference: {{refund.reference}}",
+    purpose: "transactional",
+  },
+  "service_completion_and_follow_up.review_and_satisfaction_request": {
+    key: "service_completion_and_follow_up.review_and_satisfaction_request",
+    category: "8. Service completion and follow-up",
+    title: "Review and satisfaction request",
+    subject: "How did your service with {{business.name}} go?",
+    preview: "Share feedback about your recent service experience.",
+    headline: "How did your service go?",
+    body: "Hello,\n\nWe would appreciate your feedback about your recent service with {{business.name}}. If something is not right, reply to this email so the team can help before you leave a public review.",
+    ctaLabel: "Share feedback",
+    essentialInformation: "Appointment: {{appointment.confirmation_code}}",
+    purpose: "marketing",
+  },
+  "appointment_booking_sequence.new_appointment_booked": {
+    key: "appointment_booking_sequence.new_appointment_booked",
+    category: "3. Appointment booking sequence",
+    title: "New appointment booked",
+    subject: "New appointment: {{customer.full_name}} on {{appointment.date}}",
+    preview: "A new appointment was booked and is ready for your team to review.",
+    headline: "A new appointment was booked",
+    body: "Hello,\n\nA customer completed the public booking flow. Review the appointment, confirm staffing, and contact the customer if anything needs clarification.",
+    ctaLabel: "Open appointment",
+    essentialInformation: "Customer: {{customer.full_name}} | Service: {{appointment.service}} | Date: {{appointment.date}} at {{appointment.time}} {{business.timezone}}",
+    purpose: "transactional",
+  },
+  "staff_onboarding_and_account_management.you_ve_been_invited": {
+    key: "staff_onboarding_and_account_management.you_ve_been_invited",
+    category: "10. Staff onboarding and account management",
+    title: "Workspace invitation",
+    subject: "You’re invited to join {{workspace.name}}",
+    preview: "Accept the invitation to join the workspace with the assigned role.",
+    headline: "You’re invited to {{workspace.name}}",
+    body: "Hello,\n\nA workspace administrator invited you to join {{workspace.name}} in Service Writer. Use the secure invitation link below to accept.\n\nIf you were not expecting this invitation, do not accept it and contact the workspace administrator.",
+    ctaLabel: "Accept invitation",
+    essentialInformation: "Workspace: {{workspace.name}} | Role: {{staff.role}}",
+    purpose: "authentication",
+  },
+} as const satisfies Record<string, LifecycleTemplate>;
+
+export const LIFECYCLE_TEMPLATES = {
+  ...BASE_LIFECYCLE_TEMPLATES,
+  ...LIFECYCLE_TEMPLATE_OVERRIDES,
+} as const satisfies Record<string, LifecycleTemplate>;
+
+const MARKETING_TEMPLATE_KEYS = new Set<string>([
+  "service_completion_and_follow_up.maintenance_recommendations",
+  "service_completion_and_follow_up.next_service_due",
+  "service_completion_and_follow_up.upcoming_maintenance_reminder",
+  "service_completion_and_follow_up.schedule_your_next_service",
+  "service_completion_and_follow_up.maintenance_is_overdue",
+  "service_completion_and_follow_up.final_service_reminder",
+  "vehicle_maintenance_lifecycle.oil_change_due_soon",
+  "vehicle_maintenance_lifecycle.oil_change_overdue",
+  "vehicle_maintenance_lifecycle.inspection_due",
+  "vehicle_maintenance_lifecycle.registration_reminder",
+  "vehicle_maintenance_lifecycle.tire_rotation_due",
+  "vehicle_maintenance_lifecycle.brake_service_recommended",
+  "vehicle_maintenance_lifecycle.battery_replacement_recommended",
+  "vehicle_maintenance_lifecycle.filter_replacement_due",
+  "vehicle_maintenance_lifecycle.recall_or_safety_notice",
+]);
+
 export type LifecycleTemplateKey = keyof typeof LIFECYCLE_TEMPLATES;
 
 export function getLifecycleTemplate(key: string): LifecycleTemplate {
   const template = LIFECYCLE_TEMPLATES[key as LifecycleTemplateKey];
   if (!template) throw new Error(`Unknown lifecycle email template: ${key}`);
-  return template;
+  return MARKETING_TEMPLATE_KEYS.has(key) ? { ...template, purpose: "marketing" } : template;
+}
+
+function greetingFor(variables: LifecycleVariables): string {
+  const recipientName = variables["email.recipient_name"] || variables["customer.first_name"];
+  if (typeof recipientName === "string" && recipientName.trim()) {
+    return `Hello ${recipientName.trim().split(/\s+/)[0]},`;
+  }
+  const role = String(variables["email.recipient_role"] || "customer");
+  return role === "customer" ? "Hello," : "Hello team,";
+}
+
+function personalizeBody(body: string, variables: LifecycleVariables): string {
+  return body.replace(/^Hello,/, greetingFor(variables));
+}
+
+function renderParagraphs(body: string): string {
+  return body
+    .split(/\n\s*\n/)
+    .map((paragraph) => `<p style="margin:0 0 16px;font-size:16px;line-height:1.6">${escapeHtml(paragraph).replace(/\n/g, "<br>")}</p>`)
+    .join("");
+}
+
+function renderDetails(essentialInformation: string): string {
+  return essentialInformation
+    .split(/\s*\|\s*/)
+    .map((item) => `<div style="padding:5px 0">${escapeHtml(item)}</div>`)
+    .join("");
 }
 
 export function renderLifecycleEmail(key: string, variables: LifecycleVariables): {
@@ -251,18 +477,31 @@ export function renderLifecycleEmail(key: string, variables: LifecycleVariables)
   const missing = requiredVariables(template).filter((path) => valueFor(variables, path).startsWith("{{"));
   const missingActionUrl = valueFor(variables, "email.primary_action_url").startsWith("{{");
   if (missingActionUrl) missing.push("email.primary_action_url");
+  const missingPreferenceUrl = template.purpose === "marketing" && valueFor(variables, "email.preferences_url").startsWith("{{");
+  if (missingPreferenceUrl) missing.push("email.preferences_url");
   if (missing.length) throw new Error(`Lifecycle template ${template.key} is missing required variables: ${[...new Set(missing)].join(", ")}`);
 
   const subject = interpolate(template.subject, variables);
   const preview = interpolate(template.preview, variables);
   const headline = interpolate(template.headline, variables);
-  const body = interpolate(template.body, variables);
+  const body = personalizeBody(interpolate(template.body, variables), variables);
   const essentialInformation = interpolate(template.essentialInformation, variables);
   const ctaUrl = valueFor(variables, "email.primary_action_url");
   const cta = `${template.ctaLabel}: ${ctaUrl}`;
-  const help = "Need help? Reply to this email or open your Service Writer workspace.";
-  const text = [headline, "", body, "", essentialInformation, "", cta, "", help, "", "Powered by Service Writer."].join("\n");
-  const html = `<!doctype html><html lang="en"><body style="margin:0;background:#f5f7fb;color:#172033;font-family:Arial,Helvetica,sans-serif"><div style="display:none;max-height:0;overflow:hidden;opacity:0">${escapeHtml(preview)}</div><main style="max-width:600px;margin:0 auto;padding:28px 16px"><section style="background:#ffffff;border:1px solid #e4e8f0;border-radius:16px;overflow:hidden"><header style="background:#172033;padding:22px 24px;color:#ffffff;font-size:20px;font-weight:700">Service Writer</header><article style="padding:28px 24px"><p style="margin:0 0 10px;color:#687386;font-size:14px">${escapeHtml(template.title)}</p><h1 style="margin:0 0 18px;font-size:26px;line-height:1.2">${escapeHtml(headline)}</h1><p style="font-size:16px;line-height:1.6">${escapeHtml(body)}</p><div style="margin:22px 0;padding:16px;border-radius:10px;background:#f5f7fb;font-size:14px;line-height:1.6">${escapeHtml(essentialInformation)}</div><p><a href="${escapeHtml(ctaUrl)}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;padding:12px 18px;font-weight:700">${escapeHtml(template.ctaLabel)}</a></p><p style="margin:24px 0 0;color:#687386;font-size:13px;line-height:1.5">${escapeHtml(help)}</p></article><footer style="border-top:1px solid #e4e8f0;padding:18px 24px;color:#687386;font-size:12px">Powered by Service Writer.</footer></section></main></body></html>`;
+  const businessName = typeof variables["business.name"] === "string" && variables["business.name"].trim()
+    ? variables["business.name"].trim()
+    : "Service Writer";
+  const recipientRole = String(variables["email.recipient_role"] || "customer");
+  const help = recipientRole === "customer"
+    ? `Need help? Reply to this email or contact ${businessName}.`
+    : "Need help? Reply to this email or open the Service Writer workspace.";
+  const preferencesUrl = template.purpose === "marketing" ? valueFor(variables, "email.preferences_url") : null;
+  const preferencesText = preferencesUrl ? `Manage email preferences or unsubscribe: ${preferencesUrl}` : null;
+  const text = [headline, "", body, "", essentialInformation, "", cta, "", help, preferencesText ? "" : null, preferencesText, "", "Powered by Service Writer."].filter((value) => value !== null).join("\n");
+  const preferencesHtml = preferencesUrl
+    ? `<p style="margin:14px 0 0;color:#687386;font-size:12px;line-height:1.5"><a href="${escapeHtml(preferencesUrl)}" style="color:#475569">Manage email preferences or unsubscribe</a></p>`
+    : "";
+  const html = `<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"></head><body style="margin:0;background:#f5f7fb;color:#172033;font-family:Arial,Helvetica,sans-serif"><div style="display:none;max-height:0;overflow:hidden;opacity:0">${escapeHtml(preview)}</div><main style="max-width:600px;margin:0 auto;padding:28px 16px"><section style="background:#ffffff;border:1px solid #e4e8f0;border-radius:16px;overflow:hidden"><header style="background:#172033;padding:20px 24px;color:#ffffff"><div style="font-size:20px;font-weight:700">${escapeHtml(businessName)}</div><div style="margin-top:4px;color:#cbd5e1;font-size:12px">Powered by Service Writer</div></header><article style="padding:28px 24px"><p style="margin:0 0 10px;color:#687386;font-size:13px;text-transform:uppercase;letter-spacing:.04em">${escapeHtml(template.title)}</p><h1 style="margin:0 0 20px;font-size:26px;line-height:1.2">${escapeHtml(headline)}</h1>${renderParagraphs(body)}<div style="margin:22px 0;padding:14px 16px;border-radius:10px;background:#f5f7fb;font-size:14px;line-height:1.5">${renderDetails(essentialInformation)}</div><p style="margin:0"><a href="${escapeHtml(ctaUrl)}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;padding:12px 18px;font-weight:700">${escapeHtml(template.ctaLabel)}</a></p><p style="margin:24px 0 0;color:#687386;font-size:13px;line-height:1.5">${escapeHtml(help)}</p>${preferencesHtml}</article><footer style="border-top:1px solid #e4e8f0;padding:18px 24px;color:#687386;font-size:12px">Sent by ${escapeHtml(businessName)} using Service Writer.</footer></section></main></body></html>`;
   return { templateKey: template.key, subject, preview, body, text, html, purpose: template.purpose };
 }
 

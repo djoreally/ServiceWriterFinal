@@ -51,7 +51,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       }
       if (user.email) {
         await dispatchQuoteLifecycle({
-          eventKey: body.status === "approved" ? LIFECYCLE_EVENT_KEYS.quoteApproved : LIFECYCLE_EVENT_KEYS.quoteDeclined,
+          eventKey: body.status === "approved" ? LIFECYCLE_EVENT_KEYS.quoteApprovedStaff : LIFECYCLE_EVENT_KEYS.quoteDeclinedStaff,
           eventId: `${quoteId}:staff:${body.status}:${updated.updated_at}`,
           quote: { ...updated, customer_email: customer.email, customer_name: customerName },
           workspaceName: workspace?.name ?? "Service Writer",

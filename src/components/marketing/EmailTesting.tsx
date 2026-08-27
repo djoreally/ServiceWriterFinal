@@ -178,7 +178,7 @@ export const EmailTesting = () => {
         setTestResult({ success: false, message: data.error || "Email sending failed", error: data.error });
         toast.error(`Test failed: ${data.error}`);
       } else {
-        setTestResult({ success: true, message: `Test email sent to ${testEmail}`, provider: data?.provider || "resend" });
+        setTestResult({ success: true, message: `Test email sent to ${testEmail}`, provider: data?.provider || "enginemailer" });
         toast.success("Test email sent! Check your inbox.");
       }
     } catch (err) {

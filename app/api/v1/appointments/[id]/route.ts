@@ -1,4 +1,6 @@
 import { errorResponse, json, requireWorkspaceMember } from "@/server/api";
+import { dispatchAppointmentLifecycle } from "@/server/messaging/appointment-events";
+import { LIFECYCLE_EVENT_KEYS } from "@/server/messaging/lifecycle-events";
 import { z } from "zod";
 
 const patchSchema = z.object({
@@ -73,7 +75,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     const { data: current, error: currentError } = await supabase
       .from("appointments")
-      .select("id, starts_at, ends_at, metadata")
+      .select("id,workspace_id,customer_id,starts_at,ends_at,status,assigned_user_id,metadata")
       .eq("id", id)
       .eq("workspace_id", workspace_id)
       .single();
@@ -136,9 +138,35 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       .update(canonicalPatch as any)
       .eq("id", id)
       .eq("workspace_id", workspace_id)
-      .select()
+      .select("id,workspace_id,customer_id,starts_at,ends_at,status,assigned_user_id,notes,metadata,updated_at,customers(id,first_name,last_name,email),vehicles(id,year,make,model)")
       .single();
     if (error) throw error;
+    try {
+      const { data: workspace } = await supabase.from("workspaces").select("name,timezone").eq("id", workspace_id).single();
+      const metadata = data.metadata && typeof data.metadata === "object" && !Array.isArray(data.metadata)
+        ? data.metadata as Record<string, unknown>
+        : {};
+      const customerUrl = typeof metadata.manage_url === "string" && /^https?:\/\//i.test(metadata.manage_url)
+        ? metadata.manage_url
+        : new URL("/my-bookings", request.url).toString();
+      const changedFields = Object.keys(body).filter((key) => key !== "workspace_id");
+      const eventKey = data.status === "cancelled" && current.status !== "cancelled"
+        ? LIFECYCLE_EVENT_KEYS.appointmentCancelled
+        : data.starts_at !== current.starts_at || data.ends_at !== current.ends_at
+          ? LIFECYCLE_EVENT_KEYS.appointmentRescheduled
+          : LIFECYCLE_EVENT_KEYS.bookingDetailsChanged;
+      await dispatchAppointmentLifecycle({
+        eventKey,
+        eventId: `${id}:${eventKey}:${data.updated_at}`,
+        appointment: data,
+        workspaceName: workspace?.name ?? "Service Writer",
+        workspaceTimezone: workspace?.timezone ?? "UTC",
+        actionUrl: customerUrl,
+        changedFields,
+      });
+    } catch (dispatchError) {
+      console.error("[Lifecycle] appointment update email enqueue failed", dispatchError);
+    }
     return json({ data });
   } catch (error) {
     return errorResponse(error);
@@ -155,9 +183,28 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
       .update({ status: "cancelled", updated_at: new Date().toISOString() })
       .eq("id", id)
       .eq("workspace_id", workspaceId)
-      .select()
+      .select("id,workspace_id,customer_id,starts_at,ends_at,status,notes,metadata,updated_at,customers(id,first_name,last_name,email),vehicles(id,year,make,model)")
       .single();
     if (error) throw error;
+    try {
+      const { data: workspace } = await supabase.from("workspaces").select("name,timezone").eq("id", workspaceId).single();
+      const metadata = data.metadata && typeof data.metadata === "object" && !Array.isArray(data.metadata)
+        ? data.metadata as Record<string, unknown>
+        : {};
+      const customerUrl = typeof metadata.manage_url === "string" && /^https?:\/\//i.test(metadata.manage_url)
+        ? metadata.manage_url
+        : new URL("/my-bookings", request.url).toString();
+      await dispatchAppointmentLifecycle({
+        eventKey: LIFECYCLE_EVENT_KEYS.appointmentCancelled,
+        eventId: `${id}:cancelled:${data.updated_at}`,
+        appointment: data,
+        workspaceName: workspace?.name ?? "Service Writer",
+        workspaceTimezone: workspace?.timezone ?? "UTC",
+        actionUrl: customerUrl,
+      });
+    } catch (dispatchError) {
+      console.error("[Lifecycle] appointment cancellation email enqueue failed", dispatchError);
+    }
     return json({ data });
   } catch (error) {
     return errorResponse(error);

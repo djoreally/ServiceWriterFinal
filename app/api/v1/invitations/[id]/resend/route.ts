@@ -33,7 +33,7 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
       return json({ data, delivery: { status: "accepted", provider: result.providerName, provider_message_id: result.providerMessageId }, ...(exposeToken ? { token } : {}) });
     } catch (deliveryError) {
       const message = deliveryError instanceof Error ? deliveryError.message : "Invitation delivery failed";
-      await supabase.from("invitation_delivery_attempts").insert({ workspace_id: data.workspace_id, invitation_id: id, invited_email: data.invited_email, actor_user_id: user.id, provider: "resend", status: "failed" });
+      await supabase.from("invitation_delivery_attempts").insert({ workspace_id: data.workspace_id, invitation_id: id, invited_email: data.invited_email, actor_user_id: user.id, provider: "enginemailer", status: "failed" });
       return json({ data, delivery: { status: "failed", error: message } }, { status: 502 });
     }
   } catch (error) {

@@ -85,6 +85,11 @@ export async function POST(request: Request) {
         .eq("id", data.customer_id)
         .maybeSingle();
       if (customer?.email) {
+        const { data: workspace } = await supabase
+          .from("workspaces")
+          .select("name,timezone")
+          .eq("id", body.workspace_id)
+          .single();
         const eventKey = data.status === "succeeded"
           ? LIFECYCLE_EVENT_KEYS.paymentReceipt
           : LIFECYCLE_EVENT_KEYS.paymentFailed;
@@ -96,9 +101,9 @@ export async function POST(request: Request) {
             customer_email: customer.email,
             customer_name: [customer.first_name, customer.last_name].filter(Boolean).join(" "),
           },
-          workspaceName: String((data.metadata as Record<string, unknown> | null)?.workspace_name || "Service Writer workspace"),
-          workspaceTimezone: "UTC",
-          actionUrl: String((data.metadata as Record<string, unknown> | null)?.payment_url || `/payments/${data.id}`),
+          workspaceName: workspace?.name ?? "Service Writer",
+          workspaceTimezone: workspace?.timezone ?? "UTC",
+          actionUrl: new URL(String((data.metadata as Record<string, unknown> | null)?.payment_url || `/payments/${data.id}`), request.url).toString(),
         }).catch((dispatchError) => console.error("[Lifecycle] payment creation email failed", dispatchError));
       }
     }

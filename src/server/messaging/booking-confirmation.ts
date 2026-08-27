@@ -1,3 +1,4 @@
+import { createSupabaseAdminClient } from "@/lib/supabase";
 import { dispatchLifecycleEvent, LIFECYCLE_EVENT_KEYS } from "@/server/messaging/lifecycle-events";
 
 type AppointmentRow = {
@@ -51,33 +52,64 @@ export async function sendBookingConfirmation(input: {
   const configuredManageUrl = typeof metadata.manage_url === "string" && /^https?:\/\//i.test(metadata.manage_url) ? metadata.manage_url : null;
   const manageUrl = configuredManageUrl ?? input.actionUrl;
 
-  return dispatchLifecycleEvent({
+  const customerVariables = {
+    "business.name": input.workspaceName,
+    "business.timezone": input.workspaceTimezone,
+    "business.email": typeof metadata.business_email === "string" ? metadata.business_email : undefined,
+    "business.phone": typeof metadata.business_phone === "string" ? metadata.business_phone : undefined,
+    "customer.first_name": guestName.split(/\s+/)[0],
+    "customer.full_name": guestName,
+    "appointment.service": title,
+    "appointment.date": appointmentDateTime.date,
+    "appointment.time": appointmentDateTime.time,
+    "appointment.address": address,
+    "appointment.total": total,
+    "appointment.confirmation_code": confirmationCode,
+    "appointment.payment_method": paymentMethod,
+    "appointment.manage_url": manageUrl,
+    "vehicle.description": vehicleInfo,
+    "email.primary_action_url": manageUrl,
+  };
+  const customerResult = await dispatchLifecycleEvent({
     workspaceId: input.appointment.workspace_id,
     customerId: input.appointment.customer_id,
     recipientEmail: input.recipientEmail,
     recipientRole: "customer",
     templateKey: LIFECYCLE_EVENT_KEYS.bookingCreated,
     eventId: input.appointment.id,
-    variables: {
-      "business.name": input.workspaceName,
-      "business.timezone": input.workspaceTimezone,
-      "business.email": typeof metadata.business_email === "string" ? metadata.business_email : undefined,
-      "business.phone": typeof metadata.business_phone === "string" ? metadata.business_phone : undefined,
-      "customer.first_name": guestName.split(/\s+/)[0],
-      "customer.full_name": guestName,
-      "appointment.service": title,
-      "appointment.date": appointmentDateTime.date,
-      "appointment.time": appointmentDateTime.time,
-      "appointment.address": address,
-      "appointment.total": total,
-      "appointment.confirmation_code": confirmationCode,
-      "appointment.payment_method": paymentMethod,
-      "appointment.manage_url": manageUrl,
-      "vehicle.year": vehicleInfo,
-      "vehicle.make": "Not provided",
-      "vehicle.model": "Not provided",
-      "email.primary_action_url": manageUrl,
-    },
+    variables: customerVariables,
     metadata: { appointmentId: input.appointment.id },
   });
+
+  try {
+    const admin = createSupabaseAdminClient();
+    const workspace = await admin
+      .from("workspaces")
+      .select("created_by")
+      .eq("id", input.appointment.workspace_id)
+      .single();
+    const ownerId = workspace.data?.created_by;
+    const owner = ownerId ? await admin.auth.admin.getUserById(ownerId) : null;
+    const ownerEmail = owner?.data?.user?.email;
+    if (ownerEmail && ownerEmail.toLowerCase() !== input.recipientEmail.toLowerCase()) {
+      const staffUrl = new URL(`/appointments/${input.appointment.id}`, input.actionUrl).toString();
+      await dispatchLifecycleEvent({
+        workspaceId: input.appointment.workspace_id,
+        customerId: input.appointment.customer_id,
+        recipientEmail: ownerEmail,
+        recipientRole: "shop_owner",
+        templateKey: LIFECYCLE_EVENT_KEYS.newAppointmentBooked,
+        eventId: `${input.appointment.id}:shop-owner`,
+        variables: {
+          ...customerVariables,
+          "email.primary_action_url": staffUrl,
+        },
+        metadata: { appointmentId: input.appointment.id },
+      });
+    }
+  } catch (ownerNotificationError) {
+    console.error("[Lifecycle] shop-owner booking notification enqueue failed", ownerNotificationError);
+  }
+
+  return customerResult;
 }
