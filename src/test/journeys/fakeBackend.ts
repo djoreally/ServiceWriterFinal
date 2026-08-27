@@ -177,11 +177,12 @@ export class FakeBackend {
 
   private setupDefaultRpcHandlers() {
     this.rpcHandlers = {
-      book_appointment_safe: (args) => {
+      public_booking_book_appointment: (args) => {
         const id = `appt-${Date.now()}`;
         const newAppt = {
           id,
-          user_id: args.p_business_user_id,
+          user_id: "provider-1",
+          booking_slug: args.p_booking_slug,
           title: args.p_title,
           guest_name: args.p_guest_name,
           guest_email: args.p_guest_email,

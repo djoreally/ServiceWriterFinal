@@ -28,9 +28,14 @@ const REQUIRED_TABLES = [
 ] as const satisfies readonly PublicTables[];
 
 const REQUIRED_RPCS = [
-  "book_appointment_safe",
+  "public_booking_book_appointment",
+  "public_booking_upsert_customer",
+  "public_booking_upsert_vehicle",
+  "public_booking_save_configuration",
+  "public_booking_insert_services",
+  "public_booking_record_payment_intent_v2",
+  "public_booking_set_vehicle_tire_spec_v2",
   "auto_dispatch_public_booking_v1",
-  "record_public_booking_payment_intent_v1",
   "assign_dispatch_job_v1",
   "transfer_inventory_to_van",
   "decrement_inventory_quantity",

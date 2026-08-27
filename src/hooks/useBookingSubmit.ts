@@ -454,7 +454,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
       let customerId: string | null = null;
       try {
         const { data: upsertedId, error: upsertError } = await upsertBookingCustomer({
-          p_user_id: business.user_id,
+          p_booking_slug: slug || "",
           p_email: validationResult.data.email,
           p_name: validationResult.data.name,
           p_phone: validationResult.data.phone || null,
@@ -483,8 +483,8 @@ export function useBookingSubmit(deps: SubmitDeps) {
         if (!vehicle.year || !vehicle.make || !vehicle.model) continue;
         try {
           const { data: vehicleId, error: vehicleError } = await upsertBookingVehicle({
-            p_business_user_id: business.user_id,
-            p_customer_id: customerId,
+            p_booking_slug: slug || "",
+            p_customer_email: validationResult.data.email,
             p_year: parseInt(vehicle.year),
             p_make: vehicle.make,
             p_model: vehicle.model,
@@ -502,7 +502,8 @@ export function useBookingSubmit(deps: SubmitDeps) {
             // so the appointment carries the tire spec, not oil data.
             if (vehicle.tireSize) {
               const { error: tireError } = await setVehicleTireSpec({
-                p_business_user_id: business.user_id,
+                p_booking_slug: slug || "",
+                p_customer_email: validationResult.data.email,
                 p_vehicle_id: vehicleId,
                 p_tire_size: vehicle.tireSize,
                 p_tire_size_source: vehicle.tireSizeSource ?? "manual",
@@ -572,7 +573,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
 
       // Book appointment (atomic RPC)
       const { data: appointmentId, error: appointmentError } = await bookAppointmentSafe({
-        p_business_user_id: business.user_id,
+        p_booking_slug: slug || "",
         p_scheduled_date: format(selectedDate, "yyyy-MM-dd"),
         p_scheduled_time: selectedTime,
         p_duration_minutes: getTotalDuration(),
@@ -592,7 +593,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
       if (appointmentId && !appointmentError) {
         const { error: configurationError } = await saveAppointmentBookingConfiguration(
           appointmentId,
-          business.user_id,
+          slug || "",
           buildAppointmentBookingConfiguration(vehicles, vehicleServiceSelections),
         );
         if (configurationError) throw new Error(`Could not save vehicle service configuration: ${configurationError.message}`);
@@ -636,7 +637,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
           code === "42883" ||
           code === "PGRST202"
         ) {
-          console.error("[booking] backend rejected book_appointment_safe", { code, message, correlationId });
+          console.error("[booking] backend rejected secure public booking RPC", { code, message, correlationId });
           const friendly =
             "This shop's booking service is temporarily unavailable. Nothing was charged — please try again shortly or call the shop.";
           toast.error(friendly);
@@ -799,7 +800,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
 
         if (serviceItems.length > 0) {
           try {
-            await insertBookingAppointmentServices(appointmentId, serviceItems as BookingServiceItem[]);
+            await insertBookingAppointmentServices(appointmentId, slug || "", serviceItems as BookingServiceItem[]);
           } catch (err) {
             console.warn("[Booking] Failed to create appointment_services:", err);
           }
@@ -812,6 +813,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
           const { data: paymentRecord } = await insertBookingPaymentRecord({
             user_id: business.user_id,
             appointment_id: appointmentId,
+            booking_slug: slug || "",
             amount: Math.max(dollarsToCents(toDollars(getGrandTotal())) - rewardDiscountCents, 0),
             subtotal: Math.max(dollarsToCents(toDollars(getPreTaxTotal())) - rewardDiscountCents, 0),
             tax_amount: taxData ? dollarsToCents(toDollars(taxData.tax_amount)) : 0,

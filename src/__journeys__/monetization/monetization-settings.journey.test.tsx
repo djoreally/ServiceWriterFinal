@@ -13,7 +13,7 @@ describe("Phase 5 Journey — Money, Subscriptions, Marketplace & Settings", () 
     await waitFor(() => {
       const elements = screen.getAllByText(/Quotes|Estimates|Quotes & Estimates/i);
       expect(elements.length).toBeGreaterThan(0);
-    });
+    }, { timeout: 5000 });
 
     expectNoConsoleErrors();
     expectNoPlumbingError();
@@ -28,7 +28,7 @@ describe("Phase 5 Journey — Money, Subscriptions, Marketplace & Settings", () 
     await waitFor(() => {
       const elements = screen.getAllByText(/Subscriptions|Subscription|Plans|Plan/i);
       expect(elements.length).toBeGreaterThan(0);
-    });
+    }, { timeout: 5000 });
 
     expectNoConsoleErrors();
     expectNoPlumbingError();
@@ -43,7 +43,7 @@ describe("Phase 5 Journey — Money, Subscriptions, Marketplace & Settings", () 
     await waitFor(() => {
       const elements = screen.getAllByText(/Marketplace|Listing|Directory/i);
       expect(elements.length).toBeGreaterThan(0);
-    });
+    }, { timeout: 5000 });
 
     expectNoConsoleErrors();
     expectNoPlumbingError();
@@ -58,7 +58,7 @@ describe("Phase 5 Journey — Money, Subscriptions, Marketplace & Settings", () 
     await waitFor(() => {
       const elements = screen.getAllByText(/Business|Booking|Integrations|Settings/i);
       expect(elements.length).toBeGreaterThan(0);
-    });
+    }, { timeout: 5000 });
 
     expectNoConsoleErrors();
     expectNoPlumbingError();

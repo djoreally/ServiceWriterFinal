@@ -91,13 +91,13 @@ describe("coverage-critical persistence contracts", () => {
   });
 
   it("preserves vehicle-scoped booking persistence payloads", async () => {
-    await bookAppointmentSafe({ p_business_user_id: "provider-1", p_scheduled_date: "2026-08-20", p_scheduled_time: "10:00", p_duration_minutes: 90, p_title: "Two vehicles", p_guest_name: "Customer", p_guest_email: "customer@example.com", p_guest_phone: null, p_description: "Vehicle 1 oil; Vehicle 2 tires", p_notes: null, p_estimated_cost: 300, p_tax_amount: 24, p_service_catalog_id: null, p_vehicle_id: null });
-    expect(rpc).toHaveBeenCalledWith("book_appointment_safe", expect.objectContaining({ p_status: "confirmed", p_vehicle_id: null }));
+    await bookAppointmentSafe({ p_booking_slug: "provider-booking", p_scheduled_date: "2026-08-20", p_scheduled_time: "10:00", p_duration_minutes: 90, p_title: "Two vehicles", p_guest_name: "Customer", p_guest_email: "customer@example.com", p_guest_phone: null, p_description: "Vehicle 1 oil; Vehicle 2 tires", p_notes: null, p_estimated_cost: 300, p_tax_amount: 24, p_service_catalog_id: null, p_vehicle_id: null });
+    expect(rpc).toHaveBeenCalledWith("public_booking_book_appointment", expect.objectContaining({ p_status: "confirmed", p_vehicle_id: null }));
     const configuration = { version: 1, vehicles: [{ clientVehicleId: "vehicle-1", services: [{ id: "oil", name: "Oil", price: 90, quantity: 1 }] }, { clientVehicleId: "vehicle-2", services: [{ id: "tires", name: "Tires", price: 210, quantity: 4 }] }] } as never;
-    await saveAppointmentBookingConfiguration("appointment-1", "provider-1", configuration);
-    expect(rpc).toHaveBeenCalledWith("save_appointment_booking_configuration", expect.objectContaining({ p_appointment_id: "appointment-1", p_configuration: configuration }));
-    await insertBookingAppointmentServices("appointment-1", [{ vehicle_id: "persisted-1", service_catalog_id: "oil", name: "Oil", price: 90, quantity: 1, is_prepaid: false }, { vehicle_id: "persisted-2", service_catalog_id: "tires", name: "Tire", price: 210, quantity: 4, is_prepaid: false }]);
-    expect(rpc).toHaveBeenCalledWith("insert_booking_appointment_services", expect.objectContaining({ p_services: expect.arrayContaining([expect.objectContaining({ vehicle_id: "persisted-2", quantity: 4 })]) }));
+    await saveAppointmentBookingConfiguration("appointment-1", "provider-booking", configuration);
+    expect(rpc).toHaveBeenCalledWith("public_booking_save_configuration", expect.objectContaining({ p_appointment_id: "appointment-1", p_configuration: configuration }));
+    await insertBookingAppointmentServices("appointment-1", "provider-booking", [{ vehicle_id: "persisted-1", service_catalog_id: "oil", name: "Oil", price: 90, quantity: 1, is_prepaid: false }, { vehicle_id: "persisted-2", service_catalog_id: "tires", name: "Tire", price: 210, quantity: 4, is_prepaid: false }]);
+    expect(rpc).toHaveBeenCalledWith("public_booking_insert_services", expect.objectContaining({ p_services: expect.arrayContaining([expect.objectContaining({ vehicle_id: "persisted-2", quantity: 4 })]) }));
   });
 
   it("covers appointment update persistence and notification payloads", async () => {

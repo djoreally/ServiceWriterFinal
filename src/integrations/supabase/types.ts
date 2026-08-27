@@ -19948,6 +19948,83 @@ export type Database = {
         }
         Returns: Json
       }
+      public_booking_book_appointment: {
+        Args: {
+          p_booking_slug: string
+          p_description: string
+          p_duration_minutes: number
+          p_estimated_cost: number
+          p_guest_email: string
+          p_guest_name: string
+          p_guest_phone: string
+          p_notes: string
+          p_scheduled_date: string
+          p_scheduled_time: string
+          p_service_catalog_id: string
+          p_status?: string
+          p_tax_amount: number
+          p_title: string
+          p_vehicle_id: string
+        }
+        Returns: string
+      }
+      public_booking_insert_services: {
+        Args: { p_booking_slug: string; p_appointment_id: string; p_services: Json }
+        Returns: number
+      }
+      public_booking_record_payment_intent_v2: {
+        Args: {
+          p_amount: number
+          p_appointment_id: string
+          p_booking_slug: string
+          p_currency: string
+          p_customer_email: string
+          p_customer_name: string
+          p_subtotal: number
+          p_tax_amount: number
+          p_tax_rate: number
+        }
+        Returns: string
+      }
+      public_booking_save_configuration: {
+        Args: { p_booking_slug: string; p_appointment_id: string; p_configuration: Json }
+        Returns: undefined
+      }
+      public_booking_set_vehicle_tire_spec_v2: {
+        Args: {
+          p_booking_slug: string
+          p_customer_email: string
+          p_tire_load_index?: string
+          p_tire_size: string
+          p_tire_size_front?: string
+          p_tire_size_rear?: string
+          p_tire_size_source?: string
+          p_tire_speed_rating?: string
+          p_vehicle_id: string
+        }
+        Returns: undefined
+      }
+      public_booking_upsert_customer: {
+        Args: { p_address?: string; p_booking_slug: string; p_email: string; p_name: string; p_phone?: string }
+        Returns: string
+      }
+      public_booking_upsert_vehicle: {
+        Args: {
+          p_booking_slug: string
+          p_customer_email: string
+          p_engine?: string
+          p_image_url?: string
+          p_license_plate?: string
+          p_make: string
+          p_mileage?: number
+          p_model: string
+          p_oil_capacity?: string
+          p_oil_type?: string
+          p_vin?: string
+          p_year: number
+        }
+        Returns: string
+      }
       get_public_blocked_dates:
         | {
             Args: { p_business_user_id: string }

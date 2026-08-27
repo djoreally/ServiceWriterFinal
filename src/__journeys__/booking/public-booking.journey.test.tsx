@@ -47,8 +47,8 @@ describe("Phase 2 Journey — Public Booking", () => {
     });
 
     // Simulate booking submission RPC
-    const res = await backend.rpc("book_appointment_safe", {
-      p_business_user_id: "00000000-0000-0000-0000-000000000001",
+    const res = await backend.rpc("public_booking_book_appointment", {
+      p_booking_slug: "apex-auto",
       p_scheduled_date: "2026-09-01",
       p_scheduled_time: "10:00",
       p_duration_minutes: 45,
@@ -66,7 +66,7 @@ describe("Phase 2 Journey — Public Booking", () => {
     });
 
     expect(res.data).toBeDefined();
-    expectRpcCalled("book_appointment_safe", { p_guest_email: "jane.guest@example.com" });
+    expectRpcCalled("public_booking_book_appointment", { p_booking_slug: "apex-auto", p_guest_email: "jane.guest@example.com" });
     expectNoConsoleErrors();
   });
 

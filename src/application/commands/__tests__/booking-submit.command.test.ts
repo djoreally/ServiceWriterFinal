@@ -1,12 +1,9 @@
 /**
- * Guards the booking submission RPC contract.
+ * Guards the slug-bound public booking RPC contract.
  *
- * Regression: production carried two `book_appointment_safe` overloads (with and
- * without `p_status`). Named-argument calls resolved to whichever Postgres
- * preferred, and the extra-argument overload had no EXECUTE grant for guests, so
- * every public booking failed with "permission denied for function
- * book_appointment_safe". The database now has exactly one signature — the one
- * that takes `p_status` — so the client must always send that argument.
+ * The public client must never choose a tenant by trusting a caller-supplied
+ * business user UUID. The secure RPC resolves the workspace from the booking
+ * slug and still requires an explicit p_status argument.
  */
 
 const mockRpc = jest.fn().mockResolvedValue({ data: "appt-1", error: null });
@@ -18,7 +15,7 @@ jest.mock("@/integrations/supabase/client", () => ({
 import { bookAppointmentSafe } from "../booking-submit.command";
 
 const baseParams = {
-  p_business_user_id: "00000000-0000-0000-0000-000000000001",
+  p_booking_slug: "test-booking",
   p_scheduled_date: "2026-09-01",
   p_scheduled_time: "10:00",
   p_duration_minutes: 60,
@@ -40,7 +37,7 @@ describe("bookAppointmentSafe", () => {
   it("always sends p_status so the single supported overload resolves", async () => {
     await bookAppointmentSafe(baseParams);
     const [fn, args] = mockRpc.mock.calls[0];
-    expect(fn).toBe("book_appointment_safe");
+    expect(fn).toBe("public_booking_book_appointment");
     expect(args).toHaveProperty("p_status", "confirmed");
   });
 
