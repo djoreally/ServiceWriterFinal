@@ -1,5 +1,6 @@
 import {
   getLifecycleTemplate,
+  LIFECYCLE_TEMPLATES,
   LIFECYCLE_TEMPLATE_COUNT,
   renderLifecycleEmail,
 } from "@/server/messaging/lifecycle-templates";
@@ -7,9 +8,9 @@ import { LIFECYCLE_EVENT_CATALOG } from "@/server/messaging/lifecycle-events";
 
 describe("Service Writer lifecycle template registry", () => {
   it("contains the complete lifecycle set", () => {
-    expect(LIFECYCLE_TEMPLATE_COUNT).toBe(175);
-    expect(LIFECYCLE_EVENT_CATALOG).toHaveLength(175);
-    expect(new Set(LIFECYCLE_EVENT_CATALOG.map((event) => event.key)).size).toBe(175);
+    expect(LIFECYCLE_TEMPLATE_COUNT).toBe(173);
+    expect(LIFECYCLE_EVENT_CATALOG).toHaveLength(173);
+    expect(new Set(LIFECYCLE_EVENT_CATALOG.map((event) => event.key)).size).toBe(173);
     expect(getLifecycleTemplate("appointment_booking_sequence.booking_confirmation").title).toBe("Booking confirmation");
     expect(getLifecycleTemplate("invoice_and_payment_sequence.payment_receipt").title).toBe("Payment receipt");
   });
@@ -56,6 +57,19 @@ describe("Service Writer lifecycle template registry", () => {
       "vehicle.make": "Honda",
       "email.primary_action_url": "https://example.com/appointment",
     })).toThrow(/missing required variables/);
+  });
+
+  it("covers every authored email with substantial copy and resolvable variables", () => {
+    for (const template of Object.values(LIFECYCLE_TEMPLATES)) {
+      expect(template.body.split(/\s+/).filter(Boolean).length).toBeGreaterThanOrEqual(140);
+      const source = [template.subject, template.preview, template.headline, template.body, template.essentialInformation].join("\n");
+      const paths = [...source.matchAll(/{{\s*([a-zA-Z0-9_.-]+)\s*}}/g)].map((match) => match[1]);
+      const variables = Object.fromEntries([...new Set([...paths, "email.primary_action_url"])].map((path) => [path, "Verified value"]));
+      const rendered = renderLifecycleEmail(template.key, variables);
+      expect(rendered.subject).not.toMatch(/{{/);
+      expect(rendered.body).not.toMatch(/{{/);
+      expect(rendered.html).not.toMatch(/{{/);
+    }
   });
 
   it("rejects unknown lifecycle keys", () => {
