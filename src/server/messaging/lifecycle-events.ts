@@ -44,6 +44,10 @@ export type LifecycleEventResult = {
  */
 export async function dispatchLifecycleEvent(event: LifecycleEvent): Promise<LifecycleEventResult> {
   const template = getLifecycleTemplate(event.templateKey);
+  const variables = {
+    ...event.variables,
+    "email.recipient_role": event.recipientRole,
+  };
   const metadata = {
     lifecycleEventId: event.eventId,
     recipientRole: event.recipientRole,
@@ -59,7 +63,7 @@ export async function dispatchLifecycleEvent(event: LifecycleEvent): Promise<Lif
     entityId: event.entityId ?? event.eventId,
     recipientRole: event.recipientRole,
     idempotencyKey: `lifecycle:${template.key}:${event.eventId}:${event.recipientEmail.toLowerCase()}`,
-    variables: event.variables,
+    variables,
     metadata,
   });
   return {
@@ -89,7 +93,7 @@ export function lifecycleEvent<T extends LifecycleTemplateKey>(
 /** Stable keys for the most common state-transition wiring points. */
 /** Every approved lifecycle key is dispatchable, including less-common operational events. */
 export const LIFECYCLE_EVENT_CATALOG = Object.freeze(
-  Object.values(LIFECYCLE_TEMPLATES).map((template) => ({
+  Object.keys(LIFECYCLE_TEMPLATES).map((key) => getLifecycleTemplate(key)).map((template) => ({
     key: template.key,
     category: template.category,
     title: template.title,
@@ -99,6 +103,7 @@ export const LIFECYCLE_EVENT_CATALOG = Object.freeze(
 
 export const LIFECYCLE_EVENT_KEYS = {
   bookingCreated: "appointment_booking_sequence.booking_confirmation",
+  newAppointmentBooked: "appointment_booking_sequence.new_appointment_booked",
   bookingPendingApproval: "appointment_booking_sequence.booking_received_pending_approval",
   appointmentApproved: "appointment_booking_sequence.appointment_approved",
   appointmentDeclined: "appointment_booking_sequence.appointment_declined",
@@ -124,6 +129,8 @@ export const LIFECYCLE_EVENT_KEYS = {
   quoteReady: "quotes_and_service_authorization.your_quote_is_ready",
   quoteApproved: "quotes_and_service_authorization.quote_approved",
   quoteDeclined: "quotes_and_service_authorization.quote_declined",
+  quoteApprovedStaff: "quotes_and_service_authorization.quote_approved_staff",
+  quoteDeclinedStaff: "quotes_and_service_authorization.quote_declined_staff",
   estimateConverted: "quotes_and_service_authorization.estimate_converted_to_appointment",
   invoiceCreated: "invoice_and_payment_sequence.invoice_created",
   paymentRequested: "invoice_and_payment_sequence.payment_requested",

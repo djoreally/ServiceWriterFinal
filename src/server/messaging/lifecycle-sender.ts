@@ -1,6 +1,8 @@
 import { createSupabaseAdminClient } from "@/lib/supabase";
-import { ResendEmailAdapter } from "@/server/messaging/resend";
+import { EnginemailerEmailAdapter } from "@/server/messaging/enginemailer";
 import { renderLifecycleEmail, type LifecycleVariables } from "@/server/messaging/lifecycle-templates";
+import type { LifecyclePurpose } from "@/server/messaging/lifecycle-templates";
+import type { MessagingAdapter } from "@/server/messaging/types";
 
 export type LifecycleSendInput = {
   workspaceId: string;
@@ -29,6 +31,11 @@ function assertEmail(email: string): string {
   const normalized = email.trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) throw new Error("Invalid lifecycle recipient email");
   return normalized;
+}
+
+export function lifecycleAdapterForPurpose(purpose: LifecyclePurpose): MessagingAdapter {
+  void purpose;
+  return new EnginemailerEmailAdapter();
 }
 
 export async function enqueueLifecycleEmail(input: LifecycleSendInput & {
@@ -66,6 +73,7 @@ export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ p
   const rendered = renderLifecycleEmail(input.templateKey, input.variables);
   const supabase = createSupabaseAdminClient();
   const recipientEmail = assertEmail(input.recipientEmail);
+  const adapter = lifecycleAdapterForPurpose(rendered.purpose);
   const checkedAt = new Date().toISOString();
   const suppression = await supabase.rpc("messaging_has_active_suppression", {
     target_workspace_id: input.workspaceId,
@@ -86,7 +94,7 @@ export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ p
       customer_id: input.customerId ?? null,
       channel: "email",
       purpose: rendered.purpose,
-      provider: "resend",
+      provider: adapter.providerName,
       idempotency_key: input.idempotencyKey,
       recipient_email: recipientEmail,
       template_key: rendered.templateKey,
@@ -118,7 +126,7 @@ export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ p
     customer_id: input.customerId ?? null,
     channel: "email",
     purpose: rendered.purpose,
-    provider: "resend",
+    provider: adapter.providerName,
     idempotency_key: input.idempotencyKey,
     recipient_email: recipientEmail,
     template_key: rendered.templateKey,
@@ -133,7 +141,7 @@ export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ p
   if (queued.error) throw queued.error;
 
   try {
-    const sent = await new ResendEmailAdapter().send({
+    const sent = await adapter.send({
       workspaceId: input.workspaceId,
       recipient: { email: recipientEmail },
       purpose: rendered.purpose,

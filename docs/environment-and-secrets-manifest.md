@@ -9,7 +9,8 @@ This manifest defines the configuration boundary for Development, Preview, Stagi
 | `VITE_*` | Vite build and browser | Public configuration only. Never place service-role keys, provider secrets, passwords, or signing secrets here. |
 | `NEXT_PUBLIC_*` | Next.js build and browser | Public configuration only. Never place service-role keys, provider secrets, passwords, or signing secrets here. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Next.js server only | Required for protected server operations; never expose to the Vite project or browser. |
-| `RESEND_*`, `TWILIO_*`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Next.js server only | Provider credentials and webhook secrets remain server-side. |
+| `ENGINEMAILER_*`, `TWILIO_*`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Next.js server only | Provider credentials and webhook secrets remain server-side. Enginemailer is the active email provider. |
+| `RESEND_*` | Next.js server only | Legacy rollback credentials only. No active email path selects Resend. |
 | `SENTRY_*` and server observability credentials | Deployment/provider configuration | Use environment-specific DSNs and tokens; mask customer and payment data. |
 
 ## Environment scopes

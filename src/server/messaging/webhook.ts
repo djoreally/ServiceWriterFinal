@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createSupabaseAdminClient } from "@/lib/supabase";
 import type { InboundReply, MessagingAdapter, NormalizedDeliveryEvent } from "./types";
 
@@ -12,8 +13,10 @@ function parseWebhookPayload(rawBody: string): Record<string, unknown> | null {
   }
 }
 
-function externalEventId(request: Request, payload: Record<string, unknown>): string {
-  return request.headers.get("svix-id") || request.headers.get("x-twilio-request-id") || String(payload.id || payload.MessageSid || payload.SmsSid || crypto.randomUUID());
+function externalEventId(request: Request, payload: Record<string, unknown>, rawBody: string): string {
+  return request.headers.get("svix-id")
+    || request.headers.get("x-twilio-request-id")
+    || String(payload.id || payload.MessageSid || payload.SmsSid || createHash("sha256").update(`${request.headers.get("x-timestamp") ?? ""}:${rawBody}`).digest("hex"));
 }
 
 async function findWorkspaceForMessage(supabase: ReturnType<typeof createSupabaseAdminClient>, provider: string, providerMessageId?: string) {
@@ -26,7 +29,13 @@ async function recordWebhookEvent(supabase: ReturnType<typeof createSupabaseAdmi
   const result = await supabase.from("webhook_events").upsert({
     provider,
     external_event_id: eventId,
-    event_type: typeof payload.type === "string" ? payload.type : typeof payload.MessageStatus === "string" ? "twilio.message.status" : "twilio.message.inbound",
+    event_type: typeof payload.type === "string"
+      ? payload.type
+      : typeof payload.event === "string"
+        ? `${provider}.${payload.event}`
+        : typeof payload.MessageStatus === "string"
+          ? "twilio.message.status"
+          : "twilio.message.inbound",
     workspace_id: workspaceId,
     signature_verified: true,
     status: "received",
@@ -42,7 +51,7 @@ export async function ingestDeliveryWebhook(provider: string, adapter: Messaging
   const events = adapter.normalizeDelivery(rawBody, request);
   const supabase = createSupabaseAdminClient();
   const workspaceId = await findWorkspaceForMessage(supabase, provider, events[0]?.providerMessageId);
-  const eventId = externalEventId(request, payload);
+  const eventId = externalEventId(request, payload, rawBody);
   const webhookId = await recordWebhookEvent(supabase, provider, eventId, payload, workspaceId);
   if (!webhookId || events.length === 0) return { accepted: true, duplicate: !webhookId, count: 0 };
 
@@ -79,6 +88,14 @@ export async function ingestDeliveryWebhook(provider: string, adapter: Messaging
       });
       if (suppressionResult.error) console.error("[Messaging] failed to record delivery suppression", suppressionResult.error);
     }
+    if (provider === "enginemailer" && workspaceId && event.recipient?.includes("@") && event.status === "canceled") {
+      const optOutResult = await supabase.rpc("messaging_record_marketing_opt_out", {
+        target_workspace_id: workspaceId,
+        target_email: event.recipient,
+        target_source: "enginemailer",
+      });
+      if (optOutResult.error) console.error("[Messaging] failed to record marketing opt-out", optOutResult.error);
+    }
   }
   await supabase.from("webhook_events").update({ status: "processed", processed_at: new Date().toISOString() }).eq("id", webhookId);
   return { accepted: true, duplicate: inserted === 0, count: inserted };
@@ -95,7 +112,7 @@ export async function ingestInboundWebhook(provider: string, adapter: MessagingA
   const replies: InboundReply[] = adapter.normalizeInbound(rawBody, request);
   const supabase = createSupabaseAdminClient();
   const workspaceId = await findWorkspaceByDestination(supabase, provider, replies[0]?.to);
-  const webhookId = await recordWebhookEvent(supabase, provider, externalEventId(request, payload), payload, workspaceId);
+  const webhookId = await recordWebhookEvent(supabase, provider, externalEventId(request, payload, rawBody), payload, workspaceId);
   if (!webhookId || replies.length === 0) return { accepted: true, duplicate: !webhookId, count: 0 };
   let inserted = 0;
   for (const reply of replies) {
@@ -103,7 +120,7 @@ export async function ingestInboundWebhook(provider: string, adapter: MessagingA
       workspace_id: workspaceId,
       channel: "sms",
       provider,
-      provider_event_id: reply.providerEventId || externalEventId(request, payload),
+      provider_event_id: reply.providerEventId || externalEventId(request, payload, rawBody),
       provider_message_id: reply.providerMessageId,
       from_address: reply.from,
       to_address: reply.to,
