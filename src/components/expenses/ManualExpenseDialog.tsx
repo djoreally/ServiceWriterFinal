@@ -132,7 +132,7 @@ export function ManualExpenseDialog({ open, onOpenChange, appointmentId, default
     setExistingReceiptUrl(null);
     setLineItems([]);
     setLinkedAppointmentId(null);
-  }, [open, defaultBillable]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, defaultBillable]);  
 
   // When opening with a parent-provided appointmentId, prefer it as the link target.
   useEffect(() => {

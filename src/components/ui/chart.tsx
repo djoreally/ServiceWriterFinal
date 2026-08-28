@@ -100,7 +100,7 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
 
 const ChartTooltip = Tooltip;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 const ChartTooltipContent = React.forwardRef<
   HTMLDivElement,
   any & {
@@ -238,7 +238,7 @@ ChartTooltipContent.displayName = "ChartTooltip";
 
 const ChartLegend = Legend;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 const ChartLegendContent = React.forwardRef<
   HTMLDivElement,
   any & {

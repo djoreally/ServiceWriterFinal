@@ -694,7 +694,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
       }
 
       // Post-booking: link customer, assign through dispatch boundary, set location
-      let assignedVanId: string | null = null;
+      const assignedVanId: string | null = null;
       if (appointmentId) {
         const updatePayload: Record<string, unknown> = {};
         if (customerId) updatePayload.customer_id = customerId;
