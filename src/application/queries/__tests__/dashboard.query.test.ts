@@ -11,6 +11,10 @@ jest.mock("@/application/queries/settings.query", () => ({
 
 import { supabase } from "@/integrations/supabase/client";
 import { fetchDashboardReporting } from "@/application/queries/dashboard.query";
+import {
+  appointmentDayBounds,
+  mapCockpitAppointment,
+} from "@/application/queries/dashboard-cockpit.query";
 
 type QueryError = { message: string } | null;
 type QueryResult = { data: unknown; error: QueryError };
@@ -154,5 +158,40 @@ describe("fetchDashboardReporting financial reporting mapping", () => {
     ]);
 
     expect(result.previousPeriodPayments).toEqual([{ id: "prev-1", amount: 1000, status: "succeeded" }]);
+  });
+});
+
+describe("dashboard cockpit canonical appointment adapter", () => {
+  it("maps starts_at and metadata into the cockpit display contract in workspace time", () => {
+    expect(mapCockpitAppointment({
+      id: "appointment-1",
+      status: "requested",
+      starts_at: "2026-08-31T13:30:00.000Z",
+      metadata: {
+        title: "Mobile oil change",
+        guest_name: "Jordan",
+        estimated_cost: "119.99",
+      },
+    }, "America/New_York")).toEqual({
+      id: "appointment-1",
+      title: "Mobile oil change",
+      scheduled_date: "2026-08-31",
+      scheduled_time: "09:30",
+      status: "requested",
+      guest_name: "Jordan",
+      estimated_cost: 119.99,
+    });
+  });
+
+  it("builds half-open UTC day bounds using the workspace timezone across DST", () => {
+    expect(appointmentDayBounds(
+      new Date("2026-03-08T16:00:00.000Z"),
+      "America/New_York",
+    )).toEqual({
+      yesterdayStart: "2026-03-07T05:00:00.000Z",
+      todayStart: "2026-03-08T05:00:00.000Z",
+      tomorrowStart: "2026-03-09T04:00:00.000Z",
+      next8DaysStart: "2026-03-16T04:00:00.000Z",
+    });
   });
 });

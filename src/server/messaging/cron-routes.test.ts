@@ -34,14 +34,19 @@ describe("Vercel cron worker authorization", () => {
     json: async () => ({}),
   }) as Request;
 
-  it.each([
-    ["lifecycle", runLifecycleWorker, processLifecycleEventOutbox],
-    ["push", runPushWorker, processInAppNotificationPushOutbox],
-  ] as const)("fails closed when the %s worker secret is missing", async (_name, handler, worker) => {
+  it("reports a configuration failure when the lifecycle worker secret is missing", async () => {
     delete process.env.CRON_SECRET;
-    const response = await handler(request());
+    const response = await runLifecycleWorker(request());
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ ok: false, error: "worker_not_configured" });
+    expect(processLifecycleEventOutbox).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the push worker secret is missing", async () => {
+    delete process.env.CRON_SECRET;
+    const response = await runPushWorker(request());
     expect(response.status).toBe(401);
-    expect(worker).not.toHaveBeenCalled();
+    expect(processInAppNotificationPushOutbox).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -62,5 +67,16 @@ describe("Vercel cron worker authorization", () => {
     const response = await handler(request("Bearer correct-secret"));
     expect(response.status).toBe(200);
     expect(worker).toHaveBeenCalledWith(50);
+  });
+
+  it("accepts the legacy lifecycle worker header without weakening Bearer auth", async () => {
+    process.env.CRON_SECRET = "correct-secret";
+    const lifecycleRequest = {
+      headers: new Headers({ "x-lifecycle-worker-secret": "correct-secret" }),
+      json: async () => ({ limit: 500 }),
+    } as Request;
+    const response = await runLifecycleWorker(lifecycleRequest);
+    expect(response.status).toBe(200);
+    expect(processLifecycleEventOutbox).toHaveBeenCalledWith(200);
   });
 });

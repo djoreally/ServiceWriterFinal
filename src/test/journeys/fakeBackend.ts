@@ -569,6 +569,11 @@ export class FakeBackend {
         currentData = currentData.filter((r) => compareValues(r[column], value, "gt"));
         return chain;
       },
+      lt: (column: string, value: unknown) => {
+        this.recordedCalls.push({ type: "from", target: table, method: "lt", args: { column, value }, timestamp: Date.now() });
+        currentData = currentData.filter((r) => compareValues(r[column], value, "lt"));
+        return chain;
+      },
       lte: (column: string, value: unknown) => {
         this.recordedCalls.push({ type: "from", target: table, method: "lte", args: { column, value }, timestamp: Date.now() });
         currentData = currentData.filter((r) => compareValues(r[column], value, "lte"));

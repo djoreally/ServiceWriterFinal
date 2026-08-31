@@ -11,7 +11,8 @@
  */
 import type { Dollars } from '@/lib/money';
 import { errorMessage } from "@/lib/error-message";
-import { supabase } from '@/integrations/supabase/client';
+import { productionSupabase, supabase } from '@/integrations/supabase/client';
+import { resolveCurrentWorkspace } from '@/application/queries/settings.query';
 import {
   format,
   startOfWeek,
@@ -31,6 +32,95 @@ export interface CockpitAppointment {
   status: string;
   guest_name: string | null;
   estimated_cost: number | null;
+}
+
+type CanonicalCockpitAppointment = {
+  id: string;
+  status: string;
+  starts_at: string;
+  metadata: unknown;
+};
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+/** Convert a UTC appointment into the legacy display contract used by DashboardCockpit. */
+export function mapCockpitAppointment(
+  row: CanonicalCockpitAppointment,
+  timeZone: string
+): CockpitAppointment {
+  const metadata = objectValue(row.metadata);
+  const startsAt = new Date(row.starts_at);
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(startsAt);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((candidate) => candidate.type === type)?.value ?? '';
+
+  return {
+    id: row.id,
+    title: String(metadata.title ?? metadata.service_name ?? 'Appointment'),
+    scheduled_date: `${part('year')}-${part('month')}-${part('day')}`,
+    scheduled_time: `${part('hour')}:${part('minute')}`,
+    status: row.status,
+    guest_name: typeof metadata.guest_name === 'string' ? metadata.guest_name : null,
+    estimated_cost:
+      metadata.estimated_cost == null || !Number.isFinite(Number(metadata.estimated_cost))
+        ? null
+        : Number(metadata.estimated_cost),
+  };
+}
+
+function zonedWallTimeToUtc(
+  year: number, month: number, day: number, hour: number,
+  minute: number, second: number, millisecond: number, timeZone: string
+): Date {
+  const desiredUtc = Date.UTC(year, month - 1, day, hour, minute, second, millisecond);
+  let candidate = desiredUtc;
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  });
+  for (let pass = 0; pass < 2; pass += 1) {
+    const parts = formatter.formatToParts(new Date(candidate));
+    const value = (type: Intl.DateTimeFormatPartTypes) =>
+      Number(parts.find((item) => item.type === type)?.value ?? 0);
+    const representedUtc = Date.UTC(
+      value('year'), value('month') - 1, value('day'),
+      value('hour'), value('minute'), value('second'), millisecond
+    );
+    candidate += desiredUtc - representedUtc;
+  }
+  return new Date(candidate);
+}
+
+export function appointmentDayBounds(now: Date, timeZone: string): {
+  yesterdayStart: string;
+  todayStart: string;
+  tomorrowStart: string;
+  next8DaysStart: string;
+} {
+  const dateParts = new Intl.DateTimeFormat('en-CA', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(now);
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(dateParts.find((item) => item.type === type)?.value ?? 0);
+  const calendarDate = new Date(Date.UTC(value('year'), value('month') - 1, value('day')));
+  const wallDate = (days: number) => {
+    const date = new Date(calendarDate);
+    date.setUTCDate(date.getUTCDate() + days);
+    return zonedWallTimeToUtc(
+      date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate(),
+      0, 0, 0, 0, timeZone
+    ).toISOString();
+  };
+  return { yesterdayStart: wallDate(-1), todayStart: wallDate(0), tomorrowStart: wallDate(1), next8DaysStart: wallDate(8) };
 }
 
 export interface CockpitJobInProgress {
@@ -261,6 +351,7 @@ export interface FleetOperationsDashboard {
 }
 
 export interface CockpitData {
+  workspaceTodayLabel: string;
   // Money (dollars)
   revenueToday: number;
   revenueWeek: number;
@@ -340,16 +431,34 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
   const userId = session?.user?.id ?? null;
   if (!userId) return null;
 
+  const context = await resolveCurrentWorkspace();
+  if (!context) return null;
+  const { data: workspace, error: workspaceError } = await productionSupabase
+    .from('workspaces')
+    .select('timezone')
+    .eq('id', context.workspaceId)
+    .maybeSingle();
+  if (workspaceError) throw workspaceError;
+  const timeZone = workspace?.timezone || 'UTC';
+
   const now = new Date();
-  const todayStart = format(startOfDay(now), "yyyy-MM-dd'T'HH:mm:ss");
-  const todayEnd = format(endOfDay(now), "yyyy-MM-dd'T'HH:mm:ss");
-  const today = format(now, 'yyyy-MM-dd');
-  const yesterday = format(addDays(startOfDay(now), -1), "yyyy-MM-dd'T'HH:mm:ss");
-  const yesterdayEnd = format(addDays(endOfDay(now), -1), "yyyy-MM-dd'T'HH:mm:ss");
+  const appointmentBounds = appointmentDayBounds(now, timeZone);
+  const todayStart = appointmentBounds.todayStart;
+  const todayEnd = new Date(Date.parse(appointmentBounds.tomorrowStart) - 1).toISOString();
+  const yesterday = appointmentBounds.yesterdayStart;
+  const yesterdayEnd = new Date(Date.parse(appointmentBounds.todayStart) - 1).toISOString();
+  const workspaceDateParts = new Intl.DateTimeFormat('en-CA', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(now);
+  const workspaceDatePart = (type: Intl.DateTimeFormatPartTypes) =>
+    workspaceDateParts.find((part) => part.type === type)?.value ?? '';
+  const today = `${workspaceDatePart('year')}-${workspaceDatePart('month')}-${workspaceDatePart('day')}`;
+  const workspaceTodayLabel = new Intl.DateTimeFormat(undefined, {
+    timeZone, weekday: 'long', month: 'long', day: 'numeric',
+  }).format(now);
   const weekStart = format(startOfWeek(now, { weekStartsOn: 1 }), "yyyy-MM-dd'T'HH:mm:ss");
   const monthStart = format(startOfMonth(now), "yyyy-MM-dd'T'HH:mm:ss");
   const yearStart = format(startOfYear(now), "yyyy-MM-dd'T'HH:mm:ss");
-  const next7 = format(addDays(now, 7), 'yyyy-MM-dd');
 
   // Previous month, same number of days into the month (MTD-comparable)
   const dayOfMonth = now.getDate();
@@ -408,22 +517,24 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
       .select('net_collected_cents')
       .gte('collected_at', prevMonthStart)
       .lte('collected_at', prevMonthMtdEnd),
-    supabase
+    productionSupabase
       .from('appointments')
-      .select('id, title, scheduled_date, scheduled_time, status, guest_name, estimated_cost')
+      .select('id, status, starts_at, metadata')
+      .eq('workspace_id', context.workspaceId)
       .neq('source', 'fleet_work_order')
-      .eq('scheduled_date', today)
-      .in('status', ['confirmed', 'pending', 'in_progress'])
-      .order('scheduled_time', { ascending: true }),
-    supabase
+      .gte('starts_at', appointmentBounds.todayStart)
+      .lt('starts_at', appointmentBounds.tomorrowStart)
+      .in('status', ['requested', 'confirmed', 'checked_in', 'in_progress'])
+      .order('starts_at', { ascending: true }),
+    productionSupabase
       .from('appointments')
-      .select('id, title, scheduled_date, scheduled_time, status, guest_name, estimated_cost')
+      .select('id, status, starts_at, metadata')
+      .eq('workspace_id', context.workspaceId)
       .neq('source', 'fleet_work_order')
-      .gt('scheduled_date', today)
-      .lte('scheduled_date', next7)
-      .in('status', ['confirmed', 'pending'])
-      .order('scheduled_date', { ascending: true })
-      .order('scheduled_time', { ascending: true })
+      .gte('starts_at', appointmentBounds.tomorrowStart)
+      .lt('starts_at', appointmentBounds.next8DaysStart)
+      .in('status', ['requested', 'confirmed'])
+      .order('starts_at', { ascending: true })
       .limit(10),
     supabase
       .from('services')
@@ -487,6 +598,10 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
       .eq('user_id', userId)
       .eq('status', 'pending'),
   ]);
+
+  // Do not turn a schema, authorization, or network failure into a misleading empty schedule.
+  if (todayAppts.error) throw todayAppts.error;
+  if (upcoming7.error) throw upcoming7.error;
 
   // Outstanding A/R = sum of (total_cost - paid_amount) for completed services
   // whose payment_status is explicitly 'unpaid' or 'partial'. We trust payment_status
@@ -562,16 +677,11 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
     started_at: s.service_date || null,
   }));
 
-  const todaysAppointments = (todayAppts.data || []) as CockpitAppointment[];
-  const upcomingNext7 = ((upcoming7.data || []) as CockpitAppointment[])
-    .map((a) => ({
-      a,
-      ts: parseISO(`${a.scheduled_date}T${a.scheduled_time || '00:00'}`),
-    }))
-    .filter(({ ts }) => !Number.isNaN(ts.getTime()))
-    .sort((x, y) => x.ts.getTime() - y.ts.getTime())
-    .slice(0, 8)
-    .map(({ a }) => a);
+  const todaysAppointments = ((todayAppts.data || []) as CanonicalCockpitAppointment[])
+    .map((appointment) => mapCockpitAppointment(appointment, timeZone));
+  const upcomingNext7 = ((upcoming7.data || []) as CanonicalCockpitAppointment[])
+    .map((appointment) => mapCockpitAppointment(appointment, timeZone))
+    .slice(0, 8);
 
   type FleetWorkOrderRow = {
     id: string;
@@ -1168,6 +1278,7 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
   };
 
   return {
+    workspaceTodayLabel,
     revenueToday: sumNetCollectedDollars(
       payToday.data as Array<{ net_collected_cents: number | null }> | null
     ),

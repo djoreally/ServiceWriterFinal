@@ -13,6 +13,12 @@
  */
 
 import { supabase } from '@/integrations/supabase/client';
+import type { Database, Json } from '@/integrations/supabase/types';
+
+const SAFE_DETAIL_KEY = /^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/;
+const SENSITIVE_DETAIL_KEY = /(authorization|cookie|credential|email|password|phone|secret|token|vin)/i;
+const MAX_DETAIL_ENTRIES = 32;
+const MAX_DETAIL_STRING_LENGTH = 512;
 
 export type AuditAction =
   // Auth
@@ -57,6 +63,22 @@ export interface AuditEntry {
   resource_id?: string;
 }
 
+export function sanitizeAuditDetails(details: Record<string, unknown> = {}): Record<string, Json> {
+  return Object.fromEntries(
+    Object.entries(details)
+      .filter(([key, value]) =>
+        SAFE_DETAIL_KEY.test(key)
+        && !SENSITIVE_DETAIL_KEY.test(key)
+        && ['string', 'number', 'boolean'].includes(typeof value),
+      )
+      .slice(0, MAX_DETAIL_ENTRIES)
+      .map(([key, value]) => [
+        key,
+        typeof value === 'string' ? value.slice(0, MAX_DETAIL_STRING_LENGTH) : value as number | boolean,
+      ]),
+  );
+}
+
 /**
  * Log an audit event to the audit_logs table.
  * Fails silently to never block user operations.
@@ -66,14 +88,17 @@ export async function logAudit(entry: AuditEntry): Promise<void> {
     const { data: { user } } = await supabase.auth.getUser();
 
     // Shadow Data Audit Finding #1: Do not persist user_email — use user_id only
-    const insertData = {
+    const insertData: Database['public']['Tables']['audit_logs']['Insert'] = {
       action: String(entry.action),
       user_id: entry.user_id ?? user?.id ?? null,
-      new_data: (entry.details ?? null) as Record<string, unknown>,
+      new_data: {
+        status: entry.status,
+        ...sanitizeAuditDetails(entry.details),
+      },
       table_name: entry.resource_type ?? null,
       record_id: entry.resource_id ?? null,
     };
-    await (supabase.from('audit_logs') as any).insert(insertData);
+    await supabase.from('audit_logs').insert(insertData);
   } catch (err) {
     // Audit logging must never crash the app
     if (process.env.NODE_ENV !== "production") {

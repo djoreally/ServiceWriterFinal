@@ -1,26 +1,42 @@
 import { NextResponse } from "next/server";
+import { timingSafeEqual } from "node:crypto";
 import { processLifecycleEventOutbox } from "@/server/messaging/lifecycle-sender";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-function authorized(request: Request): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return false;
+function suppliedSecret(request: Request): string | null {
   const authorization = request.headers.get("authorization");
-  const supplied = authorization?.startsWith("Bearer ") ? authorization.slice(7) : request.headers.get("x-lifecycle-worker-secret");
-  return supplied === secret;
+  return authorization?.startsWith("Bearer ")
+    ? authorization.slice(7)
+    : request.headers.get("x-lifecycle-worker-secret");
+}
+
+function authorized(request: Request, secret: string): boolean {
+  const supplied = suppliedSecret(request);
+  if (!supplied) return false;
+  const expectedBuffer = Buffer.from(secret);
+  const suppliedBuffer = Buffer.from(supplied);
+  return expectedBuffer.length === suppliedBuffer.length && timingSafeEqual(expectedBuffer, suppliedBuffer);
 }
 
 export async function POST(request: Request) {
-  if (!authorized(request)) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const secret = process.env.CRON_SECRET?.trim();
+  if (!secret) {
+    console.error("[Lifecycle] outbox worker is disabled because CRON_SECRET is not configured");
+    return NextResponse.json({ ok: false, error: "worker_not_configured" }, { status: 503 });
+  }
+  if (!authorized(request, secret)) return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  const startedAt = Date.now();
   try {
     const body = await request.json().catch(() => ({})) as { limit?: number };
     const limit = Number.isFinite(body.limit) ? Math.max(1, Math.min(Number(body.limit), 200)) : 50;
     const result = await processLifecycleEventOutbox(limit);
-    return NextResponse.json({ ok: true, ...result });
+    return NextResponse.json({ ok: true, ...result, durationMs: Date.now() - startedAt });
   } catch (error) {
-    console.error("[Lifecycle] outbox worker failed", error);
+    console.error("[Lifecycle] outbox worker failed", {
+      errorCode: error instanceof Error ? error.name : "worker_error",
+    });
     return NextResponse.json({ ok: false, error: "worker_failed" }, { status: 500 });
   }
 }

@@ -140,8 +140,9 @@ export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ p
 
   if (queued.error) throw queued.error;
 
+  let sent;
   try {
-    const sent = await adapter.send({
+    sent = await adapter.send({
       workspaceId: input.workspaceId,
       recipient: { email: recipientEmail },
       purpose: rendered.purpose,
@@ -154,24 +155,34 @@ export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ p
       idempotencyKey: input.idempotencyKey,
       metadata: input.metadata ?? {},
     });
-    const updated = await supabase.from("message_logs").update({
+  } catch (error) {
+    await supabase.from("message_logs").update({
+      status: "failed",
+      failed_at: new Date().toISOString(),
+      failure_code: "provider_send_failed",
+      failure_reason: "Email provider rejected the delivery request",
+    }).eq("id", queued.data.id);
+    throw new Error("provider_send_failed", { cause: error });
+  }
+
+  const updated = await supabase.from("message_logs").update({
       provider_message_id: sent.providerMessageId,
       status: sent.status,
       sent_at: sent.acceptedAt,
       failure_code: null,
       failure_reason: null,
       failed_at: null,
-    }).eq("id", queued.data.id);
-    if (updated.error) throw updated.error;
-    return sent;
-  } catch (error) {
-    await supabase.from("message_logs").update({
-      status: "failed",
-      failed_at: new Date().toISOString(),
-      failure_reason: error instanceof Error ? error.message.slice(0, 500) : "Email provider failed",
-    }).eq("id", queued.data.id);
-    throw error;
+  }).eq("id", queued.data.id);
+  if (updated.error) {
+    // The provider has already accepted the message. Retrying here can create a
+    // duplicate, so surface only a safe reconciliation signal and let the
+    // lifecycle event complete successfully.
+    console.error("lifecycle_message_log_reconciliation_failed", {
+      workspaceId: input.workspaceId,
+      idempotencyKey: input.idempotencyKey,
+    });
   }
+  return sent;
 }
 
 export async function processLifecycleEventOutbox(limit = 50, workerId = `vercel:${crypto.randomUUID()}`) {
@@ -182,7 +193,7 @@ export async function processLifecycleEventOutbox(limit = 50, workerId = `vercel
   });
   if (error) throw error;
 
-  const results = { claimed: (claimed ?? []).length, sent: 0, failed: 0, deadLettered: 0 };
+  const results = { claimed: (claimed ?? []).length, sent: 0, suppressed: 0, failed: 0, deadLettered: 0, completionConflicts: 0 };
   for (const row of (claimed ?? []) as OutboxRow[]) {
     try {
       if (!row.recipient_email) throw new Error("Lifecycle outbox row has no customer recipient");
@@ -204,17 +215,32 @@ export async function processLifecycleEventOutbox(limit = 50, workerId = `vercel
         p_retry_seconds: 300,
       });
       if (completed.error) throw completed.error;
-      if (delivery.status === "suppressed") results.failed += 1;
+      if (completed.data !== true) {
+        results.completionConflicts += 1;
+        console.error("lifecycle_outbox_completion_conflict", { eventId: row.id, workspaceId: row.workspace_id });
+        continue;
+      }
+      if (delivery.status === "suppressed") results.suppressed += 1;
       else results.sent += 1;
     } catch (sendError) {
       const completed = await supabase.rpc("complete_lifecycle_event", {
         p_id: row.id,
         p_worker_id: workerId,
         p_sent: false,
-        p_error: sendError instanceof Error ? sendError.message : "Lifecycle delivery failed",
+        p_error: "lifecycle_delivery_failed",
         p_retry_seconds: Math.min(86400, 30 * 2 ** Math.min(row.attempts, 8)),
       });
-      if (completed.error) console.error("[Lifecycle] failed to release outbox row", completed.error);
+      if (completed.error || completed.data !== true) {
+        results.completionConflicts += 1;
+        console.error("lifecycle_outbox_release_conflict", { eventId: row.id, workspaceId: row.workspace_id });
+      }
+      console.error("[Lifecycle] outbox delivery failed", {
+        eventId: row.id,
+        eventKey: row.event_key,
+        workspaceId: row.workspace_id,
+        attempts: row.attempts,
+        errorCode: sendError instanceof Error ? sendError.message.slice(0, 64) : "lifecycle_delivery_failed",
+      });
       results.failed += 1;
       if (row.attempts >= 8) results.deadLettered += 1;
     }

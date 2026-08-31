@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 
-const environment = process.env.ENVIRONMENT || "staging";
+const environment = process.env.ENVIRONMENT || process.env.VERCEL_ENV || process.env.NODE_ENV || "staging";
 const deploymentURL = (process.env.VERCEL_DEPLOYMENT_URL || "").replace(/\/$/, "");
 const failures = [];
 const warnings = [];
@@ -16,9 +16,21 @@ for (const file of migrationFiles) {
   if (!/^\d{14}_[a-z0-9][a-z0-9_-]*\.sql$/.test(file)) failures.push(`Invalid migration filename: ${file}`);
 }
 if (!process.env.VITE_ENABLE_DEMO_LOGIN || process.env.VITE_ENABLE_DEMO_LOGIN !== "false") warnings.push("Demo login is not explicitly disabled in the verifier environment; set VITE_ENABLE_DEMO_LOGIN=false for production.");
-if (!process.env.BACKUP_VERIFIED_AT) warnings.push("No BACKUP_VERIFIED_AT evidence was supplied; verify a restorable Supabase backup/PITR point before production migration.");
-if (!process.env.ROLLBACK_PLAN_ID) warnings.push("No ROLLBACK_PLAN_ID was supplied; attach the approved migration rollback or restoration procedure.");
-if (!process.env.SENTRY_RELEASE) warnings.push("SENTRY_RELEASE is not set; configure release and environment tags before promotion.");
+const requireProductionEvidence = (present, message) => {
+  if (present) return;
+  (environment === "production" ? failures : warnings).push(message);
+};
+requireProductionEvidence(process.env.BACKUP_VERIFIED_AT, "No BACKUP_VERIFIED_AT evidence was supplied; verify a restorable Supabase backup/PITR point before production migration.");
+requireProductionEvidence(process.env.ROLLBACK_PLAN_ID, "No ROLLBACK_PLAN_ID was supplied; attach the approved migration rollback or restoration procedure.");
+requireProductionEvidence(process.env.SENTRY_RELEASE, "SENTRY_RELEASE is not set; configure release and environment tags before promotion.");
+requireProductionEvidence(process.env.RELEASE_APPROVAL_ID, "No RELEASE_APPROVAL_ID was supplied; attach the approved production change record.");
+requireProductionEvidence(process.env.RELEASE_SHA, "RELEASE_SHA is not set; bind the release evidence to the checked-out commit.");
+if (process.env.RELEASE_SHA && process.env.RELEASE_SHA !== sha) failures.push(`RELEASE_SHA does not match checked-out commit ${sha}.`);
+if (process.env.BACKUP_VERIFIED_AT) {
+  const backupVerifiedAt = Date.parse(process.env.BACKUP_VERIFIED_AT);
+  if (!Number.isFinite(backupVerifiedAt)) failures.push("BACKUP_VERIFIED_AT must be a valid ISO-8601 timestamp.");
+  else if (backupVerifiedAt > Date.now()) failures.push("BACKUP_VERIFIED_AT cannot be in the future.");
+}
 if (!deploymentURL) warnings.push("VERCEL_DEPLOYMENT_URL is not set; deployment probe was not run.");
 if (deploymentURL && !/^https:\/\//i.test(deploymentURL)) failures.push("VERCEL_DEPLOYMENT_URL must use HTTPS.");
 

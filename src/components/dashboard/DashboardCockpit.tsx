@@ -100,11 +100,7 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
 
   if (!data) return null;
 
-  const todayLabel = new Date().toLocaleDateString(undefined, {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-  });
+  const todayLabel = data.workspaceTodayLabel;
   const firstName = ownerName?.split(' ')[0] || 'Shop';
 
   const revenueTrend = data.revenueTodayPrev > 0

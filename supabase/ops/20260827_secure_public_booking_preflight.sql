@@ -124,15 +124,16 @@ BEGIN
 END
 $$;
 
--- Confirm the migration is not already recorded or applied under a conflicting name.
+-- Confirm the canonical migration is not already recorded. Keep this version in
+-- lockstep with the filename so operators cannot receive a false READY result.
 DO $$
 BEGIN
   IF to_regclass('supabase_migrations.schema_migrations') IS NOT NULL
      AND EXISTS (
        SELECT 1 FROM supabase_migrations.schema_migrations
-       WHERE version = '20260827100000'
+       WHERE version = '20260831030526'
      ) THEN
-    RAISE EXCEPTION 'MIGRATION_ALREADY_RECORDED: 20260827100000';
+    RAISE EXCEPTION 'MIGRATION_ALREADY_RECORDED: 20260831030526';
   END IF;
 END
 $$;
@@ -142,5 +143,5 @@ rollback;
 select json_build_object(
   'status', 'READY',
   'project_schema', 'service_writer_operational_schema_present',
-  'migration', '20260827100000_secure_public_booking_rpc_context'
+  'migration', '20260831030526_secure_public_booking_rpc_context'
 ) AS preflight;

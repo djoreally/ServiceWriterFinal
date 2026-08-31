@@ -27,6 +27,15 @@ const forbiddenClientPatterns = [
 ];
 const failures = [];
 
+function projectRefFromSupabaseUrl(value) {
+  try {
+    const host = new URL(value).hostname;
+    return host.endsWith(".supabase.co") ? host.slice(0, -".supabase.co".length) : null;
+  } catch {
+    return null;
+  }
+}
+
 for (const name of [...requiredPublic, ...requiredServer, ...optionalServer]) {
   const present = Boolean(process.env[name]);
   const required = requiredPublic.includes(name) || requiredServer.includes(name);
@@ -43,6 +52,16 @@ if (process.env.NEXT_PUBLIC_APP_URL && environment === "production" && !/^https:
 }
 if (process.env.NEXT_PUBLIC_CORS_ORIGIN && /\/$/.test(process.env.NEXT_PUBLIC_CORS_ORIGIN)) {
   failures.push("NEXT_PUBLIC_CORS_ORIGIN must not have a trailing slash.");
+}
+const configuredProjectRef = process.env.NEXT_PUBLIC_SUPABASE_PROJECT_ID;
+const urlProjectRef = process.env.NEXT_PUBLIC_SUPABASE_URL
+  ? projectRefFromSupabaseUrl(process.env.NEXT_PUBLIC_SUPABASE_URL)
+  : null;
+if (configuredProjectRef && urlProjectRef && configuredProjectRef !== urlProjectRef) {
+  failures.push("NEXT_PUBLIC_SUPABASE_PROJECT_ID does not match NEXT_PUBLIC_SUPABASE_URL.");
+}
+if (environment === "production" && process.env.VITE_ENABLE_DEMO_LOGIN !== "false") {
+  failures.push("VITE_ENABLE_DEMO_LOGIN must be explicitly set to false in production.");
 }
 
 if (failures.length) {
