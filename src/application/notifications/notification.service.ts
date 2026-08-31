@@ -185,6 +185,26 @@ interface EmailPayload {
 
 async function sendEmail(payload: EmailPayload): Promise<void> {
   try {
+    // 1. First attempt to enqueue to outbox for server-side lifecycle worker delivery
+    const { data: { session } } = await supabase.auth.getSession();
+    const activeWorkspaceId = session?.user?.user_metadata?.workspace_id;
+
+    if (activeWorkspaceId) {
+      const { error: outboxError } = await (supabase as any).from("outbox_emails").insert({
+        workspace_id: activeWorkspaceId,
+        recipient_email: payload.to,
+        template_key: payload.type,
+        status: "pending",
+        payload: payload as unknown as Record<string, unknown>,
+      });
+
+      if (!outboxError) {
+        console.log(`[NotificationService] Queued email '${payload.type}' to outbox for ${payload.to}`);
+        return;
+      }
+    }
+
+    // 2. Fallback to edge function if configured
     const { error } = await supabase.functions.invoke("send-email", {
       body: payload,
     });

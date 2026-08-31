@@ -597,8 +597,8 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
     };
   }
 
-  const todaysAppointments = ((todayAppts.data || []) as ApptRawRow[]).map(mapApptRow);
-  const upcomingNext7 = ((upcoming7.data || []) as ApptRawRow[])
+  const todaysAppointments = ((todayAppts.data || []) as unknown as ApptRawRow[]).map(mapApptRow);
+  const upcomingNext7 = ((upcoming7.data || []) as unknown as ApptRawRow[])
     .map(mapApptRow)
     .map((a) => ({
       a,
