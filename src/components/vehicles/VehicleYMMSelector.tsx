@@ -84,12 +84,12 @@ export function VehicleYMMSelector({
       return true;
     }
     return false;
-  }, [value, catalogYears, makes, models, loading]);
+  }, [value, catalogYears, makes, models]);
 
   const [manual, setManual] = useState(false);
 
   useEffect(() => {
-    if (valueLooksOffCatalog) setManual(true);
+    if (valueLooksOffCatalog) void Promise.resolve().then(() => setManual(true));
   }, [valueLooksOffCatalog]);
 
   const req = required ? " *" : "";

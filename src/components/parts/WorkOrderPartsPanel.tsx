@@ -124,7 +124,7 @@ export function WorkOrderPartsPanel({
   }, [workOrderId, fleetVehicleId]);
 
   useEffect(() => {
-    void load();
+    void Promise.resolve().then(() => load());
   }, [load]);
 
   const stockById = useMemo(() => new Map(stock.map((s) => [s.id, s])), [stock]);

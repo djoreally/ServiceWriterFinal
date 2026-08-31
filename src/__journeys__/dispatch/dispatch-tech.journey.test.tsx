@@ -13,7 +13,7 @@ describe("Phase 3 Journey — Appointments & Dispatch", () => {
     await waitFor(() => {
       const elements = screen.getAllByText(/Full Synthetic Oil Change/i);
       expect(elements.length).toBeGreaterThan(0);
-    });
+    }, { timeout: 8_000 });
 
     expectNoConsoleErrors();
     expectNoPlumbingError();

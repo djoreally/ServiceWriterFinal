@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -79,9 +80,9 @@ export function VinLookup({
       setResult(vehicleResult);
       onVinFound(vehicleResult);
       toast.success("Vehicle found!");
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("VIN lookup error:", err);
-      const msg = err.message || "Failed to lookup VIN";
+      const msg = errorMessage(err, "Failed to lookup VIN");
       setError(msg);
       toast.error(msg);
     }

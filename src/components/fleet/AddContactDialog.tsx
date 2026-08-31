@@ -9,6 +9,10 @@ import { fetchFleetClientOptionsForContact, createFleetContact, updateFleetConta
 import { useAuth } from "@packages/auth";
 import { toast } from "@/components/ui/sonner";
 import { UserPlus } from "lucide-react";
+import type { Database } from "@/integrations/supabase/types";
+
+type FleetContact = Database["public"]["Tables"]["fleet_contacts"]["Row"];
+type FleetClientOption = Awaited<ReturnType<typeof fetchFleetClientOptionsForContact>>[number];
 
 // Smart defaults per role
 const ROLE_DEFAULTS: Record<string, Record<string, boolean>> = {
@@ -50,18 +54,18 @@ interface Props {
   onClose: () => void;
   onCreated: () => void;
   clientId?: string;
-  editingContact?: any;
+  editingContact?: FleetContact;
 }
 
 export const AddContactDialog = ({ open, onClose, onCreated, clientId, editingContact }: Props) => {
   const { user } = useAuth();
   const [saving, setSaving] = useState(false);
-  const [clients, setClients] = useState<any[]>([]);
+  const [clients, setClients] = useState<FleetClientOption[]>([]);
   const [form, setForm] = useState(defaultForm(clientId));
 
   useEffect(() => {
     if (editingContact) {
-      setForm({
+      void Promise.resolve().then(() => setForm({
         fleet_client_id: editingContact.fleet_client_id || clientId || "",
         name: editingContact.name || "",
         role: editingContact.role || "",
@@ -78,9 +82,9 @@ export const AddContactDialog = ({ open, onClose, onCreated, clientId, editingCo
         download_reports: !!editingContact.download_reports,
         approve_quotes: !!editingContact.approve_quotes,
         communication_preference: editingContact.communication_preference || "email",
-      });
+      }));
     } else {
-      setForm(defaultForm(clientId));
+      void Promise.resolve().then(() => setForm(defaultForm(clientId)));
     }
   }, [editingContact, clientId, open]);
 
@@ -97,7 +101,7 @@ export const AddContactDialog = ({ open, onClose, onCreated, clientId, editingCo
         const defaults = ROLE_DEFAULTS[v];
         // Reset all permissions first, then apply defaults
         ALL_PERMISSIONS.forEach((p) => {
-          if (p !== "is_primary") (updated as any)[p] = defaults[p] || false;
+          if (p !== "is_primary") updated[p] = defaults[p] || false;
         });
       }
       return updated;

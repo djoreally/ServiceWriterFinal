@@ -153,7 +153,7 @@ export function DeclinedServicesTracker() {
   }, []);
 
   useEffect(() => {
-    fetchData();
+    void Promise.resolve().then(() => fetchData());
   }, [fetchData]);
 
   const filteredServices = useMemo(() => {

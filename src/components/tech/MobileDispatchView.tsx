@@ -7,6 +7,7 @@
  * Integrates with real-time dispatch sync and location services
  */
 
+import { errorMessage } from "@/lib/error-message";
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -143,8 +144,8 @@ export function MobileDispatchView({
       }
 
       onStatusChange?.();
-    } catch (error: any) {
-      toast.error(error.message || 'Failed to update status');
+    } catch (error: unknown) {
+      toast.error(errorMessage(error, 'Failed to update status'));
     } finally {
       setTransitioning(false);
     }

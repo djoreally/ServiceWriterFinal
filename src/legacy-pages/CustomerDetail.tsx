@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { fetchCustomerDetail } from "@/application/queries/customer-detail.query";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -86,11 +86,8 @@ const CustomerDetail = () => {
   const [partsVehicleId, setPartsVehicleId] = useState<string | null>(null);
   const partsVehicle = vehicles.find((v) => v.id === partsVehicleId) ?? null;
 
-  useEffect(() => {
-    if (id) fetchCustomerData();
-  }, [id]);
 
-  const fetchCustomerData = async () => {
+  const fetchCustomerData = useCallback(async () => {
     if (!id) return;
     setLoading(true);
 
@@ -108,7 +105,11 @@ const CustomerDetail = () => {
     const totalCents = (result.paymentRecords ?? []).reduce((s, r) => s + (r.amount || 0), 0);
     setBilledTotal(result.paymentRecords.length > 0 ? totalCents / 100 : null);
     setLoading(false);
-  };
+  }, [id, navigate]);
+
+  useEffect(() => {
+    if (id) void Promise.resolve().then(() => fetchCustomerData());
+  }, [fetchCustomerData, id]);
 
   const getInitials = (name: string) => name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
 

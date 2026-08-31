@@ -78,10 +78,6 @@ export function AdminPlatformPlans() {
   const [editingPlan, setEditingPlan] = useState<PlatformPlan | null>(null);
   const [syncing, setSyncing] = useState(false);
 
-  useEffect(() => {
-    fetchPlans();
-    fetchStats();
-  }, []);
 
   const fetchPlans = async () => {
     try {
@@ -121,6 +117,11 @@ export function AdminPlatformPlans() {
       console.error('Failed to load stats:', err);
     }
   };
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchPlans());
+    void Promise.resolve().then(() => fetchStats());
+  }, []);
 
   const togglePlanActive = async (plan: PlatformPlan) => {
     try {

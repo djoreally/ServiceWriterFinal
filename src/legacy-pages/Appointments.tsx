@@ -189,7 +189,7 @@ const AppointmentsPage = () => {
       setCatalogLoading(false);
       setLoading(false);
     }
-  }, [prefillStateRef]);
+  }, [prefillStateRef, setAppointments, setEditingAppointment, setIsPrefillNew, setDialogOpen]);
 
   const { isRefreshing, containerRef } = usePullToRefresh({ onRefresh: fetchData });
 
@@ -438,7 +438,7 @@ const AppointmentsPage = () => {
 
     const deadLetters = await getDeadLetterOutboxItems();
     setDeadLetterCount(deadLetters.length);
-  }, []);
+  }, [setPendingOutboxCount, setDeadLetterCount]);
 
   useEffect(() => {
     refreshOutboxStatus().catch((): undefined => undefined);
@@ -473,7 +473,7 @@ const AppointmentsPage = () => {
         return;
       }
 
-      await retryDeadLetterOutboxItem(deadLetters[0]._raw.mutation_id);
+      await retryDeadLetterOutboxItem(deadLetters[0].mutationId);
       await processOfflineOutbox();
       await refreshOutboxStatus();
       toast.success("Dead-letter mutation moved back to retry queue");
@@ -493,7 +493,7 @@ const AppointmentsPage = () => {
         return;
       }
 
-      await discardDeadLetterOutboxItem(deadLetters[0]._raw.mutation_id);
+      await discardDeadLetterOutboxItem(deadLetters[0].mutationId);
       await refreshOutboxStatus();
       toast.success("Dead-letter mutation discarded");
     } catch (error) {

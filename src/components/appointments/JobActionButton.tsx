@@ -20,10 +20,14 @@ import { CompleteAppointmentDialog } from "@/components/appointments/CompleteApp
 import type { Appointment } from "@/shared/types";
 
 interface JobActionButtonProps {
-  appointment: Appointment;
+  appointment: JobActionAppointment;
   onUpdated: () => void;
   className?: string;
 }
+
+type JobActionAppointment = Appointment & {
+  actual_start_time?: string | null;
+};
 
 type Step = "loading" | "start" | "inspection" | "complete" | "done";
 
@@ -44,12 +48,12 @@ export function JobActionButton({ appointment, onUpdated, className }: JobAction
   }, [appointment.id]);
 
   useEffect(() => {
-    refreshGate();
+    void Promise.resolve().then(() => refreshGate());
   }, [refreshGate]);
 
   const status = (appointment.status || "").toLowerCase();
-  const dispatchStatus = ((appointment as any).dispatch_status || "").toLowerCase();
-  const started = !!(appointment as any).actual_start_time;
+  const dispatchStatus = (appointment.dispatch_status || "").toLowerCase();
+  const started = Boolean(appointment.actual_start_time);
   const isCompleted = status === "completed" || dispatchStatus === "completed";
 
   let step: Step = "loading";
@@ -94,7 +98,7 @@ export function JobActionButton({ appointment, onUpdated, className }: JobAction
         className={className}
         variant="outline"
         onClick={() => {
-          const svc = (appointment as any).service_record_id;
+          const svc = appointment.service_record_id;
           if (svc) navigate(`/services/${svc}`);
         }}
       >

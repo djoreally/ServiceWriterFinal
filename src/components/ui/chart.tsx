@@ -1,5 +1,12 @@
 import * as React from "react";
-import { Legend, ResponsiveContainer, Tooltip, type LegendProps } from "recharts";
+import {
+  Legend,
+  ResponsiveContainer,
+  Tooltip,
+  type DefaultLegendContentProps,
+  type TooltipContentProps,
+} from "recharts";
+import type { NameType, ValueType } from "recharts/types/component/DefaultTooltipContent";
 
 import { cn } from "@/lib/utils";
 
@@ -100,10 +107,10 @@ const ChartStyle = ({ id, config }: { id: string; config: ChartConfig }) => {
 
 const ChartTooltip = Tooltip;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 const ChartTooltipContent = React.forwardRef<
   HTMLDivElement,
-  any & {
+  Partial<TooltipContentProps<ValueType, NameType>> & React.ComponentProps<"div"> & {
       hideLabel?: boolean;
       hideIndicator?: boolean;
       indicator?: "line" | "dot" | "dashed";
@@ -171,7 +178,7 @@ const ChartTooltipContent = React.forwardRef<
       >
         {!nestLabel ? tooltipLabel : null}
         <div className="grid gap-1.5">
-          {payload.map((item: any, index: number) => {
+          {payload.map((item, index: number) => {
             const key = `${nameKey || item.name || item.dataKey || "value"}`;
             const itemConfig = getPayloadConfigFromPayload(config, item, key);
             const indicatorColor = color || item.payload.fill || item.color;
@@ -238,10 +245,10 @@ ChartTooltipContent.displayName = "ChartTooltip";
 
 const ChartLegend = Legend;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 const ChartLegendContent = React.forwardRef<
   HTMLDivElement,
-  any & {
+  React.ComponentProps<"div"> & Pick<DefaultLegendContentProps, "payload" | "verticalAlign"> & {
       hideIcon?: boolean;
       nameKey?: string;
     }
@@ -257,7 +264,7 @@ const ChartLegendContent = React.forwardRef<
       ref={ref}
       className={cn("flex items-center justify-center gap-4", verticalAlign === "top" ? "pb-3" : "pt-3", className)}
     >
-      {payload.map((item: any) => {
+      {payload.map((item) => {
         const key = `${nameKey || item.dataKey || "value"}`;
         const itemConfig = getPayloadConfigFromPayload(config, item, key);
 

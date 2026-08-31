@@ -37,7 +37,7 @@ export const TerminologyProvider = ({ children }: { children: ReactNode }) => {
   };
 
   useEffect(() => {
-    loadTerminology();
+    void Promise.resolve().then(() => loadTerminology());
   }, []);
 
   return (

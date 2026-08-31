@@ -12,7 +12,8 @@ function DrawerTrigger(props: React.ComponentPropsWithoutRef<typeof DrawerPrimit
   return <DrawerPrimitive.Trigger {...props} />;
 }
 
-const DrawerPortal = DrawerPrimitive.Portal;
+const DrawerPortal = (props: React.ComponentProps<typeof DrawerPrimitive.Portal>) => <DrawerPrimitive.Portal {...props} />;
+DrawerPortal.displayName = "DrawerPortal";
 
 function DrawerClose(props: React.ComponentPropsWithoutRef<typeof DrawerPrimitive.Close>): React.JSX.Element {
   return <DrawerPrimitive.Close {...props} />;

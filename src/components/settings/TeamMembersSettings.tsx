@@ -8,6 +8,7 @@
  * - View invitation status
  */
 
+import { errorMessage } from "@/lib/error-message";
 import { useState, useEffect, useCallback } from "react";
 import {
   getAuthUser,
@@ -21,7 +22,6 @@ import {
   cancelTeamInvitation,
   updateTechnician,
   uploadTeamDocument,
-  deleteTechnician,
 } from "@/application/commands/team-members.command";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -162,15 +162,15 @@ export function TeamMembersSettings() {
           is_active: t.is_active ?? true,
           working_hours: t.working_hours as TeamMember["working_hours"],
           skills: t.skills ?? [],
-          address: (t as any).address ?? null,
-          auth_user_id: (t as any).auth_user_id ?? null,
-          drivers_license_url: (t as any).drivers_license_url ?? null,
-          drivers_license_number: (t as any).drivers_license_number ?? null,
-          drivers_license_expiry: (t as any).drivers_license_expiry ?? null,
-          emergency_contact_name: (t as any).emergency_contact_name ?? null,
-          emergency_contact_phone: (t as any).emergency_contact_phone ?? null,
-          hourly_rate: (t as any).hourly_rate ?? null,
-          hire_date: (t as any).hire_date ?? null,
+          address: t.address ?? null,
+          auth_user_id: t.auth_user_id ?? null,
+          drivers_license_url: t.drivers_license_url ?? null,
+          drivers_license_number: t.drivers_license_number ?? null,
+          drivers_license_expiry: t.drivers_license_expiry ?? null,
+          emergency_contact_name: t.emergency_contact_name ?? null,
+          emergency_contact_phone: t.emergency_contact_phone ?? null,
+          hourly_rate: t.hourly_rate ?? null,
+          hire_date: t.hire_date ?? null,
         })));
       }
       if (invResult.data) {
@@ -183,7 +183,7 @@ export function TeamMembersSettings() {
     }
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { void Promise.resolve().then(() => fetchData()); }, [fetchData]);
 
   const resetAddForm = () => setAddForm({
     name: "", email: "", phone: "", address: "", employment_type: "W2",
@@ -223,8 +223,8 @@ export function TeamMembersSettings() {
       setShowAddDialog(false);
       resetAddForm();
       fetchData();
-    } catch (err: any) {
-      toast.error(err.message || "Failed to add technician");
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, "Failed to add technician"));
     } finally {
       setAdding(false);
     }
@@ -272,8 +272,8 @@ export function TeamMembersSettings() {
       setInviteEmail("");
       setInviteRole("technician");
       fetchData();
-    } catch (err: any) {
-      toast.error(err.message || "Failed to send invitation");
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, "Failed to send invitation"));
     } finally {
       setInviting(false);
     }
@@ -328,14 +328,14 @@ export function TeamMembersSettings() {
         drivers_license_expiry: editForm.drivers_license_expiry,
         emergency_contact_name: editForm.emergency_contact_name,
         emergency_contact_phone: editForm.emergency_contact_phone,
-      } as any);
+      });
 
       if (error) throw error;
       toast.success("Team member updated");
       setShowEditDialog(false);
       fetchData();
-    } catch (err: any) {
-      toast.error(err.message || "Failed to update");
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, "Failed to update"));
     } finally {
       setSaving(false);
     }
@@ -357,7 +357,7 @@ export function TeamMembersSettings() {
 
     const { data: { publicUrl } } = getTeamDocumentUrl(filePath);
 
-    await updateTechnician(selectedMember.id, { drivers_license_url: publicUrl } as any);
+    await updateTechnician(selectedMember.id, { drivers_license_url: publicUrl });
 
     toast.success("Driver's license uploaded");
     fetchData();
@@ -365,7 +365,7 @@ export function TeamMembersSettings() {
 
   const handleDeleteMember = async (memberId: string) => {
     if (!confirm("Are you sure you want to remove this team member?")) return;
-    const { error } = await updateTechnician(memberId, { is_active: false } as any);
+    const { error } = await updateTechnician(memberId, { is_active: false });
     
     if (error) {
       toast.error("Failed to remove member");

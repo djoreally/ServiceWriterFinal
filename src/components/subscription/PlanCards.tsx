@@ -112,12 +112,12 @@ export function PlanCards({
 
   const startCheckout = async (plan: PlanInfo) => {
     if (plan.contactSales) {
-      window.location.href = CONTACT_SALES_MAILTO;
+      window.location.assign(CONTACT_SALES_MAILTO);
       return;
     }
     const url = await upgrade(plan.name);
     if (url) {
-      window.location.href = url;
+      window.location.assign(url);
       return;
     }
     toast.error('Unable to start checkout. Please try again.');

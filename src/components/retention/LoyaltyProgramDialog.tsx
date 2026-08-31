@@ -52,18 +52,18 @@ export function LoyaltyProgramDialog({
 
   useEffect(() => {
     if (editProgram) {
-      setName(editProgram.name);
-      setScope(editProgram.scope);
-      setStatus(editProgram.status);
+      void Promise.resolve().then(() => setName(editProgram.name));
+      void Promise.resolve().then(() => setScope(editProgram.scope));
+      void Promise.resolve().then(() => setStatus(editProgram.status));
       const rules = editProgram.earn_rules_jsonb as Record<string, number> | null;
-      setPointsPerDollar(rules?.points_per_dollar?.toString() || "1");
-      setPointsPerVisit(rules?.points_per_visit?.toString() || "10");
+      void Promise.resolve().then(() => setPointsPerDollar(rules?.points_per_dollar?.toString() || "1"));
+      void Promise.resolve().then(() => setPointsPerVisit(rules?.points_per_visit?.toString() || "10"));
     } else {
-      setName("");
-      setScope("per_vehicle");
-      setStatus("active");
-      setPointsPerDollar("1");
-      setPointsPerVisit("10");
+      void Promise.resolve().then(() => setName(""));
+      void Promise.resolve().then(() => setScope("per_vehicle"));
+      void Promise.resolve().then(() => setStatus("active"));
+      void Promise.resolve().then(() => setPointsPerDollar("1"));
+      void Promise.resolve().then(() => setPointsPerVisit("10"));
     }
   }, [editProgram, open]);
 

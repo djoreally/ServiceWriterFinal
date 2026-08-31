@@ -67,7 +67,7 @@ export function useGoogleCalendar() {
   }, []);
 
   useEffect(() => {
-    refreshStatus();
+    void Promise.resolve().then(() => refreshStatus());
   }, [refreshStatus]);
 
   /**

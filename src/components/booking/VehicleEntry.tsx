@@ -253,9 +253,9 @@ export function VehicleEntry({
   // Reset fallback mode when year changes
   useEffect(() => {
     if (activeVehicle?.year) {
-      setFallbackMode("none");
+      void Promise.resolve().then(() => setFallbackMode("none"));
       processedAiResultRef.current = null;
-      resetAI();
+      void Promise.resolve().then(() => resetAI());
     }
   }, [activeVehicle?.year, resetAI]);
 
@@ -297,7 +297,7 @@ export function VehicleEntry({
         toast.success("Vehicle specs found via AI lookup");
       }
     }
-  }, [aiResult, activeVehicle?.id, fallbackMode, updateVehicle]);
+  }, [aiResult, activeVehicle.id, fallbackMode, updateVehicle, activeVehicle]);
 
   const addVehicle = () => {
     const newVehicle = createEmptyVehicle();

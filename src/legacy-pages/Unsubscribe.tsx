@@ -12,8 +12,8 @@ export default function Unsubscribe() {
 
   useEffect(() => {
     if (!token) {
-      setState("error");
-      setMessage("This unsubscribe link is missing its token.");
+      void Promise.resolve().then(() => setState("error"));
+      void Promise.resolve().then(() => setMessage("This unsubscribe link is missing its token."));
       return;
     }
     (async () => {

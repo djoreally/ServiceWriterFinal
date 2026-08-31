@@ -92,15 +92,16 @@ export async function getOfflineObservabilitySnapshot(): Promise<OfflineObservab
 
   const rows = await database.get('offline_outbox').query().fetch();
   const now = Date.now();
+  const statusOf = (row: (typeof rows)[number]): unknown => Reflect.get(row._raw, 'status');
 
-  const pending = rows.filter((r: any) => r._raw.status === 'pending').length;
-  const failed = rows.filter((r: any) => r._raw.status === 'failed').length;
-  const deadLetter = rows.filter((r: any) => r._raw.status === 'dead_letter').length;
-  const synced = rows.filter((r: any) => r._raw.status === 'synced').length;
+  const pending = rows.filter((row) => statusOf(row) === 'pending').length;
+  const failed = rows.filter((row) => statusOf(row) === 'failed').length;
+  const deadLetter = rows.filter((row) => statusOf(row) === 'dead_letter').length;
+  const synced = rows.filter((row) => statusOf(row) === 'synced').length;
 
   const pendingCreatedAt = rows
-    .filter((r: any) => r._raw.status === 'pending' || r._raw.status === 'failed')
-    .map((r: any) => asNumber(r._raw.created_at))
+    .filter((row) => statusOf(row) === 'pending' || statusOf(row) === 'failed')
+    .map((row) => asNumber(Reflect.get(row._raw, 'created_at')))
     .filter((value: number) => value > 0)
     .sort((a, b) => a - b);
 
@@ -161,8 +162,12 @@ export async function getSyncCursorSnapshot(): Promise<Record<string, string | n
   const rows = await database.get('offline_sync_state').query(Q.sortBy('updated_at', Q.desc)).fetch();
   const result: Record<string, string | null> = {};
 
-  for (const row of rows as any[]) {
-    result[row._raw.entity] = row._raw.cursor ?? null;
+  for (const row of rows) {
+    const entity: unknown = Reflect.get(row._raw, 'entity');
+    const cursor: unknown = Reflect.get(row._raw, 'cursor');
+    if (typeof entity === 'string') {
+      result[entity] = typeof cursor === 'string' ? cursor : null;
+    }
   }
 
   return result;

@@ -1,6 +1,7 @@
 /**
  * Appointment Detail Commands — Write operations for appointment records.
  */
+import { errorMessage } from "@/lib/error-message";
 import { supabase } from "@/integrations/supabase/client";
 import { trackAppointmentStatusChanged } from "@/lib/posthog/analytics";
 
@@ -48,9 +49,10 @@ export async function updateAppointmentStatus(id: string, status: string) {
   if (res.error) {
     // Preserve the raw supabase error for callers that check `.error`,
     // but also throw so optimistic hooks trigger their rollback path.
-    const err = new Error(res.error.message || "Failed to update appointment status");
-    (err as any).cause = res.error;
-    throw err;
+    throw new Error(
+      errorMessage(res.error, "Failed to update appointment status"),
+      { cause: res.error },
+    );
   }
   if (!res.data) {
     throw new Error(
@@ -77,13 +79,13 @@ export async function startAppointmentJob(
       "start_appointment_job" as any,
       { p_appointment_id: appointmentId },
     );
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(errorMessage(error));
     const result = data as any;
     return {
       success: !!result?.success,
       alreadyStarted: !!result?.already_started,
     };
-  } catch (err: any) {
-    return { success: false, error: err?.message || "Failed to start job" };
+  } catch (err: unknown) {
+    return { success: false, error: errorMessage(err, "Failed to start job") };
   }
 }

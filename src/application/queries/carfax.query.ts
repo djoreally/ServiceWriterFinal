@@ -22,8 +22,14 @@ export interface CarfaxExportRecord {
 }
 export interface CarfaxDataStats { totalServices: number; validVins: number; missingData: number; }
 
-function object(value: unknown): Record<string, any> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+interface CarfaxServiceRow {
+  id: string;
+  vehicle_id: string | null;
+  vehicles: { vin?: string | null } | null;
 }
 
 export async function fetchCarfaxSettings(): Promise<CarfaxSettingsData | null> {
@@ -66,7 +72,7 @@ export async function fetchCarfaxDataStats(): Promise<CarfaxDataStats> {
     .eq("workspace_id", context.workspaceId)
     .eq("status", "completed");
   if (error) throw error;
-  const rows = (data ?? []) as any[];
+  const rows = (data ?? []) as unknown as CarfaxServiceRow[];
   const totalServices = rows.length;
   const validVins = rows.filter((service) => service.vehicles?.vin?.length === 17).length;
   return { totalServices, validVins, missingData: totalServices - validVins };

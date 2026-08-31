@@ -9,10 +9,14 @@ import { toast } from "@/components/ui/sonner";
 
 const REFRESH_INTERVAL_MS = 30_000;
 
+interface DeadLetterOutboxItem {
+  mutationId: string;
+}
+
 interface OfflineDashboardDeps {
   getOfflineObservabilitySnapshot: () => Promise<OfflineObservabilitySnapshot>;
   getSyncCursorSnapshot: () => Promise<Record<string, string | null>>;
-  getDeadLetterOutboxItems: () => Promise<any[]>;
+  getDeadLetterOutboxItems: () => Promise<DeadLetterOutboxItem[]>;
   retryDeadLetterOutboxItem: (mutationId: string) => Promise<void>;
   discardDeadLetterOutboxItem: (mutationId: string) => Promise<void>;
 }
@@ -60,7 +64,7 @@ export function OfflineSyncDashboard() {
   const [isOfflineDashboardEnabled, setIsOfflineDashboardEnabled] = useState(false);
   const [snapshot, setSnapshot] = useState<OfflineObservabilitySnapshot | null>(null);
   const [cursors, setCursors] = useState<Record<string, string | null>>({});
-  const [deadLetterItems, setDeadLetterItems] = useState<any[]>([]);
+  const [deadLetterItems, setDeadLetterItems] = useState<DeadLetterOutboxItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
 
@@ -111,11 +115,11 @@ export function OfflineSyncDashboard() {
 
   useEffect(() => {
     if (!isOfflineDashboardEnabled) {
-      setLoading(false);
+      void Promise.resolve().then(() => setLoading(false));
       return;
     }
 
-    void refresh();
+    void Promise.resolve().then(() => refresh());
     const interval = setInterval((): void => void refresh(), REFRESH_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [isOfflineDashboardEnabled, refresh]);
@@ -235,22 +239,17 @@ export function OfflineSyncDashboard() {
           </CardHeader>
           <CardContent className="p-0">
             <div className="divide-y text-sm">
-              {deadLetterItems.map((item: any) => {
-                const mutationId: string = item._raw?.mutation_id ?? item.id;
+              {deadLetterItems.map((item) => {
+                const mutationId = item.mutationId;
                 const isActing = actionInProgress === mutationId;
-                const entity: string = item._raw?.entity ?? "unknown";
-                const operation: string = item._raw?.operation ?? "unknown";
-                const reason: string = item._raw?.dead_letter_reason ?? "Unknown error";
-                const attempts: number = item._raw?.attempt_count ?? 0;
 
                 return (
                   <div key={mutationId} className="flex justify-between items-start px-4 py-3 gap-4">
                     <div className="min-w-0">
-                      <p className="font-mono text-xs truncate">{entity}.{operation}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5 truncate" title={reason}>
-                        {reason}
+                      <p className="font-mono text-xs truncate">Mutation {mutationId}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Retry or discard this failed offline change.
                       </p>
-                      <p className="text-xs text-muted-foreground">{attempts} attempts</p>
                     </div>
                     <div className="flex gap-2 shrink-0">
                       <Button

@@ -26,8 +26,8 @@ export function MoveToFolderDialog({ open, count, onOpenChange, onConfirm }: Pro
 
   useEffect(() => {
     if (!open) return;
-    listAssetFolders().then(setFolders).catch(() => setFolders([]));
-    setFolder("");
+    void Promise.resolve().then(() => listAssetFolders().then(setFolders).catch(() => setFolders([])));
+    void Promise.resolve().then(() => setFolder(""));
   }, [open]);
 
   const submit = async (target: string | null) => {

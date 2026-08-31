@@ -72,8 +72,8 @@ export function TechMissionMap({ stops, origin, routeGeometry, onExpand, accent 
       map.remove();
       mapRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+
+  }, [accent, origin, stops]);
 
   // Markers
   useEffect(() => {

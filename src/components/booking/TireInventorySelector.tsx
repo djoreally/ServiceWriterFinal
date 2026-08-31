@@ -30,14 +30,14 @@ export function TireInventorySelector({
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    fetchPublicTireInventory(businessUserId, tireSize)
+    void Promise.resolve().then(() => setLoading(true));
+    void Promise.resolve().then(() => fetchPublicTireInventory(businessUserId, tireSize)
       .then((rows) => {
         if (active) setItems(rows);
       })
       .finally(() => {
         if (active) setLoading(false);
-      });
+      }));
     return () => {
       active = false;
     };

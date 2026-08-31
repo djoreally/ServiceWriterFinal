@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, no-empty */
+
 
 /**
  * PublicBooking — Multi-step public booking page.
@@ -14,7 +14,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
-import { useBookingState } from "@/hooks/useBookingState";
+import { useBookingState, type BookingState } from "@/hooks/useBookingState";
 import { useBookingPricing, type FeeSettings } from "@/hooks/useBookingPricing";
 import { useBookingSlots } from "@/hooks/useBookingSlots";
 import { useBookingSubmit } from "@/hooks/useBookingSubmit";
@@ -33,6 +33,7 @@ import {
   fetchBookingCustomerAccount,
   fetchCurrentBookingUser,
   fetchPublicBlockedDates,
+  type PublicSubscriptionPlan,
 } from "@/application/queries/public-booking.query";
 import type { BookingRequirement } from "@/lib/service-category-policy";
 import { mergeBookingRequirements, vehicleMeetsBookingRequirements } from "@/lib/booking-requirements";
@@ -84,6 +85,8 @@ import { AppointmentBar } from "@/components/booking/AppointmentBar";
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+const BOOKING_DRAFT_TTL_MS = 2 * 60 * 60 * 1000;
 
 /** Convert "HH:mm" to "h:mm AM/PM" for display */
 function formatSlotTo12h(slot: string): string {
@@ -178,7 +181,7 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
   const [business, setBusiness] = useState<BusinessProfile | null>(null);
   const [services, setServices] = useState<ServiceCatalogItem[]>([]);
   const [packages, setPackages] = useState<ServicePackage[]>([]);
-  const [subscriptionPlans, setSubscriptionPlans] = useState<any[]>([]);
+  const [subscriptionPlans, setSubscriptionPlans] = useState<PublicSubscriptionPlan[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [blockedDates, setBlockedDates] = useState<string[]>([]);
@@ -201,8 +204,8 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
     return () => {
       stopPresence();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [business?.user_id]);
+
+  }, [business?.user_id, slug]);
 
   // Step-change tracking is wired in a separate effect below (after `bs` is created).
 
@@ -226,12 +229,13 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
   //    later with prices or services that have since changed.
   //  • The draft is cleared the moment a booking is confirmed.
   const STORAGE_KEY = `booking-${slug}`;
-  const DRAFT_TTL_MS = 2 * 60 * 60 * 1000;
   const clearBookingDraft = useCallback(() => {
     try {
       localStorage.removeItem(STORAGE_KEY);
       sessionStorage.removeItem(STORAGE_KEY);
-    } catch {}
+    } catch {
+      // Storage may be unavailable in private or restricted browser contexts.
+    }
   }, [STORAGE_KEY]);
   const getSavedBookingData = useCallback(() => {
     try {
@@ -240,7 +244,7 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
       if (!saved) return null;
       const parsed = JSON.parse(saved);
       const savedAt = typeof parsed?.savedAt === "number" ? parsed.savedAt : 0;
-      if (!savedAt || Date.now() - savedAt > DRAFT_TTL_MS) {
+      if (!savedAt || Date.now() - savedAt > BOOKING_DRAFT_TTL_MS) {
         localStorage.removeItem(STORAGE_KEY);
         sessionStorage.removeItem(STORAGE_KEY);
         return null;
@@ -249,11 +253,11 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
     } catch {
       return null;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [STORAGE_KEY]);
 
   // ── State (reducer) ────────────────────────────────────────────────────
-  const savedData = getSavedBookingData();
+  const savedData = useMemo(() => getSavedBookingData(), [getSavedBookingData]);
   const { state: bs, dispatch } = useBookingState(savedData, initialStep);
 
   // Live presence — emit a funnel event whenever the booking step changes
@@ -277,7 +281,7 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
   const [quoteRequestOpen, setQuoteRequestOpen] = useState(false);
 
   useEffect(() => {
-    if (bs.step !== 5) setStep5View("options");
+    if (bs.step !== 5) void Promise.resolve().then(() => setStep5View("options"));
   }, [bs.step]);
 
   // ── Step setter (syncs URL) ─────────────────────────────────────────────
@@ -391,6 +395,8 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
     windowDays: Math.min(business?.max_advance_days ?? 14, 14),
     defaultSlotDurationMinutes: business?.slot_duration_minutes ?? 60,
   });
+  const { isDayWeatherBlocked, isWeatherBlocked } = weatherGuard;
+  const getTotalDuration = pricing.getTotalDuration;
 
   // Real-time slot decision via the weather-guard-check-slot edge function.
   // Reflects the same risk engine that drives Weather Guard automation
@@ -504,10 +510,7 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
   // rules (winback / recovery) can target them.
   // Persistent anonymous cookie id — established on first visit so we
   // can track every booking step even before the visitor types an email.
-  const anonSessionIdRef = useRef<string>("");
-  if (!anonSessionIdRef.current) {
-    anonSessionIdRef.current = getAnonSessionId();
-  }
+  const [anonSessionId] = useState(getAnonSessionId);
 
   useBookingTracker({
     businessUserId: business?.user_id,
@@ -515,7 +518,7 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
     guestName: bs.guestName,
     guestPhone: bs.guestPhone,
     step: bs.step,
-    sessionId: anonSessionIdRef.current,
+    sessionId: anonSessionId,
     serviceCatalogId: bs.selectedServices[0]?.id ?? null,
     scheduledDate: bs.selectedDate ? bs.selectedDate.toISOString().slice(0, 10) : null,
     scheduledTime: bs.selectedTime || null,
@@ -562,7 +565,9 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
     try {
       const serialized = JSON.stringify({ ...dataToSave, step: bs.step, savedAt: Date.now() });
       localStorage.setItem(STORAGE_KEY, serialized);
-    } catch {}
+    } catch {
+      // Draft persistence is best-effort and must never block booking.
+    }
   }, [slug, STORAGE_KEY, bs, clearBookingDraft]);
 
   // ── Fetch business + services ───────────────────────────────────────────
@@ -575,7 +580,7 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
       }
 
       const { data: rawBusinessData, error: businessError } = await fetchPublicBookingProfile(slug);
-      const businessData = Array.isArray(rawBusinessData) ? rawBusinessData as Record<string, any>[] : null;
+      const businessData = Array.isArray(rawBusinessData) ? rawBusinessData : null;
 
       if (businessError || !businessData || businessData.length === 0) {
         setNotFound(true);
@@ -586,7 +591,7 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
       const profile = businessData[0];
 
       const { data: additionalSettings, error: additionalSettingsError } =
-        (await fetchPublicBusinessExtendedSettings(slug)) as { data: any | null; error: unknown };
+        await fetchPublicBusinessExtendedSettings(slug);
       if (additionalSettingsError) {
         console.warn("Public booking: extended settings query failed; using profile defaults.", additionalSettingsError);
       }
@@ -594,22 +599,22 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
       setBusiness({
         id: "",
         user_id: profile.user_id,
-        business_name: profile.business_name,
+        business_name: profile.business_name ?? null,
         phone: null,
         email: profile.email || null,
         address: null,
         logo_url: profile.logo_url || null,
-        opening_time: profile.opening_time,
-        closing_time: profile.closing_time,
-        working_days: profile.working_days,
+        opening_time: profile.opening_time ?? null,
+        closing_time: profile.closing_time ?? null,
+        working_days: profile.working_days ?? null,
         day_hours:
-          (additionalSettings as any)?.day_hours && typeof (additionalSettings as any).day_hours === "object"
-            ? ((additionalSettings as any).day_hours as Record<string, unknown>)
+          additionalSettings?.day_hours && typeof additionalSettings.day_hours === "object"
+            ? additionalSettings.day_hours
             : null,
-        currency: profile.currency,
-        service_radius_miles: profile.service_radius_miles,
-        service_address: profile.service_address,
-        service_coordinates: profile.service_coordinates as { lat: number; lng: number } | null,
+        currency: profile.currency ?? null,
+        service_radius_miles: profile.service_radius_miles ?? null,
+        service_address: profile.service_address ?? null,
+        service_coordinates: profile.service_coordinates ?? null,
         buffer_time_before: profile.buffer_time_before ?? 0,
         buffer_time_after: profile.buffer_time_after ?? 0,
         min_lead_time_hours: profile.min_lead_time_hours ?? 2,
@@ -639,17 +644,15 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
         surcharge_type: additionalSettings?.surcharge_type || "percentage",
         surcharge_value: Number(additionalSettings?.surcharge_value) || 0,
         surcharge_description: additionalSettings?.surcharge_description || "Card Processing Fee",
-        weather_guard_enabled: additionalSettings?.weather_guard_enabled ?? (profile as any).weather_guard_enabled ?? false,
-        weather_guard_settings: additionalSettings?.weather_guard_settings ?? (profile as any).weather_guard_settings ?? null,
-        service_area_rules: Array.isArray((additionalSettings as any)?.day_hours?.service_area_rules)
-          ? ((additionalSettings as any).day_hours.service_area_rules as ServiceAreaRule[])
+        weather_guard_enabled: additionalSettings?.weather_guard_enabled ?? profile.weather_guard_enabled ?? false,
+        weather_guard_settings: additionalSettings?.weather_guard_settings ?? profile.weather_guard_settings ?? null,
+        service_area_rules: Array.isArray(additionalSettings?.day_hours?.service_area_rules)
+          ? (additionalSettings.day_hours.service_area_rules as ServiceAreaRule[])
           : [],
-        service_display_mode: (additionalSettings as any)?.day_hours?.public_booking_service_display_mode === "category_first"
+        service_display_mode: additionalSettings?.day_hours?.public_booking_service_display_mode === "category_first"
           ? "category_first"
           : "full_list",
-        service_verticals: Array.isArray((additionalSettings as any)?.service_verticals)
-          ? ((additionalSettings as any).service_verticals as string[])
-          : ["oil_change"],
+        service_verticals: additionalSettings?.service_verticals ?? ["oil_change"],
       });
 
       const { data: rawServicesData } = await fetchPublicServiceCatalog(slug);
@@ -688,21 +691,21 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
 
         // Prune the per-vehicle selections the draft restored directly.
         const savedSelections = savedData?.vehicleServiceSelections as
-          | Record<string, { services?: ServiceCatalogItem[]; package?: unknown }>
+          | BookingState["vehicleServiceSelections"]
           | undefined;
         if (savedSelections && Object.keys(savedSelections).length > 0) {
           const pruned = Object.fromEntries(
             Object.entries(savedSelections).map(([vehicleId, selection]) => [
               vehicleId,
               {
-                ...(selection as any),
-                services: ((selection as any)?.services ?? []).filter((svc: ServiceCatalogItem) =>
+                ...selection,
+                services: (selection.services ?? []).filter((svc) =>
                   activeIds.has(svc.id),
                 ),
               },
             ]),
-          );
-          dispatch({ type: "SET_VEHICLE_SERVICE_SELECTIONS", selections: pruned as any });
+          ) as BookingState["vehicleServiceSelections"];
+          dispatch({ type: "SET_VEHICLE_SERVICE_SELECTIONS", selections: pruned });
         }
       }
 
@@ -710,7 +713,7 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
     };
 
     fetchBusinessAndServices();
-  }, [slug, selectedServiceIds]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [dispatch, savedData?.vehicleServiceSelections, selectedServiceIds, slug]);
 
   const matchedServiceAreas = useMemo(() => {
     return matchServiceAreas(bs.customerCoords, business?.service_area_rules);
@@ -926,16 +929,12 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
     return missing;
   };
 
-  const vehicleBookingRequirements = useMemo(() => {
-    const result: Record<string, BookingRequirement[]> = {};
-    for (const vehicle of bs.vehicles) {
+  const vehicleBookingRequirements = Object.fromEntries(bs.vehicles.map((vehicle) => {
       const selection = bs.vehicleServiceSelections[vehicle.id];
       const serviceIds = selection?.package ? selection.package.services.map((service) => service.id) : selection?.services.map((service) => service.id) || [];
       const requirements = services.filter((service) => serviceIds.includes(service.id)).map((service) => service.booking_requirements ?? []);
-      result[vehicle.id] = mergeBookingRequirements([...requirements, ["basic_vehicle"]]);
-    }
-    return result;
-  }, [bs.vehicles, bs.vehicleServiceSelections, services]);
+      return [vehicle.id, mergeBookingRequirements([...requirements, ["basic_vehicle"]])];
+    })) as Record<string, BookingRequirement[]>;
 
   const canProceed = () => {
     switch (bs.step) {
@@ -955,8 +954,8 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
       case 4: {
         if (!bs.selectedDate || !bs.selectedTime || slotWeatherDecision.isBlocked) return false;
         // Fail-open: forecast errors don't block continuation.
-        if (weatherGuard.isDayWeatherBlocked(bs.selectedDate)) return false;
-        return !weatherGuard.isWeatherBlocked(bs.selectedTime, pricing.getTotalDuration() || undefined).blocked;
+        if (isDayWeatherBlocked(bs.selectedDate)) return false;
+        return !isWeatherBlocked(bs.selectedTime, getTotalDuration() || undefined).blocked;
       }
       case 5:
         // Options sub-view has no required fields; contact sub-view requires all.
@@ -969,22 +968,22 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
     if (!bs.selectedDate) return;
     const selectedDateIsBlocked =
       blockedDates.includes(format(bs.selectedDate, "yyyy-MM-dd")) ||
-      weatherGuard.isDayWeatherBlocked(bs.selectedDate);
+      isDayWeatherBlocked(bs.selectedDate);
     if (selectedDateIsBlocked) {
       dispatch({ type: "SET_SELECTED_DATE", date: undefined });
       dispatch({ type: "SET_SELECTED_TIME", time: "" });
       toast.error("That date is unavailable due to Weather Guard. Please choose another date.");
     }
-  }, [blockedDates, bs.selectedDate, weatherGuard.isDayWeatherBlocked, dispatch]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [blockedDates, bs.selectedDate, dispatch, isDayWeatherBlocked]);
 
   useEffect(() => {
     if (!bs.selectedTime) return;
-    const weather = weatherGuard.isWeatherBlocked(bs.selectedTime, pricing.getTotalDuration() || undefined);
+    const weather = isWeatherBlocked(bs.selectedTime, getTotalDuration() || undefined);
     if (weather.blocked) {
       dispatch({ type: "SET_SELECTED_TIME", time: "" });
       toast.error(`That time is unavailable due to weather: ${weather.reasons.join(", ")}`);
     }
-  }, [bs.selectedTime, weatherGuard.isWeatherBlocked, pricing.getTotalDuration, dispatch]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [bs.selectedTime, dispatch, getTotalDuration, isWeatherBlocked]);
 
   const handleNext = async () => {
     dispatch({ type: "SET_CHECKOUT_ERROR", error: null });

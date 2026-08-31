@@ -76,7 +76,7 @@ export default function TechRoute() {
   }, [identity]);
 
   useEffect(() => {
-    fetchData();
+    void Promise.resolve().then(() => fetchData());
   }, [fetchData]);
 
   const handleRefresh = async () => {

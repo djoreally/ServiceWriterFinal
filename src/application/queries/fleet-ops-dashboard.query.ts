@@ -10,7 +10,7 @@
  * fleet_service_schedules, technicians, time_clock_entries, inventory_items.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+
 import { supabase } from "@/integrations/supabase/client";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -124,6 +124,20 @@ export interface FleetOpsDashboard {
   inventory: FleetOpsInventory;
 }
 
+interface TodayWorkOrderRow {
+  id: string;
+  total?: number | null;
+  status: string;
+  assigned_technician_id?: string | null;
+  scheduled_time?: string | null;
+  fleet_client_id?: string | null;
+  checkin_geo?: unknown;
+  started_at?: string | null;
+  technicians?: { name?: string | null; current_location?: unknown; status?: string | null } | null;
+  fleet_clients?: { company_name?: string | null } | null;
+  fleet_locations?: { name?: string | null } | null;
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function isoDate(date: Date): string {
@@ -136,7 +150,9 @@ function addDays(base: Date, days: number): Date {
   return d;
 }
 
-function categorizeInventory(item: any): keyof FleetOpsInventory | null {
+function categorizeInventory(
+  item: Pick<FleetOpsInventoryRow, "name" | "category">,
+): keyof FleetOpsInventory | null {
   const name = String(item.name || "").toLowerCase();
   const category = String(item.category || "").toLowerCase();
   const haystack = `${name} ${category}`;
@@ -172,7 +188,7 @@ export async function fetchFleetOpsDashboard(userId: string): Promise<FleetOpsDa
     now.getDate()
   ).toISOString();
 
-  const db = supabase as any;
+  const db = supabase;
 
   const [
     todayWosRes,
@@ -286,23 +302,23 @@ export async function fetchFleetOpsDashboard(userId: string): Promise<FleetOpsDa
 
   // ─── KPI: today's jobs / revenue / techs working ────────────────────────
 
-  const todayWos: any[] = todayWosRes.data ?? [];
+  const todayWos = (todayWosRes.data ?? []) as TodayWorkOrderRow[];
   const todayJobs = todayWos.length;
   const todayRevenue = todayWos.reduce((s, w) => s + Number(w.total || 0), 0);
   const vehiclesScheduledToday = new Set(
-    (scheduledTodayRes.data ?? []).map((r: any) => r.fleet_vehicle_id)
+    (scheduledTodayRes.data ?? []).map((r) => r.fleet_vehicle_id)
   ).size;
   const fleetCustomers = clientsRes.count ?? 0;
 
-  const activeTechs: any[] = activeTechsRes.data ?? [];
+  const activeTechs = activeTechsRes.data ?? [];
   const clockedIn = new Set(
-    (clockedInRes.data ?? []).map((r: any) => r.technician_id)
+    (clockedInRes.data ?? []).map((r) => r.technician_id)
   );
   const techniciansWorking = clockedIn.size || activeTechs.length;
 
   // ─── KPI: fleet health + overdue PMs ────────────────────────────────────
 
-  const schedules: any[] = schedulesRes.data ?? [];
+  const schedules = schedulesRes.data ?? [];
   const uniqueVehicles = new Set(schedules.map((s) => s.fleet_vehicle_id));
   const overdueSet = new Set(
     schedules.filter((s) => s.status === "overdue").map((s) => s.fleet_vehicle_id)
@@ -317,7 +333,7 @@ export async function fetchFleetOpsDashboard(userId: string): Promise<FleetOpsDa
   // ─── KPI: outstanding invoices ──────────────────────────────────────────
 
   const outstandingInvoices = (outstandingWosRes.data ?? []).reduce(
-    (s: number, r: any) =>
+    (s: number, r) =>
       s + Number(r.invoice_balance_due || Math.max(0, (r.total || 0) - (r.invoice_paid_amount || 0))),
     0
   );
@@ -342,7 +358,7 @@ export async function fetchFleetOpsDashboard(userId: string): Promise<FleetOpsDa
     const clientId = w.fleet_client_id || "unknown";
     const key = `${clientId}::${time || "unscheduled"}`;
     const existing = scheduleByKey.get(key);
-    const tech = (w.technicians ?? null) as any;
+    const tech = w.technicians ?? null;
     const clientName = w.fleet_clients?.company_name ?? "Unknown";
     const locationName = w.fleet_locations?.name ?? null;
     if (existing) {
@@ -371,7 +387,7 @@ export async function fetchFleetOpsDashboard(userId: string): Promise<FleetOpsDa
 
   // ─── Customer attention (from schedules + WO waiting approval) ──────────
 
-  const pipelineRows: any[] = pipelineRes.data ?? [];
+  const pipelineRows = pipelineRes.data ?? [];
   const awaitingByClient = new Map<string, number>();
   pipelineRows.forEach((w) => {
     const isWaiting =
@@ -391,7 +407,7 @@ export async function fetchFleetOpsDashboard(userId: string): Promise<FleetOpsDa
     .eq("user_id", userId)
     .or("status.eq.pending_review,and(approval_required.eq.true,accepted_at.is.null)");
 
-  (waitingRows ?? []).forEach((row: any) => {
+  (waitingRows ?? []).forEach((row) => {
     const key = row.fleet_client_id;
     if (!key) return;
     awaitingByClient.set(key, (awaitingByClient.get(key) || 0) + 1);
@@ -431,7 +447,7 @@ export async function fetchFleetOpsDashboard(userId: string): Promise<FleetOpsDa
     }
   });
 
-  (waitingRows ?? []).forEach((row: any) => {
+  (waitingRows ?? []).forEach((row) => {
     if (!row.fleet_client_id) return;
     bumpAttention(
       row.fleet_client_id,
@@ -494,7 +510,7 @@ export async function fetchFleetOpsDashboard(userId: string): Promise<FleetOpsDa
   // ─── Technician status panel ────────────────────────────────────────────
 
   // Map current WO per tech from today's WOs.
-  const currentWoByTech = new Map<string, any>();
+  const currentWoByTech = new Map<string, TodayWorkOrderRow>();
   todayWos.forEach((w) => {
     if (
       w.assigned_technician_id &&
@@ -529,25 +545,21 @@ export async function fetchFleetOpsDashboard(userId: string): Promise<FleetOpsDa
 
   // ─── Revenue widget ─────────────────────────────────────────────────────
 
-  const paidToday = (paymentsRes.data ?? [])
-    .filter((r: any) => r.fleet_client_id)
-    .reduce((s: number, r: any) => s + Number(r.total || 0), 0);
-  // completedToday is derived from paymentsRes rows completed today
-  const completedRows: any[] = completedRes.data ?? [];
+  // Completed revenue is derived from work orders completed today.
+  const completedRows = completedRes.data ?? [];
   const completedTodayTotal = completedRows
     .filter((r) => r.completed_at && String(r.completed_at).slice(0, 10) === today)
     .reduce((s, r) => s + Number(r.total || 0), 0);
-  void paidToday;
 
   const revenue: FleetOpsRevenue = {
     scheduledToday: todayRevenue,
     completedToday: completedTodayTotal,
     pendingApproval: (revenuePendingApprovalRes.data ?? []).reduce(
-      (s: number, r: any) => s + Number(r.total || 0),
+      (s: number, r) => s + Number(r.total || 0),
       0
     ),
     outstanding: (revenueOutstandingRes.data ?? []).reduce(
-      (s: number, r: any) => s + Number(r.invoice_balance_due || 0),
+      (s: number, r) => s + Number(r.invoice_balance_due || 0),
       0
     ),
   };
@@ -606,7 +618,7 @@ export async function fetchFleetOpsDashboard(userId: string): Promise<FleetOpsDa
   });
 
   const arByClient = new Map<string, number>();
-  ((paymentsRes.data ?? []) as any[]).forEach((r) => {
+  (paymentsRes.data ?? []).forEach((r) => {
     if (!r.fleet_client_id) return;
     arByClient.set(
       r.fleet_client_id,
@@ -644,7 +656,7 @@ export async function fetchFleetOpsDashboard(userId: string): Promise<FleetOpsDa
 
   // ─── Inventory signals ──────────────────────────────────────────────────
 
-  const inventoryRows: any[] = inventoryRes.data ?? [];
+  const inventoryRows = inventoryRes.data ?? [];
   const inventory: FleetOpsInventory = {
     oil: [],
     filters: [],

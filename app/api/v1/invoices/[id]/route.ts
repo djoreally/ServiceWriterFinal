@@ -1,6 +1,21 @@
 import { errorResponse, json, requireWorkspaceMember } from "@/server/api";
 import { dispatchInvoiceTransition } from "@/server/messaging/invoice-events";
+import type { Database } from "@/integrations/supabase/types.production";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
+
+type InvoiceUpdate = Database["public"]["Tables"]["invoices"]["Update"];
+type InvoiceTransitionRow = {
+  id: string;
+  status: string | null;
+  updated_at?: string | null;
+  customers?: InvoiceTransitionCustomer | InvoiceTransitionCustomer[] | null;
+};
+type InvoiceTransitionCustomer = {
+  email: string | null;
+  first_name: string | null;
+  last_name: string | null;
+};
 
 const invoiceStatusInputSchema = z.enum(["draft", "issued", "sent", "partially_paid", "partial", "paid", "void", "past_due"]);
 const lineSchema = z.object({
@@ -100,9 +115,9 @@ function lineRows(items: z.infer<typeof lineSchema>[]) {
 }
 
 async function notifyInvoiceTransition(
-  supabase: any,
+  supabase: SupabaseClient<Database>,
   request: Request,
-  invoice: any,
+  invoice: InvoiceTransitionRow,
   previousStatus: string | null,
   workspaceId: string,
 ) {
@@ -112,7 +127,12 @@ async function notifyInvoiceTransition(
     const { data: workspace } = await supabase.from("workspaces").select("name,timezone").eq("id", workspaceId).single();
     const customerName = [customer.first_name, customer.last_name].filter(Boolean).join(" ") || "Customer";
     await dispatchInvoiceTransition({
-      invoice: { ...invoice, customer_email: customer.email, customer_name: customerName },
+      invoice: {
+        ...invoice,
+        workspace_id: workspaceId,
+        customer_email: customer.email,
+        customer_name: customerName,
+      },
       previousStatus,
       eventId: `${invoice.id}:${invoice.status}:${invoice.updated_at ?? new Date().toISOString()}`,
       workspaceName: workspace?.name ?? "Service Writer",
@@ -184,7 +204,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (Object.keys(metadataPatch).length) patch.metadata = mergeMetadata(current.metadata, metadataPatch);
 
     if (body.line_items !== undefined) {
-      const { error: atomicError } = await (supabase as any).rpc("patch_draft_invoice_v1", {
+      const { error: atomicError } = await supabase.rpc("patch_draft_invoice_v1", {
         p_workspace_id: body.workspace_id,
         p_invoice_id: id,
         p_patch: patch,
@@ -198,8 +218,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       return json({ data });
     }
 
-    const { data, error } = await (supabase.from("invoices") as any)
-      .update(patch)
+    const { data, error } = await supabase.from("invoices")
+      .update(patch as InvoiceUpdate)
       .eq("id", id)
       .eq("workspace_id", body.workspace_id)
       .select("*, customers(id,first_name,last_name,email)")

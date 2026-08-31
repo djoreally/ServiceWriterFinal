@@ -414,11 +414,11 @@ export function DispatchBoard() {
   }, [selectedDate, viewMode]);
 
   useEffect(() => {
-    fetchData();
+    void Promise.resolve().then(() => fetchData());
     let cleanup: (() => void) | null = null;
-    void subscribeToDispatchChanges(fetchData).then((fn) => {
+    void Promise.resolve().then(() => subscribeToDispatchChanges(fetchData).then((fn) => {
       cleanup = fn;
-    });
+    }));
     return () => {
       cleanup?.();
     };

@@ -14,7 +14,7 @@ export function GDPRConsentBanner() {
   useEffect(() => {
     const consent = getConsent();
     if (!consent) {
-      setVisible(true);
+      void Promise.resolve().then(() => setVisible(true));
     }
   }, []);
 

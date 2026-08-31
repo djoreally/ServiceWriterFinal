@@ -80,7 +80,7 @@ export function OfflineStatusBanner() {
 
   useEffect(() => {
     if (!eligible) return;
-    void refreshPendingCount();
+    void Promise.resolve().then(() => refreshPendingCount());
     const interval = window.setInterval((): void => { void refreshPendingCount(); }, 30_000);
     return () => window.clearInterval(interval);
   }, [eligible, refreshPendingCount]);

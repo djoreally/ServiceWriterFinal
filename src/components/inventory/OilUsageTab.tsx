@@ -78,8 +78,8 @@ export function OilUsageTab() {
     from.setHours(0, 0, 0, 0);
     const to = new Date(dateRange.to);
     to.setHours(23, 59, 59, 999);
-    setLoading(true);
-    fetchOilUsage({
+    void Promise.resolve().then(() => setLoading(true));
+    void Promise.resolve().then(() => fetchOilUsage({
       from,
       to,
       itemIds: itemId !== ALL ? [itemId] : undefined,
@@ -89,7 +89,7 @@ export function OilUsageTab() {
     })
       .then(setData)
       .catch((e) => toast.error(e.message || "Failed to load usage"))
-      .finally(() => setLoading(false));
+      .finally(() => setLoading(false)));
   }, [dateRange?.from, dateRange?.to, itemId, vanId, source, debouncedSearch]);
 
   const totals = data?.totals;

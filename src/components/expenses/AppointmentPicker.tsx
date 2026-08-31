@@ -64,7 +64,7 @@ export function AppointmentPicker({ value, onChange, disabled, placeholder }: Pr
   // Hydrate the chosen label when value is set externally / on edit.
   useEffect(() => {
     if (!value) {
-      setSelected(null);
+      void Promise.resolve().then(() => setSelected(null));
       return;
     }
     if (selected?.id === value) return;
@@ -84,7 +84,7 @@ export function AppointmentPicker({ value, onChange, disabled, placeholder }: Pr
     if (!open) return;
     const userId = session?.user?.id;
     if (!userId) {
-      setLoading(false);
+      void Promise.resolve().then(() => setLoading(false));
       return;
     }
     let cancelled = false;

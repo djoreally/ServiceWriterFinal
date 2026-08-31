@@ -4,11 +4,14 @@ import { Check, ChevronDown, ChevronUp } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
-const Select = SelectPrimitive.Root;
+const Select = (props: React.ComponentProps<typeof SelectPrimitive.Root>) => <SelectPrimitive.Root {...props} />;
+Select.displayName = SelectPrimitive.Root.displayName;
 
-const SelectGroup = SelectPrimitive.Group;
+const SelectGroup = (props: React.ComponentProps<typeof SelectPrimitive.Group>) => <SelectPrimitive.Group {...props} />;
+SelectGroup.displayName = SelectPrimitive.Group.displayName;
 
-const SelectValue = SelectPrimitive.Value;
+const SelectValue = (props: React.ComponentProps<typeof SelectPrimitive.Value>) => <SelectPrimitive.Value {...props} />;
+SelectValue.displayName = SelectPrimitive.Value.displayName;
 
 const SelectTrigger = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Trigger>,

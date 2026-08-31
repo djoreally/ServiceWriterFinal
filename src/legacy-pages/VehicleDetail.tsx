@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import {
   getCurrentUser,
@@ -173,13 +173,8 @@ const VehicleDetail = () => {
   const [notesUpdatedAt, setNotesUpdatedAt] = useState<string | null>(null);
   const [specs, setSpecs] = useState<VehicleSpecRow | null>(null);
 
-  useEffect(() => {
-    if (id) {
-      fetchVehicleData();
-    }
-  }, [id]);
 
-  const fetchVehicleData = async () => {
+  const fetchVehicleData = useCallback(async () => {
     setLoading(true);
     const user = await getCurrentUser();
     if (!user || !id) {
@@ -253,9 +248,15 @@ const VehicleDetail = () => {
     ]);
     setWorkOrders(((workOrderData as VehicleWorkOrder[] | null) ?? []).filter((wo) => wo.vehicle_id === vehicleData.id));
     setInvoices(((invoiceData as VehicleInvoice[] | null) ?? []).filter((inv) => inv.vehicle_id === vehicleData.id));
-    setFleetClientName((fleetLinkData as any)?.fleet_clients?.company_name ?? null);
+    setFleetClientName(null);
     setLoading(false);
-  };
+  }, [id, navigate]);
+
+  useEffect(() => {
+    if (id) {
+      void Promise.resolve().then(() => fetchVehicleData());
+    }
+  }, [fetchVehicleData, id]);
 
   const handleSaveNotes = async () => {
     if (!vehicle) return;
@@ -379,7 +380,7 @@ const VehicleDetail = () => {
 
   useEffect(() => {
     if (vehicle && editDialogOpen) {
-      setEditFormData({
+      void Promise.resolve().then(() => setEditFormData({
         make: vehicle.make,
         model: vehicle.model,
         year: vehicle.year,
@@ -391,7 +392,7 @@ const VehicleDetail = () => {
         engine: vehicle.engine || '',
         oil_type: vehicle.oil_type || '',
         oil_capacity: vehicle.oil_capacity || ''
-      });
+      }));
       // Pull every spec variant for the YMM so admin can choose the correct engine/oil
       (async () => {
         if (!vehicle.year || !vehicle.make || !vehicle.model) {

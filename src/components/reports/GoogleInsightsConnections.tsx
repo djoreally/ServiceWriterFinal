@@ -19,7 +19,7 @@ export function GoogleInsightsConnections() {
     setLocationId(next.business_location_id || "");
     if (next.connected) setResources(await fetchGoogleInsightsResources());
   };
-  useEffect(() => { void load().catch(() => setStatus({ connected: false })); }, []);
+  useEffect(() => { void Promise.resolve().then(() => load().catch(() => setStatus({ connected: false }))); }, []);
 
   const connect = async () => {
     setWorking(true);

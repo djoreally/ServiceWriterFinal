@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -174,20 +174,8 @@ export default function Availability() {
   });
   const initialTab = searchParams.get("tab") === "areas" ? "areas" : "hours";
 
-  useEffect(() => {
-    checkAuthAndLoadData();
-  }, []);
 
-  const checkAuthAndLoadData = async () => {
-    const userId = await getSessionUserId();
-    if (!userId) {
-      navigate("/login");
-      return;
-    }
-    await loadData(userId);
-  };
-
-  const loadData = async (userId: string) => {
+  const loadData = useCallback(async (userId: string) => {
     setLoading(true);
     try {
       const { profile, blocked, questions } = await fetchAvailabilityPageData(userId);
@@ -239,7 +227,20 @@ export default function Availability() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  const checkAuthAndLoadData = useCallback(async () => {
+    const userId = await getSessionUserId();
+    if (!userId) {
+      navigate("/login");
+      return;
+    }
+    await loadData(userId);
+  }, [loadData, navigate]);
+
+  useEffect(() => {
+    void Promise.resolve().then(() => checkAuthAndLoadData());
+  }, [checkAuthAndLoadData]);
 
   const handleScheduleChange = (day: keyof WeeklySchedule, field: keyof DayHours, value: string | boolean) => {
     setSchedule(prev => ({

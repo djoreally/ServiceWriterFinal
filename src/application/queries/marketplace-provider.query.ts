@@ -199,7 +199,7 @@ export async function fetchMarketplaceLeads(userId: string): Promise<Marketplace
     .order("scheduled_date", { ascending: true })
     .limit(100);
 
-  return ((data || []) as Record<string, any>[]).map((row) => ({
+  return (data || []).map((row) => ({
     id: row.id,
     title: row.title ?? "Marketplace booking",
     status: row.status ?? "pending",
@@ -232,7 +232,7 @@ export async function fetchMarketplaceServices(userId: string): Promise<Marketpl
     .eq("user_id", userId)
     .order("name", { ascending: true });
 
-  return ((data || []) as Record<string, any>[]).map((row) => ({
+  return (data || []).map((row) => ({
     id: row.id,
     name: row.name,
     description: row.description ?? null,
@@ -262,7 +262,7 @@ export async function fetchMarketplaceReviews(userId: string): Promise<Marketpla
     .order("created_at", { ascending: false })
     .limit(100);
 
-  return ((data || []) as Record<string, any>[]).map((row) => ({
+  return (data || []).map((row) => ({
     id: row.id,
     customer_name: row.customer_name ?? null,
     content: row.content ?? null,

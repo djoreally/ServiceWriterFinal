@@ -5,6 +5,7 @@
  * instead of a single flat rate.
  */
 
+import { errorCode } from "@/lib/error-message";
 import { useState, useEffect } from "react";
 import {
   fetchTaxSettings,
@@ -157,9 +158,6 @@ export const TaxSettings = () => {
     special_rate: 0,
   });
 
-  useEffect(() => {
-    fetchData();
-  }, []);
 
   const fetchData = async () => {
     try {
@@ -172,6 +170,10 @@ export const TaxSettings = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchData());
+  }, []);
 
   const handleSaveSettings = async () => {
     setSaving(true);
@@ -227,8 +229,8 @@ export const TaxSettings = () => {
       toast.success(editingRate ? "Tax rate updated" : "Tax rate added");
       setDialogOpen(false);
       fetchData();
-    } catch (error: any) {
-      if (error?.code === "23505") {
+    } catch (error: unknown) {
+      if (errorCode(error) === "23505") {
         toast.error("A rate for this jurisdiction already exists");
       } else {
         toast.error(editingRate ? "Failed to update tax rate" : "Failed to add tax rate");

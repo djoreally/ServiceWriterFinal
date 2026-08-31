@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { fetchFleetFailureWorklists, fetchFleetNextActions, retryFleetOperationalFailure, type FleetFailureWorklists, type FleetNextAction } from "@/application/queries/fleet-dispatch-actions.query";
+import { currentTimeMs } from "@/lib/datetime";
 
 const categoryTone: Record<string, string> = {
   "SLA risk": "border-red-500/40 bg-red-500/5", "Technician exception": "border-orange-500/40 bg-orange-500/5",
@@ -25,6 +26,7 @@ export function FleetDispatcherActionQueue() {
   const [error, setError] = useState("");
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
   const [retrying, setRetrying] = useState<string | null>(null);
+  const [now, setNow] = useState(currentTimeMs);
   const tab = params.get("view") === "failures" ? "failures" : "actions";
 
   const load = useCallback(async (quiet = false) => {
@@ -32,6 +34,7 @@ export function FleetDispatcherActionQueue() {
     try {
       const [next, nextFailures] = await Promise.all([fetchFleetNextActions(), fetchFleetFailureWorklists()]);
       setActions(next.items); setFailures(nextFailures); setGeneratedAt(next.generatedAt); setError("");
+      setNow(currentTimeMs());
       setState(next.items.length === 0 ? "empty" : "ready");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The dispatch queue could not be loaded.");
@@ -39,8 +42,8 @@ export function FleetDispatcherActionQueue() {
     }
   }, []);
 
-  useEffect(() => { void load(); const timer = window.setInterval(() => { if (document.visibilityState === "visible") void load(true); }, 30_000); return () => window.clearInterval(timer); }, [load]);
-  const stale = generatedAt ? Date.now() - new Date(generatedAt).getTime() > 90_000 : false;
+  useEffect(() => { void Promise.resolve().then(() => load()); const timer = window.setInterval(() => { if (document.visibilityState === "visible") void load(true); }, 30_000); return () => window.clearInterval(timer); }, [load]);
+  const stale = generatedAt ? now - new Date(generatedAt).getTime() > 90_000 : false;
   const failureCount = (failures?.dead_letters.length ?? 0) + (failures?.outbox.length ?? 0) + (failures?.invoices.length ?? 0);
   const grouped = useMemo(() => actions.reduce<Record<string, FleetNextAction[]>>((map, item) => { (map[item.category] ||= []).push(item); return map; }, {}), [actions]);
 

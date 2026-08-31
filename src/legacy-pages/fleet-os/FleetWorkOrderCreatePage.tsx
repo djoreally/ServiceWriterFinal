@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { FleetOSLayout } from "@/components/layout/FleetOSLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,6 +33,7 @@ const FleetWorkOrderCreatePage = () => {
   const [searchParams] = useSearchParams();
   const prefillVehicleId = searchParams.get("vehicleId") || "";
   const { user } = useAuth();
+  const userId = user?.id ?? "";
 
   const [options, setOptions] = useState<FleetWorkOrderCreateOptions | null>(null);
   const [loading, setLoading] = useState(true);
@@ -75,19 +76,10 @@ const FleetWorkOrderCreatePage = () => {
   };
 
   useEffect(() => {
-    void loadOptions();
+    void Promise.resolve().then(() => loadOptions());
   }, []);
 
   // Prefill from ?vehicleId= if provided (e.g. when launched from vehicle profile)
-  useEffect(() => {
-    if (!prefillVehicleId || !options || vehicleId) return;
-    const exists = options.vehicles.find((v) => v.id === prefillVehicleId);
-    if (exists) {
-      setClientId(exists.fleet_client_id || "");
-      void handleVehicleSelect(prefillVehicleId);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefillVehicleId, options]);
 
   const selectedVehicle = useMemo(
     () => options?.vehicles.find((v) => v.id === vehicleId) || null,
@@ -165,9 +157,9 @@ const FleetWorkOrderCreatePage = () => {
       const bRemaining = Number(b.amount_limit || 0) - Number(b.amount_authorized || 0);
       return bRemaining - aRemaining;
     });
-  }, [options?.purchaseOrders, selectedVehicle?.fleet_client_id]);
+  }, [options, selectedVehicle]);
 
-  const handleVehicleSelect = async (value: string, optionOverride?: FleetWorkOrderCreateOptions | null) => {
+  const handleVehicleSelect = useCallback(async (value: string, optionOverride?: FleetWorkOrderCreateOptions | null) => {
     setVehicleId(value);
     setServiceProfileId("");
     setPackageCode("");
@@ -176,7 +168,7 @@ const FleetWorkOrderCreatePage = () => {
     setAvailableSlots([]);
 
     const vehicle = (optionOverride ?? options)?.vehicles.find((v) => v.id === value);
-    if (!vehicle || !user?.id) return;
+    if (!vehicle || !userId) return;
 
     if (!vehicle.fleet_client_id) {
       toast.error("Vehicle must belong to a fleet client.");
@@ -195,7 +187,7 @@ const FleetWorkOrderCreatePage = () => {
 
     const defaults = await resolveServiceDefaultsForVehicle({
       vehicleId: vehicle.id,
-      userId: user.id,
+      userId,
       vin: vehicle.vin,
       year: vehicle.year,
       make: vehicle.make,
@@ -209,7 +201,17 @@ const FleetWorkOrderCreatePage = () => {
 
     setServiceDefaults(defaults);
     setStep("service");
-  };
+  }, [clientId, options, userId]);
+
+  useEffect(() => {
+    if (!prefillVehicleId || !options || vehicleId) return;
+    const exists = options.vehicles.find((v) => v.id === prefillVehicleId);
+    if (exists) {
+      void Promise.resolve().then(() => setClientId(exists.fleet_client_id || ""));
+      void Promise.resolve().then(() => handleVehicleSelect(prefillVehicleId));
+    }
+
+  }, [prefillVehicleId, options, vehicleId, handleVehicleSelect]);
 
   const handleClientSelect = (value: string) => {
     setClientId(value);

@@ -1,6 +1,12 @@
 node_modules/
 .next/
 dist/
+coverage/
+e2e/playwright-report/
+test-results/
+eslint-rest.json
+eslint-src.json
+*.tsbuildinfo
 .env
 .env.*
 !.env.example

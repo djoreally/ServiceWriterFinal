@@ -53,10 +53,10 @@ export function InvoicesTab() {
     } finally {
       setLoading(false);
     }
-  }, [session?.user?.id]);
+  }, [session]);
 
   useEffect(() => {
-    load();
+    void Promise.resolve().then(() => load());
   }, [load]);
 
   // Outstanding = any invoice not in paid/void status with a remaining balance
@@ -101,7 +101,7 @@ export function InvoicesTab() {
     });
   }, [rows, debouncedSearch, statusFilter]);
 
-  useEffect(() => { setPage(1); }, [debouncedSearch, statusFilter, pageSize]);
+  useEffect(() => { void Promise.resolve().then(() => setPage(1)); }, [debouncedSearch, statusFilter, pageSize]);
   const pagedRows = usePageSlice(filteredRows, page, pageSize);
 
   return (

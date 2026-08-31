@@ -38,7 +38,7 @@ export default function InvitationAccept() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!invitationId || !token) { setError("This invitation link is incomplete."); setLoading(false); return; }
+    if (!invitationId || !token) { void Promise.resolve().then(() => setError("This invitation link is incomplete.")); void Promise.resolve().then(() => setLoading(false)); return; }
     void (async () => {
       try {
         const session = (await supabase.auth.getSession()).data.session;

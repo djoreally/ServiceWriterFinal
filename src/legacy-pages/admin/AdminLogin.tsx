@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message";
 import { useState } from "react";
 import { logAuditEvent } from '@/lib/auditLog';
 import { useNavigate } from "react-router-dom";
@@ -47,7 +48,9 @@ const AdminLogin = () => {
           const data = await res.json();
           ip = data.ip;
         }
-      } catch {}
+      } catch {
+        // The audit log can omit the optional client IP when lookup fails.
+      }
 
       if (authError || !authData.user) {
         await logAuditEvent({
@@ -85,9 +88,9 @@ const AdminLogin = () => {
 
       toast.success("Welcome, Admin!");
       navigate("/admin");
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Admin login error:", err);
-      setError(err.message || "Login failed");
+      setError(errorMessage(err, "Login failed"));
     }
 
     setLoading(false);

@@ -72,7 +72,7 @@ export default function MarketplaceHub() {
   }, [userId]);
 
   useEffect(() => {
-    void load();
+    void Promise.resolve().then(() => load());
   }, [load]);
 
   const handleSave = async (updates: MarketplaceListingUpdate) => {

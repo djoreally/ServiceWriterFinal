@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import useIsClient from "@/hooks/useIsClient";
 import {
   checkSystemHealth as probeSystemHealth,
@@ -40,19 +40,16 @@ export function AdminSystemHealth() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    checkSystemHealth();
-  }, []);
 
   const isClient = useIsClient();
 
   // If we're in the browser, simulate activeConnections client-side to avoid SSR nondeterminism
   useEffect(() => {
     if (!isClient) return;
-    setMetrics((prev) => ({ ...prev, activeConnections: Math.floor(Math.random() * 50) + 10 }));
+    void Promise.resolve().then(() => setMetrics((prev) => ({ ...prev, activeConnections: Math.floor(Math.random() * 50) + 10 })));
   }, [isClient]);
 
-  const checkSystemHealth = async () => {
+  const checkSystemHealth = useCallback(async () => {
     setRefreshing(true);
     try {
       const result = await probeSystemHealth();
@@ -66,7 +63,11 @@ export function AdminSystemHealth() {
     }
     setLoading(false);
     setRefreshing(false);
-  };
+  }, [isClient]);
+
+  useEffect(() => {
+    void Promise.resolve().then(() => checkSystemHealth());
+  }, [checkSystemHealth]);
 
   const getStatusIcon = (status: "healthy" | "degraded" | "down") => {
     switch (status) {

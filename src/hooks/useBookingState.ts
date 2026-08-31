@@ -93,7 +93,7 @@ export interface BookingState {
   submitting: boolean;
   lastSubmissionTime: number;
   submissionCount: number;
-  confirmationEmailStatus: "pending" | "sent" | "failed";
+  confirmationEmailStatus: "pending" | "queued" | "failed";
 
   // Checkout error
   checkoutError: { type: CheckoutErrorType; message?: string } | null;
@@ -355,7 +355,11 @@ const createEmptyVehicle = (): VehicleData => ({
 /**
  * Build initial state, optionally restoring from session storage.
  */
-function createInitialState(savedData: Record<string, any> | null, initialStep: number): BookingState {
+type SavedBookingData = Partial<Omit<BookingState, "selectedDate">> & {
+  selectedDate?: string | Date;
+};
+
+function createInitialState(savedData: SavedBookingData | null, initialStep: number): BookingState {
   return {
     step: initialStep,
     customerAddress: savedData?.customerAddress || "",
@@ -407,7 +411,7 @@ function createInitialState(savedData: Record<string, any> | null, initialStep: 
   };
 }
 
-export function useBookingState(savedData: Record<string, any> | null, initialStep: number) {
+export function useBookingState(savedData: SavedBookingData | null, initialStep: number) {
   const [state, dispatch] = useReducer(
     bookingReducer,
     { savedData, initialStep },

@@ -54,7 +54,7 @@ export interface NewsletterSubscribeArgs {
   utm?: Record<string, string>;
 }
 
-export async function subscribeToNewsletter(args: NewsletterSubscribeArgs): Promise<any> {
+export async function subscribeToNewsletter(args: NewsletterSubscribeArgs) {
   return supabase.functions.invoke("newsletter-subscribe", {
     body: {
       workspaceUserId: args.workspaceUserId,
@@ -67,7 +67,7 @@ export async function subscribeToNewsletter(args: NewsletterSubscribeArgs): Prom
   });
 }
 
-export async function listScheduledNewsletterCampaigns(): Promise<any> {
+export async function listScheduledNewsletterCampaigns() {
   return supabase.functions.invoke("newsletter-campaign-schedule", { method: "GET" });
 }
 
@@ -77,10 +77,10 @@ export async function scheduleNewsletterCampaign(body: {
   html: string;
   segment: string;
   sendAt: string;
-}): Promise<any> {
+}) {
   return supabase.functions.invoke("newsletter-campaign-schedule", { body });
 }
 
-export async function cancelScheduledNewsletterCampaign(id: string): Promise<any> {
+export async function cancelScheduledNewsletterCampaign(id: string) {
   return supabase.functions.invoke(`newsletter-campaign-schedule?id=${id}`, { method: "DELETE" });
 }

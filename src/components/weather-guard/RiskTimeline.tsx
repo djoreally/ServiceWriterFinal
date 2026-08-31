@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { AtRiskAppointment } from "@/application/queries/weather-guard.query";
+import { currentTimeMs } from "@/lib/datetime";
 
 function bandColor(score: number | null) {
   if (score === null) return "bg-muted";
@@ -10,7 +12,7 @@ function bandColor(score: number | null) {
 }
 
 export function RiskTimeline({ jobs }: { jobs: AtRiskAppointment[] }) {
-  const now = Date.now();
+  const [now] = useState(currentTimeMs);
   const horizon = now + 48 * 3_600_000;
 
   const positioned = jobs

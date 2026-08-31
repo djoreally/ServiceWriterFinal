@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { emailServiceRecord, fetchServiceInspections } from "@/application/queries/service-detail-email.query";
 import { SHOW_INCOMPLETE_FEATURES } from "@/lib/feature-flags";
@@ -71,11 +71,8 @@ const ServiceDetail = () => {
   const [businessEmail, setBusinessEmail] = useState<string>("");
   const [sendingEmail, setSendingEmail] = useState(false);
 
-  useEffect(() => {
-    if (id) fetchData();
-  }, [id]);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     if (!id) return;
     setLoading(true);
 
@@ -98,7 +95,11 @@ const ServiceDetail = () => {
     setCatalogLaborHours(result.catalogLaborHours);
     setOilType(result.oilType);
     setLoading(false);
-  };
+  }, [id, navigate]);
+
+  useEffect(() => {
+    if (id) void Promise.resolve().then(() => fetchData());
+  }, [fetchData, id]);
 
   // Determine effective labor hours: stored value > catalog value
   const effectiveLaborHours = service?.labor_hours ?? catalogLaborHours;
@@ -586,16 +587,17 @@ function VoiceInspectionSection({
   const [inspections, setInspections] = useState<any[]>([]);
   const [loadingInspections, setLoadingInspections] = useState(true);
 
-  useEffect(() => {
-    fetchInspectionsData();
-  }, [serviceId]);
 
-  const fetchInspectionsData = async () => {
+  const fetchInspectionsData = useCallback(async () => {
     setLoadingInspections(true);
     const data = await fetchServiceInspections(serviceId);
     setInspections(data);
     setLoadingInspections(false);
-  };
+  }, [serviceId]);
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchInspectionsData());
+  }, [fetchInspectionsData, serviceId]);
 
   if (viewReportId) {
     return (

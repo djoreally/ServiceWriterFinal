@@ -4,13 +4,17 @@ import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
-const Dialog = DialogPrimitive.Root;
+const Dialog = (props: React.ComponentProps<typeof DialogPrimitive.Root>) => <DialogPrimitive.Root {...props} />;
+Dialog.displayName = DialogPrimitive.Root.displayName;
 
-const DialogTrigger = DialogPrimitive.Trigger;
+const DialogTrigger = (props: React.ComponentProps<typeof DialogPrimitive.Trigger>) => <DialogPrimitive.Trigger {...props} />;
+DialogTrigger.displayName = DialogPrimitive.Trigger.displayName;
 
-const DialogPortal = DialogPrimitive.Portal;
+const DialogPortal = (props: React.ComponentProps<typeof DialogPrimitive.Portal>) => <DialogPrimitive.Portal {...props} />;
+DialogPortal.displayName = DialogPrimitive.Portal.displayName;
 
-const DialogClose = DialogPrimitive.Close;
+const DialogClose = (props: React.ComponentProps<typeof DialogPrimitive.Close>) => <DialogPrimitive.Close {...props} />;
+DialogClose.displayName = DialogPrimitive.Close.displayName;
 
 const DialogOverlay = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Overlay>,

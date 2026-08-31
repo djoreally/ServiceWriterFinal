@@ -75,7 +75,7 @@ export const ExpensesTab = () => {
     setLoading(false);
   }, [activeMonth, ownerUserId, session?.user?.id]);
 
-  useEffect(() => { if (!roleLoading) load(); }, [load, roleLoading]);
+  useEffect(() => { if (!roleLoading) void Promise.resolve().then(() => load()); }, [load, roleLoading]);
 
   const selected = useMemo(() => expenses.find((e) => e.id === selectedId) ?? null, [expenses, selectedId]);
 

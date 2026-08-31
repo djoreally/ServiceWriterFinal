@@ -38,12 +38,12 @@ export async function encryptSmtpPassword(plainPassword: string) {
 /** SMTP and IMAP credentials share the same server-side encryption primitive. */
 export const encryptEmailPassword = encryptSmtpPassword;
 
-export async function invokeTestEmail(userId: string): Promise<any> {
+export async function invokeTestEmail(userId: string) {
   return supabase.functions.invoke("test-email-settings", {
     body: { user_id: userId },
   });
 }
 
-export async function invokeTestIncomingEmail(): Promise<any> {
+export async function invokeTestIncomingEmail() {
   return supabase.functions.invoke("fleet-email-mailbox", { body: { action: "test" } });
 }

@@ -69,7 +69,7 @@ export interface InternalThreadMessage {
   edited_at: string | null;
 }
 
-const client = () => supabase as any;
+const client = () => supabase;
 
 /**
  * List every thread the current user can see (owner OR participant).
@@ -95,14 +95,14 @@ export async function listInternalThreads(): Promise<InternalThreadSummary[]> {
 
   const threadIds = Array.from(
     new Set([
-      ...(parts || []).map((p: any) => p.thread_id as string),
-      ...(owned || []).map((t: any) => t.id as string),
+      ...(parts || []).map((participant) => participant.thread_id),
+      ...(owned || []).map((thread) => thread.id),
     ]),
   );
   if (threadIds.length === 0) return [];
 
   const lastReadByThread = new Map<string, string | null>(
-    (parts || []).map((p: any) => [p.thread_id as string, (p.last_read_at as string) ?? null]),
+    (parts || []).map((participant) => [participant.thread_id, participant.last_read_at ?? null]),
   );
 
   // 3. Threads + appointment titles + status (so we can hide closed jobs)
@@ -116,9 +116,9 @@ export async function listInternalThreads(): Promise<InternalThreadSummary[]> {
 
   // Hide job threads whose appointment is completed/cancelled. Direct messages always stay.
   const CLOSED = new Set(["completed", "cancelled", "canceled", "no_show"]);
-  const threads = (threadsRaw || []).filter((t: any) => {
-    if (t.type !== "job") return true;
-    const apt = Array.isArray(t.appointments) ? t.appointments[0] : t.appointments;
+  const threads = (threadsRaw || []).filter((thread) => {
+    if (thread.type !== "job") return true;
+    const apt = Array.isArray(thread.appointments) ? thread.appointments[0] : thread.appointments;
     if (!apt) return false; // orphaned job thread — hide
     return !CLOSED.has(apt.status) && !CLOSED.has(apt.dispatch_status);
   });
@@ -129,7 +129,7 @@ export async function listInternalThreads(): Promise<InternalThreadSummary[]> {
   const appointmentIds = Array.from(
     new Set(
       threads
-        .map((t: any) => t.appointment_id as string | null)
+        .map((thread) => thread.appointment_id)
         .filter((x: string | null): x is string => !!x),
     ),
   );
@@ -162,15 +162,15 @@ export async function listInternalThreads(): Promise<InternalThreadSummary[]> {
   // 5. Unread counts
   const unreadCounts = new Map<string, number>();
   await Promise.all(
-    threads.map(async (t: any) => {
-      const lastRead = lastReadByThread.get(t.id) ?? null;
+    threads.map(async (thread) => {
+      const lastRead = lastReadByThread.get(thread.id) ?? null;
       const q = client()
         .from("job_thread_messages")
         .select("id", { count: "exact", head: true })
-        .eq("thread_id", t.id)
+        .eq("thread_id", thread.id)
         .neq("sender_id", me);
       const { count } = lastRead ? await q.gt("created_at", lastRead) : await q;
-      unreadCounts.set(t.id, count || 0);
+      unreadCounts.set(thread.id, count || 0);
     }),
   );
 
@@ -181,7 +181,7 @@ export async function listInternalThreads(): Promise<InternalThreadSummary[]> {
     .in("thread_id", threadIds)
     .is("removed_at", null);
 
-  const userIds = Array.from(new Set((allParts || []).map((p: any) => p.user_id as string)));
+  const userIds = Array.from(new Set((allParts || []).map((participant) => participant.user_id)));
   const nameMap = new Map<string, string>();
   if (userIds.length > 0) {
     const { data: techs } = await client()
@@ -201,7 +201,7 @@ export async function listInternalThreads(): Promise<InternalThreadSummary[]> {
     }
   }
 
-  return threads.map((t: any): InternalThreadSummary => {
+  return threads.map((t): InternalThreadSummary => {
     const apt = Array.isArray(t.appointments) ? t.appointments[0] : t.appointments;
     const customerName = apt?.customers?.name || apt?.guest_name || null;
     const services = (t.appointment_id && servicesByAppointment.get(t.appointment_id)) || [];
@@ -233,8 +233,12 @@ export async function listInternalThreads(): Promise<InternalThreadSummary[]> {
       last_message_preview: latestByThread.get(t.id)?.content ?? null,
       unread_count: unreadCounts.get(t.id) ?? 0,
       participants: (allParts || [])
-        .filter((p: any) => p.thread_id === t.id)
-        .map((p: any) => ({ user_id: p.user_id, role: p.role, name: nameMap.get(p.user_id) ?? null })),
+        .filter((participant) => participant.thread_id === t.id)
+        .map((participant) => ({
+          user_id: participant.user_id,
+          role: participant.role,
+          name: nameMap.get(participant.user_id) ?? null,
+        })),
     };
   });
 }
@@ -247,9 +251,11 @@ export async function fetchInternalThreadMessages(threadId: string): Promise<Int
     .is("deleted_at", null)
     .order("created_at", { ascending: true });
   if (error) throw error;
-  return (data || []).map((m: any) => ({
-    ...m,
-    attachments: Array.isArray(m.attachments) ? m.attachments : [],
+  return (data || []).map((message) => ({
+    ...message,
+    attachments: Array.isArray(message.attachments)
+      ? message.attachments.filter((attachment): attachment is string => typeof attachment === "string")
+      : [],
   }));
 }
 
@@ -284,7 +290,7 @@ export async function listDmCandidates(): Promise<Array<{ user_id: string; name:
     .eq("owner_user_id", ownerId);
 
   const candidates: Array<{ user_id: string; name: string; role: string }> = [];
-  const userIds = (links || []).map((l: any) => l.member_user_id as string).filter((x: string) => x !== me);
+  const userIds = (links || []).map((teamLink) => teamLink.member_user_id).filter((userId) => userId !== me);
   // Include the owner if I'm a team member (not the owner)
   if (ownerId !== me) userIds.push(ownerId);
 
@@ -309,7 +315,7 @@ export async function listDmCandidates(): Promise<Array<{ user_id: string; name:
   }
 
   for (const uid of userIds) {
-    const role = (links || []).find((l: any) => l.member_user_id === uid)?.role || "admin";
+    const role = (links || []).find((teamLink) => teamLink.member_user_id === uid)?.role || "admin";
     candidates.push({ user_id: uid, name: nameMap.get(uid) || "Staff", role });
   }
   return candidates;

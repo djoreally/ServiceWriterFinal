@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message";
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { FleetOSLayout } from "@/components/layout/FleetOSLayout";
@@ -104,6 +105,13 @@ interface FleetClient {
   created_at: string;
 }
 
+type ClientVehicle = NonNullable<Awaited<ReturnType<typeof fetchClientVehicles>>["data"]>[number];
+type ClientWorkOrder = NonNullable<Awaited<ReturnType<typeof fetchClientWorkOrders>>["data"]>[number];
+type ClientLocation = NonNullable<Awaited<ReturnType<typeof fetchClientLocations>>["data"]>[number];
+type ClientContract = NonNullable<Awaited<ReturnType<typeof fetchClientContracts>>["data"]>[number];
+type ClientPurchaseOrder = NonNullable<Awaited<ReturnType<typeof fetchClientPurchaseOrders>>["data"]>[number];
+type ClientContact = NonNullable<Awaited<ReturnType<typeof fetchClientContacts>>["data"]>[number];
+
 const paymentTermsLabel: Record<string, string> = {
   due_on_receipt: "Due on Receipt",
   net_15: "Net 15",
@@ -124,13 +132,13 @@ const FleetClientDetail = () => {
 
   // Dialog states
   const [addVehicleOpen, setAddVehicleOpen] = useState(false);
-  const [editingVehicle, setEditingVehicle] = useState<any>(null);
+  const [editingVehicle, setEditingVehicle] = useState<React.ComponentProps<typeof AddVehicleDialog>["editingVehicle"]>(null);
   const [addLocationOpen, setAddLocationOpen] = useState(false);
-  const [editingLocation, setEditingLocation] = useState<any>(null);
+  const [editingLocation, setEditingLocation] = useState<React.ComponentProps<typeof AddLocationDialog>["editingLocation"]>(null);
   const [addContactOpen, setAddContactOpen] = useState(false);
-  const [editingContact, setEditingContact] = useState<any>(null);
+  const [editingContact, setEditingContact] = useState<React.ComponentProps<typeof AddContactDialog>["editingContact"]>(null);
   const [addContractOpen, setAddContractOpen] = useState(false);
-  const [editingContract, setEditingContract] = useState<any>(null);
+  const [editingContract, setEditingContract] = useState<React.ComponentProps<typeof AddContractDialog>["editingContract"]>(null);
   const [addPOOpen, setAddPOOpen] = useState(false);
 
   const refreshClient = async () => {
@@ -310,7 +318,7 @@ function ClientOverviewTab({ client, editing, onSaved }: { client: FleetClient; 
   const { user } = useAuth();
   const [counts, setCounts] = useState({ vehicles: 0, workOrders: 0, locations: 0, contacts: 0, contracts: 0 });
   const [saving, setSaving] = useState(false);
-  const buildForm = () => ({
+  const buildForm = useCallback(() => ({
     company_name: client.company_name,
     phone: client.phone || "",
     billing_email: client.billing_email || "",
@@ -333,13 +341,13 @@ function ClientOverviewTab({ client, editing, onSaved }: { client: FleetClient; 
     billing_notes: client.billing_notes || "",
     service_notes: client.service_notes || "",
     communication_preference: client.communication_preference || "email",
-  });
+  }), [client]);
   const [form, setForm] = useState(buildForm());
 
   // Reset form when client or editing changes
   useEffect(() => {
-    setForm(buildForm());
-  }, [client, editing]);
+    void Promise.resolve().then(() => setForm(buildForm()));
+  }, [buildForm, editing]);
 
   const updateField = (field: string, value: string | boolean) => setForm((p) => ({ ...p, [field]: value }));
 
@@ -354,8 +362,8 @@ function ClientOverviewTab({ client, editing, onSaved }: { client: FleetClient; 
       if (error) throw error;
       toast.success("Client updated");
       onSaved(data as FleetClient);
-    } catch (err: any) {
-      toast.error(err.message || "Failed to update client");
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, "Failed to update client"));
     } finally {
       setSaving(false);
     }
@@ -579,30 +587,30 @@ function ClientOverviewTab({ client, editing, onSaved }: { client: FleetClient; 
 }
 
 // ── Vehicles Tab ──────────────────────────────────────
-function ClientVehiclesTab({ clientId, onAdd, onEdit }: { clientId: string; onAdd: () => void; onEdit: (v: any) => void }) {
+function ClientVehiclesTab({ clientId, onAdd, onEdit }: { clientId: string; onAdd: () => void; onEdit: (vehicle: ClientVehicle) => void }) {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [vehicles, setVehicles] = useState<any[]>([]);
+  const [vehicles, setVehicles] = useState<ClientVehicle[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const { data } = await fetchClientVehicles(clientId);
     setVehicles(data ?? []);
     setLoading(false);
-  };
+  }, [clientId]);
 
   useEffect(() => {
-    if (user?.id) load();
-  }, [user?.id, clientId]);
+    if (user?.id) void Promise.resolve().then(() => load());
+  }, [user?.id, load]);
 
   const handleDelete = async (vehicleId: string) => {
     if (!confirm("Are you sure you want to delete this vehicle?")) return;
     try {
       await deleteFleetVehicle(vehicleId);
       toast.success("Vehicle deleted");
-      load();
-    } catch (err: any) {
+      void load();
+    } catch (err: unknown) {
       toast.error("Failed to delete vehicle");
     }
   };
@@ -679,7 +687,7 @@ function ClientVehiclesTab({ clientId, onAdd, onEdit }: { clientId: string; onAd
 function ClientWorkOrdersTab({ clientId }: { clientId: string }) {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [orders, setOrders] = useState<any[]>([]);
+  const [orders, setOrders] = useState<ClientWorkOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
 
@@ -693,7 +701,7 @@ function ClientWorkOrdersTab({ clientId }: { clientId: string }) {
     fetch();
   }, [user?.id, clientId]);
 
-  const filtered = orders.filter((o: any) => {
+  const filtered = orders.filter((o) => {
     if (!search) return true;
     const q = search.toLowerCase();
     return o.order_number?.toLowerCase().includes(q) || o.service_type?.toLowerCase().includes(q);
@@ -727,7 +735,7 @@ function ClientWorkOrdersTab({ clientId }: { clientId: string }) {
         </CardContent></Card>
       ) : (
         <div className="space-y-2">
-          {filtered.map((o: any) => {
+          {filtered.map((o) => {
             const vehicle = o.fleet_vehicles;
             return (
               <Card key={o.id} className="cursor-pointer hover:border-primary/30 transition-colors" onClick={() => navigate(`/fleet-os/work-orders/${o.id}`)}>
@@ -760,28 +768,28 @@ function ClientWorkOrdersTab({ clientId }: { clientId: string }) {
 }
 
 // ── Locations Tab ─────────────────────────────────────
-function ClientLocationsTab({ clientId, onAdd, onEdit }: { clientId: string; onAdd: () => void; onEdit: (l: any) => void }) {
+function ClientLocationsTab({ clientId, onAdd, onEdit }: { clientId: string; onAdd: () => void; onEdit: (location: ClientLocation) => void }) {
   const { user } = useAuth();
-  const [locations, setLocations] = useState<any[]>([]);
+  const [locations, setLocations] = useState<ClientLocation[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const { data } = await fetchClientLocations(clientId);
     setLocations(data ?? []);
     setLoading(false);
-  };
+  }, [clientId]);
 
   useEffect(() => {
-    if (user?.id) load();
-  }, [user?.id, clientId]);
+    if (user?.id) void Promise.resolve().then(() => load());
+  }, [user?.id, load]);
 
   const handleDelete = async (locId: string) => {
     if (!confirm("Are you sure you want to delete this location?")) return;
     try {
       await deleteFleetLocation(locId);
       toast.success("Location deleted");
-      load();
-    } catch (err: any) {
+      void load();
+    } catch (err: unknown) {
       toast.error("Failed to delete location");
     }
   };
@@ -838,28 +846,28 @@ function ClientLocationsTab({ clientId, onAdd, onEdit }: { clientId: string; onA
 }
 
 // ── Contracts Tab ─────────────────────────────────────
-function ClientContractsTab({ clientId, onAdd, onEdit }: { clientId: string; onAdd: () => void; onEdit: (c: any) => void }) {
+function ClientContractsTab({ clientId, onAdd, onEdit }: { clientId: string; onAdd: () => void; onEdit: (contract: ClientContract) => void }) {
   const { user } = useAuth();
-  const [contracts, setContracts] = useState<any[]>([]);
+  const [contracts, setContracts] = useState<ClientContract[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const { data } = await fetchClientContracts(clientId);
     setContracts(data ?? []);
     setLoading(false);
-  };
+  }, [clientId]);
 
   useEffect(() => {
-    if (user?.id) load();
-  }, [user?.id, clientId]);
+    if (user?.id) void Promise.resolve().then(() => load());
+  }, [user?.id, load]);
 
   const handleDelete = async (contractId: string) => {
     if (!confirm("Are you sure you want to delete this contract?")) return;
     try {
       await deleteFleetContract(contractId);
       toast.success("Contract deleted");
-      load();
-    } catch (err: any) {
+      void load();
+    } catch (err: unknown) {
       toast.error("Failed to delete contract");
     }
   };
@@ -1017,26 +1025,26 @@ function ClientInvoicesTab({ clientId }: { clientId: string }) {
 // ── POs Tab ───────────────────────────────────────────
 function ClientPOsTab({ clientId, onAdd }: { clientId: string; onAdd: () => void }) {
   const { user } = useAuth();
-  const [pos, setPos] = useState<any[]>([]);
+  const [pos, setPos] = useState<ClientPurchaseOrder[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const { data } = await fetchClientPurchaseOrders(clientId);
     setPos(data ?? []);
     setLoading(false);
-  };
+  }, [clientId]);
 
   useEffect(() => {
-    if (user?.id) load();
-  }, [user?.id, clientId]);
+    if (user?.id) void Promise.resolve().then(() => load());
+  }, [user?.id, load]);
 
   const handleDelete = async (poId: string) => {
     if (!confirm("Are you sure you want to delete this purchase order?")) return;
     try {
       await deletePurchaseOrder(poId);
       toast.success("PO deleted");
-      load();
-    } catch (err: any) {
+      void load();
+    } catch (err: unknown) {
       toast.error("Failed to delete purchase order");
     }
   };
@@ -1149,28 +1157,28 @@ function ClientReportsTab({ clientId }: { clientId: string }) {
 }
 
 // ── Contacts Tab ──────────────────────────────────────
-function ClientContactsTab({ clientId, onAdd, onEdit }: { clientId: string; onAdd: () => void; onEdit: (c: any) => void }) {
+function ClientContactsTab({ clientId, onAdd, onEdit }: { clientId: string; onAdd: () => void; onEdit: (contact: ClientContact) => void }) {
   const { user } = useAuth();
-  const [contacts, setContacts] = useState<any[]>([]);
+  const [contacts, setContacts] = useState<ClientContact[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const { data } = await fetchClientContacts(clientId);
     setContacts(data ?? []);
     setLoading(false);
-  };
+  }, [clientId]);
 
   useEffect(() => {
-    if (user?.id) load();
-  }, [user?.id, clientId]);
+    if (user?.id) void Promise.resolve().then(() => load());
+  }, [user?.id, load]);
 
   const handleDelete = async (contactId: string) => {
     if (!confirm("Are you sure you want to delete this contact?")) return;
     try {
       await deleteFleetContact(contactId);
       toast.success("Contact deleted");
-      load();
-    } catch (err: any) {
+      void load();
+    } catch (err: unknown) {
       toast.error("Failed to delete contact");
     }
   };

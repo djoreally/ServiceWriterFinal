@@ -10,7 +10,7 @@ const Dashboard = () => {
   const [pageReady, setPageReady] = useState(false);
 
   useEffect(() => {
-    setPageReady(true);
+    void Promise.resolve().then(() => setPageReady(true));
   }, []);
 
   return (

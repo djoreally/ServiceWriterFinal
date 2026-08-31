@@ -1,3 +1,4 @@
+import { createElement } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -53,7 +54,7 @@ export function AssetRow({
         onClick={() => onPreview(asset)}
         className="h-9 w-9 rounded bg-muted flex items-center justify-center shrink-0 text-muted-foreground"
       >
-        <Icon className="h-4 w-4" />
+        {createElement(Icon, { className: "h-4 w-4" })}
       </button>
       <button
         type="button"

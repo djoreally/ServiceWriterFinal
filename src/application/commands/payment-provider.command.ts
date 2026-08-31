@@ -15,7 +15,7 @@ export async function updatePaymentProvider(provider: string) {
   if (error) throw new Error(error.message);
 }
 
-export async function initiateStripeOnboarding(): Promise<any> {
+export async function initiateStripeOnboarding() {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error("Not authenticated");
 
@@ -24,7 +24,7 @@ export async function initiateStripeOnboarding(): Promise<any> {
   });
 }
 
-export async function initiateSquareOnboarding(): Promise<any> {
+export async function initiateSquareOnboarding() {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error("Not authenticated");
 
@@ -34,7 +34,7 @@ export async function initiateSquareOnboarding(): Promise<any> {
   });
 }
 
-export async function completeSquareCallback(code: string): Promise<any> {
+export async function completeSquareCallback(code: string) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error("Not authenticated");
 

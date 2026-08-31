@@ -33,15 +33,15 @@ export function VehiclePartsAlert({ vehicles, serviceNames }: VehiclePartsAlertP
   useEffect(() => {
     let active = true;
     if (vehicleCount === 0 || serviceCount === 0) {
-      setMatches([]);
+      void Promise.resolve().then(() => setMatches([]));
       return () => { active = false; };
     }
-    setLoading(true);
+    void Promise.resolve().then(() => setLoading(true));
     const lookupVehicles = JSON.parse(lookupKey) as VehicleData[];
     const lookupServices = serviceKey.split("|").filter(Boolean);
-    resolveBookingFilterMatch({ vehicles: lookupVehicles, serviceNames: lookupServices })
+    void Promise.resolve().then(() => resolveBookingFilterMatch({ vehicles: lookupVehicles, serviceNames: lookupServices })
       .then((result) => { if (active) setMatches(result); })
-      .finally(() => { if (active) setLoading(false); });
+      .finally(() => { if (active) setLoading(false); }));
     return () => { active = false; };
   // Stable serialized keys prevent a lookup loop when parent arrays are recreated.
   }, [lookupKey, serviceKey, vehicleCount, serviceCount]);

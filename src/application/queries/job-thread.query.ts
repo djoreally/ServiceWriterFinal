@@ -24,6 +24,38 @@ export interface TechnicianMessageJob {
   customerEmail: string | null;
 }
 
+interface JobThreadMessageRow {
+  id: string;
+  thread_id: string;
+  sender_id: string | null;
+  sender_role: string | null;
+  content: string;
+  attachments: unknown;
+  channel: string | null;
+  recipient: string | null;
+  created_at: string;
+  job_message_deliveries: unknown;
+}
+
+interface JobThreadEventRow {
+  id: string;
+  thread_id: string;
+  event_type: string;
+  metadata: unknown;
+  created_at: string;
+  created_by: string | null;
+}
+
+interface JobThreadExceptionRow {
+  id: string;
+  thread_id: string;
+  exception_type: string;
+  note: string | null;
+  attachments: unknown;
+  created_at: string;
+  created_by: string | null;
+}
+
 export async function ensureJobThread(jobId: string, jobSource: JobSource) {
   const { data: auth } = await getCurrentAuthUser();
   const userId = auth.user?.id;
@@ -66,7 +98,7 @@ export async function fetchJobThreadTimeline(jobId: string, jobSource: JobSource
   if (eventsRes.error) throw eventsRes.error;
   if (exceptionsRes.error) throw exceptionsRes.error;
 
-  const messages = (messagesRes.data ?? []).map((m: any) => ({
+  const messages = ((messagesRes.data ?? []) as JobThreadMessageRow[]).map((m) => ({
     id: m.id,
     thread_id: m.thread_id,
     item_type: "human_message" as const,
@@ -82,7 +114,7 @@ export async function fetchJobThreadTimeline(jobId: string, jobSource: JobSource
     },
   }));
 
-  const events = (eventsRes.data ?? []).map((e: any) => ({
+  const events = ((eventsRes.data ?? []) as JobThreadEventRow[]).map((e) => ({
     id: e.id,
     thread_id: e.thread_id,
     item_type: "system_event" as const,
@@ -94,7 +126,7 @@ export async function fetchJobThreadTimeline(jobId: string, jobSource: JobSource
     },
   }));
 
-  const exceptions = (exceptionsRes.data ?? []).map((x: any) => ({
+  const exceptions = ((exceptionsRes.data ?? []) as JobThreadExceptionRow[]).map((x) => ({
     id: x.id,
     thread_id: x.thread_id,
     item_type: "exception" as const,

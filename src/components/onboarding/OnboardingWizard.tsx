@@ -106,9 +106,6 @@ export const OnboardingWizard = () => {
   const [userId, setUserId] = useState<string | null>(null);
   const [priorImport, setPriorImport] = useState<SiteImportResult | null>(null);
 
-  useEffect(() => {
-    loadExistingData();
-  }, []);
 
   const loadExistingData = async () => {
     try {
@@ -158,6 +155,10 @@ export const OnboardingWizard = () => {
       console.error("Error loading data:", error);
     }
   };
+
+  useEffect(() => {
+    void Promise.resolve().then(() => loadExistingData());
+  }, []);
 
   const updateData = (updates: Partial<OnboardingData>) => {
     setData((prev) => ({ ...prev, ...updates }));

@@ -236,8 +236,8 @@ export default function TechNavigation() {
 
     void boot();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identity, jobId]);
+
+  }, [getCurrentPosition, identity, jobId, loadRoute, speak]);
 
   // Initialize the map once.
   useEffect(() => {
@@ -245,7 +245,7 @@ export default function TechNavigation() {
     try {
       mapboxgl.accessToken = requireMapboxToken();
     } catch {
-      setError("Mapping is not configured for this workspace.");
+      void Promise.resolve().then(() => setError("Mapping is not configured for this workspace."));
       return;
     }
 

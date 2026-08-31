@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message";
 import { useState, useEffect, useCallback } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -111,8 +112,8 @@ const ServicePackages = () => {
   }, []);
 
   useEffect(() => {
-    fetchPackages();
-    fetchServices();
+    void Promise.resolve().then(() => fetchPackages());
+    void Promise.resolve().then(() => fetchServices());
   }, [fetchPackages, fetchServices]);
 
   const loadPreConfiguredPackages = async () => {
@@ -125,9 +126,9 @@ const ServicePackages = () => {
         toast.success(`Added ${count} pre-configured package${count > 1 ? 's' : ''} to your catalog`);
         fetchPackages();
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error loading templates:", error);
-      toast.error(error.message || "Failed to load pre-configured packages");
+      toast.error(errorMessage(error, "Failed to load pre-configured packages"));
     } finally {
       setLoadingTemplates(false);
     }

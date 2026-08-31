@@ -117,9 +117,9 @@ const FleetWorkOrdersPage = () => {
     setAggregates(woData.aggregates);
     setTechs(techData.map((t: any) => ({ id: t.id, name: t.name })));
     setLoading(false);
-  }, [clientFilter, page, search, sort, statusFilter, user?.id]);
+  }, [clientFilter, page, search, sort, statusFilter, user]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { void Promise.resolve().then(() => loadData()); }, [loadData]);
   useEffect(() => {
     if (!user?.id) return;
     let timer: ReturnType<typeof setTimeout> | undefined;

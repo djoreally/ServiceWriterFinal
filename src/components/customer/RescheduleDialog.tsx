@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message";
 import { useState } from "react";
 import { rescheduleAppointment } from "@/application/commands/customer-portal.command";
 import { sendBookingLifecycleSms } from "@/application/commands/sms.command";
@@ -81,8 +82,8 @@ export function RescheduleDialog({
       sendBookingLifecycleSms({ appointmentId: appointment.id, type: "reschedule", signature: sig || undefined })
         .catch((e) => console.warn("[reschedule-sms] failed", e));
       onSuccess();
-    } catch (error: any) {
-      toast.error(error.message || "Failed to reschedule appointment");
+    } catch (error: unknown) {
+      toast.error(errorMessage(error, "Failed to reschedule appointment"));
     } finally {
       setSubmitting(false);
     }

@@ -83,7 +83,7 @@ export function CustomerAppointmentsTab({ account }: Props) {
   }, [account.id]);
 
   useEffect(() => {
-    fetchAppointments();
+    void Promise.resolve().then(() => fetchAppointments());
   }, [fetchAppointments]);
 
   const upcoming = appointments.filter((a) => {

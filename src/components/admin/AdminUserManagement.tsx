@@ -57,9 +57,6 @@ export function AdminUserManagement() {
   const [slugEditId, setSlugEditId] = useState<string | null>(null);
   const [slugDraft, setSlugDraft] = useState("");
 
-  useEffect(() => {
-    fetchUsers();
-  }, []);
 
   const fetchUsers = async () => {
     try {
@@ -71,6 +68,10 @@ export function AdminUserManagement() {
     }
     setLoading(false);
   };
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchUsers());
+  }, []);
 
   const audit = async (action: string, userId: string) => {
     const currentUserId = await getCurrentUserId();

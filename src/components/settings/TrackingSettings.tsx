@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message";
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -64,9 +65,9 @@ export function TrackingSettings() {
       const fresh = await fetchTrackingSettings();
       if (fresh) setState(fresh);
       toast.success(enabled ? "Tracking injection enabled" : "Tracking injection disabled");
-    } catch (e: any) {
+    } catch (e: unknown) {
       set("enabled", previous);
-      toast.error(e?.message || "Failed to save tracking switch");
+      toast.error(errorMessage(e, "Failed to save tracking switch"));
     } finally {
       setSavingEnabled(false);
     }
@@ -85,8 +86,8 @@ export function TrackingSettings() {
       const fresh = await fetchTrackingSettings();
       if (fresh) setState(fresh);
       toast.success("Tracking settings saved");
-    } catch (e: any) {
-      toast.error(e?.message || "Failed to save tracking settings");
+    } catch (e: unknown) {
+      toast.error(errorMessage(e, "Failed to save tracking settings"));
     } finally {
       setSaving(false);
     }

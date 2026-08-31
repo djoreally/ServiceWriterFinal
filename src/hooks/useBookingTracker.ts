@@ -45,8 +45,6 @@ interface UseBookingTrackerOptions {
 export function useBookingTracker(opts: UseBookingTrackerOptions) {
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSentRef = useRef<string>("");
-  const succeededRef = useRef(opts.succeeded);
-  succeededRef.current = opts.succeeded;
 
   const email = opts.guestEmail?.trim();
   const hasEmail = !!email && email.includes("@");
@@ -55,7 +53,7 @@ export function useBookingTracker(opts: UseBookingTrackerOptions) {
   // Debounced write on dependency change
   useEffect(() => {
     if (!opts.businessUserId) return;
-    if (succeededRef.current) return;
+    if (opts.succeeded) return;
     // Need at least one identity dimension
     if (!hasEmail && !sessionId) return;
 
@@ -107,12 +105,13 @@ export function useBookingTracker(opts: UseBookingTrackerOptions) {
     opts.serviceCatalogId,
     opts.scheduledDate,
     opts.scheduledTime,
+    opts.succeeded,
   ]);
 
   // Final flush on tab close — best-effort fire-and-forget.
   useEffect(() => {
     const handler = () => {
-      if (succeededRef.current) return;
+      if (opts.succeeded) return;
       if (!opts.businessUserId) return;
       if (!hasEmail && !sessionId) return;
       void trackBookingProgress({
@@ -141,6 +140,7 @@ export function useBookingTracker(opts: UseBookingTrackerOptions) {
     opts.serviceCatalogId,
     opts.scheduledDate,
     opts.scheduledTime,
+    opts.succeeded,
   ]);
 
   // Recovery on success — DB trigger also handles this; redundant safeguard.

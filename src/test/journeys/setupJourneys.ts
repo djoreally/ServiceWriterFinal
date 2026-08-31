@@ -1,4 +1,4 @@
-import React from "react";
+import React, { type ReactNode } from "react";
 import { configure } from "@testing-library/react";
 import { getFakeBackend, resetFakeBackend } from "./fakeBackend";
 import { setupConsoleErrorGuard, restoreConsoleErrorGuard } from "./matchers";
@@ -10,10 +10,10 @@ configure({ asyncUtilTimeout: 8000 });
 
 // Mock Supabase client module to route through Proxy pointing to active FakeBackend
 jest.mock("@/integrations/supabase/client", () => {
-  const handler = {
-    get(_target: any, prop: string) {
+  const handler: ProxyHandler<object> = {
+    get(_target, prop) {
       const backend = getFakeBackend();
-      const value = (backend as any)[prop];
+      const value: unknown = Reflect.get(backend, prop);
       if (typeof value === "function") {
         return value.bind(backend);
       }
@@ -23,6 +23,7 @@ jest.mock("@/integrations/supabase/client", () => {
   const proxy = new Proxy({}, handler);
   return {
     supabase: proxy,
+    productionSupabase: proxy,
     authSupabase: proxy,
     SUPABASE_URL_RESOLVED: "http://localhost:54321",
     SUPABASE_PUBLISHABLE_KEY_RESOLVED: "test-anon-key",
@@ -45,14 +46,14 @@ jest.mock("mapbox-gl", () => ({
 }), { virtual: true });
 
 jest.mock("@mapbox/search-js-react", () => ({
-  AddressAutofill: ({ children }: { children: any }) => children,
+  AddressAutofill: ({ children }: { children: ReactNode }) => children,
 }), { virtual: true });
 
 jest.mock("react-map-gl", () => {
   return {
-    Map: ({ children }: { children: any }) => React.createElement("div", null, "Map Mock", children),
-    Marker: ({ children }: { children: any }) => React.createElement("div", null, "Marker", children),
-    Popup: ({ children }: { children: any }) => React.createElement("div", null, "Popup", children),
+    Map: ({ children }: { children: ReactNode }) => React.createElement("div", null, "Map Mock", children),
+    Marker: ({ children }: { children: ReactNode }) => React.createElement("div", null, "Marker", children),
+    Popup: ({ children }: { children: ReactNode }) => React.createElement("div", null, "Popup", children),
   };
 }, { virtual: true });
 
@@ -69,7 +70,7 @@ jest.mock("@posthog/react", () => ({
     capture: jest.fn(),
     identify: jest.fn(),
   }),
-  PostHogProvider: ({ children }: { children: any }) => children,
+  PostHogProvider: ({ children }: { children: ReactNode }) => children,
 }), { virtual: true });
 
 // Mock Stripe

@@ -1,5 +1,5 @@
 /** Service Records Query — canonical reads with a legacy UI adapter. */
-import { supabase } from "@/integrations/supabase/client";
+import { productionSupabase } from "@/integrations/supabase/client";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
@@ -44,7 +44,7 @@ function object(value: unknown): Record<string, any> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
 }
 
-function customerName(row: any): string {
+function customerName(row: { first_name: string | null; last_name: string | null }): string {
   return [row?.first_name, row?.last_name].filter(Boolean).join(" ").trim() || "Customer";
 }
 
@@ -55,18 +55,18 @@ export async function fetchServiceRecordsPageData(): Promise<ServiceRecordsPageD
   if (!context) return null;
 
   const [servicesRes, customersRes, vehiclesRes] = await Promise.all([
-    (supabase.from("service_records") as any)
+    productionSupabase.from("service_records")
       .select("id,customer_id,vehicle_id,status,work_performed,customer_notes,internal_notes,metadata,started_at,completed_at,created_at,subtotal,total_amount,technician_id")
       .eq("workspace_id", context.workspaceId)
       .neq("status", "voided")
       .order("completed_at", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false }),
-    (supabase.from("customers") as any)
+    productionSupabase.from("customers")
       .select("id,first_name,last_name")
       .eq("workspace_id", context.workspaceId)
       .neq("status", "archived")
       .order("last_name"),
-    (supabase.from("vehicles") as any)
+    productionSupabase.from("vehicles")
       .select("id,customer_id,make,model,year")
       .eq("workspace_id", context.workspaceId)
       .neq("status", "archived")
@@ -77,7 +77,7 @@ export async function fetchServiceRecordsPageData(): Promise<ServiceRecordsPageD
   if (customersRes.error) throw customersRes.error;
   if (vehiclesRes.error) throw vehiclesRes.error;
 
-  const services: ServiceRecordRow[] = ((servicesRes.data ?? []) as any[]).map((row) => {
+  const services: ServiceRecordRow[] = (servicesRes.data ?? []).map((row) => {
     const metadata = object(row.metadata);
     const serviceDate = row.completed_at ?? row.started_at ?? row.created_at;
     return {
@@ -102,8 +102,8 @@ export async function fetchServiceRecordsPageData(): Promise<ServiceRecordsPageD
 
   return {
     services,
-    customers: ((customersRes.data ?? []) as any[]).map((row) => ({ id: row.id, name: customerName(row) })),
-    vehicles: ((vehiclesRes.data ?? []) as any[]).map((row) => ({
+    customers: (customersRes.data ?? []).map((row) => ({ id: row.id, name: customerName(row) })),
+    vehicles: (vehiclesRes.data ?? []).map((row) => ({
       id: row.id,
       customer_id: row.customer_id ?? null,
       make: row.make ?? "",

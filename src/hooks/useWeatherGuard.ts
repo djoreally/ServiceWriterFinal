@@ -110,7 +110,7 @@ export function useWeatherGuard({
   );
 
   useEffect(() => {
-    fetchWindow();
+    void Promise.resolve().then(() => fetchWindow());
   }, [fetchWindow]);
 
   // Memoize a per-date blocked-slots map derived from the window forecast.

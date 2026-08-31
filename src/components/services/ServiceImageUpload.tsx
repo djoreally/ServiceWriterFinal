@@ -47,7 +47,7 @@ export function ServiceImageUpload({ serviceId }: ServiceImageUploadProps) {
     setLoading(false);
   }, [serviceId]);
 
-  useEffect(() => { loadImages(); }, [loadImages]);
+  useEffect(() => { void Promise.resolve().then(() => loadImages()); }, [loadImages]);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

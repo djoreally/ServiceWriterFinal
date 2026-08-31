@@ -15,7 +15,7 @@ interface Props {
 export const CustomerSection = ({ state, dispatch, options }: Props) => {
   const [query, setQuery] = useState("");
 
-  const clients = options?.clients || [];
+  const clients = useMemo(() => options?.clients || [], [options?.clients]);
   const filtered = useMemo(
     () => clients.filter((c) => !query || c.company_name.toLowerCase().includes(query.toLowerCase())).slice(0, 6),
     [clients, query],

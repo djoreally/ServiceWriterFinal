@@ -1,8 +1,9 @@
-jest.mock("@/integrations/supabase/client", () => ({
-  supabase: {
+jest.mock("@/integrations/supabase/client", () => {
+  const client = {
     from: jest.fn(),
-  },
-}));
+  };
+  return { supabase: client, productionSupabase: client };
+});
 
 jest.mock("@/application/queries/settings.query", () => ({
   resolveCurrentWorkspace: jest.fn(async () => ({ workspaceId: "workspace-1", userId: "user-1" })),
@@ -11,7 +12,21 @@ jest.mock("@/application/queries/settings.query", () => ({
 import { supabase } from "@/integrations/supabase/client";
 import { fetchDashboardReporting } from "@/application/queries/dashboard.query";
 
-type QueryResult = { data: any; error: any };
+type QueryError = { message: string } | null;
+type QueryResult = { data: unknown; error: QueryError };
+
+interface ThenableQuery {
+  select: jest.Mock<ThenableQuery>;
+  neq: jest.Mock<ThenableQuery>;
+  eq: jest.Mock<ThenableQuery>;
+  gte: jest.Mock<ThenableQuery>;
+  lte: jest.Mock<ThenableQuery>;
+  order: jest.Mock<ThenableQuery>;
+  then: (
+    resolve: (value: QueryResult) => unknown,
+    reject?: (reason: unknown) => unknown,
+  ) => Promise<unknown>;
+}
 
 const tableResults: Record<string, QueryResult[]> = {
   payments: [],
@@ -26,7 +41,8 @@ const tableCallCount: Record<string, number> = {
 };
 
 function makeThenableQuery(result: QueryResult) {
-  const builder: any = {
+  const builder = {} as ThenableQuery;
+  Object.assign(builder, {
     select: jest.fn(() => builder),
     neq: jest.fn(() => builder),
     eq: jest.fn(() => builder),
@@ -35,7 +51,7 @@ function makeThenableQuery(result: QueryResult) {
     order: jest.fn(() => builder),
     then: (resolve: (value: QueryResult) => unknown, reject?: (reason: unknown) => unknown) =>
       Promise.resolve(result).then(resolve, reject),
-  };
+  });
   return builder;
 }
 
@@ -69,39 +85,41 @@ describe("fetchDashboardReporting financial reporting mapping", () => {
             amount: 5000,
             created_at: "2026-03-01T10:00:00Z",
             status: "pending",
-            customer_email: "a@example.com",
-            customer_name: "A",
-            refund_amount: null,
-            appointment_id: "appt-1",
-            appointments: { status: "cancelled" },
+            metadata: {
+              customer_email: "a@example.com",
+              customer_name: "A",
+              appointment_status: "cancelled",
+            },
+            customers: null,
           },
           {
             id: "p2",
             amount: 7000,
             created_at: "2026-03-01T11:00:00Z",
             status: "pending",
-            customer_email: "b@example.com",
-            customer_name: "B",
-            refund_amount: null,
-            appointment_id: "appt-2",
-            appointments: { status: "confirmed" },
+            metadata: {
+              customer_email: "b@example.com",
+              customer_name: "B",
+              appointment_status: "confirmed",
+            },
+            customers: null,
           },
           {
             id: "p3",
             amount: 9000,
             created_at: "2026-03-01T12:00:00Z",
             status: "succeeded",
-            customer_email: null,
-            customer_name: null,
-            refund_amount: 300,
-            appointment_id: "appt-3",
-            appointments: { status: "cancelled" },
+            metadata: {
+              refunded_amount: 300,
+              appointment_status: "cancelled",
+            },
+            customers: null,
           },
         ],
         error: null,
       },
       {
-        data: [{ id: "prev-1", amount: 1000, status: "succeeded" }],
+        data: [{ id: "prev-1", amount: 1000, status: "succeeded", metadata: null }],
         error: null,
       },
     ];

@@ -74,7 +74,7 @@ export const AddVehicleDialog = ({ open, onClose, onCreated, clientId, editingVe
 
   useEffect(() => {
     if (editingVehicle) {
-      setForm({
+      void Promise.resolve().then(() => setForm({
         fleet_client_id: editingVehicle.fleet_client_id || clientId || "",
         fleet_location_id: editingVehicle.fleet_location_id || "",
         fleet_contract_id: editingVehicle.fleet_contract_id || "",
@@ -94,9 +94,9 @@ export const AddVehicleDialog = ({ open, onClose, onCreated, clientId, editingVe
         last_service_mileage: editingVehicle.last_service_mileage ? String(editingVehicle.last_service_mileage) : "",
         next_service_date: editingVehicle.next_service_date || "",
         next_service_mileage: editingVehicle.next_service_mileage ? String(editingVehicle.next_service_mileage) : "",
-      });
+      }));
     } else {
-      setForm({
+      void Promise.resolve().then(() => setForm({
         fleet_client_id: clientId || "",
         fleet_location_id: "",
         fleet_contract_id: "",
@@ -116,7 +116,7 @@ export const AddVehicleDialog = ({ open, onClose, onCreated, clientId, editingVe
         last_service_mileage: "",
         next_service_date: "",
         next_service_mileage: "",
-      });
+      }));
     }
   }, [editingVehicle, clientId, open]);
 

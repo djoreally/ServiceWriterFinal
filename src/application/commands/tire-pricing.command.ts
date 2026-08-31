@@ -38,7 +38,7 @@ export async function saveTireServicePricingRule(rule: TireServicePricingRule) {
     allows_staggered_fitment: rule.allowsStaggeredFitment,
     duration_minutes_per_tire: rule.durationMinutesPerTire,
   };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
   const { error } = await (supabase as any).from("tire_service_pricing_rules").upsert(row, { onConflict: "user_id,service_catalog_id" });
   if (error) throw error;
 }

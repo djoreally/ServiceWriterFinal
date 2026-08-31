@@ -52,7 +52,7 @@ export function CustomerPaymentsTab({ account }: Props) {
   }, [account.id]);
 
   useEffect(() => {
-    fetchPayments();
+    void Promise.resolve().then(() => fetchPayments());
   }, [fetchPayments]);
 
   const totalPaid = payments

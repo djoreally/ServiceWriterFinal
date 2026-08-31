@@ -56,6 +56,8 @@ export interface PaymentSuccessBookingDetails {
   confirmationNumber: string;
   status: "pending" | "succeeded" | "failed";
   userId?: string;
+  appointmentId?: string;
+  provider?: string;
 }
 
 function workspaceId(): string {
@@ -64,11 +66,31 @@ function workspaceId(): string {
   return id;
 }
 
-function object(value: unknown): Record<string, any> {
-  return value && typeof value === "object" ? value as Record<string, any> : {};
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? value as Record<string, unknown> : {};
 }
 
-function customerName(customer: any): string | null {
+interface PaymentCustomer {
+  first_name?: string | null;
+  last_name?: string | null;
+  email?: string | null;
+}
+
+interface PaymentApiRow {
+  id: string;
+  amount: number | null;
+  currency_code: string | null;
+  status: string;
+  provider: string | null;
+  provider_payment_id: string | null;
+  created_at: string;
+  metadata: unknown;
+  invoice_id?: string | null;
+  customer_id?: string | null;
+  customers?: PaymentCustomer | null;
+}
+
+function customerName(customer: PaymentCustomer | null | undefined): string | null {
   if (!customer) return null;
   const name = [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim();
   return name || null;
@@ -77,7 +99,7 @@ function customerName(customer: any): string | null {
 /** Canonical payments are stored in dollars. No cents conversion belongs here. */
 export async function fetchPaymentRecords(): Promise<PaymentRecord[]> {
   const response = await nextApi.payments.list(workspaceId());
-  return ((response.data ?? []) as Record<string, any>[]).map((payment) => {
+  return ((response.data ?? []) as unknown as PaymentApiRow[]).map((payment) => {
     const metadata = object(payment.metadata);
     const refundedAmount = payment.status === "refunded"
       ? Number(payment.amount ?? 0)
@@ -93,13 +115,13 @@ export async function fetchPaymentRecords(): Promise<PaymentRecord[]> {
       currency: payment.currency_code || "USD",
       status: payment.status,
       payment_type: String(metadata.payment_method ?? payment.provider ?? "other"),
-      customer_name: customerName(payment.customers) ?? metadata.customer_name ?? null,
-      customer_email: payment.customers?.email ?? metadata.customer_email ?? null,
+      customer_name: customerName(payment.customers) ?? (metadata.customer_name == null ? null : String(metadata.customer_name)),
+      customer_email: payment.customers?.email ?? (metadata.customer_email == null ? null : String(metadata.customer_email)),
       stripe_payment_intent_id: payment.provider === "stripe" ? payment.provider_payment_id ?? null : null,
       created_at: payment.created_at,
       metadata: payment.metadata ?? {},
       refund_amount: refundedAmount,
-      invoice_sent_at: metadata.invoice_sent_at ?? null,
+      invoice_sent_at: metadata.invoice_sent_at == null ? null : String(metadata.invoice_sent_at),
       invoice_id: payment.invoice_id ?? null,
       customer_id: payment.customer_id ?? null,
       appointments: null,
@@ -145,9 +167,13 @@ export async function fetchPaymentSuccessBookingDetails(
     serviceName: String(metadata.service_name ?? metadata.serviceName ?? "Auto Service"),
     amount: Number(paymentRecord.amount ?? 0),
     currency: paymentRecord.currency_code || "USD",
-    vehicleInfo: metadata.vehicle_info ?? metadata.vehicleInfo ?? undefined,
+    vehicleInfo: metadata.vehicle_info == null && metadata.vehicleInfo == null
+      ? undefined
+      : String(metadata.vehicle_info ?? metadata.vehicleInfo),
     confirmationNumber: paymentRecord.id.slice(-8).toUpperCase(),
     status: paymentRecord.status as "pending" | "succeeded" | "failed",
     userId: paymentRecord.created_by ?? undefined,
+    appointmentId: metadata.appointment_id == null ? undefined : String(metadata.appointment_id),
+    provider: paymentRecord.provider ?? "stripe",
   };
 }

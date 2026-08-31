@@ -82,11 +82,44 @@ export interface ServiceDetailResult {
   oilType: string | null;
 }
 
-function object(value: unknown): Record<string, any> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-function customerAdapter(row: any): ServiceDetailCustomer | null {
+function optionalString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+interface ServiceDetailCustomerRow {
+  id: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  company_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
+  city?: string | null;
+  region?: string | null;
+  postal_code?: string | null;
+  created_at: string;
+}
+
+interface VehicleServiceSpecRow {
+  engine?: string | null;
+  oil_type?: string | null;
+  oil_capacity?: string | null;
+}
+
+interface ServiceDetailLineRow {
+  id: string;
+  item_type: string | null;
+  description: string;
+  quantity: number | null;
+  labor_hours: number | null;
+}
+
+function customerAdapter(row: ServiceDetailCustomerRow | null | undefined): ServiceDetailCustomer | null {
   if (!row) return null;
   return {
     id: row.id,
@@ -135,7 +168,7 @@ export async function fetchServiceDetail(serviceId: string): Promise<ServiceDeta
 
   let customer = customerAdapter(customerRes.data);
   const rawVehicle = vehicleRes.data;
-  let specs: any = null;
+  let specs: VehicleServiceSpecRow | null = null;
   if (row.vehicle_id) {
     const specRes = await client.from("vehicle_service_specs")
       .select("engine,oil_type,oil_capacity,oil_filter,metadata")
@@ -144,7 +177,7 @@ export async function fetchServiceDetail(serviceId: string): Promise<ServiceDeta
       .order("updated_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    specs = specRes.data;
+    specs = specRes.data as VehicleServiceSpecRow | null;
   }
 
   if (!customer && appointmentRes.data?.customer_id) {
@@ -192,10 +225,10 @@ export async function fetchServiceDetail(serviceId: string): Promise<ServiceDeta
     color: rawVehicle.color ?? null,
     oil_type: specs?.oil_type ?? null,
     oil_capacity: specs?.oil_capacity ?? null,
-    engine: specs?.engine ?? object(rawVehicle.metadata).engine ?? null,
+    engine: specs?.engine ?? optionalString(object(rawVehicle.metadata).engine),
   } : null;
 
-  const lineRows = (linesRes.data ?? []) as any[];
+  const lineRows = (linesRes.data ?? []) as ServiceDetailLineRow[];
   const laborItems: ServiceDetailLaborItem[] = lineRows
     .filter((line) => Number(line.labor_hours ?? 0) > 0 || line.item_type === "labor")
     .map((line) => ({ id: line.id, description: line.description, hours: Number(line.labor_hours ?? line.quantity ?? 0) }));
@@ -228,11 +261,11 @@ export async function fetchServiceDetail(serviceId: string): Promise<ServiceDeta
     mileage: metadata.mileage != null ? Number(metadata.mileage) : null,
     vin_captured: metadata.vin ? String(metadata.vin) : vehicleSnapshot.vin ? String(vehicleSnapshot.vin) : null,
     vehicle_year: vehicleSnapshot.year != null ? Number(vehicleSnapshot.year) : rawVehicle?.year ?? null,
-    vehicle_make: vehicleSnapshot.make ?? rawVehicle?.make ?? null,
-    vehicle_model: vehicleSnapshot.model ?? rawVehicle?.model ?? null,
-    vehicle_trim: vehicleSnapshot.trim ?? rawVehicle?.trim ?? null,
-    vehicle_engine: vehicleSnapshot.engine ?? specs?.engine ?? object(rawVehicle?.metadata).engine ?? null,
-    license_plate: vehicleSnapshot.license_plate ?? rawVehicle?.license_plate ?? null,
+    vehicle_make: optionalString(vehicleSnapshot.make) ?? rawVehicle?.make ?? null,
+    vehicle_model: optionalString(vehicleSnapshot.model) ?? rawVehicle?.model ?? null,
+    vehicle_trim: optionalString(vehicleSnapshot.trim) ?? rawVehicle?.trim ?? null,
+    vehicle_engine: optionalString(vehicleSnapshot.engine) ?? specs?.engine ?? optionalString(object(rawVehicle?.metadata).engine),
+    license_plate: optionalString(vehicleSnapshot.license_plate) ?? rawVehicle?.license_plate ?? null,
     odometer_measure: metadata.odometer_measure ? String(metadata.odometer_measure) : rawVehicle?.mileage_unit ?? "mi",
   };
 

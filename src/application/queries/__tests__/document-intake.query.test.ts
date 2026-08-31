@@ -24,7 +24,16 @@ import {
 type Row = Record<string, unknown>;
 
 function makeBuilder(opts: { selectReturn?: { data: Row | null; error: unknown } } = {}) {
-  const builder: any = {
+  interface Builder {
+    insert: jest.Mock<Builder>;
+    update: jest.Mock<Builder>;
+    eq: jest.Mock<Builder>;
+    select: jest.Mock<Builder>;
+    single: jest.Mock<Promise<{ data: Row | null; error: unknown }>>;
+    then: (resolve: (value: { data: null; error: null }) => unknown) => Promise<unknown>;
+  }
+  const builder = {} as Builder;
+  Object.assign(builder, {
     insert: jest.fn(() => builder),
     update: jest.fn(() => builder),
     eq: jest.fn(() => builder),
@@ -32,7 +41,7 @@ function makeBuilder(opts: { selectReturn?: { data: Row | null; error: unknown }
     single: jest.fn(async () => opts.selectReturn ?? { data: { id: "generated-id" }, error: null }),
     then: (resolve: (v: { data: null; error: null }) => unknown) =>
       Promise.resolve({ data: null, error: null }).then(resolve),
-  };
+  });
   return builder;
 }
 
@@ -94,7 +103,7 @@ describe("approveAndPromoteIntakeDocument", () => {
         price_per_gallon: 4.29,
         total_amount: 53.62,
         odometer: 102334,
-      } as any,
+      } as DocumentIntakeRow["parsed_json"],
     });
 
     const result = await approveAndPromoteIntakeDocument(doc, "user-1");
@@ -128,7 +137,7 @@ describe("approveAndPromoteIntakeDocument", () => {
         mileage: 102334,
         oil_type: "5W30",
         oil_spec: "229.52",
-      } as any,
+      } as DocumentIntakeRow["parsed_json"],
     });
 
     const result = await approveAndPromoteIntakeDocument(doc, "user-1");
@@ -160,7 +169,7 @@ describe("approveAndPromoteIntakeDocument", () => {
         subtotal: 25,
         tax_amount: 2,
         total_amount: 27,
-      } as any,
+      } as DocumentIntakeRow["parsed_json"],
     });
 
     const result = await approveAndPromoteIntakeDocument(doc, "user-1");

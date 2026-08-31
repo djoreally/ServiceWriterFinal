@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/hooks/use-toast";
+import { generateCorrelationId } from "@/lib/client-observability";
+import { currentTimeMs } from "@/lib/datetime";
 import {
   Dialog,
   DialogContent,
@@ -140,8 +142,8 @@ export const PayoutsDashboard = () => {
   };
 
   useEffect(() => {
-    fetchPayouts();
-    setInstantLog(loadInstantPayoutLog());
+    void Promise.resolve().then(() => fetchPayouts());
+    void Promise.resolve().then(() => setInstantLog(loadInstantPayoutLog()));
   }, []);
 
   const handleRefresh = async () => {
@@ -190,13 +192,14 @@ export const PayoutsDashboard = () => {
 
   const handleConfirmInstantPayout = async () => {
     if (effectiveAmountCents <= 0) return;
-    const localId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const localId = generateCorrelationId("req");
+    const requestedAt = currentTimeMs();
     appendLog({
       id: localId,
       amountCents: effectiveAmountCents,
       currency: primaryCurrency,
       status: "queued",
-      requestedAt: Date.now(),
+      requestedAt,
       feeCents,
       netCents,
     });

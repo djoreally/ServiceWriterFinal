@@ -147,7 +147,7 @@ const Customers = () => {
   }, [selectedWorkspaceId]);
 
   useEffect(() => {
-    if (!workspaceLoading) void fetchCustomers();
+    if (!workspaceLoading) void Promise.resolve().then(() => fetchCustomers());
   }, [fetchCustomers, workspaceLoading]);
 
   const { containerRef, isRefreshing } = usePullToRefresh({
@@ -245,7 +245,7 @@ const Customers = () => {
   // Pagination
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
-  useEffect(() => { setPage(1); }, [debouncedSearchQuery, pageSize]);
+  useEffect(() => { void Promise.resolve().then(() => setPage(1)); }, [debouncedSearchQuery, pageSize]);
   const pagedCustomers = usePageSlice(filteredCustomers, page, pageSize);
 
   return (

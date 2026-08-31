@@ -96,7 +96,7 @@ export interface StockOption {
 export async function fetchStockOptions(): Promise<StockOption[]> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return [];
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from("inventory_items")
     .select("id, name, sku, category, unit, quantity, sell_price, unit_cost")
     .eq("user_id", user.id)
@@ -176,7 +176,7 @@ export interface PartReservationRow {
 }
 
 export async function fetchWorkOrderPartReservations(workOrderId: string): Promise<PartReservationRow[]> {
-  const { data, error } = await supabase
+  const { data, error } = await (supabase as any)
     .from("inventory_reservations")
     .select("id, inventory_item_id, quantity, status, van_id, notes")
     .eq("work_order_id", workOrderId)

@@ -1,4 +1,4 @@
--- Secure public booking RPC context migration.
+-- Secure public booking RPC context migration (production version 20260831030526).
 -- Public callers provide the canonical booking slug; the database resolves the
 -- workspace and business owner. Caller-supplied business_user_id is removed
 -- from the public contract and legacy mutation RPCs become server-only.
@@ -10,7 +10,7 @@ returns table (workspace_id uuid, business_user_id uuid)
 language sql
 stable
 security definer
-set search_path = pg_catalog, public
+set search_path = ''
 as $$
   select w.id, w.created_by
   from public.workspaces w
@@ -33,7 +33,7 @@ create or replace function public.public_booking_upsert_customer(
 returns uuid
 language plpgsql
 security definer
-set search_path = pg_catalog, public
+set search_path = ''
 as $$
 declare v_workspace_id uuid; v_customer_id uuid; v_first_name text; v_last_name text;
 begin
@@ -74,7 +74,7 @@ create or replace function public.public_booking_upsert_vehicle(
 returns uuid
 language plpgsql
 security definer
-set search_path = pg_catalog, public
+set search_path = ''
 as $$
 declare v_business_user_id uuid; v_workspace_id uuid; v_customer_id uuid;
 begin
@@ -110,7 +110,7 @@ create or replace function public.public_booking_book_appointment(
 returns uuid
 language plpgsql
 security definer
-set search_path = pg_catalog, public
+set search_path = ''
 as $$
 declare
   v_business_user_id uuid; v_workspace_id uuid; v_vehicle_workspace uuid; v_service_workspace uuid;
@@ -146,8 +146,8 @@ begin
   if exists (select 1 from public.appointments a where a.workspace_id = v_workspace_id and a.status::text not in ('cancelled', 'no_show') and a.starts_at < v_ends_at and a.ends_at > v_starts_at) then raise exception 'SLOT_UNAVAILABLE'; end if;
   v_status := case when p_status in ('confirmed', 'scheduled') then 'confirmed'::public.appointment_status else 'requested'::public.appointment_status end;
   insert into public.appointments(workspace_id, customer_id, vehicle_id, status, starts_at, ends_at, source, confirmation_code, notes, metadata)
-  values (v_workspace_id, v_guest_customer_id, p_vehicle_id, v_status, v_starts_at, v_ends_at, 'public_booking', upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 8)), p_notes, jsonb_strip_nulls(jsonb_build_object('title', left(coalesce(p_title, 'Online booking'), 500), 'guest_name', left(p_guest_name, 160), 'guest_email', lower(trim(p_guest_email)), 'guest_phone', p_guest_phone, 'description', p_description, 'estimated_cost', round(coalesce(p_estimated_cost, 0), 2), 'tax_amount', round(coalesce(p_tax_amount, 0), 2), 'service_catalog_id', p_service_catalog_id)));
-  select a.id into v_appointment_id from public.appointments a where a.workspace_id = v_workspace_id and a.confirmation_code is not null order by a.created_at desc limit 1;
+  values (v_workspace_id, v_guest_customer_id, p_vehicle_id, v_status, v_starts_at, v_ends_at, 'public_booking', upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 8)), p_notes, jsonb_strip_nulls(jsonb_build_object('title', left(coalesce(p_title, 'Online booking'), 500), 'guest_name', left(p_guest_name, 160), 'guest_email', lower(trim(p_guest_email)), 'guest_phone', p_guest_phone, 'description', p_description, 'estimated_cost', round(coalesce(p_estimated_cost, 0), 2), 'tax_amount', round(coalesce(p_tax_amount, 0), 2), 'service_catalog_id', p_service_catalog_id)))
+  returning id into v_appointment_id;
   return v_appointment_id;
 end;
 $$;
@@ -160,7 +160,7 @@ create or replace function public.public_booking_save_configuration(
 returns void
 language plpgsql
 security definer
-set search_path = pg_catalog, public
+set search_path = ''
 as $$
 declare v_business_user_id uuid; v_workspace_id uuid; v_appointment_workspace uuid;
 begin
@@ -182,7 +182,7 @@ create or replace function public.public_booking_insert_services(
 returns integer
 language plpgsql
 security definer
-set search_path = pg_catalog, public
+set search_path = ''
 as $$
 declare v_workspace_id uuid; v_appointment_workspace uuid;
 begin
@@ -209,7 +209,7 @@ create or replace function public.public_booking_record_payment_intent_v2(
 returns uuid
 language plpgsql
 security definer
-set search_path = pg_catalog, public
+set search_path = ''
 as $$
 declare v_business_user_id uuid; v_workspace_id uuid; v_appointment_workspace uuid;
 begin
@@ -237,7 +237,7 @@ create or replace function public.public_booking_set_vehicle_tire_spec_v2(
 returns void
 language plpgsql
 security definer
-set search_path = pg_catalog, public
+set search_path = ''
 as $$
 declare v_business_user_id uuid; v_workspace_id uuid; v_vehicle_workspace uuid; v_customer_id uuid;
 begin
@@ -283,13 +283,13 @@ grant execute on function public.public_booking_record_payment_intent_v2(text,uu
 grant execute on function public.public_booking_set_vehicle_tire_spec_v2(text,text,uuid,text,text,text,text,text,text) to anon, authenticated;
 
 -- Avoid search_path hijacking in every new SECURITY DEFINER function.
-alter function public.resolve_public_booking_context(text) set search_path = pg_catalog, public;
-alter function public.public_booking_upsert_customer(text,text,text,text,text) set search_path = pg_catalog, public;
-alter function public.public_booking_upsert_vehicle(text,text,integer,text,text,text,text,integer,text,text,text,text) set search_path = pg_catalog, public;
-alter function public.public_booking_book_appointment(text,date,time,integer,text,text,text,text,text,text,numeric,numeric,uuid,uuid,text) set search_path = pg_catalog, public;
-alter function public.public_booking_save_configuration(text,uuid,jsonb) set search_path = pg_catalog, public;
-alter function public.public_booking_insert_services(text,uuid,jsonb) set search_path = pg_catalog, public;
-alter function public.public_booking_record_payment_intent_v2(text,uuid,bigint,bigint,bigint,numeric,text,text,text) set search_path = pg_catalog, public;
-alter function public.public_booking_set_vehicle_tire_spec_v2(text,text,uuid,text,text,text,text,text,text) set search_path = pg_catalog, public;
+alter function public.resolve_public_booking_context(text) set search_path = '';
+alter function public.public_booking_upsert_customer(text,text,text,text,text) set search_path = '';
+alter function public.public_booking_upsert_vehicle(text,text,integer,text,text,text,text,integer,text,text,text,text) set search_path = '';
+alter function public.public_booking_book_appointment(text,date,time,integer,text,text,text,text,text,text,numeric,numeric,uuid,uuid,text) set search_path = '';
+alter function public.public_booking_save_configuration(text,uuid,jsonb) set search_path = '';
+alter function public.public_booking_insert_services(text,uuid,jsonb) set search_path = '';
+alter function public.public_booking_record_payment_intent_v2(text,uuid,bigint,bigint,bigint,numeric,text,text,text) set search_path = '';
+alter function public.public_booking_set_vehicle_tire_spec_v2(text,text,uuid,text,text,text,text,text,text) set search_path = '';
 
 commit;

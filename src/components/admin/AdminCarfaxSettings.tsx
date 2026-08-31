@@ -55,8 +55,8 @@ export function AdminCarfaxSettings() {
   }, []);
 
   useEffect(() => {
-    fetchSettings();
-    fetchStats();
+    void Promise.resolve().then(() => fetchSettings());
+    void Promise.resolve().then(() => fetchStats());
   }, [fetchSettings, fetchStats]);
 
   const handleSave = async () => {

@@ -31,13 +31,13 @@ function makeRuntime(overrides: Partial<JobRuntime> = {}): JobRuntime {
 describe("job-execution-policy", () => {
   it("allows completion only when runtime is execution-ready", () => {
     expect(canCompleteJob(makeRuntime())).toBe(true);
-    expect(canCompleteJob(makeRuntime({ execution: { checklistStatus: "in_progress" } as any }))).toBe(false);
+    expect(canCompleteJob(makeRuntime({ execution: { checklistStatus: "in_progress" } }))).toBe(false);
     expect(canCompleteJob(makeRuntime({ parts: { status: "ordered", required: [] } }))).toBe(false);
   });
 
   it("reports blocking reasons for incomplete jobs", () => {
     const reasons = getExecutionBlockingReasons(makeRuntime({
-      execution: { checklistStatus: "in_progress", blockingIssues: ["missing tool"] } as any,
+      execution: { checklistStatus: "in_progress", blockingIssues: ["missing tool"] },
       parts: { status: "pending_review", required: [] },
     }));
     expect(reasons.length).toBeGreaterThan(0);
@@ -45,8 +45,8 @@ describe("job-execution-policy", () => {
   });
 
   it("enforces start/pause lifecycle rules", () => {
-    expect(canStartJob(makeRuntime({ lifecycle: { status: "scheduled", updatedAt: "x" } as any }))).toBe(true);
+    expect(canStartJob(makeRuntime({ lifecycle: { status: "scheduled", updatedAt: "x" } }))).toBe(true);
     expect(canPauseJob(makeRuntime())).toBe(true);
-    expect(canPauseJob(makeRuntime({ lifecycle: { status: "assigned", updatedAt: "x" } as any }))).toBe(false);
+    expect(canPauseJob(makeRuntime({ lifecycle: { status: "assigned", updatedAt: "x" } }))).toBe(false);
   });
 });

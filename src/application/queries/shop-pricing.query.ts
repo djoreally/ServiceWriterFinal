@@ -1,5 +1,5 @@
 /** Shop pricing defaults for the active workspace. */
-import { supabase } from "@/integrations/supabase/client";
+import { productionSupabase } from "@/integrations/supabase/client";
 import { DEFAULT_SHOP_PRICING, type ShopPricingDefaults } from "@/domain/pricing/repair-estimate";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
@@ -7,7 +7,7 @@ export async function fetchShopPricingDefaults(_userId?: string): Promise<ShopPr
   const context = await resolveCurrentWorkspace();
   if (!context) return { ...DEFAULT_SHOP_PRICING };
 
-  const { data, error } = await (supabase as any)
+  const { data, error } = await productionSupabase
     .from("workspace_settings")
     .select("operational_settings")
     .eq("workspace_id", context.workspaceId)
@@ -15,7 +15,7 @@ export async function fetchShopPricingDefaults(_userId?: string): Promise<ShopPr
   if (error || !data) return { ...DEFAULT_SHOP_PRICING };
 
   const operational = data.operational_settings && typeof data.operational_settings === "object"
-    ? data.operational_settings as Record<string, any>
+    ? data.operational_settings as Record<string, unknown>
     : {};
 
   return {
@@ -32,7 +32,7 @@ export async function saveShopPricingDefaults(_userId: string, values: ShopPrici
   const context = await resolveCurrentWorkspace();
   if (!context) return { data: null, error: new Error("Not authenticated") };
 
-  const client = supabase as any;
+  const client = productionSupabase;
   const { data, error } = await client.from("workspace_settings")
     .select("operational_settings")
     .eq("workspace_id", context.workspaceId)
@@ -40,7 +40,7 @@ export async function saveShopPricingDefaults(_userId: string, values: ShopPrici
   if (error) return { data: null, error };
 
   const operational = data?.operational_settings && typeof data.operational_settings === "object"
-    ? data.operational_settings as Record<string, any>
+    ? data.operational_settings as Record<string, unknown>
     : {};
 
   return client.from("workspace_settings")

@@ -64,7 +64,7 @@ export function BudgetForecastTab({ ownerUserId }: Props) {
     }
   }, [ownerUserId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void Promise.resolve().then(() => load()); }, [load]);
 
   const today = new Date();
   const daysElapsed = getDate(today);

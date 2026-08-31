@@ -13,7 +13,9 @@ jest.mock("@/integrations/supabase/client", () => ({
   },
 }));
 
-const fetchOperationalJobsByDateRangeMock: any = jest.fn(async () => ({ data: [], error: null }));
+const fetchOperationalJobsByDateRangeMock = jest.fn(
+  async (_userId: string, _fromDate: string, _toDate: string) => ({ data: [], error: null }),
+);
 
 jest.mock("../operational-jobs.query", () => ({
   fetchOperationalJobsByDateRange: (userId: string, fromDate: string, toDate: string) =>
@@ -37,12 +39,12 @@ describe("tech-app.query identity scope", () => {
     });
 
     expect(fetchOperationalJobsByDateRangeMock).toHaveBeenCalled();
-    const firstCall = fetchOperationalJobsByDateRangeMock.mock.calls[0] as any[];
+    const firstCall = fetchOperationalJobsByDateRangeMock.mock.calls[0];
     expect(firstCall[0]).toBe("owner-user-id");
   });
 
   it("loads identity and job access through canonical RPC contracts", async () => {
-    (supabase.rpc as any)
+    (supabase.rpc as jest.Mock)
       .mockResolvedValueOnce({ data: { technician_id: "tech-1", workspace_user_id: "owner-1", access_state: "linked" }, error: null })
       .mockResolvedValueOnce({ data: { job_id: "job-1", source: "fleet_work_order" }, error: null });
     await expect(fetchTechnicianAppContext()).resolves.toMatchObject({ technician_id: "tech-1", access_state: "linked" });

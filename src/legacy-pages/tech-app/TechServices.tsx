@@ -67,7 +67,7 @@ export default function TechServices() {
     }
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { void Promise.resolve().then(() => fetchData()); }, [fetchData]);
 
   const customerName = useCallback(
     (id: string | null) => (id ? customers.find(c => c.id === id)?.name || "Unknown" : "Customer"),

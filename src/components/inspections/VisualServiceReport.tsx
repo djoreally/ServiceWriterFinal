@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { fetchInspectionReport, type InspectionReportData, type InspectionResultRow as InspResultRow, type InspectionVehicle as VehicleD, type InspectionBusiness as BusinessD } from "@/application/queries/visual-inspection.query";
 import { useAuth } from "@packages/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -111,11 +111,8 @@ export function VisualServiceReport({ inspectionId, onClose }: VisualServiceRepo
   const [business, setBusiness] = useState<BusinessData | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    fetchData();
-  }, [inspectionId]);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const report = await fetchInspectionReport(inspectionId);
@@ -128,7 +125,11 @@ export function VisualServiceReport({ inspectionId, onClose }: VisualServiceRepo
       toast.error("Failed to load inspection report");
     }
     setLoading(false);
-  };
+  }, [inspectionId]);
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchData());
+  }, [fetchData, inspectionId]);
 
   const handlePrint = () => {
     window.print();

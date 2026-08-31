@@ -95,7 +95,10 @@ export function CurbeeScheduleBoard({
   closingHour = 18,
   className,
 }: CurbeeScheduleBoardProps) {
-  const visibleResources = resources.length > 0 ? resources : [{ id: "unassigned", name: "Unassigned Van" }];
+  const visibleResources = useMemo(
+    () => resources.length > 0 ? resources : [{ id: "unassigned", name: "Unassigned Van" }],
+    [resources],
+  );
   const hours = useMemo(
     () => Array.from({ length: Math.max(closingHour - openingHour + 1, 1) }, (_, i) => openingHour + i),
     [closingHour, openingHour],

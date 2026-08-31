@@ -65,9 +65,6 @@ export const EmailSettings = () => {
     imap_secure: true,
   });
 
-  useEffect(() => {
-    fetchSettings();
-  }, []);
 
   const fetchSettings = async () => {
     const data = await fetchEmailSettingsData();
@@ -94,6 +91,10 @@ export const EmailSettings = () => {
     }
     setLoading(false);
   };
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchSettings());
+  }, []);
 
   const handleSave = async () => {
     setSaving(true);

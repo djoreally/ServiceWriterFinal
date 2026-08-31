@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+
 import { addDays, formatISO, startOfWeek } from "date-fns";
 import { supabase } from "@/integrations/supabase/client";
 import type { FleetOperationsOverview, FleetServiceRule, FleetUpcomingQueueRow, FleetVehicleOpsRow } from "./types";

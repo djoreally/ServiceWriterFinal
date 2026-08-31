@@ -54,8 +54,8 @@ export function GlobalCommandPalette() {
 
   useEffect(() => {
     if (!open || !userId || query.trim().length < 2) {
-      setCustomerResults([]);
-      setAppointmentResults([]);
+      void Promise.resolve().then(() => setCustomerResults([]));
+      void Promise.resolve().then(() => setAppointmentResults([]));
       return;
     }
 

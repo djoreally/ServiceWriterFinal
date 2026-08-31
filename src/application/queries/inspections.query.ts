@@ -97,7 +97,7 @@ export async function fetchAppointmentInspectionGate(
     .select("name")
     .eq("appointment_id", appointmentId);
 
-  const names = (apptSvcs ?? []).map((r: any) => r.name).filter(Boolean);
+  const names = (apptSvcs ?? []).map((row) => row.name).filter(Boolean);
 
   // 2. Catalog rows with an inspection template (by id OR matching service name)
   const ids: string[] = [];
@@ -114,7 +114,7 @@ export async function fetchAppointmentInspectionGate(
 
   const required: { templateId: string; templateName: string }[] = [];
   const seen = new Set<string>();
-  for (const row of (catalogRows ?? []) as any[]) {
+  for (const row of catalogRows ?? []) {
     const tid = row.inspection_template_id;
     if (!tid || seen.has(tid)) continue;
     if (ids.includes(row.id) || names.includes(row.name)) {
@@ -132,9 +132,9 @@ export async function fetchAppointmentInspectionGate(
     .from("service_inspections")
     .select("template_id")
     .eq("user_id", user.id)
-    .eq("appointment_id", appointmentId as any);
+    .eq("appointment_id", appointmentId);
 
-  const completedTemplates = new Set((completed ?? []).map((r: any) => r.template_id));
+  const completedTemplates = new Set((completed ?? []).map((row) => row.template_id));
 
   const out = required.map((r) => ({
     ...r,

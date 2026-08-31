@@ -18,6 +18,7 @@ jest.mock('@/integrations/supabase/client', () => ({
 }));
 
 import {
+  enqueueServiceCatalogEdit,
   processOfflineOutbox,
   retryDeadLetterOutboxItem,
   discardDeadLetterOutboxItem,
@@ -131,5 +132,30 @@ describe('Phase 5 offline outbox QA scenarios', () => {
 
     await discardDeadLetterOutboxItem('inventory-van-1-item-1');
     expect(mutation._raw.status).toBe('discarded');
+  });
+
+  it('preserves the service item ID and data for an offline update replay', async () => {
+    const created = { _raw: {} as Record<string, unknown> };
+    mockCurrentDb = {
+      get: jest.fn(() => ({
+        create: jest.fn(async (initialize: (record: typeof created) => void) => {
+          initialize(created);
+          return created;
+        }),
+      })),
+      write: async (fn: () => Promise<void>) => fn(),
+    };
+
+    await enqueueServiceCatalogEdit({
+      action: 'update',
+      itemId: 'service-123',
+      data: { name: 'Synthetic oil change' },
+    });
+
+    expect(JSON.parse(String(created._raw.payload))).toEqual({
+      action: 'update',
+      itemId: 'service-123',
+      data: { name: 'Synthetic oil change' },
+    });
   });
 });

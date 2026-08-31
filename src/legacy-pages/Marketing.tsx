@@ -148,7 +148,7 @@ const Marketing = () => {
   useEffect(() => {
     const urlTab = searchParams.get("tab");
     if (urlTab && VALID_TAB_IDS.has(urlTab as GrowthTabId) && urlTab !== activeTab) {
-      setActiveTab(urlTab as GrowthTabId);
+      void Promise.resolve().then(() => setActiveTab(urlTab as GrowthTabId));
     }
   }, [searchParams, activeTab]);
 

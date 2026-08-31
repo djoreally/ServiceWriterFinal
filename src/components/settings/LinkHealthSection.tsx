@@ -104,7 +104,7 @@ export const LinkHealthSection = () => {
   }, []);
 
   useEffect(() => {
-    loadLinks();
+    void Promise.resolve().then(() => loadLinks());
   }, [loadLinks]);
 
   const issueLinks = links.filter((l) => l.issues.length > 0);

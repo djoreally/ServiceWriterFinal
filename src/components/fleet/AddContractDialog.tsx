@@ -16,8 +16,38 @@ interface Props {
   onClose: () => void;
   onCreated: () => void;
   clientId?: string;
-  editingContract?: any;
+  editingContract?: EditingContract;
 }
+
+type FleetClientOption = Awaited<ReturnType<typeof fetchFleetClientsForContract>>[number];
+
+interface EditingContract {
+  id: string;
+  fleet_client_id?: string | null;
+  name?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  sla_hours?: number | null;
+  approval_threshold?: number | null;
+  invoice_frequency?: string | null;
+  is_active?: boolean | null;
+  pricing_rules?: unknown;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const nestedRecord = (value: unknown, key: string): Record<string, unknown> => {
+  if (!isRecord(value)) return {};
+  const nested = value[key];
+  return isRecord(nested) ? nested : {};
+};
+
+const stringValue = (value: unknown): string | undefined =>
+  typeof value === "string" ? value : undefined;
+
+const numberValue = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
 type Step = "core" | "approval" | "billing" | "scope" | "services" | "activation";
 
@@ -26,7 +56,7 @@ const SERVICE_CLASSES = ["Class A PM", "Class B PM", "Brake Service", "Diagnosti
 export const AddContractDialog = ({ open, onClose, onCreated, clientId, editingContract }: Props) => {
   const { user } = useAuth();
   const [saving, setSaving] = useState(false);
-  const [clients, setClients] = useState<any[]>([]);
+  const [clients, setClients] = useState<FleetClientOption[]>([]);
   const [step, setStep] = useState<Step>("core");
   const [savedContractId, setSavedContractId] = useState<string | null>(editingContract?.id || null);
 
@@ -57,37 +87,43 @@ export const AddContractDialog = ({ open, onClose, onCreated, clientId, editingC
 
   useEffect(() => {
     if (editingContract) {
-      setSavedContractId(editingContract.id);
-      const rules = (editingContract.pricing_rules as any) || {};
-      setForm({
+      void Promise.resolve().then(() => setSavedContractId(editingContract.id));
+      const rules = isRecord(editingContract.pricing_rules) ? editingContract.pricing_rules : {};
+      const approval = nestedRecord(rules, "approval");
+      const billing = nestedRecord(rules, "billing");
+      const po = nestedRecord(rules, "po");
+      const serviceScope = nestedRecord(rules, "service_scope");
+      const scheduling = nestedRecord(rules, "scheduling");
+      const allowedServiceClasses = serviceScope.allowed_service_classes;
+      void Promise.resolve().then(() => setForm({
         fleet_client_id: editingContract.fleet_client_id || clientId || "",
         name: editingContract.name || "",
         start_date: editingContract.start_date || "",
         end_date: editingContract.end_date || "",
-        sla_hours: String(editingContract.sla_hours || rules.sla_hours || 24),
-        approval_mode: rules.approval?.mode || "hybrid",
-        approval_threshold: String(editingContract.approval_threshold || rules.approval?.threshold_amount || 500),
-        approver_role: rules.approval?.approver_role || "fleet_manager",
-        require_photo_evidence: Boolean(rules.approval?.require_photo_evidence),
-        billing_model: rules.billing?.model || "flat_rate",
-        invoice_frequency: editingContract.invoice_frequency || rules.billing?.invoice_frequency || "monthly",
-        net_terms: rules.billing?.net_terms || "net_30",
-        invoice_group: rules.billing?.invoice_group || "",
-        po_required: Boolean(rules.po?.requires_po),
-        po_validate_remaining: rules.po?.validate_remaining_balance !== false,
-        service_scope: Array.isArray(rules.service_scope?.allowed_service_classes) ? rules.service_scope.allowed_service_classes : [],
-        restrict_to_profiled_services: rules.service_scope?.restrict_to_profiled_services !== false,
-        enforce_location_windows: rules.scheduling?.enforce_location_windows !== false,
-        enforce_sla_window: rules.scheduling?.enforce_sla_window !== false,
-        min_dispatch_buffer_minutes: String(rules.scheduling?.min_dispatch_buffer_minutes || 15),
+        sla_hours: String(editingContract.sla_hours || numberValue(rules.sla_hours) || 24),
+        approval_mode: stringValue(approval.mode) || "hybrid",
+        approval_threshold: String(editingContract.approval_threshold || numberValue(approval.threshold_amount) || 500),
+        approver_role: stringValue(approval.approver_role) || "fleet_manager",
+        require_photo_evidence: Boolean(approval.require_photo_evidence),
+        billing_model: stringValue(billing.model) || "flat_rate",
+        invoice_frequency: editingContract.invoice_frequency || stringValue(billing.invoice_frequency) || "monthly",
+        net_terms: stringValue(billing.net_terms) || "net_30",
+        invoice_group: stringValue(billing.invoice_group) || "",
+        po_required: Boolean(po.requires_po),
+        po_validate_remaining: po.validate_remaining_balance !== false,
+        service_scope: Array.isArray(allowedServiceClasses) ? allowedServiceClasses.filter((value): value is string => typeof value === "string") : [],
+        restrict_to_profiled_services: serviceScope.restrict_to_profiled_services !== false,
+        enforce_location_windows: scheduling.enforce_location_windows !== false,
+        enforce_sla_window: scheduling.enforce_sla_window !== false,
+        min_dispatch_buffer_minutes: String(numberValue(scheduling.min_dispatch_buffer_minutes) || 15),
         change_summary: "",
         is_active: !!editingContract.is_active,
-      });
+      }));
     } else {
-      setSavedContractId(null);
-      setForm((prev) => ({ ...prev, fleet_client_id: clientId || "" }));
+      void Promise.resolve().then(() => setSavedContractId(null));
+      void Promise.resolve().then(() => setForm((prev) => ({ ...prev, fleet_client_id: clientId || "" })));
     }
-    setStep("core");
+    void Promise.resolve().then(() => setStep("core"));
   }, [editingContract, clientId, open]);
 
   useEffect(() => {

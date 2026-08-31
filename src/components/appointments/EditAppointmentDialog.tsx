@@ -65,7 +65,7 @@ export function EditAppointmentDialog({
     if (appointment) {
       const apptAny = appointment as unknown as Record<string, unknown>;
       const customerAddress = (appointment.customer as { address?: string } | undefined)?.address;
-      setFormData({
+      void Promise.resolve().then(() => setFormData({
         title: appointment.title || "",
         scheduled_date: appointment.scheduled_date || "",
         scheduled_time: appointment.scheduled_time || "",
@@ -80,7 +80,7 @@ export function EditAppointmentDialog({
           (apptAny.location_address as string | null | undefined) ||
           customerAddress ||
           "",
-      });
+      }));
     }
   }, [appointment, open]);
 

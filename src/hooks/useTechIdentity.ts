@@ -57,7 +57,7 @@ export function useTechIdentity() {
     } finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { resolve(); }, [resolve]);
+  useEffect(() => { void Promise.resolve().then(() => resolve()); }, [resolve]);
 
   return { identity, loading, error, refetch: resolve };
 }

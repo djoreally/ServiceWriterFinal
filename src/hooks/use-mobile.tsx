@@ -7,7 +7,7 @@ export function useIsMobile() {
 
   React.useEffect(() => {
     if (typeof window === 'undefined') {
-      setIsMobile(false);
+      void Promise.resolve().then(() => setIsMobile(false));
       return;
     }
 
@@ -16,7 +16,7 @@ export function useIsMobile() {
       setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
     };
     mql.addEventListener("change", onChange);
-    setIsMobile(window.innerWidth < MOBILE_BREAKPOINT);
+    void Promise.resolve().then(() => setIsMobile(window.innerWidth < MOBILE_BREAKPOINT));
     return () => mql.removeEventListener("change", onChange);
   }, []);
 

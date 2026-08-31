@@ -19,10 +19,6 @@ export const TestimonialManager = () => {
   const [businessSlug, setBusinessSlug] = useState<string | null>(null);
   const isClient = useIsClient();
 
-  useEffect(() => {
-    fetchTestimonials();
-    fetchBusinessSlug();
-  }, []);
 
   const fetchTestimonials = async () => {
     try {
@@ -38,6 +34,11 @@ export const TestimonialManager = () => {
     const slug = await fetchBusinessSlugQuery();
     if (slug) setBusinessSlug(slug);
   };
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchTestimonials());
+    void Promise.resolve().then(() => fetchBusinessSlug());
+  }, []);
 
   const handleApprove = async (id: string) => {
     try {

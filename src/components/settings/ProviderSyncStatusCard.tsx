@@ -103,7 +103,7 @@ export function ProviderSyncStatusCard() {
   }, [filter]);
 
   useEffect(() => {
-    void refresh();
+    void Promise.resolve().then(() => refresh());
     const interval = setInterval((): void => { void refresh(); }, REFRESH_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [refresh]);

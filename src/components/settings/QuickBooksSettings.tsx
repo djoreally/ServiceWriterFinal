@@ -121,22 +121,6 @@ export const QuickBooksSettings = () => {
     payments: 0,
   });
 
-  useEffect(() => {
-    fetchData();
-    
-    // Check for OAuth callback
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get("qbo_success") === "true") {
-        toast.success("QuickBooks connected successfully!");
-        window.history.replaceState({}, "", window.location.pathname);
-        fetchData();
-      } else if (params.get("qbo_error")) {
-        toast.error(`QuickBooks connection failed: ${params.get("qbo_error")}`);
-        window.history.replaceState({}, "", window.location.pathname);
-      }
-    }
-  }, []);
 
   const fetchData = async () => {
     const result = await fetchQBOData();
@@ -159,6 +143,23 @@ export const QuickBooksSettings = () => {
     setEntityStats(result.entityStats);
     setLoading(false);
   };
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchData());
+
+    // Check for OAuth callback
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("qbo_success") === "true") {
+        toast.success("QuickBooks connected successfully!");
+        window.history.replaceState({}, "", window.location.pathname);
+        void Promise.resolve().then(() => fetchData());
+      } else if (params.get("qbo_error")) {
+        toast.error(`QuickBooks connection failed: ${params.get("qbo_error")}`);
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+    }
+  }, []);
 
   const handleConnect = async () => {
     setConnecting(true);

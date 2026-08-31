@@ -23,7 +23,7 @@ export interface CatalogBenchmark {
 
 /** All benchmarks for the current shop, keyed by catalog item id (latest first). */
 export async function fetchCatalogBenchmarks(): Promise<Record<string, CatalogBenchmark>> {
-  const { data, error } = await (supabase.from("service_catalog_benchmarks") as any)
+  const { data, error } = await supabase.from("service_catalog_benchmarks")
     .select("*")
     .order("captured_at", { ascending: false });
 
@@ -52,7 +52,7 @@ export interface SaveBenchmarkInput {
 
 /** Upsert the latest benchmark for a catalog item + vehicle. */
 export async function saveCatalogBenchmark(input: SaveBenchmarkInput) {
-  return (supabase.from("service_catalog_benchmarks") as any).upsert(
+  return supabase.from("service_catalog_benchmarks").upsert(
     {
       user_id: input.userId,
       service_catalog_id: input.serviceCatalogId,
@@ -96,7 +96,7 @@ export interface QuoteRequest {
 
 /** Estimate-only requests for the current shop. */
 export async function fetchQuoteRequests(): Promise<QuoteRequest[]> {
-  const { data, error } = await (supabase.from("quote_requests") as any)
+  const { data, error } = await supabase.from("quote_requests")
     .select("*")
     .order("created_at", { ascending: false })
     .limit(200);
@@ -113,7 +113,7 @@ export async function updateQuoteRequestStatus(
   status: QuoteRequest["status"],
   convertedQuoteId?: string,
 ) {
-  return (supabase.from("quote_requests") as any)
+  return supabase.from("quote_requests")
     .update({ status, ...(convertedQuoteId ? { converted_quote_id: convertedQuoteId } : {}) })
     .eq("id", id);
 }

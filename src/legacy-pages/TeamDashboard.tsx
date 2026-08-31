@@ -8,6 +8,7 @@
  * - Update job status
  */
 
+import { errorMessage } from "@/lib/error-message";
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -51,7 +52,7 @@ import { toast } from "@/components/ui/sonner";
 import { format, parseISO, isToday, isFuture } from "date-fns";
 import { getSemanticStatus } from "@/lib/semantic-status";
 
-interface Assignment extends TeamAssignment {}
+type Assignment = TeamAssignment;
 
 const DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 
@@ -91,7 +92,7 @@ const TeamDashboard = () => {
     }
   }, [navigate]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { void Promise.resolve().then(() => fetchData()); }, [fetchData]);
 
   const handleSaveProfile = async () => {
     if (!profile) return;
@@ -100,8 +101,8 @@ const TeamDashboard = () => {
       await updateTechProfile(profile.id, editProfile);
       toast.success("Profile updated");
       fetchData();
-    } catch (err: any) {
-      toast.error(err.message || "Failed to save");
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, "Failed to save"));
     } finally {
       setSaving(false);
     }

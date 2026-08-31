@@ -93,7 +93,7 @@ export function RepairEstimatorDialog({
   useEffect(() => {
     if (!open) return;
     if (loadedVin === cleanVin && repairs.length > 0) return;
-    void load();
+    void Promise.resolve().then(() => load());
   }, [open, cleanVin, loadedVin, repairs.length, load]);
 
   const handleApply = (repair: RepairItem, tier: PricingTier) => {

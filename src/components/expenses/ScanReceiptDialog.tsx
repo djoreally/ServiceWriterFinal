@@ -107,7 +107,7 @@ export function ScanReceiptDialog({ open, onOpenChange, appointmentId, defaultBi
 
   useEffect(() => {
     if (!open) return;
-    setLinkedAppointmentId(appointmentId ?? null);
+    void Promise.resolve().then(() => setLinkedAppointmentId(appointmentId ?? null));
     const user = session?.user;
     if (!user) return;
     (async () => {

@@ -81,4 +81,104 @@ describe("delivery webhook ingestion", () => {
       target_source: "enginemailer",
     });
   });
+
+  it("rejects the webhook when delivery persistence fails", async () => {
+    const persistenceError = new Error("delivery insert failed");
+    const messageLogQuery = () => ({
+      select: jest.fn().mockReturnValue({
+        eq: jest.fn().mockReturnValue({
+          eq: jest.fn().mockReturnValue({
+            maybeSingle: jest.fn().mockResolvedValue({ data: { workspace_id: "00000000-0000-4000-8000-000000000001" }, error: null }),
+          }),
+        }),
+      }),
+    });
+    (createSupabaseAdminClient as jest.Mock).mockReturnValue({
+      rpc: jest.fn(),
+      from: jest.fn((table: string) => {
+        if (table === "message_logs") return messageLogQuery();
+        if (table === "webhook_events") return {
+          upsert: jest.fn().mockReturnValue({
+            select: jest.fn().mockReturnValue({
+              maybeSingle: jest.fn().mockResolvedValue({ data: { id: "webhook-1" }, error: null }),
+            }),
+          }),
+        };
+        if (table === "message_delivery_events") return {
+          upsert: jest.fn().mockResolvedValue({ error: persistenceError }),
+        };
+        throw new Error(`Unexpected table ${table}`);
+      }),
+    });
+    const adapter: MessagingAdapter = {
+      providerName: "enginemailer",
+      send: jest.fn(),
+      healthCheck: jest.fn(),
+      verifyWebhook: jest.fn().mockReturnValue(true),
+      normalizeDelivery: jest.fn().mockReturnValue([{
+        providerMessageId: "12345",
+        providerEventId: "delivery-event-1",
+        status: "delivered",
+        occurredAt: "2026-08-27T15:30:00.000Z",
+        recipient: "customer@example.com",
+        rawPayload: { event: "delivery" },
+      }]),
+    };
+
+    await expect(ingestDeliveryWebhook(
+      "enginemailer",
+      adapter,
+      { headers: new Headers({ "x-timestamp": "1787844600" }) } as Request,
+      JSON.stringify({ event: "delivery", details: { txid: 12345 } }),
+    )).rejects.toThrow("delivery insert failed");
+  });
+
+  it("rejects the webhook when message-state reconciliation fails", async () => {
+    const reconciliationError = new Error("reconciliation failed");
+    const messageLogQuery = () => ({
+      select: jest.fn().mockReturnValue({
+        eq: jest.fn().mockReturnValue({
+          eq: jest.fn().mockReturnValue({
+            maybeSingle: jest.fn().mockResolvedValue({ data: { workspace_id: "00000000-0000-4000-8000-000000000001", id: "message-log-1" }, error: null }),
+          }),
+        }),
+      }),
+    });
+    (createSupabaseAdminClient as jest.Mock).mockReturnValue({
+      rpc: jest.fn().mockResolvedValue({ data: null, error: reconciliationError }),
+      from: jest.fn((table: string) => {
+        if (table === "message_logs") return messageLogQuery();
+        if (table === "webhook_events") return {
+          upsert: jest.fn().mockReturnValue({
+            select: jest.fn().mockReturnValue({
+              maybeSingle: jest.fn().mockResolvedValue({ data: { id: "webhook-1" }, error: null }),
+            }),
+          }),
+        };
+        if (table === "message_delivery_events") return { upsert: jest.fn().mockResolvedValue({ error: null }) };
+        throw new Error(`Unexpected table ${table}`);
+      }),
+    });
+    const adapter: MessagingAdapter = {
+      providerName: "enginemailer",
+      send: jest.fn(),
+      healthCheck: jest.fn(),
+      verifyWebhook: jest.fn().mockReturnValue(true),
+      normalizeDelivery: jest.fn().mockReturnValue([{
+        providerMessageId: "12345",
+        providerEventId: "delivery-event-1",
+        status: "delivered",
+        occurredAt: "2026-08-27T15:30:00.000Z",
+        recipient: "customer@example.com",
+        rawPayload: { event: "delivery" },
+      }]),
+    };
+
+    await expect(ingestDeliveryWebhook(
+      "enginemailer",
+      adapter,
+      { headers: new Headers({ "x-timestamp": "1787844600" }) } as Request,
+      JSON.stringify({ event: "delivery", details: { txid: 12345 } }),
+    )).rejects.toThrow("reconciliation failed");
+  });
 });

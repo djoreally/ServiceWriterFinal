@@ -1,4 +1,4 @@
-/* eslint-disable react-hooks/exhaustive-deps */
+
 
 /**
  * useBookingSubmit — Encapsulates booking submission logic (pay-later
@@ -207,7 +207,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
       console.warn("[WeatherGuard] Pre-flight check failed; falling back to local guard:", err);
     }
     return false;
-  }, [business?.user_id, weatherGuardContext, selectedDate, selectedTime, getTotalDuration]);
+  }, [business, weatherGuardContext, selectedDate, selectedTime, getTotalDuration]);
 
   const validateVehicleRequirements = useCallback((): boolean => {
     if (
@@ -220,7 +220,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
       return false;
     }
     return true;
-  }, [bookingRequirements, vehicles]);
+  }, [bookingRequirements, getVehicleBookingRequirements, vehicles]);
 
   // ── Pay Now (redirect to Stripe/Square checkout) ────────────────────────
   const handlePayNow = useCallback(async () => {
@@ -378,12 +378,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
     }
 
     dispatch({ type: "SET_PROCESSING_PAYMENT", processing: false });
-  }, [
-    business, guestEmail, guestName, guestPhone, selectedServices, selectedPackage, vehicleServiceSelections, getVehicleBookingRequirements,
-    selectedDate, selectedTime, customerAddress, addressLine2, city, state, zipCode,
-    vehicles, notes, transactionalSmsConsent, marketingSmsConsent, marketingEmailConsent, getOilPriceBreakdown, getTotalDuration, getGrandTotal,
-    dispatch, isWeatherBlocked, enforceWeatherGuard, validateVehicleRequirements,
-  ]);
+  }, [business, guestEmail, guestName, guestPhone, selectedServices, selectedPackage, vehicleServiceSelections, selectedDate, selectedTime, customerAddress, addressLine2, city, state, zipCode, vehicles, notes, transactionalSmsConsent, marketingSmsConsent, marketingEmailConsent, getOilPriceBreakdown, getTotalDuration, getGrandTotal, dispatch, isWeatherBlocked, enforceWeatherGuard, validateVehicleRequirements]);
 
   // ── Pay Later (book directly) ──────────────────────────────────────────
   const handleSubmit = useCallback(async () => {
@@ -694,7 +689,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
       }
 
       // Post-booking: link customer, assign through dispatch boundary, set location
-      let assignedVanId: string | null = null;
+      const assignedVanId: string | null = null;
       if (appointmentId) {
         const updatePayload: Record<string, unknown> = {};
         if (customerId) updatePayload.customer_id = customerId;
@@ -882,7 +877,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
       dispatch({ type: "SET_CONFIRMATION_EMAIL_STATUS", status: "pending" });
       if (appointmentId && slug) {
         try {
-          await nextApi.publicBooking.sendConfirmation(String(slug), {
+          const confirmation = await nextApi.publicBooking.sendConfirmation(String(slug), {
             appointment_id: String(appointmentId),
             email: validationResult.data.email,
             phone: validationResult.data.phone || null,
@@ -895,7 +890,10 @@ export function useBookingSubmit(deps: SubmitDeps) {
               marketing_email: MARKETING_EMAIL_CONSENT_TEXT,
             },
           });
-          dispatch({ type: "SET_CONFIRMATION_EMAIL_STATUS", status: "sent" });
+          dispatch({
+            type: "SET_CONFIRMATION_EMAIL_STATUS",
+            status: confirmation.data.status === "queued" ? "queued" : "failed",
+          });
         } catch (emailError) {
           console.error("[Booking] Confirmation email failed", { appointmentId, emailError });
           dispatch({ type: "SET_CONFIRMATION_EMAIL_STATUS", status: "failed" });
@@ -950,15 +948,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
     } finally {
       dispatch({ type: "SET_SUBMITTING", submitting: false });
     }
-  }, [
-    business, slug, selectedServices, selectedPackage, vehicleServiceSelections, getVehicleBookingRequirements, selectedDate, selectedTime,
-    vehicles, guestName, guestEmail, guestPhone, notes, paymentChoice,
-    transactionalSmsConsent, marketingSmsConsent, marketingEmailConsent,
-    customerAddress, addressLine2, city, state, zipCode, customerCoords,
-    bookingContextId, submissionCount, lastSubmissionTime, taxData, selectedRewardInstanceId, storageKey,
-    getTotalDuration, getGrandTotal, getPreTaxTotal, getOilPriceBreakdown, getDetailingAdjustment,
-    fetchBookedSlots, dispatch, isWeatherBlocked, enforceWeatherGuard, validateVehicleRequirements,
-  ]);
+  }, [business, slug, selectedServices, selectedPackage, vehicleServiceSelections, selectedDate, selectedTime, vehicles, guestName, guestEmail, guestPhone, notes, paymentChoice, transactionalSmsConsent, marketingSmsConsent, marketingEmailConsent, customerAddress, addressLine2, city, state, zipCode, customerCoords, bookingContextId, submissionCount, lastSubmissionTime, taxData, selectedRewardInstanceId, storageKey, getTotalDuration, getGrandTotal, getPreTaxTotal, getOilPriceBreakdown, fetchBookedSlots, dispatch, isWeatherBlocked, enforceWeatherGuard, validateVehicleRequirements]);
 
   // ── Account creation ────────────────────────────────────────────────────
   const handleCreateAccount = useCallback(

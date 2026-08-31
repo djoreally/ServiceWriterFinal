@@ -200,11 +200,14 @@ export class EnginemailerEmailAdapter implements MessagingAdapter {
       ?? details.campaigntxid
       ?? details.autorespondertxid;
     if (messageId === undefined || messageId === null) return [];
-    const status = event === "delivered" ? "delivered"
+    const status = (event === "delivery" || event === "delivered") ? "delivered"
       : event === "bounce" ? "bounced"
-      : event === "spam-complaint" ? "complained"
-      : event === "unsubscribed" ? "canceled"
+      : (event === "spam" || event === "spam-complaint") ? "complained"
+      : (event === "unsubscribe" || event === "unsubscribed") ? "canceled"
       : null;
+    // Open and click webhooks are valid engagement events, but they do not
+    // change the delivery state tracked by message_logs.
+    if (event === "open" || event === "click") return [];
     if (!status) return [];
     const occurredAt = webhookDate(
       details.deliverydate

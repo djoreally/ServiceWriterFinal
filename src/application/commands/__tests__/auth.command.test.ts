@@ -15,7 +15,7 @@ jest.mock("@/integrations/supabase/client", () => ({
 }));
 
 import { authSupabase } from "@/integrations/supabase/client";
-import { getSafeSignInError, requestMagicLink } from "@/application/commands/auth.command";
+import { getSafeSignInError, requestMagicLink, signInWithPassword } from "@/application/commands/auth.command";
 
 describe("getSafeSignInError", () => {
   it("does not reveal whether credentials or account state caused rejection", () => {
@@ -68,5 +68,33 @@ describe("requestMagicLink", () => {
       sent: false,
       error: "Magic links are disabled for this app environment. Use Continue with Google, or enable Email sign-in for the same environment you are testing.",
     });
+  });
+});
+
+describe("signInWithPassword", () => {
+  const passwordSignIn = authSupabase.auth.signInWithPassword as jest.Mock;
+
+  beforeEach(() => passwordSignIn.mockReset());
+
+  it("performs exactly one credential exchange on success", async () => {
+    passwordSignIn.mockResolvedValue({ error: null });
+
+    await expect(signInWithPassword("owner@example.com", "correct-password")).resolves.toEqual({});
+    expect(passwordSignIn).toHaveBeenCalledTimes(1);
+    expect(passwordSignIn).toHaveBeenCalledWith({
+      email: "owner@example.com",
+      password: "correct-password",
+    });
+  });
+
+  it("does not retry a transient failed credential mutation", async () => {
+    passwordSignIn.mockResolvedValue({
+      error: { status: 503, message: "service unavailable" },
+    });
+
+    await expect(signInWithPassword("owner@example.com", "password")).resolves.toEqual({
+      error: "The authentication service is temporarily unavailable. Please try again in a moment.",
+    });
+    expect(passwordSignIn).toHaveBeenCalledTimes(1);
   });
 });

@@ -21,6 +21,22 @@ function splitName(fullName: string): { first_name: string; last_name: string } 
   return { first_name, last_name: rest.join(" ") };
 }
 
+interface ServiceFormCustomerRow {
+  id: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+}
+
+interface ServiceFormCatalogRow {
+  id: string;
+  name: string;
+  description?: string | null;
+  labor_price?: number | null;
+  estimated_minutes?: number | null;
+}
+
 export async function fetchServiceFormOptions() {
   const id = workspaceId();
   const [customersResponse, catalogResponse] = await Promise.all([
@@ -32,13 +48,13 @@ export async function fetchServiceFormOptions() {
       .order("name"),
   ]);
 
-  const customers = ((customersResponse.data ?? []) as Record<string, any>[]).map((row) => ({
+  const customers = ((customersResponse.data ?? []) as unknown as ServiceFormCustomerRow[]).map((row) => ({
     id: row.id,
     name: [row.first_name, row.last_name].filter(Boolean).join(" ").trim(),
     email: row.email ?? null,
     phone: row.phone ?? null,
   }));
-  const catalog = ((catalogResponse.data ?? []) as Record<string, any>[]).map((row) => ({
+  const catalog = ((catalogResponse.data ?? []) as unknown as ServiceFormCatalogRow[]).map((row) => ({
     id: row.id,
     name: row.name,
     description: row.description ?? null,
@@ -102,7 +118,7 @@ export async function upsertCustomerRpc(_userId: string, email: string, fullName
   try {
     const normalizedEmail = email.trim().toLowerCase();
     const existingResponse = await nextApi.customers.list(id, normalizedEmail);
-    const existing = ((existingResponse.data ?? []) as Record<string, any>[]).find(
+    const existing = ((existingResponse.data ?? []) as unknown as ServiceFormCustomerRow[]).find(
       (row) => typeof row.email === "string" && row.email.toLowerCase() === normalizedEmail,
     );
     if (existing?.id) return { data: existing.id, error: null };

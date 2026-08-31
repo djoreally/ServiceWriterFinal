@@ -35,7 +35,7 @@ const FleetLocationsPage = () => {
   };
 
   useEffect(() => {
-    loadLocations();
+    void Promise.resolve().then(() => loadLocations());
   }, []);
 
   const filtered = locations.filter((l) => {

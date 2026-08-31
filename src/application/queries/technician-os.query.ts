@@ -17,6 +17,17 @@ export interface TechnicianRosterRow {
   completed_today: number;
 }
 
+interface TechnicianMemberRow {
+  user_id: string;
+  role: string;
+  is_active: boolean;
+  profiles: {
+    display_name?: string | null;
+    phone?: string | null;
+    avatar_url?: string | null;
+  } | null;
+}
+
 export async function getCurrentUser() {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return null;
@@ -24,13 +35,16 @@ export async function getCurrentUser() {
   return !error && typeof ownerId === "string" && ownerId ? { ...user, id: ownerId } : user;
 }
 
-export async function fetchTechnicianRoster(): Promise<{ data: TechnicianRosterRow[]; error: any }> {
+export async function fetchTechnicianRoster(): Promise<{
+  data: TechnicianRosterRow[];
+  error: unknown;
+}> {
   try {
     const context = await resolveCurrentWorkspace();
     if (!context) return { data: [], error: null };
     const today = format(new Date(), "yyyy-MM-dd");
     const [membersRes, jobsRes] = await Promise.all([
-      (supabase.from("workspace_members") as any)
+      (supabase as any).from("workspace_members")
         .select("user_id,role,is_active,profiles!workspace_members_user_id_fkey(display_name,phone,avatar_url)")
         .eq("workspace_id", context.workspaceId)
         .in("role", ["technician", "owner", "manager"])
@@ -41,7 +55,8 @@ export async function fetchTechnicianRoster(): Promise<{ data: TechnicianRosterR
     if (jobsRes.error) return { data: [], error: jobsRes.error };
 
     const jobs = jobsRes.data ?? [];
-    const data = (membersRes.data ?? []).map((member: any) => {
+    const members = (membersRes.data ?? []) as TechnicianMemberRow[];
+    const data = members.map((member) => {
       const assigned = jobs.filter((job) => job.assigned_technician_id === member.user_id);
       const completed = assigned.filter((job) => job.status === "completed");
       const active = assigned.filter((job) => !["completed", "cancelled", "no_show"].includes(String(job.status)));

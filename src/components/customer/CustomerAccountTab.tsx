@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message";
 import { useState } from "react";
 import { updateCustomerAccountProfile, changeCustomerPassword, type CustomerAccountProfile } from "@/application/commands/customer-account.command";
 import { toast } from "@/components/ui/sonner";
@@ -63,8 +64,8 @@ export function CustomerAccountTab({ account, onUpdate }: Props) {
     setChangingPassword(true);
     try {
       await changeCustomerPassword(newPassword);
-    } catch (err: any) {
-      toast.error(err.message || "Failed to change password");
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, "Failed to change password"));
       setChangingPassword(false);
       return;
     }

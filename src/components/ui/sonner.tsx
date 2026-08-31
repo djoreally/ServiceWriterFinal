@@ -1,4 +1,4 @@
-/* eslint-disable react-refresh/only-export-components */
+
 import type { ComponentProps } from "react";
 import { Toaster as Sonner, toast as sonnerToast } from "sonner";
 import { useTheme } from "@/hooks/useTheme";

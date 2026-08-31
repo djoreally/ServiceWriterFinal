@@ -126,13 +126,10 @@ const QuickService = () => {
     toast.success("Quick service draft restored");
   };
 
-  useEffect(() => {
-    fetchExistingData();
-  }, []);
 
   useEffect(() => {
     // Show all vehicles regardless of customer selection
-    setFilteredVehicles(existingVehicles);
+    void Promise.resolve().then(() => setFilteredVehicles(existingVehicles));
   }, [existingVehicles]);
 
   const fetchExistingData = async () => {
@@ -144,6 +141,10 @@ const QuickService = () => {
     setExistingVehicles(vehicles);
     setServiceCatalog(catalog);
   };
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchExistingData());
+  }, []);
 
   const handleServiceCatalogSelect = (value: string) => {
     if (value === CUSTOM_SERVICE_VALUE) {

@@ -23,7 +23,7 @@ defaults:
     shell: bash
 
 env:
-  NODE_VERSION: 22.x
+  NODE_VERSION: 24.x
   CI: true
 
 permissions:

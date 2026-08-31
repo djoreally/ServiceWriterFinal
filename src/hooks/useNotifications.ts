@@ -258,8 +258,8 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
       channel = nextChannel;
     };
 
-    void fetchNotifications();
-    void subscribe();
+    void Promise.resolve().then(() => fetchNotifications());
+    void Promise.resolve().then(() => subscribe());
 
     return () => {
       active = false;

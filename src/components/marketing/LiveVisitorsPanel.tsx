@@ -17,10 +17,10 @@ export function LiveVisitorsPanel() {
     const data = await fetchLiveVisitors(user.id, cutoff);
     setRows(data.rows);
     setEvents(data.events);
-  }, [user?.id]);
+  }, [user]);
 
   useEffect(() => {
-    void refreshLiveVisitors();
+    void Promise.resolve().then(() => refreshLiveVisitors());
     if (!user?.id) return;
     const { unsubscribe } = subscribeLiveVisitorsChannel(() => void refreshLiveVisitors());
     return unsubscribe;

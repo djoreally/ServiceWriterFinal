@@ -132,7 +132,7 @@ export default function CustomerAuth({ providerId, providerName, onSuccess, retu
     
     // Set up auth state listener
     const { data: { subscription } } = onAuthStateChange(
-      (event: string, session: any) => {
+      (event, session) => {
         if (event === "SIGNED_IN" && session?.user) {
           setTimeout(() => {
             if (onSuccess) {

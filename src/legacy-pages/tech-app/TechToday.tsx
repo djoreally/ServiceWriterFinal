@@ -212,7 +212,7 @@ export default function TechToday() {
       );
 
       if (notificationPrefs.offlineCacheEnabled) {
-        saveTechMissionBoardCache(identity.userId, buildTechMissionBoard(jobs as any[], today), jobs as any[]);
+        saveTechMissionBoardCache(identity.userId, buildTechMissionBoard(jobs, today), jobs);
         saveTechContextCache(identity.userId, {
           access_state: session.access_state,
           workspace_user_id: session.workspace_user_id,
@@ -237,7 +237,7 @@ export default function TechToday() {
   }, [identity]);
 
   useEffect(() => {
-    if (identity) fetchData();
+    if (identity) void Promise.resolve().then(() => fetchData());
   }, [identity, fetchData]);
 
   // Live mission board: dispatch reassignments and status changes land without a
@@ -274,12 +274,12 @@ export default function TechToday() {
     [allJobs, today],
   );
 
-  const missionBoard = useMemo(() => buildTechMissionBoard(allJobs as any[], today), [allJobs, today]);
+  const missionBoard = useMemo(() => buildTechMissionBoard(allJobs, today), [allJobs, today]);
 
   const currentJob =
     (missionBoard.currentJob as TechJob | null) ??
-    todaysJobs.find((job) => EN_ROUTE_STATES.has(getTechMissionEffectiveStatus(job as any))) ??
-    todaysJobs.find((job) => getTechMissionEffectiveStatus(job as any) !== "completed") ??
+    todaysJobs.find((job) => EN_ROUTE_STATES.has(getTechMissionEffectiveStatus(job))) ??
+    todaysJobs.find((job) => getTechMissionEffectiveStatus(job) !== "completed") ??
     null;
 
   const eta = useTechJobEta(
@@ -294,8 +294,8 @@ export default function TechToday() {
   );
 
   const scheduleJobs = todaysJobs.filter((job) => job.id !== currentJob?.id);
-  const currentStatus = currentJob ? getTechMissionEffectiveStatus(currentJob as any) : identity?.presenceState || "off_shift";
-  const completeCount = todaysJobs.filter((job) => getTechMissionEffectiveStatus(job as any) === "completed").length;
+  const currentStatus = currentJob ? getTechMissionEffectiveStatus(currentJob) : identity?.presenceState || "off_shift";
+  const completeCount = todaysJobs.filter((job) => getTechMissionEffectiveStatus(job) === "completed").length;
   const remainingCount = Math.max(0, todaysJobs.length - completeCount);
   const dailyGoal = todaysJobs.length > 0 ? Math.round((completeCount / todaysJobs.length) * 100) : 0;
   const firstName = identity?.name?.split(" ")[0] || "Tech";

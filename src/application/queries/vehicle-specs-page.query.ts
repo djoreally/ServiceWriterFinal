@@ -4,6 +4,17 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 
+export interface VinDecodeData {
+  year?: number | null;
+  make?: string | null;
+  model?: string | null;
+  engine?: string | null;
+  oilSpecs?: {
+    oilType?: string | null;
+    oilCapacity?: string | null;
+  } | null;
+}
+
 /** Count total vehicle specifications records. */
 export async function countVehicleSpecs() {
   return supabase.from("vehicle_specifications").select("*", { count: "exact", head: true });
@@ -24,8 +35,10 @@ export async function searchVehicleSpecs(year?: number, make?: string, model?: s
 }
 
 /** Decode a VIN via edge function. */
-export async function decodeVin(vin: string): Promise<any> {
-  return supabase.functions.invoke("vin-decode", { body: { vin: vin.toUpperCase() } });
+export async function decodeVin(vin: string) {
+  return supabase.functions.invoke<VinDecodeData>("vin-decode", {
+    body: { vin: vin.toUpperCase() },
+  });
 }
 
 /** Search filter cross-references by part number. */
@@ -38,28 +51,28 @@ export async function searchFilterCrossRefs(partNumber: string) {
 }
 
 /** Invoke vehicle-maintenance edge function. */
-export async function fetchMaintenanceSchedule(body: Record<string, unknown>): Promise<any> {
+export async function fetchMaintenanceSchedule(body: Record<string, unknown>) {
   return supabase.functions.invoke("vehicle-maintenance", { body });
 }
 
 /** Invoke quickvin-lookup edge function (plate decoder). */
-export async function decodePlate(licensePlate: string, state: string): Promise<any> {
+export async function decodePlate(licensePlate: string, state: string) {
   return supabase.functions.invoke("quickvin-lookup", {
     body: { licensePlate, state },
   });
 }
 
 /** Invoke ymmt-specs edge function for TWB data. */
-export async function fetchYmmtSpecs(body: Record<string, unknown>): Promise<any> {
+export async function fetchYmmtSpecs(body: Record<string, unknown>) {
   return supabase.functions.invoke("ymmt-specs", { body });
 }
 
 /** Invoke seed-vehicle-specs edge function with a chunk. */
-export async function seedVehicleSpecsChunk(specs: unknown[]): Promise<any> {
+export async function seedVehicleSpecsChunk(specs: unknown[]) {
   return supabase.functions.invoke("seed-vehicle-specs", { body: { specs } });
 }
 
 /** Invoke seed-filters edge function. */
-export async function seedFilters(body: unknown): Promise<any> {
+export async function seedFilters(body: unknown) {
   return supabase.functions.invoke("seed-filters", { body });
 }

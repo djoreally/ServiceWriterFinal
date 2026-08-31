@@ -5,13 +5,17 @@ import * as React from "react";
 
 import { cn } from "@/lib/utils";
 
-const Sheet = SheetPrimitive.Root;
+const Sheet = (props: React.ComponentProps<typeof SheetPrimitive.Root>) => <SheetPrimitive.Root {...props} />;
+Sheet.displayName = SheetPrimitive.Root.displayName;
 
-const SheetTrigger = SheetPrimitive.Trigger;
+const SheetTrigger = (props: React.ComponentProps<typeof SheetPrimitive.Trigger>) => <SheetPrimitive.Trigger {...props} />;
+SheetTrigger.displayName = SheetPrimitive.Trigger.displayName;
 
-const SheetClose = SheetPrimitive.Close;
+const SheetClose = (props: React.ComponentProps<typeof SheetPrimitive.Close>) => <SheetPrimitive.Close {...props} />;
+SheetClose.displayName = SheetPrimitive.Close.displayName;
 
-const SheetPortal = SheetPrimitive.Portal;
+const SheetPortal = (props: React.ComponentProps<typeof SheetPrimitive.Portal>) => <SheetPrimitive.Portal {...props} />;
+SheetPortal.displayName = SheetPrimitive.Portal.displayName;
 
 const SheetOverlay = React.forwardRef<
   React.ElementRef<typeof SheetPrimitive.Overlay>,

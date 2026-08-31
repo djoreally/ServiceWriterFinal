@@ -106,7 +106,7 @@ export async function commitRows(session: VehicleImportSession, userId: string):
     };
   });
 
-  const { data: operationBatch } = await (supabase as any)
+  const { data: operationBatch } = await supabase
     .from("fleet_operation_batches")
     .select("id,status")
     .eq("user_id", userId)
@@ -132,7 +132,7 @@ export async function commitRows(session: VehicleImportSession, userId: string):
     rowIds: staged.map((entry) => entry.rowId),
   });
 
-  const { data: newOperationBatch } = await (supabase as any)
+  const { data: newOperationBatch } = await supabase
     .from("fleet_operation_batches")
     .insert({
       user_id: userId,
@@ -257,7 +257,7 @@ export async function commitRows(session: VehicleImportSession, userId: string):
 
   if (operationBatchId) {
     for (const row of rows) {
-      await (supabase as any).from("fleet_operation_batch_items").upsert({
+      await supabase.from("fleet_operation_batch_items").upsert({
         batch_id: operationBatchId,
         item_key: row.id,
         status:
@@ -278,7 +278,7 @@ export async function commitRows(session: VehicleImportSession, userId: string):
     }
 
     const failedCount = rows.filter((row) => row.commitStatus === "failed").length;
-    await (supabase as any)
+    await supabase
       .from("fleet_operation_batches")
       .update({
         status: failedCount > 0 ? (rows.some((row) => row.commitStatus === "committed") ? "partial_failed" : "failed") : "completed",
@@ -293,13 +293,13 @@ export async function commitRows(session: VehicleImportSession, userId: string):
 }
 
 export async function rollbackImportedBatch(batchId: string, userId: string): Promise<{ reversed: number; blocked: number }> {
-  const { data: rows } = await (supabase as any)
+  const { data: rows } = await supabase
     .from("vehicle_import_rows")
     .select("id,existing_vehicle_id,commit_status")
     .eq("batch_id", batchId)
     .eq("commit_status", "committed");
   const vehicleIds = (rows || [])
-    .map((row: any) => String(row.existing_vehicle_id || ""))
+    .map((row) => String(row.existing_vehicle_id || ""))
     .filter(Boolean);
   if (vehicleIds.length === 0) return { reversed: 0, blocked: 0 };
 
@@ -309,7 +309,7 @@ export async function rollbackImportedBatch(batchId: string, userId: string): Pr
     .eq("user_id", userId)
     .in("fleet_vehicle_id", vehicleIds)
     .not("status", "in", "(cancelled)");
-  const blockedVehicleIds = new Set((attachedOrders || []).map((order: any) => String(order.fleet_vehicle_id || "")));
+  const blockedVehicleIds = new Set((attachedOrders || []).map((order) => String(order.fleet_vehicle_id || "")));
 
   let reversed = 0;
   for (const vehicleId of vehicleIds) {
@@ -330,7 +330,7 @@ export async function rollbackImportedBatch(batchId: string, userId: string): Pr
     if (!error) reversed += 1;
   }
 
-  await (supabase as any).from("vehicle_import_audit_log").insert({
+  await supabase.from("vehicle_import_audit_log").insert({
     batch_id: batchId,
     event_type: "rollback_completed",
     details: { reversed, blocked: blockedVehicleIds.size },

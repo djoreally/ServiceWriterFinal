@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message";
 import { useState, useEffect, useMemo } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -42,6 +43,29 @@ import {
 import { useVehicleSpecs, VehicleSpec } from "@/hooks/useVehicleSpecs";
 import { VinScanner } from "@/components/vehicles/VinScanner";
 import { cn } from "@/lib/utils";
+import type { Database as SupabaseDatabase } from "@/integrations/supabase/types";
+
+type FilterCrossReference = SupabaseDatabase["public"]["Tables"]["filter_cross_references"]["Row"];
+
+type SeedVehicleRecord = Record<string, unknown> & {
+  Year?: string | number;
+  Make?: string;
+  Model?: string;
+  Engine?: string;
+};
+
+function isSeedVehicleRecord(value: unknown): value is SeedVehicleRecord {
+  return typeof value === "object" && value !== null;
+}
+
+function toVehicleAdditionalSpecs(value: unknown): Record<string, string | null> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, string | null] =>
+      typeof entry[1] === "string" || entry[1] === null,
+    ),
+  );
+}
 
 // Tab definitions for the icon card grid
 const TAB_ITEMS = [
@@ -81,7 +105,7 @@ export default function VehicleSpecs() {
   // ── Filter Cross-Reference state ──
   const [filterPartNumber, setFilterPartNumber] = useState("");
   const [filterBrand, setFilterBrand] = useState("");
-  const [filterCrossResults, setFilterCrossResults] = useState<any[]>([]);
+  const [filterCrossResults, setFilterCrossResults] = useState<FilterCrossReference[]>([]);
   const [isSearchingFilters, setIsSearchingFilters] = useState(false);
 
   // ── Maintenance state ──
@@ -149,12 +173,15 @@ export default function VehicleSpecs() {
     if (error) {
       toast.error("Failed to search specifications");
     } else {
-      const mappedResults: VehicleSpec[] = (data || []).map((item: any) => ({
-        id: item.id, year: item.year, make: item.make, model: item.model,
-        engine: item.engine, oil_type: item.oil_type, oil_capacity: item.oil_capacity,
-        oil_plug_torque: item.additional_specs?.oil_plug_torque || null,
-        transmission_fluid: item.transmission_fluid, additional_specs: item.additional_specs,
-      }));
+      const mappedResults: VehicleSpec[] = (data || []).map((item) => {
+        const additionalSpecs = toVehicleAdditionalSpecs(item.additional_specs);
+        return {
+          id: item.id, year: item.year, make: item.make, model: item.model,
+          engine: item.engine, oil_type: item.oil_type, oil_capacity: item.oil_capacity,
+          oil_plug_torque: additionalSpecs?.oil_plug_torque || null,
+          transmission_fluid: item.transmission_fluid, additional_specs: additionalSpecs,
+        };
+      });
       setSearchResults(mappedResults);
       if (mappedResults.length === 0) toast.info("No specifications found for this vehicle");
     }
@@ -183,8 +210,8 @@ export default function VehicleSpecs() {
       } else {
         toast.error("Could not decode VIN - vehicle not found");
       }
-    } catch (error: any) {
-      toast.error(error.message || "Failed to decode VIN");
+    } catch (error: unknown) {
+      toast.error(errorMessage(error, "Failed to decode VIN"));
     } finally {
       setIsDecodingVin(false);
     }
@@ -224,7 +251,7 @@ export default function VehicleSpecs() {
     setMaintenanceResults([]);
     setMaintenanceVehicle(null);
     try {
-      const body: Record<string, any> = {};
+      const body: Record<string, unknown> = {};
       if (hasVin) { body.vin = maintenanceVinInput.trim().toUpperCase(); }
       else { body.year = parseInt(maintYear); body.make = maintMake; body.model = maintModel; }
 
@@ -263,8 +290,8 @@ export default function VehicleSpecs() {
       } else {
         toast.error(data?.error || "Vehicle not found for this plate");
       }
-    } catch (err: any) {
-      toast.error(err.message || "Failed to decode license plate");
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, "Failed to decode license plate"));
     } finally {
       setIsDecodingPlate(false);
     }
@@ -274,11 +301,11 @@ export default function VehicleSpecs() {
   useEffect(() => {
     const yrs: number[] = [];
     for (let y = 2026; y >= 1981; y--) yrs.push(y);
-    setTwbYears(yrs);
+    void Promise.resolve().then(() => setTwbYears(yrs));
   }, []);
 
   useEffect(() => {
-    if (!twbYear) { setTwbMakes([]); return; }
+    if (!twbYear) { void Promise.resolve().then(() => setTwbMakes([])); return; }
     const load = async () => {
       setTwbLoadingOptions(true);
       try {
@@ -287,11 +314,11 @@ export default function VehicleSpecs() {
       } catch { /* ignore */ }
       finally { setTwbLoadingOptions(false); }
     };
-    load();
+    void Promise.resolve().then(() => load());
   }, [twbYear]);
 
   useEffect(() => {
-    if (!twbYear || !twbMake) { setTwbModels([]); return; }
+    if (!twbYear || !twbMake) { void Promise.resolve().then(() => setTwbModels([])); return; }
     const load = async () => {
       setTwbLoadingOptions(true);
       try {
@@ -300,11 +327,11 @@ export default function VehicleSpecs() {
       } catch { /* ignore */ }
       finally { setTwbLoadingOptions(false); }
     };
-    load();
+    void Promise.resolve().then(() => load());
   }, [twbYear, twbMake]);
 
   useEffect(() => {
-    if (!twbYear || !twbMake || !twbModel) { setTwbTrims([]); return; }
+    if (!twbYear || !twbMake || !twbModel) { void Promise.resolve().then(() => setTwbTrims([])); return; }
     const load = async () => {
       setTwbLoadingOptions(true);
       try {
@@ -313,7 +340,7 @@ export default function VehicleSpecs() {
       } catch { /* ignore */ }
       finally { setTwbLoadingOptions(false); }
     };
-    load();
+    void Promise.resolve().then(() => load());
   }, [twbYear, twbMake, twbModel]);
 
   const handleTwbLookup = async () => {
@@ -346,15 +373,20 @@ export default function VehicleSpecs() {
     try {
       const origin = window.location.origin;
       toast.info("Loading vehicle data files...");
-      const loadJson = async (path: string) => {
-        try { const res = await fetch(new URL(path, origin).href, { credentials: 'omit' }); if (!res.ok) throw new Error(); return await res.json(); }
+      const loadJson = async (path: string): Promise<SeedVehicleRecord[]> => {
+        try {
+          const res = await fetch(new URL(path, origin).href, { credentials: "omit" });
+          if (!res.ok) throw new Error();
+          const value: unknown = await res.json();
+          return Array.isArray(value) ? value.filter(isSeedVehicleRecord) : [];
+        }
         catch { return []; }
       };
       const [carsFullData, vehicleSpecsFullData, carData2025] = await Promise.all([
         loadJson("/data/cars-full.json"), loadJson("/data/vehicle-specs-full.json"), loadJson("/data/car-data-2025.json"),
       ]);
-      const seenKeys = new Set<string>(); const allData: any[] = [];
-      const addRecords = (records: any[]) => { for (const rec of records) { const key = `${rec.Year}-${rec.Make}-${rec.Model}-${rec.Engine || ''}`.toLowerCase(); if (!seenKeys.has(key)) { seenKeys.add(key); allData.push(rec); } } };
+      const seenKeys = new Set<string>(); const allData: SeedVehicleRecord[] = [];
+      const addRecords = (records: SeedVehicleRecord[]) => { for (const rec of records) { const key = `${rec.Year}-${rec.Make}-${rec.Model}-${rec.Engine || ""}`.toLowerCase(); if (!seenKeys.has(key)) { seenKeys.add(key); allData.push(rec); } } };
       addRecords(carData2025); addRecords(vehicleSpecsFullData); addRecords(carsFullData);
 
       const CHUNK_SIZE = 500; const totalRecords = allData.length; let totalInserted = 0; let totalErrors = 0;
@@ -372,7 +404,7 @@ export default function VehicleSpecs() {
       const { count } = await countVehicleSpecs();
       setTotalSpecs(count || 0);
       setSearchResults([]);
-    } catch (error: any) { toast.error(error.message || "Failed to seed database"); }
+    } catch (error: unknown) { toast.error(errorMessage(error, "Failed to seed database")); }
     finally { setIsSeeding(false); setSeedingProgress({ current: 0, total: 0, percentage: 0 }); }
   };
 
@@ -388,7 +420,7 @@ export default function VehicleSpecs() {
       toast.success(`Successfully seeded ${data.applicationsInserted} filters and ${data.crossReferencesInserted} cross-references`);
       const { count } = await countFilterApplications();
       setTotalFilters(count || 0);
-    } catch (error: any) { toast.error(error.message || "Failed to seed filters"); }
+    } catch (error: unknown) { toast.error(errorMessage(error, "Failed to seed filters")); }
     finally { setIsSeedingFilters(false); }
   };
 

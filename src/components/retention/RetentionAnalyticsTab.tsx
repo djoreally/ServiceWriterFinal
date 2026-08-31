@@ -2,7 +2,7 @@
  * RetentionAnalyticsTab — charts retention_signals & service_reminders over time
  * with filters by customer segment and signal/service type.
  */
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { subDays, format, startOfDay } from "date-fns";
 import {
@@ -107,11 +107,11 @@ export function RetentionAnalyticsTab({ userId }: Props) {
   });
 
   // Filter helpers
-  const matchSegment = (cid: string | null): boolean => {
+  const matchSegment = useCallback((cid: string | null): boolean => {
     if (segment === "all") return true;
     if (!segmentMemberIds) return false;
     return cid != null && segmentMemberIds.has(cid);
-  };
+  }, [segment, segmentMemberIds]);
 
   const filteredSignals = useMemo(
     () =>
@@ -120,7 +120,7 @@ export function RetentionAnalyticsTab({ userId }: Props) {
           (signalType === "all" || s.signal_type === signalType) &&
           matchSegment(s.customer_id),
       ),
-    [signals, signalType, segment, segmentMemberIds],
+    [signals, signalType, matchSegment],
   );
 
   const filteredReminders = useMemo(
@@ -130,7 +130,7 @@ export function RetentionAnalyticsTab({ userId }: Props) {
           (serviceType === "all" || r.service_type === serviceType) &&
           matchSegment(r.customer_id),
       ),
-    [reminders, serviceType, segment, segmentMemberIds],
+    [reminders, serviceType, matchSegment],
   );
 
   // Distinct types for filter dropdowns

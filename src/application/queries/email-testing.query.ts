@@ -9,7 +9,7 @@ export async function fetchEmailTestingData() {
   if (!user) return null;
 
   const [profileResp, emailSettingsResp, queueResp, logsResp] = await Promise.all([
-    supabase
+    (supabase as any)
       .from("business_profiles")
       .select("business_name, email")
       .eq("user_id", user.id)
@@ -19,13 +19,13 @@ export async function fetchEmailTestingData() {
       .select("id, use_custom_smtp, smtp_host, verified")
       .eq("user_id", user.id)
       .maybeSingle(),
-    supabase
+    (supabase as any)
       .from("email_queue")
       .select("id, email_type, recipient_email, recipient_name, status, scheduled_for, sent_at, error_message, created_at, source, retry_count, review_request_id, campaign_id, provider_message_id, last_event, last_event_at")
       .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(20),
-    supabase
+    (supabase as any)
       .from("email_logs")
       .select("id, recipient_email, recipient_name, email_type, subject, status, provider, error_message, created_at, source, queue_id, review_request_id, campaign_id, provider_message_id, last_event, last_event_at")
       .eq("user_id", user.id)

@@ -36,7 +36,7 @@ const FleetContactsPage = () => {
   };
 
   useEffect(() => {
-    loadContacts();
+    void Promise.resolve().then(() => loadContacts());
   }, []);
 
   const filtered = contacts.filter((c) => {

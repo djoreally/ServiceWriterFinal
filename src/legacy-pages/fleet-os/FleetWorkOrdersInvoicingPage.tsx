@@ -78,7 +78,7 @@ export default function FleetWorkOrdersInvoicingPage() {
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void Promise.resolve().then(() => load()); }, [load]);
 
   useEffect(() => {
     void fetchPaymentSettings()

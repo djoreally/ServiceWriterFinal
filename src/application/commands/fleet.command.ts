@@ -1,5 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
-import type { Database } from "@/integrations/supabase/types";
+import type { Database, Json } from "@/integrations/supabase/types";
 import { resolveVehicleFilters } from "@/application/queries/vehicle-filters.query";
 import { toDollars, type Dollars } from "@/lib/money";
 import { getNextFleetWorkOrderStatus } from "@/domain/fleet/work-order-lifecycle";
@@ -7,9 +7,10 @@ import { getNextFleetWorkOrderStatus } from "@/domain/fleet/work-order-lifecycle
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 type FleetWorkOrderRow = Database["public"]["Tables"]["fleet_work_orders"]["Row"];
 type FleetWorkOrderInsert = Database["public"]["Tables"]["fleet_work_orders"]["Insert"];
+type FleetWorkOrderUpdate = Database["public"]["Tables"]["fleet_work_orders"]["Update"];
 type FleetApprovalInsert = Database["public"]["Tables"]["fleet_approvals"]["Insert"];
 type FleetWorkOrderLineItemInsert = Database["public"]["Tables"]["fleet_work_order_line_items"]["Insert"];
-const db = supabase as any;
+const db = supabase;
 
 type FleetPurchaseOrderRow = Database["public"]["Tables"]["fleet_purchase_orders"]["Row"];
 
@@ -132,7 +133,7 @@ async function transitionFleetWorkOrderStatus(input: {
   targetStatus: string;
   actorRole?: string;
   reasonCode?: string;
-  details?: Record<string, unknown>;
+  details?: Json;
 }): Promise<void> {
   const { error } = await db.rpc("transition_fleet_work_order", {
     p_work_order_id: input.workOrderId,
@@ -151,7 +152,7 @@ async function transitionFleetWorkOrderStatus(input: {
       const { data: { user } } = await getCurrentAuthUser();
       if (!user) throw new Error("You must be logged in to update work orders.");
       const now = new Date().toISOString();
-      const patch: Record<string, unknown> = {
+      const patch: FleetWorkOrderUpdate = {
         status: input.targetStatus,
         updated_at: now,
       };
@@ -183,7 +184,7 @@ async function acquireOperationLock(input: {
   userId: string;
   operationType: string;
   idempotencyKey: string;
-  context?: Record<string, unknown>;
+  context?: Json;
 }): Promise<{ batchId: string | null; duplicateCompleted: boolean }> {
   const { data: existing } = await db
     .from("fleet_operation_batches")
@@ -742,8 +743,8 @@ export async function createFleetWorkOrder(
         .eq("user_id", user.id);
 
       const vehicleAuthorized = (vehicleLedger || [])
-        .filter((entry: any) => String((entry.metadata as Record<string, unknown> | null)?.vehicle_id || "") === payload.vehicleId && entry.entry_type === "authorized")
-        .reduce((acc: number, entry: any) => acc + Number(entry.amount || 0), 0);
+        .filter((entry) => String((entry.metadata as Record<string, unknown> | null)?.vehicle_id || "") === payload.vehicleId && entry.entry_type === "authorized")
+        .reduce((acc: number, entry) => acc + Number(entry.amount || 0), 0);
 
       if (vehicleAuthorized + reserveAmount > policy.maxPerVehicle) {
         throw new Error(`PO max-per-vehicle limit exceeded (${policy.maxPerVehicle.toFixed(2)}).`);
@@ -870,7 +871,7 @@ export async function createFleetWorkOrder(
         } as unknown as FleetWorkOrderInsert["parts_used"])
       : null,
   };
-  (insertData as any).source_schedule_id = payload.sourceScheduleId || null;
+  insertData.source_schedule_id = payload.sourceScheduleId || null;
 
   if (!payload.asDraft) {
     insertData.submitted_at = now;
@@ -958,7 +959,7 @@ export async function createFleetWorkOrder(
         .order("sort_order", { ascending: true });
 
       if (contractServices?.length) {
-        const lineItems = contractServices.map((cs: any, idx: number) => {
+        const lineItems = contractServices.map((cs, idx: number) => {
           const unitPrice = cs.custom_price ?? cs.service_catalog?.default_price ?? 0;
           return {
             user_id: user.id,
@@ -978,7 +979,7 @@ export async function createFleetWorkOrder(
 
         await supabase.from("fleet_work_order_line_items").insert(lineItems);
 
-        const totalAmount = lineItems.reduce((sum: number, li: any) => sum + Number(li.total), 0);
+        const totalAmount = lineItems.reduce((sum: number, li) => sum + Number(li.total), 0);
         await supabase
           .from("fleet_work_orders")
           .update({ total: totalAmount })
@@ -1357,7 +1358,7 @@ export async function completeFleetWorkOrderWithDetails(
 
   const { data: order, error } = await supabase
     .from("fleet_work_orders")
-    .select("id, fleet_vehicle_id, status, parts_used")
+    .select("id, fleet_vehicle_id, fleet_location_id, fleet_contract_id, status, parts_used")
     .eq("id", payload.workOrderId)
     .eq("user_id", user.id)
     .single();
@@ -1367,7 +1368,6 @@ export async function completeFleetWorkOrderWithDetails(
     throw new Error("Failed to load work order");
   }
 
-  const orderAny = order as any;
   const [{ data: vehicle }, { data: location }, { data: contract }] = await Promise.all([
     supabase
       .from("fleet_vehicles")
@@ -1375,19 +1375,19 @@ export async function completeFleetWorkOrderWithDetails(
       .eq("id", order.fleet_vehicle_id)
       .eq("user_id", user.id)
       .maybeSingle(),
-    orderAny.fleet_location_id
+    order.fleet_location_id
       ? supabase
           .from("fleet_locations")
           .select("service_window_start,service_window_end")
-          .eq("id", orderAny.fleet_location_id)
+          .eq("id", order.fleet_location_id)
           .eq("user_id", user.id)
           .maybeSingle()
       : Promise.resolve({ data: null }),
-    orderAny.fleet_contract_id
+    order.fleet_contract_id
       ? supabase
           .from("fleet_contracts")
           .select("pricing_rules")
-          .eq("id", orderAny.fleet_contract_id)
+          .eq("id", order.fleet_contract_id)
           .eq("user_id", user.id)
           .maybeSingle()
       : Promise.resolve({ data: null }),
@@ -1425,12 +1425,12 @@ export async function completeFleetWorkOrderWithDetails(
   });
 
   // 3. Update the completion-specific details
-  const updates = {
+  const updates: FleetWorkOrderUpdate = {
     mileage_at_service: payload.mileageAtService,
     completion_status: vinMatched ? "passed" : "vin_mismatch",
     completion_vin_captured: capturedVin || null,
     completion_vin_matched: vinMatched,
-  } as any;
+  };
   if (payload.technicianNotes) {
     updates.technician_notes = payload.technicianNotes;
   }
@@ -1482,8 +1482,8 @@ export async function authorizePurchaseOrderForWorkOrder(
   if (!["open", "partially_used"].includes(po.status || "")) throw new Error("PO is not available for authorization");
 
   const alreadyAuthorizedForOrder = (orderLedger || [])
-    .filter((entry: any) => entry.fleet_purchase_order_id === purchaseOrderId && entry.reason_code === "work_order_po_authorized")
-    .reduce((acc: number, entry: any) => acc + Number(entry.amount || 0), 0);
+    .filter((entry) => entry.fleet_purchase_order_id === purchaseOrderId && entry.reason_code === "work_order_po_authorized")
+    .reduce((acc: number, entry) => acc + Number(entry.amount || 0), 0);
   const targetAuthorization = Number(order.total || 0);
   const authorizationDelta = Math.max(0, targetAuthorization - alreadyAuthorizedForOrder);
 
@@ -1566,7 +1566,7 @@ export async function applyFleetInvoiceAdjustment(input: {
 
   const { data: order } = await db
     .from("fleet_work_orders")
-    .select("id,total,status,fleet_purchase_order_id,fleet_vehicle_id,parts_used")
+    .select("id,total,tax_amount,status,fleet_purchase_order_id,fleet_vehicle_id,parts_used")
     .eq("id", input.workOrderId)
     .eq("user_id", user.id)
     .maybeSingle();
@@ -1592,11 +1592,11 @@ export async function applyFleetInvoiceAdjustment(input: {
 
     if (!po) throw new Error("Linked PO not found for adjustment.");
     const reservedForOrder = (orderLedger || [])
-      .filter((entry: any) => entry.entry_type === "authorized")
-      .reduce((acc: number, entry: any) => acc + Number(entry.amount || 0), 0);
+      .filter((entry) => entry.entry_type === "authorized")
+      .reduce((acc: number, entry) => acc + Number(entry.amount || 0), 0);
     const releasedForOrder = (orderLedger || [])
-      .filter((entry: any) => entry.entry_type === "released")
-      .reduce((acc: number, entry: any) => acc + Number(entry.amount || 0), 0);
+      .filter((entry) => entry.entry_type === "released")
+      .reduce((acc: number, entry) => acc + Number(entry.amount || 0), 0);
     const netReservedForOrder = reservedForOrder - releasedForOrder;
 
     const delta = input.adjustedTotal - netReservedForOrder;
@@ -1699,11 +1699,11 @@ export async function applyFleetInvoiceAdjustment(input: {
 
     if (!po) throw new Error("Linked PO not found for adjustment.");
     const reservedForOrder = (orderLedger || [])
-      .filter((entry: any) => entry.entry_type === "authorized")
-      .reduce((acc: number, entry: any) => acc + Number(entry.amount || 0), 0);
+      .filter((entry) => entry.entry_type === "authorized")
+      .reduce((acc: number, entry) => acc + Number(entry.amount || 0), 0);
     const releasedForOrder = (orderLedger || [])
-      .filter((entry: any) => entry.entry_type === "released")
-      .reduce((acc: number, entry: any) => acc + Number(entry.amount || 0), 0);
+      .filter((entry) => entry.entry_type === "released")
+      .reduce((acc: number, entry) => acc + Number(entry.amount || 0), 0);
     const netReservedForOrder = reservedForOrder - releasedForOrder;
 
     const delta = normalizedAdjustedTotal - netReservedForOrder;
@@ -1847,14 +1847,14 @@ export async function recordFleetInvoicePayment(input: {
     if (!po) throw new Error("Linked PO not found for payment.");
 
     const reserved = (ledger || [])
-      .filter((entry: any) => entry.entry_type === "authorized")
-      .reduce((acc: number, entry: any) => acc + Number(entry.amount || 0), 0);
+      .filter((entry) => entry.entry_type === "authorized")
+      .reduce((acc: number, entry) => acc + Number(entry.amount || 0), 0);
     const released = (ledger || [])
-      .filter((entry: any) => entry.entry_type === "released")
-      .reduce((acc: number, entry: any) => acc + Number(entry.amount || 0), 0);
+      .filter((entry) => entry.entry_type === "released")
+      .reduce((acc: number, entry) => acc + Number(entry.amount || 0), 0);
     const consumed = (ledger || [])
-      .filter((entry: any) => entry.entry_type === "consumed")
-      .reduce((acc: number, entry: any) => acc + Number(entry.amount || 0), 0);
+      .filter((entry) => entry.entry_type === "consumed")
+      .reduce((acc: number, entry) => acc + Number(entry.amount || 0), 0);
     const availableToConsume = Math.max(0, reserved - released - consumed);
     if (consumed + input.amount > Number(order.total || 0)) {
       throw new Error("Payment would exceed the invoiced work order total.");
@@ -1901,7 +1901,10 @@ export async function recordFleetInvoicePayment(input: {
     .eq("id", input.workOrderId)
     .eq("user_id", user.id)
     .maybeSingle();
-  if (refreshedOrder && Number((refreshedOrder as any).invoice_paid_amount || 0) - Number((refreshedOrder as any).total || 0) > 0.01) {
+  if (
+    refreshedOrder &&
+    Number(refreshedOrder.invoice_paid_amount || 0) - Number(refreshedOrder.total || 0) > 0.01
+  ) {
     throw new Error("Payment posting exceeded invoice total; transaction rejected for reconciliation.");
   }
     await finalizeOperationLock({ userId: user.id, batchId: operationLock.batchId });
@@ -2262,11 +2265,15 @@ export async function updateFleetWorkOrderSchedule(
   const resolvedTime =
     payload.scheduledTime || existingSchedule?.scheduled_time || "08:00:00";
 
-  const { error } = await (supabase as any).rpc("reschedule_fleet_work_order_v1", {
+  if (!existingSchedule) {
+    throw new Error("Work order schedule was not found.");
+  }
+
+  const { error } = await supabase.rpc("reschedule_fleet_work_order_v1", {
     p_work_order_id: workOrderId,
     p_date: payload.scheduledDate,
     p_start: resolvedTime,
-    p_expected_updated_at: existingSchedule?.updated_at,
+    p_expected_updated_at: existingSchedule.updated_at,
   });
   if (error) throw new Error("Failed to update schedule");
 

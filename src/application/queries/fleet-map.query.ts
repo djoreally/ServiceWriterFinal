@@ -5,6 +5,7 @@
  */
 
 import { supabase } from '@/integrations/supabase/client';
+import type { Database } from '@/integrations/supabase/types';
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface FleetMapVan {
@@ -25,6 +26,19 @@ export interface FleetMapVan {
   } | null;
   currentLocation: { lat: number; lng: number } | null;
   todayJobCount: number;
+}
+
+type TechnicianRow = Pick<
+  Database["public"]["Tables"]["technicians"]["Row"],
+  "id" | "name" | "status" | "current_location" | "avatar_url"
+>;
+
+function coordinates(value: unknown): { lat: number; lng: number } | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const point = value as Record<string, unknown>;
+  return typeof point.lat === "number" && typeof point.lng === "number"
+    ? { lat: point.lat, lng: point.lng }
+    : null;
 }
 
 /** Fetch enriched map data: vans + territories + technician GPS + today job counts */
@@ -56,30 +70,30 @@ export async function fetchFleetMapData(): Promise<FleetMapVan[]> {
       .not('status', 'in', '("cancelled","completed")'),
   ]);
 
-  const vansData = vansRes.data as any[] | null;
+  const vansData = vansRes.data;
   if (!vansData) return [];
 
-  const techsData = (techsRes.data || []) as any[];
-  const techMap: Record<string, any> = {};
+  const techsData = techsRes.data ?? [];
+  const techMap = new Map<string, TechnicianRow>();
   techsData.forEach((t) => {
-    techMap[t.id] = t;
+    techMap.set(t.id, t);
   });
 
   const territoryMap: Record<string, { zip_code: string; is_primary: boolean }[]> = {};
-  ((territoriesRes.data || []) as any[]).forEach((t: any) => {
+  (territoriesRes.data ?? []).forEach((t) => {
     if (!territoryMap[t.van_id]) territoryMap[t.van_id] = [];
-    territoryMap[t.van_id].push({ zip_code: t.zip_code, is_primary: t.is_primary });
+    territoryMap[t.van_id].push({ zip_code: t.zip_code, is_primary: t.is_primary === true });
   });
 
   const jobCountMap: Record<string, number> = {};
-  ((jobsRes.data || []) as any[]).forEach((j: any) => {
-    const vid = j.assigned_van_id as string | null;
+  (jobsRes.data ?? []).forEach((j) => {
+    const vid = j.assigned_van_id;
     if (vid) jobCountMap[vid] = (jobCountMap[vid] || 0) + 1;
   });
 
-  return vansData.map((van: any) => {
-    const tech = van.assigned_technician_id ? techMap[van.assigned_technician_id] : null;
-    const rawLoc: { lat: number; lng: number } | null = tech?.current_location ?? null;
+  return vansData.map((van) => {
+    const tech = van.assigned_technician_id ? techMap.get(van.assigned_technician_id) ?? null : null;
+    const rawLoc = coordinates(tech?.current_location);
     return {
       id: van.id,
       name: van.name,

@@ -25,6 +25,6 @@ export function useServiceCategoryPolicy(
   return useMemo(() => {
     if (!rows) return DEFAULT_CATEGORY_POLICY;
     return resolveCategoryPolicy(rows, key ? key.split("|") : []);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [rows, key]);
 }

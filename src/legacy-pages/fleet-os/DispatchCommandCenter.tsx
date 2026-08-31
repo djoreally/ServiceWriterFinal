@@ -30,10 +30,10 @@ const DispatchCommandCenter = () => {
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [user]);
 
   useEffect(() => {
-    loadData();
+    void Promise.resolve().then(() => loadData());
     const { unsubscribe } = subscribeTechnicianUpdates("tech-locations", () => {
       loadData();
     });

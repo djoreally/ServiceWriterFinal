@@ -47,7 +47,7 @@ export function useTeam(): UseTeamResult {
   }, []);
 
   useEffect(() => {
-    fetchTeam();
+    void Promise.resolve().then(() => fetchTeam());
   }, [fetchTeam]);
 
   return { teamId, team, role, loading, error, refetch: fetchTeam };

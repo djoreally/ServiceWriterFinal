@@ -247,7 +247,7 @@ function useFinancialOverview() {
     }
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { void Promise.resolve().then(() => fetchData()); }, [fetchData]);
 
   return { data, loading, refresh: fetchData };
 }

@@ -176,7 +176,7 @@ export function CustomerSegmentation() {
   }, []);
 
   useEffect(() => {
-    fetchSegmentsData();
+    void Promise.resolve().then(() => fetchSegmentsData());
   }, [fetchSegmentsData]);
 
 

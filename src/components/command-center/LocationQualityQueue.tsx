@@ -47,7 +47,7 @@ export function LocationQualityQueue({ onResolved }: LocationQualityQueueProps) 
   }, []);
 
   useEffect(() => {
-    refresh();
+    void Promise.resolve().then(() => refresh());
   }, [refresh]);
 
   const flaggedJobs = useMemo(

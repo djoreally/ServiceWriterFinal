@@ -33,32 +33,32 @@ export async function fetchFleetReportPageData(userId: string): Promise<FleetRep
     supabase.from("fleet_work_orders")
       .select("id, total, status, fleet_vehicle_id, invoice_status, fleet_vehicles(year, make, model, unit_number)")
       .eq("user_id", userId),
-    (supabase as any).from("fleet_purchase_orders")
+    supabase.from("fleet_purchase_orders")
       .select("id, status", { count: "exact" })
       .eq("user_id", userId)
       .in("status", ["open", "partially_used"]),
   ]);
 
   const allOrders = woRes.data ?? [];
-  const completedOrders = allOrders.filter((o: any) => ["completed", "invoiced", "paid"].includes(o.status));
-  const totalSpend = completedOrders.reduce((sum: number, o: any) => sum + (o.total || 0), 0);
+  const completedOrders = allOrders.filter((order) => ["completed", "invoiced", "paid"].includes(order.status));
+  const totalSpend = completedOrders.reduce((sum, order) => sum + (order.total || 0), 0);
   const vehicleCount = vehiclesRes.count ?? 0;
   const pendingInvoices = allOrders.filter(
-    (o: any) => (o.invoice_status || "pending") === "pending" && o.status === "completed"
+    (order) => (order.invoice_status || "pending") === "pending" && order.status === "completed"
   ).length;
 
   // Top vehicles by spend
-  const vehicleSpend: Record<string, { total: number; vehicle: any }> = {};
-  completedOrders.forEach((o: any) => {
-    if (!o.fleet_vehicle_id) return;
-    if (!vehicleSpend[o.fleet_vehicle_id]) {
-      vehicleSpend[o.fleet_vehicle_id] = { total: 0, vehicle: o.fleet_vehicles };
+  const vehicleSpend: Record<string, FleetTopVehicleSpendItem> = {};
+  completedOrders.forEach((order) => {
+    if (!order.fleet_vehicle_id) return;
+    if (!vehicleSpend[order.fleet_vehicle_id]) {
+      vehicleSpend[order.fleet_vehicle_id] = { total: 0, vehicle: order.fleet_vehicles };
     }
-    vehicleSpend[o.fleet_vehicle_id].total += o.total || 0;
+    vehicleSpend[order.fleet_vehicle_id].total += order.total || 0;
   });
   const topVehicles = Object.values(vehicleSpend)
     .sort((a, b) => b.total - a.total)
-    .slice(0, 5) as FleetTopVehicleSpendItem[];
+    .slice(0, 5);
 
   return {
     stats: {

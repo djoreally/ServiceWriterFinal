@@ -89,9 +89,9 @@ const FleetScheduleCalendarWorkspace = () => {
     } finally {
       setLoading(false);
     }
-  }, [user?.id, windowRange.end, windowRange.start]);
+  }, [user, windowRange.end, windowRange.start]);
 
-  useEffect(() => { void loadData(); }, [loadData]);
+  useEffect(() => { void Promise.resolve().then(() => loadData()); }, [loadData]);
   useEffect(() => { void fetchFleetResourceCapacity(anchorDate).then(setResources).catch(() => setResources([])); }, [anchorDate]);
   useEffect(() => {
     if (!user?.id) return;

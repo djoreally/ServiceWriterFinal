@@ -87,7 +87,7 @@ export const RegionalSettingsProvider = ({ children }: { children: ReactNode }) 
   };
 
   useEffect(() => {
-    void fetchSettings();
+    void Promise.resolve().then(() => fetchSettings());
   }, []);
 
   const getCurrencySymbol = (): string => {

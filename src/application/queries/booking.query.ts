@@ -5,9 +5,9 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
-import { nextApi } from "@/lib/nextApiClient";
 import { resolveOilPricePerQuart } from "@/lib/oilPricing";
 import {
+  fetchPublicBookingProfile,
   fetchPublicServicePackages,
   fetchBookedSlotsForDate,
 } from "@/application/queries/public-booking.query";
@@ -65,13 +65,9 @@ export interface ServicePackage {
  * Uses the safe get_public_booking_profile_v2 RPC exclusively — no raw business_profiles query.
  */
 export async function fetchBookingProfile(slug: string): Promise<BookingBusinessProfile | null> {
-  let profile: Record<string, any>;
-  try {
-    const response = await nextApi.publicBooking.get(slug, "profile");
-    profile = response.data as Record<string, any>;
-  } catch {
-    return null;
-  }
+  const { data, error } = await fetchPublicBookingProfile(slug);
+  const profile = data?.[0];
+  if (error || !profile) return null;
 
   return {
     id: '',

@@ -39,7 +39,7 @@ import {
 import { useTechJobEta } from "@/hooks/useTechJobEta";
 import { toast } from "@/components/ui/sonner";
 import { getTechPrimaryAction } from "@/lib/tech-mission-board";
-import { fetchJobThreadTimeline, type JobThreadTimelineItem } from "@/application/queries/job-thread.query";
+import { fetchJobThreadTimeline, type JobSource, type JobThreadTimelineItem } from "@/application/queries/job-thread.query";
 import { createJobThreadException, sendJobThreadHumanMessage } from "@/application/commands/job-thread.command";
 import { queueJobThreadMessage } from "@/offline/outbox";
 
@@ -64,6 +64,9 @@ interface JobDetail {
   service_catalog: { name: string } | null;
   technicians: { name: string; id: string } | null;
   vans: { name: string } | null;
+  is_fleet: boolean;
+  location_lat: number | null;
+  location_lng: number | null;
 }
 
 interface AppointmentService {
@@ -72,6 +75,13 @@ interface AppointmentService {
   price: number;
   quantity: number;
   is_prepaid: boolean;
+}
+
+interface AppointmentServiceSource {
+  id: string;
+  quantity: number | null;
+  is_prepaid: boolean | null;
+  service_catalog: { name: string | null; price: number | null } | null;
 }
 
 interface JobPhoto {
@@ -132,6 +142,15 @@ const THREAD_EXCEPTION_TYPES = [
   "safety_issue",
   "other",
 ] as const;
+type ThreadExceptionType = (typeof THREAD_EXCEPTION_TYPES)[number];
+
+function getJobSource(job: Pick<JobDetail, "is_fleet">): JobSource {
+  return job.is_fleet ? "fleet_work_order" : "appointment";
+}
+
+function isThreadExceptionType(value: string): value is ThreadExceptionType {
+  return (THREAD_EXCEPTION_TYPES as readonly string[]).includes(value);
+}
 
 // Photo types with metadata
 const PHOTO_TYPES = [
@@ -171,7 +190,7 @@ export default function TechJobDetail() {
   const [timelineItems, setTimelineItems] = useState<JobThreadTimelineItem[]>([]);
   const [executionSteps, setExecutionSteps] = useState<JobExecutionStep[]>([]);
   const [threadMessage, setThreadMessage] = useState("");
-  const [threadExceptionType, setThreadExceptionType] = useState<string>("customer_not_present");
+  const [threadExceptionType, setThreadExceptionType] = useState<ThreadExceptionType>("customer_not_present");
   const [threadExceptionNote, setThreadExceptionNote] = useState("");
 
   const fetchData = useCallback(async () => {
@@ -200,7 +219,7 @@ export default function TechJobDetail() {
       setTechNotes(jobData.notes || "");
       setPhotos((photosData || []) as unknown as JobPhoto[]);
 
-      const parsedServices: AppointmentService[] = (servicesData || []).map((s: any) => ({
+      const parsedServices: AppointmentService[] = (servicesData as unknown as AppointmentServiceSource[]).map((s) => ({
         id: s.id,
         name: s.service_catalog?.name || "Service",
         price: s.service_catalog?.price || 0,
@@ -220,7 +239,7 @@ export default function TechJobDetail() {
       try {
         const timeline = await fetchJobThreadTimeline(
           jobData.id,
-          (jobData as any).is_fleet ? "fleet_work_order" : "appointment",
+          getJobSource(jobData),
         );
         setTimelineItems(timeline);
       } catch {
@@ -235,14 +254,14 @@ export default function TechJobDetail() {
 
 
   useEffect(() => {
-    fetchData();
+    void Promise.resolve().then(() => fetchData());
   }, [fetchData]);
 
   // ⚡ Use RPC for status updates (creates audit trail in dispatch_events)
   const updateStatus = async (nextStatus: string, failureReason?: string) => {
     if (!job) return;
 
-    if (nextStatus === "completed" && !(job as any).is_fleet) {
+    if (nextStatus === "completed" && !job.is_fleet) {
       const requiredPhotoTypes = PHOTO_TYPES.filter((p) => p.required).map((p) => p.type);
       const uploadedTypes = new Set(photos.map((p) => p.photo_type));
       const missingRequiredEvidence = requiredPhotoTypes.filter((photoType) => !uploadedTypes.has(photoType));
@@ -258,7 +277,7 @@ export default function TechJobDetail() {
       job.id,
       nextStatus,
       failureReason,
-      (job as any).is_fleet
+      job.is_fleet
     );
 
     if (error) {
@@ -290,7 +309,7 @@ export default function TechJobDetail() {
     if (!job || !threadMessage.trim()) return;
     const { error } = await sendJobThreadHumanMessage({
       jobId: job.id,
-      jobSource: (job as any).is_fleet ? "fleet_work_order" : "appointment",
+      jobSource: getJobSource(job),
       content: threadMessage.trim(),
       senderRole: "technician",
     });
@@ -299,7 +318,7 @@ export default function TechJobDetail() {
       return;
     }
     setThreadMessage("");
-    const timeline = await fetchJobThreadTimeline(job.id, (job as any).is_fleet ? "fleet_work_order" : "appointment");
+    const timeline = await fetchJobThreadTimeline(job.id, getJobSource(job));
     setTimelineItems(timeline);
     toast.success("Message added to job thread");
   };
@@ -308,8 +327,8 @@ export default function TechJobDetail() {
     if (!job) return;
     const { error } = await createJobThreadException({
       jobId: job.id,
-      jobSource: (job as any).is_fleet ? "fleet_work_order" : "appointment",
-      exceptionType: threadExceptionType as any,
+      jobSource: getJobSource(job),
+      exceptionType: threadExceptionType,
       note: threadExceptionNote.trim() || undefined,
     });
     if (error) {
@@ -317,7 +336,7 @@ export default function TechJobDetail() {
       return;
     }
     setThreadExceptionNote("");
-    const timeline = await fetchJobThreadTimeline(job.id, (job as any).is_fleet ? "fleet_work_order" : "appointment");
+    const timeline = await fetchJobThreadTimeline(job.id, getJobSource(job));
     setTimelineItems(timeline);
     toast.success("Exception logged to thread");
   };
@@ -381,14 +400,14 @@ export default function TechJobDetail() {
 
   // Live traffic ETA for this job (shared with the dashboard mission card).
   const jobEta = useTechJobEta(
-    job ? { lat: (job as any).location_lat ?? null, lng: (job as any).location_lng ?? null, address: job.location_address } : null,
+    job ? { lat: job.location_lat, lng: job.location_lng, address: job.location_address } : null,
   );
   const [etaSending, setEtaSending] = useState(false);
 
   // ⚡ Email the customer a shop-branded ETA update (live traffic based)
   const emailCustomerEta = async () => {
     if (!job || etaSending) return;
-    if ((job as any).is_fleet) {
+    if (job.is_fleet) {
       toast.error("Fleet work orders have no customer email");
       return;
     }
@@ -421,7 +440,7 @@ export default function TechJobDetail() {
     try {
       const { error } = await sendJobThreadHumanMessage({
         jobId: job.id,
-        jobSource: (job as any).is_fleet ? "fleet_work_order" : "appointment",
+        jobSource: getJobSource(job),
         content: text,
         senderRole: "technician",
         channel: "customer_sms",
@@ -431,13 +450,13 @@ export default function TechJobDetail() {
 
       if (error) throw new Error(error);
       toast.success("Update queued for the customer");
-      const timeline = await fetchJobThreadTimeline(job.id, (job as any).is_fleet ? "fleet_work_order" : "appointment");
+      const timeline = await fetchJobThreadTimeline(job.id, getJobSource(job));
       setTimelineItems(timeline);
     } catch (err) {
       // Offline or transient failure: queue it so the update is never silently lost.
       const queued = await queueJobThreadMessage({
         jobId: job.id,
-        jobSource: (job as any).is_fleet ? "fleet_work_order" : "appointment",
+        jobSource: getJobSource(job),
         content: text,
         channel: "customer_sms",
         recipient: job.customers.phone,
@@ -457,7 +476,7 @@ export default function TechJobDetail() {
   const saveTechNotes = async () => {
     if (!job) return;
 
-    const { error } = await saveTechJobNotes(job.id, techNotes, (job as any).is_fleet);
+    const { error } = await saveTechJobNotes(job.id, techNotes, job.is_fleet);
 
     if (error) {
       toast.error("Failed to save notes");
@@ -521,7 +540,6 @@ export default function TechJobDetail() {
         <Button variant="ghost" size="sm" onClick={() => navigate("/tech-app")}>
           <ArrowLeft className="mr-2 h-4 w-4" /> Back to today
         </Button>
-        {!(job as any).is_fleet && <AppointmentConfigurationSummary appointmentId={job.id} />}
         <Card>
           <CardContent className="space-y-3 p-6 text-center">
             <AlertTriangle className="mx-auto h-8 w-8 text-muted-foreground" />
@@ -547,10 +565,10 @@ export default function TechJobDetail() {
 
 
   const activeIndex = STATUS_ORDER.indexOf(job.dispatch_status as (typeof STATUS_ORDER)[number]);
-  const primaryAction = getTechPrimaryAction(job as any, true);
+  const primaryAction = getTechPrimaryAction(job, true);
   const requiredPhotoTypes = PHOTO_TYPES.filter((p) => p.required).map((p) => p.type);
   const uploadedTypes = new Set(photos.map((p) => p.photo_type));
-  const missingEvidence = !(job as any).is_fleet ? requiredPhotoTypes.filter((photoType) => !uploadedTypes.has(photoType)) : [];
+  const missingEvidence = !job.is_fleet ? requiredPhotoTypes.filter((photoType) => !uploadedTypes.has(photoType)) : [];
   const hasOpenThreadExceptions = timelineItems.some((item) => item.item_type === "exception");
 
   return (
@@ -675,7 +693,7 @@ export default function TechJobDetail() {
         </Card>
 
         {/* Retail evidence is appointment-backed; Fleet evidence requires its own Phase 3 contract. */}
-        {!(job as any).is_fleet && <Card>
+        {!job.is_fleet && <Card>
           <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Camera className="h-4 w-4" />Photo Documentation</CardTitle></CardHeader>
           <CardContent className="grid grid-cols-2 gap-2">
             {PHOTO_TYPES.map((photoType) => {
@@ -722,7 +740,7 @@ export default function TechJobDetail() {
         </Card>}
 
         {/* Customer Communication - Now sends SMS */}
-        {!(job as any).is_fleet && <Card>
+        {!job.is_fleet && <Card>
           <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><MessageSquare className="h-4 w-4" />Send Customer Update</CardTitle></CardHeader>
           <CardContent className="space-y-2">
             <Button
@@ -762,7 +780,7 @@ export default function TechJobDetail() {
         </Card>}
 
         {/* Recommendations - Persisted to declined_services */}
-        {!(job as any).is_fleet && <Card>
+        {!job.is_fleet && <Card>
           <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><AlertTriangle className="h-4 w-4" />Add Recommendation</CardTitle></CardHeader>
           <CardContent className="space-y-3">
             <div className="space-y-1">
@@ -912,7 +930,12 @@ export default function TechJobDetail() {
 
             <div className="space-y-2">
               <Label className="text-xs">Log Structured Exception</Label>
-              <Select value={threadExceptionType} onValueChange={setThreadExceptionType}>
+              <Select
+                value={threadExceptionType}
+                onValueChange={(value) => {
+                  if (isThreadExceptionType(value)) setThreadExceptionType(value);
+                }}
+              >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {THREAD_EXCEPTION_TYPES.map((exceptionType) => (

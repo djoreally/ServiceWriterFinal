@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message";
 import { useState } from "react";
 import { sendMaintenanceReminders } from "@/application/commands/maintenance-reminders.command";
 import { Button } from "@/components/ui/button";
@@ -57,9 +58,9 @@ export const MaintenanceReminderSettings = ({
       if (data.errors?.length > 0) {
         toast.warning(`${data.errors.length} email(s) failed to send`);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error sending reminders:", error);
-      toast.error(error.message || "Failed to send reminders");
+      toast.error(errorMessage(error, "Failed to send reminders"));
     } finally {
       setSending(false);
     }

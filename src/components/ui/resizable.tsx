@@ -12,7 +12,8 @@ function ResizablePanelGroup({ className, ...props }: React.ComponentProps<typeo
   );
 }
 
-const ResizablePanel = ResizablePrimitive.Panel;
+const ResizablePanel = (props: React.ComponentProps<typeof ResizablePrimitive.Panel>) => <ResizablePrimitive.Panel {...props} />;
+ResizablePanel.displayName = ResizablePrimitive.Panel.displayName;
 
 function ResizableHandle({
   withHandle,

@@ -153,7 +153,7 @@ export async function markInvoiceStatus(invoiceId: string, status: "draft" | "se
   if (status === "sent") patch.sent_at = new Date().toISOString();
   await nextApi.invoices.update(invoiceId, patch);
   if (status === "void") {
-    const { error: eventError } = await (supabase as any).from("invoice_lifecycle_events").insert({
+    const { error: eventError } = await supabase.from("invoice_lifecycle_events").insert({
       invoice_id: invoiceId,
       user_id: user.id,
       event_type: "voided",
@@ -184,7 +184,7 @@ export async function recordFleetInvoicePayment(params: {
   note?: string;
 }): Promise<{ status: string; amount_paid: number; balance_due: number }> {
   if (!Number.isFinite(params.amount) || params.amount <= 0) throw new Error("Payment amount must be greater than zero");
-  const { data, error } = await (supabase as any).rpc("record_fleet_invoice_payment", {
+  const { data, error } = await supabase.rpc("record_fleet_invoice_payment", {
     _invoice_id: params.invoiceId,
     _amount: params.amount,
     _idempotency_key: `manual:${params.invoiceId}:${crypto.randomUUID()}`,
@@ -432,7 +432,7 @@ export async function createInvoiceFromFleetWorkOrders(
   if (invoiceOrders.some((order: InvoicePreflightOrder) => !order.fleet_contract_id)) throw new Error("Every work order needs an active contract for automated invoicing.");
   if (invoiceOrders.some((order: InvoicePreflightOrder) => !order.fleet_purchase_order_id || !order.po_number?.trim())) throw new Error("Every work order needs an open purchase order for automated invoicing.");
 
-  const { data, error } = await (supabase as any).rpc("create_fleet_consolidated_invoice_v3", {
+  const { data, error } = await supabase.rpc("create_fleet_consolidated_invoice_v3", {
     _work_order_ids: ids,
     _invoice_number: null,
     _notes: null,

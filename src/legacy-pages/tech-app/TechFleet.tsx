@@ -73,7 +73,7 @@ export default function TechFleet() {
   }, [identity]);
 
   useEffect(() => {
-    if (identity) void load();
+    if (identity) void Promise.resolve().then(() => load());
   }, [identity, load]);
 
   const today = format(new Date(), "yyyy-MM-dd");

@@ -207,7 +207,7 @@ export function AssetsPage() {
     }
   }, [deleteTarget, invalidateAssets]);
 
-  const items = data?.items ?? [];
+  const items = useMemo(() => data?.items ?? [], [data?.items]);
 
   // Selection helpers
   const toggleSelect = useCallback((asset: AssetRecord) => {
@@ -225,7 +225,7 @@ export function AssetsPage() {
 
   // Drop stale ids when the visible set changes
   useEffect(() => {
-    setSelectedIds((prev) => {
+    void Promise.resolve().then(() => setSelectedIds((prev) => {
       if (prev.size === 0) return prev;
       const visible = new Set(items.map((i) => i.id));
       const next = new Set<string>();
@@ -233,7 +233,7 @@ export function AssetsPage() {
         if (visible.has(id)) next.add(id);
       });
       return next.size === prev.size ? prev : next;
-    });
+    }));
   }, [items]);
 
   const handleBulkDelete = useCallback(async () => {

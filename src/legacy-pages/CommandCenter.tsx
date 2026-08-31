@@ -76,7 +76,7 @@ export default function CommandCenter({ embedded = false }: CommandCenterProps) 
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void Promise.resolve().then(() => load()); }, [load]);
 
   const buckets = useMemo(() => buildCommandCenterBuckets(jobs), [jobs]);
   const visible = activeTab === "queue"

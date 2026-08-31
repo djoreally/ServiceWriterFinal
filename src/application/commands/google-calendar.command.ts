@@ -7,7 +7,7 @@ import { supabase } from "@/integrations/supabase/client";
 export const GOOGLE_CALENDAR_REDIRECT_PATH = "/google-calendar/callback";
 
 /** Start the standalone Google Calendar OAuth flow; returns the consent URL. */
-export async function startGoogleCalendarOAuth(redirectUri: string): Promise<any> {
+export async function startGoogleCalendarOAuth(redirectUri: string) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error("Not authenticated");
 
@@ -18,7 +18,7 @@ export async function startGoogleCalendarOAuth(redirectUri: string): Promise<any
 }
 
 /** Complete the standalone Google Calendar OAuth flow with the returned code. */
-export async function completeGoogleCalendarOAuth(code: string, state: string, redirectUri: string): Promise<any> {
+export async function completeGoogleCalendarOAuth(code: string, state: string, redirectUri: string) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error("Not authenticated");
 
@@ -32,7 +32,7 @@ export async function completeGoogleCalendarOAuth(code: string, state: string, r
 export async function exchangeGoogleTokens(
   providerToken: string,
   providerRefreshToken: string | null
-): Promise<any> {
+) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error("Not authenticated");
 
@@ -49,7 +49,7 @@ export async function exchangeGoogleTokens(
 /** Push an appointment to Google Calendar */
 export async function syncAppointmentToGoogle(
   appointment: Record<string, unknown>
-): Promise<any> {
+) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error("Not authenticated");
 
@@ -60,7 +60,7 @@ export async function syncAppointmentToGoogle(
 }
 
 /** Disconnect Google Calendar */
-export async function disconnectGoogleCalendar(): Promise<any> {
+export async function disconnectGoogleCalendar() {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error("Not authenticated");
 
@@ -71,7 +71,7 @@ export async function disconnectGoogleCalendar(): Promise<any> {
 }
 
 /** Re-push all upcoming unsynced appointments to the connected Google Calendar. */
-export async function runGoogleCalendarBackfill(): Promise<any> {
+export async function runGoogleCalendarBackfill() {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error("Not authenticated");
 

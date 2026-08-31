@@ -146,9 +146,9 @@ const ServiceCatalog = () => {
   };
 
   useEffect(() => {
-    fetchServices();
-    fetchCats();
-    loadBenchmarks();
+    void Promise.resolve().then(() => fetchServices());
+    void Promise.resolve().then(() => fetchCats());
+    void Promise.resolve().then(() => loadBenchmarks());
   }, []);
 
 

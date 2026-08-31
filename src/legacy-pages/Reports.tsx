@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -113,7 +113,7 @@ export default function Reports() {
       .catch((error) => console.error("[reports] earliest activity lookup failed", error));
   }, []);
 
-  const reload = () => {
+  const reload = useCallback(() => {
     setLoading(true);
     setLoadError(null);
     getCurrentUserId()
@@ -136,8 +136,10 @@ export default function Reports() {
         setLoadError(errorMessage(error, "The backend did not return report data."));
       })
       .finally(() => setLoading(false));
-  };
-  useEffect(reload, [range, dataScope]);
+  }, [dataScope, range]);
+  useEffect(() => {
+    void Promise.resolve().then(reload);
+  }, [range, dataScope, reload]);
 
   const runGeocodeBackfill = async () => {
     setGeocoding(true);

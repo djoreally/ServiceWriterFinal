@@ -1,5 +1,5 @@
 /** Service Invoice Query — canonical service-record invoice/print adapter. */
-import { supabase } from "@/integrations/supabase/client";
+import { productionSupabase } from "@/integrations/supabase/client";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
@@ -47,8 +47,16 @@ export interface InvoiceData {
   business: InvoiceBusinessProfile | null; laborItems: InvoiceLaborItem[]; serviceItems: InvoiceServiceItem[];
 }
 
-function object(value: unknown): Record<string, any> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function nullableString(value: unknown): string | null {
+  return value == null ? null : String(value);
+}
+
+function nullableNumber(value: unknown): number | null {
+  return value == null ? null : Number(value);
 }
 
 export async function fetchInvoiceData(serviceId: string, customerId: string | null, vehicleId: string | null): Promise<InvoiceData> {
@@ -56,7 +64,7 @@ export async function fetchInvoiceData(serviceId: string, customerId: string | n
   if (!user) throw new Error("Not authenticated");
   const context = await resolveCurrentWorkspace();
   if (!context) throw new Error("Select a workspace before viewing a service invoice.");
-  const client = supabase as any;
+  const client = productionSupabase;
 
   const [serviceRes, customerRes, vehicleRes, workspaceRes, settingsRes, linesRes, specsRes] = await Promise.all([
     client.from("service_records").select("*").eq("workspace_id", context.workspaceId).eq("id", serviceId).maybeSingle(),
@@ -76,7 +84,7 @@ export async function fetchInvoiceData(serviceId: string, customerId: string | n
   const vehicleSnapshot = object(meta.vehicle_snapshot);
   const rawVehicle = vehicleRes.data;
   const specs = specsRes.data;
-  const lines = (linesRes.data ?? []) as any[];
+  const lines = linesRes.data ?? [];
 
   const service: InvoiceServiceData = {
     id: row.id,
@@ -99,14 +107,14 @@ export async function fetchInvoiceData(serviceId: string, customerId: string | n
     paid_amount: meta.paid_amount == null ? null : Number(meta.paid_amount),
     technician: meta.technician == null ? null : String(meta.technician),
     mileage: meta.mileage == null ? null : Number(meta.mileage),
-    vin_captured: meta.vin ? String(meta.vin) : vehicleSnapshot.vin ?? null,
-    vehicle_year: vehicleSnapshot.year ?? rawVehicle?.year ?? null,
-    vehicle_make: vehicleSnapshot.make ?? rawVehicle?.make ?? null,
-    vehicle_model: vehicleSnapshot.model ?? rawVehicle?.model ?? null,
-    vehicle_trim: vehicleSnapshot.trim ?? rawVehicle?.trim ?? null,
-    vehicle_engine: vehicleSnapshot.engine ?? specs?.engine ?? object(rawVehicle?.metadata).engine ?? null,
-    license_plate: vehicleSnapshot.license_plate ?? rawVehicle?.license_plate ?? null,
-    odometer_measure: meta.odometer_measure ?? rawVehicle?.mileage_unit ?? "mi",
+    vin_captured: nullableString(meta.vin ?? vehicleSnapshot.vin),
+    vehicle_year: nullableNumber(vehicleSnapshot.year ?? rawVehicle?.year),
+    vehicle_make: nullableString(vehicleSnapshot.make ?? rawVehicle?.make),
+    vehicle_model: nullableString(vehicleSnapshot.model ?? rawVehicle?.model),
+    vehicle_trim: nullableString(vehicleSnapshot.trim ?? rawVehicle?.trim),
+    vehicle_engine: nullableString(vehicleSnapshot.engine ?? specs?.engine ?? object(rawVehicle?.metadata).engine),
+    license_plate: nullableString(vehicleSnapshot.license_plate ?? rawVehicle?.license_plate),
+    odometer_measure: String(meta.odometer_measure ?? rawVehicle?.mileage_unit ?? "mi"),
   };
 
   const customerRow = customerRes.data;
@@ -128,7 +136,7 @@ export async function fetchInvoiceData(serviceId: string, customerId: string | n
     color: rawVehicle.color ?? null,
     oil_type: specs?.oil_type ?? null,
     oil_capacity: specs?.oil_capacity ?? null,
-    engine: specs?.engine ?? object(rawVehicle.metadata).engine ?? null,
+    engine: nullableString(specs?.engine ?? object(rawVehicle.metadata).engine),
   } : null;
 
   const settings = settingsRes.data;

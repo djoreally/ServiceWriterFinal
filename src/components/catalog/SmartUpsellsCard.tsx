@@ -4,6 +4,7 @@
  * during the booking checkout step to increase average ticket value.
  */
 
+import { errorMessage } from "@/lib/error-message";
 import { useState, useEffect, useCallback } from "react";
 import {
   fetchUpsells as fetchUpsellsQuery,
@@ -56,7 +57,7 @@ export function SmartUpsellsCard({ onRefresh }: { onRefresh?: () => void }) {
     setLoading(false);
   }, []);
 
-  useEffect(() => { fetchUpsells(); }, [fetchUpsells]);
+  useEffect(() => { void Promise.resolve().then(() => fetchUpsells()); }, [fetchUpsells]);
 
   const startEdit = (item: UpsellItem) => {
     setEditing({
@@ -84,8 +85,8 @@ export function SmartUpsellsCard({ onRefresh }: { onRefresh?: () => void }) {
       setEditing(null);
       fetchUpsells();
       onRefresh?.();
-    } catch (err: any) {
-      toast({ title: "Error saving upsell", description: err.message, variant: "destructive" });
+    } catch (err: unknown) {
+      toast({ title: "Error saving upsell", description: errorMessage(err), variant: "destructive" });
     }
     setSaving(false);
   };
@@ -110,8 +111,8 @@ export function SmartUpsellsCard({ onRefresh }: { onRefresh?: () => void }) {
         fetchUpsells();
         onRefresh?.();
       }
-    } catch (err: any) {
-      toast({ title: "Error loading templates", description: err.message, variant: "destructive" });
+    } catch (err: unknown) {
+      toast({ title: "Error loading templates", description: errorMessage(err), variant: "destructive" });
     }
     setLoadingTemplates(false);
   };
@@ -130,8 +131,8 @@ export function SmartUpsellsCard({ onRefresh }: { onRefresh?: () => void }) {
       setAddDialogOpen(false);
       fetchUpsells();
       onRefresh?.();
-    } catch (err: any) {
-      toast({ title: "Error adding upsell", description: err.message, variant: "destructive" });
+    } catch (err: unknown) {
+      toast({ title: "Error adding upsell", description: errorMessage(err), variant: "destructive" });
     }
     setSaving(false);
   };

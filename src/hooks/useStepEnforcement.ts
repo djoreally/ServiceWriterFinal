@@ -11,6 +11,7 @@
  *  - captureVin / captureMileage: field-capture helpers
  */
 
+import { errorMessage } from "@/lib/error-message";
 import { useState, useMemo, useCallback } from "react";
 import {
   advanceChecklistStep,
@@ -96,8 +97,8 @@ export function useStepEnforcement(
       try {
         await advanceChecklistStep(itemId, evidenceUrl, notes);
         onRefresh();
-      } catch (e: any) {
-        setError(e.message);
+      } catch (e: unknown) {
+        setError(errorMessage(e));
         throw e;
       } finally {
         setAdvancing(false);

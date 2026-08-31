@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message";
 import { useEffect, useState, useCallback } from 'react';
 import { sendReviewRequest } from '@/application/commands/review-request.command';
 import { computeFinancialSummary } from '@/lib/financialMath';
@@ -125,7 +126,7 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
    * render oil/fluid information or be charged a waste-oil disposal fee.
    */
   const categoryPolicy = useServiceCategoryPolicy([
-    (appointment as any)?.service_catalog?.category ?? null,
+    appointment?.service_catalog?.category ?? null,
     appointment?.service_catalog?.name ?? null,
     appointment?.title ?? null,
   ]);
@@ -157,8 +158,8 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
       toast.success('Appointment rescheduled');
       setRescheduleOpen(false);
       fetchAppointment();
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to reschedule');
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, 'Failed to reschedule'));
     } finally {
       setRescheduling(false);
     }
@@ -226,9 +227,9 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
 
     setAppointment(data as unknown as Appointment);
 
-    if ((data as any).service_record_id) {
+    if (data.service_record_id) {
       const status = await fetchReviewRequestStatusForService(
-        (data as any).service_record_id,
+        data.service_record_id,
         queryUserId,
       );
       setReviewRequestStatus(status);
@@ -246,14 +247,14 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
       setVehicleSpecs({
         oil_type: data.vehicle.oil_type || specs?.oil_type || undefined,
         oil_capacity: data.vehicle.oil_capacity || specs?.oil_capacity || undefined,
-        engine: (data.vehicle as any).engine || specs?.engine || undefined,
+        engine: data.vehicle.engine || specs?.engine || undefined,
       });
     } else {
       setVehicleSpecs(null);
     }
 
     // Resolve address: prefer customer → appointment location_address → email lookup
-    let address = data.customer?.address || (data as any).location_address || null;
+    let address = data.customer?.address || data.location_address || null;
     if (!address && data.guest_email) {
       const { data: matchedCustomer } = await fetchCustomerAddressByGuestEmail(data.guest_email, queryUserId);
       address = matchedCustomer?.address || null;
@@ -276,10 +277,24 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
       const user = await getCurrentAuthUser();
       if (!user) return;
       const { data } = await fetchAppointmentFeeSettings(overrideUserId || user.id);
-      if (data) setFeeSettings(data as any);
+      if (data) {
+        setFeeSettings({
+          waste_oil_fee_enabled: data.waste_oil_fee_enabled ?? false,
+          waste_oil_fee: data.waste_oil_fee ?? 0,
+          shop_fee_enabled: data.shop_fee_enabled ?? false,
+          shop_fee_type: data.shop_fee_type ?? "fixed",
+          shop_fee_value: data.shop_fee_value ?? 0,
+          shop_fee_description: data.shop_fee_description ?? "",
+          surcharge_enabled: data.surcharge_enabled ?? false,
+          surcharge_type: data.surcharge_type ?? "fixed",
+          surcharge_value: data.surcharge_value ?? 0,
+          surcharge_description: data.surcharge_description ?? "",
+          tax_rate: data.tax_rate,
+        });
+      }
     };
     fetchFees();
-  }, []);
+  }, [overrideUserId]);
 
   const handleEditSuccess = () => {
     fetchAppointment();
@@ -298,7 +313,7 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
       toast.success(`Appointment ${newStatus === 'cancelled' ? 'cancelled' : 'updated'}`);
       fetchAppointment();
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to update status';
+      const message = err instanceof Error ? errorMessage(err) : 'Failed to update status';
       toast.error(message);
     }
   };
@@ -344,24 +359,19 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
     }
   };
 
-  // Conditional layout wrapper
-  const Layout = embedded 
-    ? ({ children }: { children: React.ReactNode }) => <div className="flex-1 overflow-y-auto">{children}</div>
-    : ({ children }: { children: React.ReactNode }) => <AppLayout title="Appointment Details">{children}</AppLayout>;
-
   if (loading) {
     return (
-      <Layout>
+      <AppointmentDetailLayout embedded={embedded}>
         <div className="flex items-center justify-center h-64">
           <Loader2 className="w-8 h-8 animate-spin text-primary" />
         </div>
-      </Layout>
+      </AppointmentDetailLayout>
     );
   }
 
   if (error || !appointment) {
     return (
-      <Layout>
+      <AppointmentDetailLayout embedded={embedded}>
         <div className="max-w-md mx-auto text-center py-12 space-y-4">
           <h1 className="text-xl font-semibold">Appointment unavailable</h1>
           <p className="text-muted-foreground">{error ?? 'This appointment could not be found.'}</p>
@@ -369,7 +379,7 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
             Back
           </Button>
         </div>
-      </Layout>
+      </AppointmentDetailLayout>
     );
   }
 
@@ -400,7 +410,7 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
   const canReactivate = appointment.status === 'cancelled' || appointment.status === 'no_show';
 
   return (
-    <Layout>
+    <AppointmentDetailLayout embedded={embedded}>
       <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -549,19 +559,19 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
                         )}
                       </div>
                       {/* Tire specification — tire jobs show tire size, never oil */}
-                      {isTireJob && (appointment.vehicle as any)?.tire_size && (
+                      {isTireJob && appointment.vehicle?.tire_size && (
                         <div className="border-t pt-2 mt-2 space-y-1">
                           <p className="text-sm">
-                            <span className="text-muted-foreground">Tire Size:</span> {(appointment.vehicle as any).tire_size}
-                            {(appointment.vehicle as any).tire_size_source === 'oe' && (
+                            <span className="text-muted-foreground">Tire Size:</span> {appointment.vehicle.tire_size}
+                            {appointment.vehicle.tire_size_source === 'oe' && (
                               <span className="ml-2 text-xs text-muted-foreground">(factory)</span>
                             )}
                           </p>
-                          {(appointment.vehicle as any).tire_load_index && (
-                            <p className="text-sm"><span className="text-muted-foreground">Load Index:</span> {(appointment.vehicle as any).tire_load_index}</p>
+                          {appointment.vehicle.tire_load_index && (
+                            <p className="text-sm"><span className="text-muted-foreground">Load Index:</span> {appointment.vehicle.tire_load_index}</p>
                           )}
-                          {(appointment.vehicle as any).tire_speed_rating && (
-                            <p className="text-sm"><span className="text-muted-foreground">Speed Rating:</span> {(appointment.vehicle as any).tire_speed_rating}</p>
+                          {appointment.vehicle.tire_speed_rating && (
+                            <p className="text-sm"><span className="text-muted-foreground">Speed Rating:</span> {appointment.vehicle.tire_speed_rating}</p>
                           )}
                         </div>
                       )}
@@ -973,8 +983,13 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
         appointment={appointment}
         onSuccess={handleCompleteSuccess}
       />
-    </Layout>
+    </AppointmentDetailLayout>
   );
 };
+
+function AppointmentDetailLayout({ embedded, children }: { embedded: boolean; children: React.ReactNode }) {
+  if (embedded) return <div className="flex-1 overflow-y-auto">{children}</div>;
+  return <AppLayout title="Appointment Details">{children}</AppLayout>;
+}
 
 export default AppointmentDetail;

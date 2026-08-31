@@ -15,12 +15,14 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { AddPurchaseOrderDialog } from "@/components/fleet/AddPurchaseOrderDialog";
+import { currentTimeMs } from "@/lib/datetime";
 
 const FleetPurchaseOrdersPage = () => {
   const [pos, setPos] = useState<FleetPurchaseOrderSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [now] = useState(currentTimeMs);
 
   const loadPos = async () => {
     try {
@@ -34,7 +36,7 @@ const FleetPurchaseOrdersPage = () => {
   };
 
   useEffect(() => {
-    loadPos();
+    void Promise.resolve().then(() => loadPos());
   }, []);
 
   const filtered = pos.filter((p) => {
@@ -106,7 +108,7 @@ const FleetPurchaseOrdersPage = () => {
               const isNearLimit = utilizationPct !== null && utilizationPct >= 80;
               const isExpiringSoon =
                 p.expiry_date &&
-                new Date(p.expiry_date).getTime() - Date.now() < 30 * 24 * 60 * 60 * 1000 &&
+                new Date(p.expiry_date).getTime() - now < 30 * 24 * 60 * 60 * 1000 &&
                 p.status !== "closed" &&
                 p.status !== "expired";
 

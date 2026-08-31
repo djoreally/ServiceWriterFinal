@@ -32,7 +32,7 @@ export const Sidebar = () => {
   const mode = "daily" as SidebarMode;
 
   useEffect(() => {
-    setCompact(window.localStorage.getItem(SIDEBAR_COMPACT_KEY) === "true");
+    void Promise.resolve().then(() => setCompact(window.localStorage.getItem(SIDEBAR_COMPACT_KEY) === "true"));
   }, []);
 
   const allNavGroups = useMemo(() => getNavGroups(terms, role), [terms, role]);

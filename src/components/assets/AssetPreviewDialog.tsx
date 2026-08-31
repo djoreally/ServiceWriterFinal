@@ -18,20 +18,20 @@ export function AssetPreviewDialog({ asset, onOpenChange }: Props) {
 
   useEffect(() => {
     if (!asset) {
-      setUrl(null);
-      setFailed(false);
+      void Promise.resolve().then(() => setUrl(null));
+      void Promise.resolve().then(() => setFailed(false));
       return;
     }
     let cancelled = false;
-    setLoading(true);
-    setFailed(false);
-    safeGetSignedUrl(asset.storage_path, 3600)
+    void Promise.resolve().then(() => setLoading(true));
+    void Promise.resolve().then(() => setFailed(false));
+    void Promise.resolve().then(() => safeGetSignedUrl(asset.storage_path, 3600)
       .then((u) => {
         if (cancelled) return;
         if (u) setUrl(u);
         else setFailed(true);
       })
-      .finally(() => !cancelled && setLoading(false));
+      .finally(() => !cancelled && setLoading(false)));
     return () => {
       cancelled = true;
     };

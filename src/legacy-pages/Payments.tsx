@@ -136,8 +136,8 @@ const Payments = () => {
 
 
   useEffect(() => {
-    fetchPayments();
-    fetchStripeStatus();
+    void Promise.resolve().then(() => fetchPayments());
+    void Promise.resolve().then(() => fetchStripeStatus());
   }, []);
 
   const handleRefresh = async () => {

@@ -4,7 +4,7 @@
 import { supabase } from "@/integrations/supabase/client";
 
 /** Get Google Calendar connection status */
-export async function getGoogleCalendarStatus(): Promise<any> {
+export async function getGoogleCalendarStatus() {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error("Not authenticated");
 
