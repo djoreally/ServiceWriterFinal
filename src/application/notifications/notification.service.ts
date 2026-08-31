@@ -190,7 +190,7 @@ async function sendEmail(payload: EmailPayload): Promise<void> {
     const activeWorkspaceId = session?.user?.user_metadata?.workspace_id;
 
     if (activeWorkspaceId) {
-      const { error: outboxError } = await supabase.from("outbox_emails").insert({
+      const { error: outboxError } = await (supabase as any).from("outbox_emails").insert({
         workspace_id: activeWorkspaceId,
         recipient_email: payload.to,
         template_key: payload.type,
