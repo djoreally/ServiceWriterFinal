@@ -12,6 +12,7 @@ import { productionSupabase } from "@/integrations/supabase/client";
 import type { Database, Json } from "@/integrations/supabase/types.production";
 import type { Terminology } from "@/contexts/TerminologyContext";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
 export interface BusinessProfileSettings {
   id?: string;
@@ -62,14 +63,37 @@ export async function resolveCurrentWorkspace(): Promise<WorkspaceContext | null
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return null;
 
-  const { data: membership, error: membershipError } = await productionSupabase
+  const selectedWorkspaceId = getSelectedWorkspaceId();
+  let membershipQuery = productionSupabase
     .from("workspace_members")
     .select("workspace_id")
     .eq("user_id", user.id)
-    .eq("is_active", true)
+    .eq("is_active", true);
+
+  // Every workspace-scoped surface must honor the workspace selected in the
+  // application shell. Previously this resolver used an unordered limit(1),
+  // so users with multiple memberships could see the dashboard for one shop
+  // while the appointments API and calendar loaded another.
+  if (selectedWorkspaceId) {
+    membershipQuery = membershipQuery.eq("workspace_id", selectedWorkspaceId);
+  }
+
+  let { data: membership, error: membershipError } = await membershipQuery
     .limit(1)
     .maybeSingle();
   if (membershipError) throw membershipError;
+  if (!membership && selectedWorkspaceId) {
+    const fallback = await productionSupabase
+      .from("workspace_members")
+      .select("workspace_id")
+      .eq("user_id", user.id)
+      .eq("is_active", true)
+      .limit(1)
+      .maybeSingle();
+    membership = fallback.data;
+    membershipError = fallback.error;
+    if (membershipError) throw membershipError;
+  }
   if (membership?.workspace_id) return { workspaceId: membership.workspace_id, userId: user.id };
 
   const { data: owned, error: ownedError } = await productionSupabase

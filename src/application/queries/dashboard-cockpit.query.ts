@@ -11,7 +11,7 @@
  */
 import type { Dollars } from '@/lib/money';
 import { errorMessage } from "@/lib/error-message";
-import { supabase } from '@/integrations/supabase/client';
+import { productionSupabase, supabase } from '@/integrations/supabase/client';
 import {
   format,
   startOfWeek,
@@ -408,19 +408,19 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
       .select('net_collected_cents')
       .gte('collected_at', prevMonthStart)
       .lte('collected_at', prevMonthMtdEnd),
-    supabase
+    productionSupabase
       .from('appointments')
-      .select('id, title, starts_at, status, guest_name, estimated_cost, metadata')
+      .select('id, starts_at, status, metadata')
       .gte('starts_at', `${today}T00:00:00`)
       .lte('starts_at', `${today}T23:59:59`)
-      .in('status', ['confirmed', 'pending', 'in_progress', 'requested'])
+      .in('status', ['confirmed', 'in_progress', 'requested'])
       .order('starts_at', { ascending: true }),
-    supabase
+    productionSupabase
       .from('appointments')
-      .select('id, title, starts_at, status, guest_name, estimated_cost, metadata')
+      .select('id, starts_at, status, metadata')
       .gt('starts_at', `${today}T23:59:59`)
       .lte('starts_at', `${next7}T23:59:59`)
-      .in('status', ['confirmed', 'pending', 'requested'])
+      .in('status', ['confirmed', 'requested'])
       .order('starts_at', { ascending: true })
       .limit(10),
     supabase

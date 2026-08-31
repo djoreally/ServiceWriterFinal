@@ -2,7 +2,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase";
 import { EnginemailerEmailAdapter } from "@/server/messaging/enginemailer";
 import { renderLifecycleEmail, type LifecycleVariables } from "@/server/messaging/lifecycle-templates";
 import type { LifecyclePurpose } from "@/server/messaging/lifecycle-templates";
-import type { MessagingAdapter } from "@/server/messaging/types";
+import type { MessagingAdapter, ProviderSendResult } from "@/server/messaging/types";
 
 export type LifecycleSendInput = {
   workspaceId: string;
@@ -140,8 +140,9 @@ export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ p
 
   if (queued.error) throw queued.error;
 
+  let sent: ProviderSendResult;
   try {
-    const sent = await adapter.send({
+    sent = await adapter.send({
       workspaceId: input.workspaceId,
       recipient: { email: recipientEmail },
       purpose: rendered.purpose,
@@ -154,16 +155,6 @@ export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ p
       idempotencyKey: input.idempotencyKey,
       metadata: input.metadata ?? {},
     });
-    const updated = await supabase.from("message_logs").update({
-      provider_message_id: sent.providerMessageId,
-      status: sent.status,
-      sent_at: sent.acceptedAt,
-      failure_code: null,
-      failure_reason: null,
-      failed_at: null,
-    }).eq("id", queued.data.id);
-    if (updated.error) throw updated.error;
-    return sent;
   } catch (error) {
     await supabase.from("message_logs").update({
       status: "failed",
@@ -172,6 +163,24 @@ export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ p
     }).eq("id", queued.data.id);
     throw error;
   }
+
+  const updated = await supabase.from("message_logs").update({
+    provider_message_id: sent.providerMessageId,
+    status: sent.status,
+    sent_at: sent.acceptedAt,
+    failure_code: null,
+    failure_reason: null,
+    failed_at: null,
+  }).eq("id", queued.data.id);
+  if (updated.error) {
+    // Provider acceptance is the irreversible boundary. A bookkeeping failure
+    // after that point must not turn into a retry and duplicate the email.
+    console.error("[Lifecycle] provider accepted email but message log update failed", {
+      messageLogId: queued.data.id,
+      provider: adapter.providerName,
+    });
+  }
+  return sent;
 }
 
 export async function processLifecycleEventOutbox(limit = 50, workerId = `vercel:${crypto.randomUUID()}`) {

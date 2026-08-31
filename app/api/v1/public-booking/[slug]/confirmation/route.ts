@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createSupabaseAdminClient, createSupabaseServerClient } from "@/lib/supabase";
+import { createSupabaseAdminClient } from "@/lib/supabase";
 import { errorResponse, json } from "@/server/api";
 import { sendBookingConfirmation } from "@/server/messaging/booking-confirmation";
 
@@ -22,19 +22,24 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
   try {
     const slug = slugSchema.parse((await context.params).slug);
     const body = bodySchema.parse(await request.json());
-    const publicClient = await createSupabaseServerClient();
-    const profileResult = await (publicClient as any).rpc("get_public_booking_profile_v2", { booking_slug_param: slug });
-    if (profileResult.error || !Array.isArray(profileResult.data) || !profileResult.data[0]?.user_id) {
+    const admin = createSupabaseAdminClient();
+    // Resolve the exact workspace from the canonical booking slug. Booking
+    // creation uses this same workspace_settings mapping; selecting an owner's
+    // first workspace here breaks confirmation for multi-workspace owners.
+    const bookingSettingsResult = await admin.from("workspace_settings")
+      .select("workspace_id")
+      .eq("booking_slug", slug)
+      .eq("booking_enabled", true)
+      .limit(1)
+      .single();
+    if (bookingSettingsResult.error || !bookingSettingsResult.data?.workspace_id) {
       return json({ error: { code: "booking_unavailable", message: "Booking provider unavailable" } }, { status: 404 });
     }
 
-    const admin = createSupabaseAdminClient();
     const workspaceResult = await admin.from("workspaces")
       .select("id,name,timezone")
-      .eq("created_by", profileResult.data[0].user_id)
+      .eq("id", bookingSettingsResult.data.workspace_id)
       .eq("is_active", true)
-      .order("created_at")
-      .limit(1)
       .single();
     if (workspaceResult.error || !workspaceResult.data) {
       return json({ error: { code: "booking_unavailable", message: "Booking provider unavailable" } }, { status: 404 });
