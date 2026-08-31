@@ -9,7 +9,7 @@ import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 interface UpcomingItem {
   id: string;
   title: string;
-  date: Date;
+  date: Date | string;
   time?: string;
   vehicle?: string;
   status: "confirmed" | "pending";
@@ -34,15 +34,25 @@ export const UpcomingSection = ({ items }: UpcomingSectionProps) => {
     }
   };
   // determine the next upcoming appointment (earliest active date/time)
+  const parseItemDate = (d: Date | string): Date => {
+    if (d instanceof Date) return d;
+    const parsed = new Date(d);
+    return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  };
+
   const nextItem = items && items.length > 0
     ? items
         .slice()
         .sort((a, b) => {
-          const aTime = new Date(`${format(new Date(a.date), "yyyy-MM-dd")}T${a.time || "00:00"}`).getTime();
-          const bTime = new Date(`${format(new Date(b.date), "yyyy-MM-dd")}T${b.time || "00:00"}`).getTime();
+          const aDateObj = parseItemDate(a.date);
+          const bDateObj = parseItemDate(b.date);
+          const aTime = new Date(`${format(aDateObj, "yyyy-MM-dd")}T${a.time || "00:00"}`).getTime();
+          const bTime = new Date(`${format(bDateObj, "yyyy-MM-dd")}T${b.time || "00:00"}`).getTime();
           return aTime - bTime;
         })[0]
     : null;
+
+  const nextItemDateObj = nextItem ? parseItemDate(nextItem.date) : null;
 
   return (
     <Card className="border border-border/50">
@@ -81,16 +91,16 @@ export const UpcomingSection = ({ items }: UpcomingSectionProps) => {
           >
             <div className="flex flex-col items-center bg-primary/10 rounded-lg px-3 py-2 min-w-[56px]">
               <span className="text-[10px] font-medium text-primary uppercase">
-                {format(new Date(nextItem.date), "MMM")}
+                {nextItemDateObj ? format(nextItemDateObj, "MMM") : ""}
               </span>
               <span className="text-xl font-bold text-primary">
-                {format(new Date(nextItem.date), "dd")}
+                {nextItemDateObj ? format(nextItemDateObj, "dd") : ""}
               </span>
             </div>
             <div className="flex-1 min-w-0 pt-1">
               <p className="font-medium text-sm text-foreground truncate">{nextItem.title}</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {nextItem.time ? formatTime(nextItem.time) : format(new Date(nextItem.date), "h:mm a")}
+                {nextItem.time ? formatTime(nextItem.time) : (nextItemDateObj ? format(nextItemDateObj, "h:mm a") : "")}
                 {nextItem.vehicle && ` • ${nextItem.vehicle}`}
               </p>
               <Badge

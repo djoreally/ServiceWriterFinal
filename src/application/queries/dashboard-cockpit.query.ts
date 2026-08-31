@@ -410,20 +410,18 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
       .lte('collected_at', prevMonthMtdEnd),
     supabase
       .from('appointments')
-      .select('id, title, scheduled_date, scheduled_time, status, guest_name, estimated_cost')
-      .neq('source', 'fleet_work_order')
-      .eq('scheduled_date', today)
-      .in('status', ['confirmed', 'pending', 'in_progress'])
-      .order('scheduled_time', { ascending: true }),
+      .select('id, title, starts_at, status, guest_name, estimated_cost, metadata')
+      .gte('starts_at', `${today}T00:00:00`)
+      .lte('starts_at', `${today}T23:59:59`)
+      .in('status', ['confirmed', 'pending', 'in_progress', 'requested'])
+      .order('starts_at', { ascending: true }),
     supabase
       .from('appointments')
-      .select('id, title, scheduled_date, scheduled_time, status, guest_name, estimated_cost')
-      .neq('source', 'fleet_work_order')
-      .gt('scheduled_date', today)
-      .lte('scheduled_date', next7)
-      .in('status', ['confirmed', 'pending'])
-      .order('scheduled_date', { ascending: true })
-      .order('scheduled_time', { ascending: true })
+      .select('id, title, starts_at, status, guest_name, estimated_cost, metadata')
+      .gt('starts_at', `${today}T23:59:59`)
+      .lte('starts_at', `${next7}T23:59:59`)
+      .in('status', ['confirmed', 'pending', 'requested'])
+      .order('starts_at', { ascending: true })
       .limit(10),
     supabase
       .from('services')
@@ -562,8 +560,46 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
     started_at: s.service_date || null,
   }));
 
-  const todaysAppointments = (todayAppts.data || []) as CockpitAppointment[];
-  const upcomingNext7 = ((upcoming7.data || []) as CockpitAppointment[])
+  type ApptRawRow = {
+    id: string;
+    title?: string | null;
+    starts_at?: string | null;
+    scheduled_date?: string | null;
+    scheduled_time?: string | null;
+    status: string;
+    guest_name?: string | null;
+    estimated_cost?: number | null;
+    metadata?: unknown;
+  };
+
+  function mapApptRow(row: ApptRawRow): CockpitAppointment {
+    const meta = row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+      ? (row.metadata as Record<string, unknown>)
+      : {};
+    let schedDate = row.scheduled_date ?? '';
+    let schedTime = row.scheduled_time ?? null;
+    if (row.starts_at) {
+      const dt = new Date(row.starts_at);
+      if (!Number.isNaN(dt.getTime())) {
+        schedDate = format(dt, 'yyyy-MM-dd');
+        schedTime = format(dt, 'HH:mm');
+      }
+    }
+    const apptTitle = row.title || String(meta.title ?? meta.service_name ?? 'Appointment');
+    return {
+      id: row.id,
+      title: apptTitle,
+      scheduled_date: schedDate,
+      scheduled_time: schedTime,
+      status: row.status,
+      guest_name: row.guest_name ?? (typeof meta.guest_name === 'string' ? meta.guest_name : null),
+      estimated_cost: row.estimated_cost ?? (meta.estimated_cost != null ? Number(meta.estimated_cost) : null),
+    };
+  }
+
+  const todaysAppointments = ((todayAppts.data || []) as ApptRawRow[]).map(mapApptRow);
+  const upcomingNext7 = ((upcoming7.data || []) as ApptRawRow[])
+    .map(mapApptRow)
     .map((a) => ({
       a,
       ts: parseISO(`${a.scheduled_date}T${a.scheduled_time || '00:00'}`),
