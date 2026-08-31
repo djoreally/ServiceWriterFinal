@@ -1,4 +1,3 @@
-const createSupabaseServerClient = jest.fn();
 const createSupabaseAdminClient = jest.fn();
 const sendBookingConfirmation = jest.fn();
 
@@ -22,7 +21,6 @@ jest.mock("@/server/api", () => ({
 }));
 
 jest.mock("@/lib/supabase", () => ({
-  createSupabaseServerClient: (...args: unknown[]) => createSupabaseServerClient(...args),
   createSupabaseAdminClient: (...args: unknown[]) => createSupabaseAdminClient(...args),
 }));
 
@@ -60,15 +58,16 @@ function queryResult(result: unknown) {
 describe("public booking confirmation route", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    createSupabaseServerClient.mockResolvedValue({
-      rpc: jest.fn().mockResolvedValue({ data: [{ user_id: "owner-1" }], error: null }),
-    });
     sendBookingConfirmation.mockResolvedValue({ status: "accepted", providerMessageId: "em-1" });
   });
 
   it("binds confirmation delivery to the appointment workspace and guest email", async () => {
     const workspace = queryResult({
       data: { id: "00000000-0000-4000-8000-000000000001", name: "MOMS", timezone: "America/New_York" },
+      error: null,
+    });
+    const bookingSettings = queryResult({
+      data: { workspace_id: "00000000-0000-4000-8000-000000000001" },
       error: null,
     });
     const appointment = {
@@ -86,6 +85,7 @@ describe("public booking confirmation route", () => {
     const consents = queryResult({ data: null, error: null });
     createSupabaseAdminClient.mockReturnValue({
       from: jest.fn((table: string) => {
+        if (table === "workspace_settings") return bookingSettings;
         if (table === "workspaces") return workspace;
         if (table === "appointments") return appointments;
         if (table === "messaging_consents") return consents;
@@ -115,6 +115,10 @@ describe("public booking confirmation route", () => {
       data: { id: "00000000-0000-4000-8000-000000000001", name: "MOMS", timezone: "America/New_York" },
       error: null,
     });
+    const bookingSettings = queryResult({
+      data: { workspace_id: "00000000-0000-4000-8000-000000000001" },
+      error: null,
+    });
     const appointments = queryResult({
       data: {
         id: "00000000-0000-4000-8000-000000000002",
@@ -124,7 +128,11 @@ describe("public booking confirmation route", () => {
       error: null,
     });
     createSupabaseAdminClient.mockReturnValue({
-      from: jest.fn((table: string) => table === "workspaces" ? workspace : appointments),
+      from: jest.fn((table: string) => {
+        if (table === "workspace_settings") return bookingSettings;
+        if (table === "workspaces") return workspace;
+        return appointments;
+      }),
     });
 
     const response = await POST(request({
@@ -134,5 +142,49 @@ describe("public booking confirmation route", () => {
 
     expect(response.status).toBe(404);
     expect(sendBookingConfirmation).not.toHaveBeenCalled();
+  });
+
+  it("uses the workspace bound to the booking slug instead of the owner's first workspace", async () => {
+    const bookingSettings = queryResult({
+      data: { workspace_id: "00000000-0000-4000-8000-000000000009" },
+      error: null,
+    });
+    const workspace = queryResult({
+      data: { id: "00000000-0000-4000-8000-000000000009", name: "Slug Workspace", timezone: "America/New_York" },
+      error: null,
+    });
+    const appointment = {
+      id: "00000000-0000-4000-8000-000000000002",
+      workspace_id: "00000000-0000-4000-8000-000000000009",
+      customer_id: null,
+      starts_at: "2026-09-01T14:00:00.000Z",
+      ends_at: "2026-09-01T15:00:00.000Z",
+      status: "confirmed",
+      notes: null,
+      metadata: { guest_email: "customer@example.com" },
+      created_at: "2026-08-31T00:00:00.000Z",
+    };
+    const appointments = queryResult({ data: appointment, error: null });
+    const consents = queryResult({ data: null, error: null });
+    const from = jest.fn((table: string) => {
+      if (table === "workspace_settings") return bookingSettings;
+      if (table === "workspaces") return workspace;
+      if (table === "appointments") return appointments;
+      if (table === "messaging_consents") return consents;
+      throw new Error(`Unexpected table ${table}`);
+    });
+    createSupabaseAdminClient.mockReturnValue({ from });
+
+    const response = await POST(request({
+      appointment_id: appointment.id,
+      email: "customer@example.com",
+    }), { params: Promise.resolve({ slug: "moms" }) });
+
+    expect(response.status).toBe(200);
+    expect(from).toHaveBeenCalledWith("workspace_settings");
+    expect(sendBookingConfirmation).toHaveBeenCalledWith(expect.objectContaining({
+      appointment,
+      workspaceName: "Slug Workspace",
+    }));
   });
 });

@@ -87,12 +87,12 @@ describe("Enginemailer marketing adapter", () => {
     }));
   });
 
-  it("fails closed when Enginemailer does not return a transaction ID", async () => {
+  it("records a successful submission without a transaction ID as accepted and does not invite a retry", async () => {
     global.fetch = jest.fn()
       .mockResolvedValueOnce(jsonResponse({ Result: { Status: "OK", StatusCode: "200" } }))
       .mockResolvedValueOnce(jsonResponse({ Result: { Status: "OK", StatusCode: "200" } })) as typeof fetch;
 
-    await expect(new EnginemailerEmailAdapter().send({
+    const request = {
       workspaceId: "00000000-0000-4000-8000-000000000001",
       recipient: { email: "customer@example.com" },
       purpose: "marketing",
@@ -102,7 +102,35 @@ describe("Enginemailer marketing adapter", () => {
       html: "<html><body>Review request</body></html>",
       idempotencyKey: "review:ABC12345:customer@example.com",
       metadata: {},
-    })).rejects.toThrow(/transaction ID/i);
+    } as const;
+
+    const result = await new EnginemailerEmailAdapter().send(request);
+
+    expect(result).toEqual(expect.objectContaining({
+      providerName: "enginemailer",
+      providerMessageId: expect.stringMatching(/^accepted-untracked:[a-f0-9]{32}$/),
+      status: "accepted",
+    }));
+  });
+
+  it.each([
+    [{ Result: { Status: "OK", StatusCode: "200", TxID: 12345 } }, "12345"],
+    [{ CampaignTxID: "campaign-789" }, "campaign-789"],
+  ])("normalizes alternate Enginemailer transaction ID fields", async (payload, expectedId) => {
+    global.fetch = jest.fn().mockResolvedValueOnce(jsonResponse(payload)) as typeof fetch;
+
+    const result = await new EnginemailerEmailAdapter().send({
+      workspaceId: "00000000-0000-4000-8000-000000000001",
+      recipient: { email: "customer@example.com" },
+      purpose: "transactional",
+      templateKey: "booking_confirmation",
+      subject: "Booking confirmed",
+      body: "Confirmed",
+      idempotencyKey: `booking:ABC12345:${expectedId}:customer@example.com`,
+      metadata: {},
+    });
+
+    expect(result.providerMessageId).toBe(expectedId);
   });
 
   it("verifies signed webhooks and normalizes unsubscribe events", () => {

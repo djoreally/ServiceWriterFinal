@@ -17,6 +17,8 @@ type EnginemailerResult = {
     TransactionID?: string;
     TransactionId?: string;
     transaction_id?: string;
+    TxID?: string | number;
+    CampaignTxID?: string | number;
     Status?: string;
     StatusCode?: string | number;
     ErrorMessage?: string;
@@ -24,19 +26,36 @@ type EnginemailerResult = {
   TransactionID?: string;
   TransactionId?: string;
   transaction_id?: string;
+  TxID?: string | number;
+  CampaignTxID?: string | number;
   id?: string;
   message?: string;
 };
 
 function providerMessageId(payload: EnginemailerResult): string | undefined {
   const result = payload.Result;
-  return result?.TransactionID
+  const value = result?.TransactionID
     ?? result?.TransactionId
     ?? result?.transaction_id
+    ?? result?.TxID
+    ?? result?.CampaignTxID
     ?? payload.TransactionID
     ?? payload.TransactionId
     ?? payload.transaction_id
+    ?? payload.TxID
+    ?? payload.CampaignTxID
     ?? payload.id;
+  return value === undefined || value === null || String(value).trim() === ""
+    ? undefined
+    : String(value);
+}
+
+function untrackedAcceptedId(idempotencyKey: string): string {
+  // Some successful Enginemailer submissions do not include a transaction ID.
+  // A stable, non-PII local identifier prevents an accepted submission from
+  // being retried (and potentially delivered repeatedly) while making the
+  // reduced webhook correlation explicit in message_logs.
+  return `accepted-untracked:${createHash("sha256").update(idempotencyKey).digest("hex").slice(0, 32)}`;
 }
 
 function responseError(payload: EnginemailerResult, status: number): string {
@@ -120,8 +139,7 @@ export class EnginemailerEmailAdapter implements MessagingAdapter {
     const payload = request.purpose === "marketing"
       ? await this.sendMarketing(request, content)
       : await this.sendTransactional(request, content);
-    const messageId = providerMessageId(payload);
-    if (!messageId) throw new Error("Enginemailer accepted the request without a transaction ID");
+    const messageId = providerMessageId(payload) ?? untrackedAcceptedId(request.idempotencyKey);
     return {
       providerMessageId: messageId,
       providerName: this.providerName,
