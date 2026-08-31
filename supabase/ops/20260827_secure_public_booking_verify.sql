@@ -1,10 +1,10 @@
 -- Service Writer post-migration verification. Run after applying
--- 20260827100000_secure_public_booking_rpc_context.sql.
+-- 20260831030526_secure_public_booking_rpc_context.sql.
 
 select json_build_object(
   'migration_recorded', exists (
     select 1 from supabase_migrations.schema_migrations
-    where version = '20260827100000'
+    where version = '20260831030526'
   ),
   'public_booking_functions', (
     select count(*) = 8

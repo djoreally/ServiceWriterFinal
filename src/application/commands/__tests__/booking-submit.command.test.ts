@@ -51,7 +51,7 @@ describe("bookAppointmentSafe", () => {
 
 describe("public booking appointment migration contract", () => {
   const migration = readFileSync(
-    join(process.cwd(), "supabase/migrations/20260827100000_secure_public_booking_rpc_context.sql"),
+    join(process.cwd(), "supabase/migrations/20260831030526_secure_public_booking_rpc_context.sql"),
     "utf8",
   );
 

@@ -1,4 +1,4 @@
--- Secure public booking RPC context migration.
+-- Secure public booking RPC context migration (production version 20260831030526).
 -- Public callers provide the canonical booking slug; the database resolves the
 -- workspace and business owner. Caller-supplied business_user_id is removed
 -- from the public contract and legacy mutation RPCs become server-only.
