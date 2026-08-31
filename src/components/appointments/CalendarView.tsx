@@ -86,18 +86,36 @@ export const CalendarView = ({
     }
   };
 
+  const getApptDateAndSlotTime = (a: CalendarAppointment): { dateStr: string; timeStr: string } => {
+    let dateStr = a.scheduled_date ?? "";
+    let timeStr = (a.scheduled_time || "").slice(0, 5);
+
+    // If scheduled_date is missing or empty, derive from starts_at if available on raw object
+    const rawStartsAt = (a as unknown as { starts_at?: string }).starts_at;
+    if ((!dateStr || !timeStr) && rawStartsAt) {
+      const dt = parseISO(rawStartsAt);
+      if (!Number.isNaN(dt.getTime())) {
+        if (!dateStr) dateStr = format(dt, "yyyy-MM-dd");
+        if (!timeStr) timeStr = format(dt, "HH:mm");
+      }
+    }
+    return { dateStr, timeStr };
+  };
+
   const getAppointmentsForDay = (date: Date) => {
-    const dateStr = format(date, "yyyy-MM-dd");
-    return appointments.filter(a => a.scheduled_date === dateStr);
+    const targetDateStr = format(date, "yyyy-MM-dd");
+    return appointments.filter((a) => {
+      const { dateStr } = getApptDateAndSlotTime(a);
+      return dateStr === targetDateStr;
+    });
   };
 
   const getAppointmentsForSlot = (date: Date, time: string) => {
-    const dateStr = format(date, "yyyy-MM-dd");
-    return appointments.filter(a => {
-      if (a.scheduled_date !== dateStr) return false;
-      const slotTime = time;
-      const appointmentTime = a.scheduled_time.slice(0, 5);
-      return appointmentTime === slotTime;
+    const targetDateStr = format(date, "yyyy-MM-dd");
+    const targetTimeStr = time.slice(0, 5);
+    return appointments.filter((a) => {
+      const { dateStr, timeStr } = getApptDateAndSlotTime(a);
+      return dateStr === targetDateStr && timeStr === targetTimeStr;
     });
   };
 

@@ -106,7 +106,12 @@ export function CustomerServiceHistoryTab({ account }: Props) {
       ) : (
         <div className="space-y-3">
           {records.map((record) => {
-            const date = parseISO(record.scheduled_date);
+            const parseRecordDate = (dateStr?: string | null): Date | null => {
+              if (!dateStr) return null;
+              const parsed = parseISO(dateStr);
+              return Number.isNaN(parsed.getTime()) ? null : parsed;
+            };
+            const date = parseRecordDate(record.scheduled_date);
             const isExpanded = expandedId === record.id;
 
             return (
@@ -140,7 +145,7 @@ export function CustomerServiceHistoryTab({ account }: Props) {
                       <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
                         <div className="flex items-center gap-1">
                           <Calendar className="h-4 w-4" />
-                          <span>{format(date, "MMM d, yyyy")}</span>
+                          <span>{date ? format(date, "MMM d, yyyy") : "—"}</span>
                         </div>
                         {record.duration_minutes > 0 && (
                           <div className="flex items-center gap-1">
@@ -209,19 +214,21 @@ export function CustomerServiceHistoryTab({ account }: Props) {
                           <p className="font-medium text-muted-foreground">
                             Service Date
                           </p>
-                          <p>{format(date, "EEEE, MMMM d, yyyy")}</p>
+                          <p>{date ? format(date, "EEEE, MMMM d, yyyy") : "—"}</p>
                         </div>
                         <div>
                           <p className="font-medium text-muted-foreground">
                             Time
                           </p>
                           <p>
-                            {format(
-                              parseISO(
-                                `${record.scheduled_date}T${record.scheduled_time}`
-                              ),
-                              "h:mm a"
-                            )}
+                            {(() => {
+                              const sDate = record.scheduled_date || "2000-01-01";
+                              const sTime = record.scheduled_time || "00:00:00";
+                              const parsed = parseISO(`${sDate}T${sTime}`);
+                              return Number.isNaN(parsed.getTime())
+                                ? "—"
+                                : format(parsed, "h:mm a");
+                            })()}
                           </p>
                         </div>
                         {record.actual_start_time && (

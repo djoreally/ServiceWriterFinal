@@ -26,9 +26,15 @@ function relativeLabel(date: Date): string {
 }
 
 export function UpcomingAppointmentWidget({ appointment }: Props) {
-  const apptDate = parseISO(
-    `${appointment.scheduled_date}T${appointment.scheduled_time}`,
-  );
+  const parseApptDate = (): Date => {
+    if (!appointment.scheduled_date) return new Date();
+    const timeStr = appointment.scheduled_time || "00:00:00";
+    const isoCandidate = `${appointment.scheduled_date}T${timeStr}`;
+    const parsed = parseISO(isoCandidate);
+    return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+  };
+
+  const apptDate = parseApptDate();
 
   return (
     <Card className="border-primary/30 bg-gradient-to-br from-primary/5 via-card to-card overflow-hidden">

@@ -135,6 +135,28 @@ export async function saveAppointment(
     console.warn("[saveAppointment] provider sync failed", syncError);
   });
 
+  const recipientEmail = formData.guest_email?.trim();
+  if (recipientEmail) {
+    try {
+      const { notifyBookingConfirmation } = await import("@/application/notifications");
+      await notifyBookingConfirmation({
+        recipients: {
+          customerEmail: recipientEmail,
+          customerName: formData.guest_name?.trim() || "Valued Customer",
+          providerEmail: null,
+          providerName: "Service Writer",
+        },
+        serviceName: resolvedTitle,
+        scheduledDate: formData.scheduled_date,
+        scheduledTime: formData.scheduled_time,
+        estimatedDuration: durationMinutes,
+        totalAmount: formData.estimated_cost != null ? `$${formData.estimated_cost}` : undefined,
+      });
+    } catch (notifErr) {
+      console.warn("[saveAppointment] failed to send booking notification", notifErr);
+    }
+  }
+
   return { appointmentId: createdRecord.id, isUpdate: false };
 }
 
