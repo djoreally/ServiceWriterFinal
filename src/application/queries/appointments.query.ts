@@ -175,16 +175,20 @@ function mapCatalog(row: {
 
 function mapAppointment(row: AppointmentApiRow, customerMap: Map<string, Customer>, vehicleMap: Map<string, Vehicle>): AppointmentWithSource {
   const metadata = metadataObject(row.metadata);
-  const customer = row.customer_id ? customerMap.get(row.customer_id) ?? null : null;
+  const customerFromRelation = relatedCustomer(row);
+  const customer = row.customer_id
+    ? customerMap.get(row.customer_id) ?? (customerFromRelation ? mapCustomer(customerFromRelation) : null)
+    : (customerFromRelation ? mapCustomer(customerFromRelation) : null);
   const vehicle = row.vehicle_id ? vehicleMap.get(row.vehicle_id) ?? null : null;
   const startsAt = row.starts_at;
   const endsAt = row.ends_at;
   const start = localDateTime(startsAt);
   const duration = Math.max(15, Math.round((Date.parse(endsAt) - Date.parse(startsAt)) / 60000));
+  const guestName = optionalString(metadata.guest_name);
   const vehicleLabel = vehicle ? `${vehicle.year} ${vehicle.make} ${vehicle.model}` : "Vehicle";
   const title = optionalString(metadata.title)
     ?? optionalString(metadata.service_name)
-    ?? (customer ? `${customer.name} — ${vehicleLabel}` : vehicleLabel);
+    ?? (customer ? `${customer.name} — ${vehicleLabel}` : (guestName ? `${guestName} — ${vehicleLabel}` : vehicleLabel));
   return {
     id: row.id,
     title,
@@ -194,7 +198,7 @@ function mapAppointment(row: AppointmentApiRow, customerMap: Map<string, Custome
     status: row.status,
     customer,
     vehicle,
-    guest_name: optionalString(metadata.guest_name) ?? customer?.name ?? null,
+    guest_name: guestName ?? customer?.name ?? null,
     guest_email: optionalString(metadata.guest_email) ?? customer?.email ?? null,
     guest_phone: optionalString(metadata.guest_phone) ?? customer?.phone ?? null,
     notes: row.notes ?? optionalString(metadata.notes),
