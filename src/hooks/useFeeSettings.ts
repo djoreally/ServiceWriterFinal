@@ -47,11 +47,11 @@ export function useFeeSettings() {
   useEffect(() => {
     let active = true;
     if (cached) {
-      setFeeSettings(cached);
-      setLoading(false);
+      void Promise.resolve().then(() => setFeeSettings(cached));
+      void Promise.resolve().then(() => setLoading(false));
       return;
     }
-    loadFeeSettings()
+    void Promise.resolve().then(() => loadFeeSettings()
       .then((settings) => {
         if (active) {
           setFeeSettings(settings);
@@ -60,7 +60,7 @@ export function useFeeSettings() {
       })
       .catch(() => {
         if (active) setLoading(false);
-      });
+      }));
     return () => { active = false; };
   }, []);
 

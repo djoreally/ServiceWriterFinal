@@ -12,6 +12,7 @@
  * Performance: Catalog and customers are fetched once on mount, not per keystroke.
  */
 
+import { errorMessage } from "@/lib/error-message";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { fetchServiceWriterData } from "@/application/queries/inline-service-writer.query";
 import { createInlineCustomer, createInlineAppointment, insertAppointmentServiceItems } from "@/application/commands/inline-service-writer.command";
@@ -252,9 +253,9 @@ export function InlineServiceWriter({ onBack, onJobCreated }: Props) {
 
       toast.success("Job created — ready for dispatch");
       onJobCreated();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Job creation error:", err);
-      toast.error(err.message || "Failed to create job");
+      toast.error(errorMessage(err, "Failed to create job"));
     } finally {
       setSubmitting(false);
     }

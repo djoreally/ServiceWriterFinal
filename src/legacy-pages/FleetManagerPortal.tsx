@@ -33,8 +33,8 @@ export default function FleetManagerPortal() {
 
   useEffect(() => {
     if (authLoading) return;
-    if (!session) { navigate("/fleet-manager/auth?returnTo=/fleet-manager", { replace: true }); return; }
-    void load();
+    if (!session) { void Promise.resolve().then(() => navigate("/fleet-manager/auth?returnTo=/fleet-manager", { replace: true })); return; }
+    void Promise.resolve().then(() => load());
   }, [authLoading, session, navigate, load]);
 
   const vehicleById = useMemo(() => new Map((portal?.vehicles ?? []).map((vehicle) => [vehicle.id, vehicle])), [portal?.vehicles]);

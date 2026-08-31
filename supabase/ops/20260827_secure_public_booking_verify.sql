@@ -37,7 +37,7 @@ select json_build_object(
         'public_booking_record_payment_intent_v2',
         'public_booking_set_vehicle_tire_spec_v2'
       )
-      and p.proconfig @> array['search_path=pg_catalog, public']
+      and p.proconfig @> array['search_path=""']
   ),
   'all_public_booking_functions_security_definer', (
     select count(*) = 8

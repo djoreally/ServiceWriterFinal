@@ -8,7 +8,7 @@ import {
 import { deriveDispatchStatusFromAppointment } from "@/lib/dispatch-state";
 import { toast } from "@/components/ui/sonner";
 
-type WorkflowEvent = 
+type WorkflowEvent =
   | { type: "appointment"; action: "INSERT" | "UPDATE" | "DELETE"; record: Record<string, unknown> }
   | { type: "service"; action: "INSERT" | "UPDATE" | "DELETE"; record: Record<string, unknown> }
   | { type: "timeline"; action: "INSERT" | "UPDATE" | "DELETE"; record: Record<string, unknown> };
@@ -40,8 +40,8 @@ export function useRealtimeWorkflow({
       if (type !== "appointment" && type !== "service" && type !== "timeline") return;
 
       const action = payload.eventType as "INSERT" | "UPDATE" | "DELETE";
-      const record = payload.new && Object.keys(payload.new).length > 0 
-        ? payload.new 
+      const record = payload.new && Object.keys(payload.new).length > 0
+        ? payload.new
         : payload.old || {};
 
       const recordUserId = (record as { user_id?: string }).user_id;
@@ -51,9 +51,9 @@ export function useRealtimeWorkflow({
       onEvent?.(event);
 
       if (showToasts) {
-        const title = (record as { title?: string }).title || 
-                     (record as { service_type?: string }).service_type || 
-                     (record as { status?: string }).status || 
+        const title = (record as { title?: string }).title ||
+                     (record as { service_type?: string }).service_type ||
+                     (record as { status?: string }).status ||
                      "Item";
 
         if (type === "appointment" && action === "UPDATE") {
@@ -122,8 +122,8 @@ export function useRealtimeWorkflow({
         setIsConnected(false);
       }
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, userId]);
+
+  }, [enabled, handleChange, userId]);
 
   return { isConnected };
 }

@@ -3,9 +3,16 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { nextApi } from "@/lib/nextApiClient";
+import type { Database } from "@/integrations/supabase/types";
 
-export async function addTechnician(userId: string, data: Record<string, unknown>): Promise<any> {
-  const result = await supabase.from("technicians").insert([{ user_id: userId, ...data } as any]);
+type TechnicianInsert = Database["public"]["Tables"]["technicians"]["Insert"];
+type TechnicianUpdate = Database["public"]["Tables"]["technicians"]["Update"];
+
+export async function addTechnician(
+  userId: string,
+  data: Omit<TechnicianInsert, "user_id">,
+) {
+  const result = await supabase.from("technicians").insert({ user_id: userId, ...data });
 
   if (result.error?.message === "seat_limit_reached") {
     return {
@@ -43,11 +50,11 @@ export async function cancelTeamInvitation(invitationId: string): Promise<{ data
   }
 }
 
-export async function updateTechnician(techId: string, data: Record<string, unknown>) {
-  return supabase.from("technicians").update(data as never).eq("id", techId);
+export async function updateTechnician(techId: string, data: TechnicianUpdate) {
+  return supabase.from("technicians").update(data).eq("id", techId);
 }
 
-export async function uploadTeamDocument(filePath: string, file: File): Promise<any> {
+export async function uploadTeamDocument(filePath: string, file: File) {
   return supabase.storage.from("team-documents").upload(filePath, file, { upsert: true });
 }
 

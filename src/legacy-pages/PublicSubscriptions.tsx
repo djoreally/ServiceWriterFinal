@@ -163,8 +163,8 @@ const PublicSubscriptions = ({ tenantSlug, embedded = false }: PublicSubscriptio
 
   useEffect(() => {
     if (!slug) {
-      setNotFound(true);
-      setLoading(false);
+      void Promise.resolve().then(() => setNotFound(true));
+      void Promise.resolve().then(() => setLoading(false));
       return;
     }
 
@@ -191,7 +191,7 @@ const PublicSubscriptions = ({ tenantSlug, embedded = false }: PublicSubscriptio
       }
     };
 
-    loadData();
+    void Promise.resolve().then(() => loadData());
   }, [slug]);
 
   // ── Derived data ──

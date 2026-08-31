@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -381,6 +381,7 @@ The Team at {{shop_name}}`,
 
 export function NewsletterSequence() {
   const { user } = useAuth();
+  const userId = user?.id ?? "";
   const [sequences, setSequences] = useState<NewsletterSequence[]>([]);
   const [templates, setTemplates] = useState<NewsletterTemplate[]>([]);
   const [selectedSequence, setSelectedSequence] = useState<string | null>(null);
@@ -406,22 +407,11 @@ export function NewsletterSequence() {
       .replace(/\{\{booking_link\}\}/g, 'https://your-shop.servicewriter.xyz/book');
   };
 
-  useEffect(() => {
-    if (user) {
-      loadSequences();
-      loadSubscriberCount();
-    }
-  }, [user]);
 
-  useEffect(() => {
-    if (selectedSequence) {
-      loadTemplates(selectedSequence);
-    }
-  }, [selectedSequence]);
 
-  const loadSequences = async () => {
+  const loadSequences = useCallback(async () => {
     try {
-      const data = await fetchNewsletterSequences(user?.id || "");
+      const data = await fetchNewsletterSequences(userId);
       setSequences(data || []);
       if (data && data.length > 0 && !selectedSequence) {
         setSelectedSequence(data[0].id);
@@ -432,7 +422,7 @@ export function NewsletterSequence() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedSequence, userId]);
 
   const loadTemplates = async (sequenceId: string) => {
     try {
@@ -443,14 +433,27 @@ export function NewsletterSequence() {
     }
   };
 
-  const loadSubscriberCount = async () => {
+  useEffect(() => {
+    if (selectedSequence) {
+      void Promise.resolve().then(() => loadTemplates(selectedSequence));
+    }
+  }, [selectedSequence]);
+
+  const loadSubscriberCount = useCallback(async () => {
     try {
-      const count = await fetchSubscriberCount(user?.id || "");
+      const count = await fetchSubscriberCount(userId);
       setSubscriberCount(count);
     } catch (error) {
       console.error("Error loading subscriber count:", error);
     }
-  };
+  }, [userId]);
+
+  useEffect(() => {
+    if (user) {
+      void Promise.resolve().then(() => loadSequences());
+      void Promise.resolve().then(() => loadSubscriberCount());
+    }
+  }, [loadSequences, loadSubscriberCount, user]);
 
   const createSequenceHandler = async () => {
     if (!newSequenceName.trim()) {

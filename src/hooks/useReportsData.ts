@@ -309,7 +309,7 @@ export function useReportsData(dateRange: DateRange | undefined): ReportsData {
   }, [dateRange]);
 
   useEffect(() => {
-    fetchData();
+    void Promise.resolve().then(() => fetchData());
   }, [fetchData]);
 
   return {

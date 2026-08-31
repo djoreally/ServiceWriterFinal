@@ -71,7 +71,7 @@ const Fleet = () => {
     }
   }, []);
 
-  useEffect(() => { fetchData(); fetchMapData(); }, [fetchData, fetchMapData]);
+  useEffect(() => { void Promise.resolve().then(() => fetchData()); void Promise.resolve().then(() => fetchMapData()); }, [fetchData, fetchMapData]);
 
   const { containerRef, isRefreshing } = usePullToRefresh({
     onRefresh: async () => { await Promise.all([fetchData(), fetchMapData()]); }

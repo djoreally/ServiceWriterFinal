@@ -180,7 +180,7 @@ const FleetWorkOrderDetailPage = () => {
 
   // Multi-tech state
   const [showAssignTechDialog, setShowAssignTechDialog] = useState(false);
-  const [availableTechs, setAvailableTechs] = useState<any[]>([]);
+  const [availableTechs, setAvailableTechs] = useState<Array<{ id: string; name: string }>>([]);
   const [selectedTechId, setSelectedTechId] = useState("");
   const [techRole, setTechRole] = useState("helper");
   const [isPrimaryTech, setIsPrimaryTech] = useState(false);
@@ -259,7 +259,7 @@ const FleetWorkOrderDetailPage = () => {
     }
   }, [id, loadTechs]);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => { void Promise.resolve().then(() => fetchAll()); }, [fetchAll]);
 
   // Advance status
   const advanceStatus = async () => {

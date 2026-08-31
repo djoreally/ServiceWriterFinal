@@ -28,7 +28,7 @@ export interface DispatchNotification {
  * Update technician operational status
  * Triggers: Status badge changes, location updates, dispatch events
  */
-export async function updateTechnicianStatus(update: TechStatusUpdate): Promise<any> {
+export async function updateTechnicianStatus(update: TechStatusUpdate) {
   return supabase.functions.invoke('tech-dispatch-sync', {
     body: {
       action: 'update_tech_status',
@@ -41,7 +41,7 @@ export async function updateTechnicianStatus(update: TechStatusUpdate): Promise<
  * Send dispatch notification to technician
  * Triggers: Job assignment, route changes, urgent messages
  */
-export async function sendDispatchNotification(notification: DispatchNotification): Promise<any> {
+export async function sendDispatchNotification(notification: DispatchNotification) {
   return supabase.functions.invoke('tech-dispatch-sync', {
     body: {
       action: 'dispatch_notification',
@@ -54,7 +54,7 @@ export async function sendDispatchNotification(notification: DispatchNotificatio
  * Sync daily workload for capacity planning
  * Triggers: Job assignment, completion, cancellation
  */
-export async function syncTechnicianDailyLoad(technician_id: string, date: string): Promise<any> {
+export async function syncTechnicianDailyLoad(technician_id: string, date: string) {
   return supabase.functions.invoke('tech-dispatch-sync', {
     body: {
       action: 'sync_daily_load',
@@ -70,7 +70,7 @@ export async function syncTechnicianDailyLoad(technician_id: string, date: strin
 export async function updateTechnicianLocation(
   technician_id: string, 
   location: { lat: number; lng: number }
-): Promise<any> {
+) {
   return supabase.functions.invoke('tech-dispatch-sync', {
     body: {
       action: 'update_location',
@@ -83,7 +83,7 @@ export async function updateTechnicianLocation(
  * Start technician shift (clock in)
  * Server-side RPC ensures data integrity
  */
-export async function clockInTechnician(location?: { lat: number; lng: number }): Promise<any> {
+export async function clockInTechnician(location?: { lat: number; lng: number }) {
   return supabase.rpc('clock_in', { 
     p_location: location ? JSON.stringify(location) : null 
   });
@@ -93,7 +93,7 @@ export async function clockInTechnician(location?: { lat: number; lng: number })
  * End technician shift (clock out)
  * Server-side RPC calculates hours and updates status
  */
-export async function clockOutTechnician(location?: { lat: number; lng: number }): Promise<any> {
+export async function clockOutTechnician(location?: { lat: number; lng: number }) {
   return supabase.rpc('clock_out', { 
     p_location: location ? JSON.stringify(location) : null 
   });
@@ -102,7 +102,7 @@ export async function clockOutTechnician(location?: { lat: number; lng: number }
 /**
  * Start break during active shift
  */
-export async function startBreak(): Promise<any> {
+export async function startBreak() {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error('Not authenticated');
 
@@ -143,14 +143,14 @@ export async function startBreak(): Promise<any> {
 /**
  * End break and resume active shift
  */
-export async function endBreak(): Promise<any> {
+export async function endBreak() {
   return supabase.rpc('end_break');
 }
 
 /**
  * Accept job assignment (from Today view)
  */
-export async function acceptJobAssignment(appointment_id: string): Promise<any> {
+export async function acceptJobAssignment(appointment_id: string) {
   const workspace_id = getSelectedWorkspaceId();
   if (!workspace_id) throw new Error('Select a workspace before acknowledging a job.');
   const { data: { user } } = await getCurrentAuthUser();
@@ -164,7 +164,7 @@ export async function acceptJobAssignment(appointment_id: string): Promise<any> 
 /**
  * Mark technician en route to job
  */
-export async function markEnRoute(appointment_id: string, location?: { lat: number; lng: number }): Promise<any> {
+export async function markEnRoute(appointment_id: string, location?: { lat: number; lng: number }) {
   const workspace_id = getSelectedWorkspaceId();
   if (!workspace_id) throw new Error('Select a workspace before marking a job en route.');
   const { data: { user } } = await getCurrentAuthUser();
@@ -179,7 +179,7 @@ export async function markEnRoute(appointment_id: string, location?: { lat: numb
 /**
  * Mark technician arrived at job site
  */
-export async function markArrived(appointment_id: string, location?: { lat: number; lng: number }): Promise<any> {
+export async function markArrived(appointment_id: string, location?: { lat: number; lng: number }) {
   const workspace_id = getSelectedWorkspaceId();
   if (!workspace_id) throw new Error('Select a workspace before marking arrival.');
   const { data: { user } } = await getCurrentAuthUser();
@@ -194,7 +194,7 @@ export async function markArrived(appointment_id: string, location?: { lat: numb
 /**
  * Start work on job
  */
-export async function startJob(appointment_id: string): Promise<any> {
+export async function startJob(appointment_id: string) {
   const workspace_id = getSelectedWorkspaceId();
   if (!workspace_id) throw new Error('Select a workspace before starting a job.');
   const { data: { user } } = await getCurrentAuthUser();

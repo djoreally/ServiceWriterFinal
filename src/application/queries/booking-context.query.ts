@@ -22,13 +22,26 @@ export interface BookingContextRecord {
   created_at: string;
 }
 
+export interface RouteSafeAvailabilityData {
+  slots?: Array<{ time: string; technicianId: string; routeScore: number }>;
+}
+
+export interface VerifiedLocationData {
+  valid?: boolean;
+  message?: string;
+  bookingContextId?: string;
+  location?: {
+    geocode?: { lat: number; lng: number };
+  };
+}
+
 /** Fetch route-safe availability via edge function. */
 export async function fetchRouteSafeSlots(
   bookingContextId: string,
   businessUserId: string,
   date: string
-): Promise<{ data: any; error: any }> {
-  return supabase.functions.invoke("route-safe-availability", {
+){
+  return supabase.functions.invoke<RouteSafeAvailabilityData>("route-safe-availability", {
     body: { bookingContextId, businessUserId, date },
   });
 }
@@ -38,8 +51,8 @@ export async function verifyLocation(
   customerAddress: string,
   businessUserId: string,
   sessionId?: string
-): Promise<{ data: any; error: any }> {
-  return supabase.functions.invoke("verify-location", {
+){
+  return supabase.functions.invoke<VerifiedLocationData>("verify-location", {
     body: { customerAddress, businessUserId, sessionId },
   });
 }

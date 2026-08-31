@@ -51,17 +51,17 @@ export function WheelTireConfigurator({ value, onChange, title = "Vehicle & tire
   const [oeLoading, setOeLoading] = useState(false);
   const [manualMode, setManualMode] = useState(false);
 
-  const yearOptions = useMemo(generateYears, []);
+  const yearOptions = useMemo(() => generateYears(), []);
 
   useEffect(() => {
     let cancelled = false;
     const { year, make, model } = value;
     if (!year || !make || !model) {
-      setOeSizes([]);
+      void Promise.resolve().then(() => setOeSizes([]));
       return;
     }
-    setOeLoading(true);
-    fetchExactVehicleSpecifications(Number(year), make, model, "tire_size")
+    void Promise.resolve().then(() => setOeLoading(true));
+    void Promise.resolve().then(() => fetchExactVehicleSpecifications(Number(year), make, model, "tire_size")
       .then((rows) => {
         if (cancelled) return;
         const sizes = Array.from(
@@ -78,12 +78,12 @@ export function WheelTireConfigurator({ value, onChange, title = "Vehicle & tire
       })
       .finally(() => {
         if (!cancelled) setOeLoading(false);
-      });
+      }));
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value.year, value.make, value.model]);
+
+  }, [value.year, value.make, value.model, value, onChange]);
 
   const manualInvalid =
     manualMode && value.tireSize.trim().length > 0 && !TIRE_SIZE_PATTERN.test(value.tireSize.trim());

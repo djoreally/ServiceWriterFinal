@@ -46,8 +46,8 @@ import {
  * a cache-busting param (bounded attempt counter prevents reload loops).
  */
 // Component props are inferred from each factory's concrete component type.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function lazyRetry<T extends ComponentType<any>>(
+
+function lazyRetry<T extends ComponentType<never>>(
   factory: () => Promise<{ default: T }>,
   retries = 2,
 ): React.LazyExoticComponent<T> {
@@ -244,7 +244,7 @@ const LoadingScreen = ({ message = "Loading..." }: { message?: string }) => (
  * mounted once at the app shell. This component never redirects on role: an
  * unauthorized deep link renders `AccessDenied` so there is no bounce/flash.
  */
-const RequireAuth = ({ children }: { children: JSX.Element }) => {
+const RequireAuth = ({ children }: { children: React.ReactElement }) => {
   const { session, loading } = useAuth();
   const { role, loading: roleLoading } = useTeamRole();
   const location = useLocation();
@@ -277,7 +277,7 @@ const RequirePlanFeature = ({
   children,
 }: {
   feature: keyof PlanFeatures;
-  children: JSX.Element;
+  children: React.ReactElement;
 }) => {
   const { hasAccess, loading } = useFeatureGate(feature);
 
@@ -491,7 +491,7 @@ export const AppRoutes = () => {
               {/* Legacy dispatcher URL now routes to the canonical daily operations view. */}
               <Route path="/dispatch" element={<RequireAuth><Navigate to="/command-center" replace /></RequireAuth>} />
 
-              {/* 
+              {/*
                 Subdomain-based booking: {slug}.servicewriter.xyz
                 The TenantResolver handles subdomain detection automatically.
                 No subdirectory routes needed - tenant detection happens at app load.

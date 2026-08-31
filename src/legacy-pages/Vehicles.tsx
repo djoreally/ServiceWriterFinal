@@ -69,9 +69,6 @@ const Vehicles = () => {
     oil_capacity: "",
   });
 
-  useEffect(() => {
-    fetchVehiclesData();
-  }, []);
 
   const fetchVehiclesData = useCallback(async () => {
     setVehiclesLoading(true);
@@ -109,6 +106,10 @@ const Vehicles = () => {
       setCustomersLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchVehiclesData());
+  }, [fetchVehiclesData]);
 
   const { containerRef, isRefreshing } = usePullToRefresh({
     onRefresh: fetchVehiclesData,
@@ -294,7 +295,7 @@ const Vehicles = () => {
   // Pagination
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
-  useEffect(() => { setPage(1); }, [debouncedSearchQuery, pageSize, ymmFilter]);
+  useEffect(() => { void Promise.resolve().then(() => setPage(1)); }, [debouncedSearchQuery, pageSize, ymmFilter]);
   const pagedVehicles = usePageSlice(filteredVehicles, page, pageSize);
 
   // ⚡ Performance: Memoize derived statistics

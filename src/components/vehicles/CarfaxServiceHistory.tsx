@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message";
 import { useState, useEffect } from "react";
 import { lookupCarfaxServiceHistory, type CarfaxServiceRecord } from "@/application/queries/carfax-service-history.query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -72,9 +73,9 @@ export function CarfaxServiceHistory({ vin, vehicleName }: CarfaxServiceHistoryP
       } else {
         setError(result.error || "Failed to check service history");
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("CARFAX lookup error:", err);
-      setError(err.message || "Failed to check service history");
+      setError(errorMessage(err, "Failed to check service history"));
     }
 
     setLoading(false);

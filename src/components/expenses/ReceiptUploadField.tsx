@@ -94,15 +94,15 @@ export function ReceiptUploadField({
   // Manage object URL lifecycle for the selected file
   useEffect(() => {
     if (!file) {
-      setPreviewUrl(null);
+      void Promise.resolve().then(() => setPreviewUrl(null));
       return;
     }
     if (file.type.startsWith("image/")) {
       const url = URL.createObjectURL(file);
-      setPreviewUrl(url);
+      void Promise.resolve().then(() => setPreviewUrl(url));
       return () => URL.revokeObjectURL(url);
     }
-    setPreviewUrl(null);
+    void Promise.resolve().then(() => setPreviewUrl(null));
   }, [file]);
 
   const isPdf = file?.type === "application/pdf";

@@ -46,20 +46,20 @@ export async function fetchTechProfile(authUserId: string): Promise<TechProfile 
   const { data, error } = await supabase
     .from("technicians")
     .select("*")
-    .eq("auth_user_id", authUserId as any)
-    .single() as { data: any; error: any };
+    .eq("auth_user_id", authUserId)
+    .single();
 
   if (error || !data) return null;
 
   return {
     ...data,
     working_hours: data.working_hours as TechProfile["working_hours"],
-    address: (data as any).address,
-    drivers_license_number: (data as any).drivers_license_number,
-    drivers_license_expiry: (data as any).drivers_license_expiry,
-    drivers_license_url: (data as any).drivers_license_url,
-    emergency_contact_name: (data as any).emergency_contact_name,
-    emergency_contact_phone: (data as any).emergency_contact_phone,
+    address: data.address,
+    drivers_license_number: data.drivers_license_number,
+    drivers_license_expiry: data.drivers_license_expiry,
+    drivers_license_url: data.drivers_license_url,
+    emergency_contact_name: data.emergency_contact_name,
+    emergency_contact_phone: data.emergency_contact_phone,
   } as TechProfile;
 }
 

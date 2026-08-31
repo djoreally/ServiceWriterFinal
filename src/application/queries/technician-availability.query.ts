@@ -12,6 +12,11 @@ export interface AvailabilityRow {
   end_time: string;
 }
 
+interface TechnicianAvailabilityRecord extends AvailabilityRow {
+  technician_id: string;
+  user_id: string;
+}
+
 export async function fetchTechnicianAvailability(technicianId: string): Promise<AvailabilityRow[]> {
   const { data } = await supabase
     .from("technician_availability" as any)
@@ -19,7 +24,7 @@ export async function fetchTechnicianAvailability(technicianId: string): Promise
     .eq("technician_id", technicianId);
 
   if (!data) return [];
-  return data.map((r: any) => ({
+  return (data as unknown as TechnicianAvailabilityRecord[]).map((r) => ({
     id: r.id,
     weekday: r.weekday,
     is_available: r.is_available ?? false,
@@ -40,7 +45,7 @@ export async function saveTechnicianAvailability(
   }>
 ): Promise<void> {
   for (const row of rows) {
-    const payload: any = {
+    const payload: Omit<TechnicianAvailabilityRecord, "id"> = {
       technician_id: technicianId,
       user_id: userId,
       weekday: row.weekday,
@@ -52,7 +57,7 @@ export async function saveTechnicianAvailability(
       await supabase.from("technician_availability" as any).update(payload).eq("id", row.existingId);
     } else {
       const { data: ins } = await supabase.from("technician_availability" as any).insert(payload).select().single();
-      if (ins) row.existingId = (ins as any).id;
+      if (ins) row.existingId = (ins as unknown as TechnicianAvailabilityRecord).id;
     }
   }
 }

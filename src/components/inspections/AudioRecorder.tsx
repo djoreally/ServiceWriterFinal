@@ -79,7 +79,7 @@ export function AudioRecorder({ onRecordingComplete, className }: AudioRecorderP
                 {Array.from({ length: 20 }).map((_, i) => {
                   const barHeight = Math.max(
                     4,
-                    audioLevel * 48 * (0.5 + 0.5 * Math.sin(Date.now() / 200 + i))
+                    audioLevel * 48 * (0.5 + 0.5 * Math.sin(i))
                   );
                   return (
                     <div

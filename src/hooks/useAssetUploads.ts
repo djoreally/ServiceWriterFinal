@@ -46,7 +46,7 @@ export function useAssetUploads(onComplete?: (asset: AssetRecord) => void) {
     setItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch } : i)));
   }, []);
 
-  const pump = useCallback(async () => {
+  const pump = useCallback(async function pumpQueue() {
     while (activeRef.current < MAX_CONCURRENT && queueRef.current.length > 0) {
       const next = queueRef.current.shift()!;
       activeRef.current += 1;
@@ -69,7 +69,7 @@ export function useAssetUploads(onComplete?: (asset: AssetRecord) => void) {
         })
         .finally(() => {
           activeRef.current -= 1;
-          void pump();
+          void pumpQueue();
         });
     }
   }, [onComplete, update]);

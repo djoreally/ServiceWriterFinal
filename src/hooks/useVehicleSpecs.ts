@@ -139,7 +139,7 @@ export function useVehicleSpecs(options: UseVehicleSpecsOptions = {}) {
   // ⚡ Load distinct makes via RPC — returns only unique makes for selected year
   useEffect(() => {
     if (!options.year) {
-      setMakes([]);
+      void Promise.resolve().then(() => setMakes([]));
       return;
     }
     const loadMakes = async () => {
@@ -148,13 +148,13 @@ export function useVehicleSpecs(options: UseVehicleSpecsOptions = {}) {
         setMakes((data as VehicleSpecMakeOption[]).map((d) => d.make));
       }
     };
-    loadMakes();
+    void Promise.resolve().then(() => loadMakes());
   }, [options.year]);
 
   // ⚡ Load distinct models via RPC — returns only unique models for year+make
   useEffect(() => {
     if (!options.year || !options.make) {
-      setModels([]);
+      void Promise.resolve().then(() => setModels([]));
       return;
     }
     const loadModels = async () => {
@@ -163,14 +163,14 @@ export function useVehicleSpecs(options: UseVehicleSpecsOptions = {}) {
         setModels((data as VehicleSpecModelOption[]).map((d) => d.model));
       }
     };
-    loadModels();
+    void Promise.resolve().then(() => loadModels());
   }, [options.year, options.make]);
 
   // Load engines + matched spec when model changes
   useEffect(() => {
     if (!options.year || !options.make || !options.model) {
-      setEngines([]);
-      setMatchedSpec(null);
+      void Promise.resolve().then(() => setEngines([]));
+      void Promise.resolve().then(() => setMatchedSpec(null));
       return;
     }
     const loadEngines = async () => {
@@ -189,7 +189,7 @@ export function useVehicleSpecs(options: UseVehicleSpecsOptions = {}) {
         setMatchedSpec(specs[0] || null);
       }
     };
-    loadEngines();
+    void Promise.resolve().then(() => loadEngines());
   }, [options.year, options.make, options.model]);
 
   // Check if we need fallback for selected year
@@ -248,11 +248,11 @@ export function useVehicleSpecLookup(year?: string, make?: string, model?: strin
 
   useEffect(() => {
     if (!year || !make || !model) {
-      setSpec(null);
+      void Promise.resolve().then(() => setSpec(null));
       return;
     }
 
-    setLoading(true);
+    void Promise.resolve().then(() => setLoading(true));
 
     const lookup = async () => {
       const { data, error } = await fetchVehicleSpecSingle(
@@ -270,7 +270,7 @@ export function useVehicleSpecLookup(year?: string, make?: string, model?: strin
       setLoading(false);
     };
 
-    lookup();
+    void Promise.resolve().then(() => lookup());
   }, [year, make, model, engine]);
 
   return { spec, loading };

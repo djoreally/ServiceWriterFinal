@@ -20,7 +20,7 @@ interface ConfirmationStepProps {
   formatCurrency: (amount: number) => string;
   getGrandTotal: () => number;
   quoteRequired?: boolean;
-  confirmationEmailStatus: "pending" | "sent" | "failed";
+  confirmationEmailStatus: "pending" | "queued" | "failed";
 }
 
 export function ConfirmationStep({ businessName, guestEmail, vehicles, vehicleServiceSelections, selectedDate, selectedTime, customerAddress, city, state, zipCode, paymentChoice, formatCurrency, getGrandTotal, quoteRequired = false, confirmationEmailStatus }: ConfirmationStepProps) {
@@ -53,8 +53,8 @@ export function ConfirmationStep({ businessName, guestEmail, vehicles, vehicleSe
     const link = document.createElement("a"); link.href = url; link.download = "appointment.ics"; document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(url);
   };
 
-  const emailNotice = confirmationEmailStatus === "sent"
-    ? <>A confirmation email was accepted for delivery to {guestEmail}.</>
+  const emailNotice = confirmationEmailStatus === "queued"
+    ? <>A confirmation email is queued for delivery to {guestEmail}.</>
     : confirmationEmailStatus === "failed"
       ? <>Your appointment is saved, but the confirmation email could not be sent. Please contact {businessName} if you need a copy.</>
       : <>Your appointment is saved. The confirmation email is still being processed.</>;

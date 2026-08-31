@@ -203,25 +203,25 @@ const Quotes = () => {
   useEffect(() => {
     if (!isClient) return;
     // Populate deterministic defaults on client to avoid SSR hydration mismatch
-    setFormData(prev => ({
+    void Promise.resolve().then(() => setFormData(prev => ({
       ...prev,
       quote_date: prev.quote_date || format(new Date(), "yyyy-MM-dd"),
       valid_until: prev.valid_until || format(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), "yyyy-MM-dd"),
-    }));
+    })));
   }, [isClient]);
 
   useEffect(() => {
     if (!open || editingQuote) return;
     const restored = restoreQuoteDraft();
     if (!restored) return;
-    setFormData({ ...defaultQuoteFormData(), ...restored.formData });
-    setLineItems(restored.lineItems ?? []);
-    setFleetVehicles(restored.fleetVehicles?.length ? restored.fleetVehicles : [emptyFleetLine()]);
+    void Promise.resolve().then(() => setFormData({ ...defaultQuoteFormData(), ...restored.formData }));
+    void Promise.resolve().then(() => setLineItems(restored.lineItems ?? []));
+    void Promise.resolve().then(() => setFleetVehicles(restored.fleetVehicles?.length ? restored.fleetVehicles : [emptyFleetLine()]));
   }, [defaultQuoteFormData, editingQuote, open, restoreQuoteDraft]);
 
   useEffect(() => {
     // Show all vehicles regardless of customer selection
-    setFilteredVehicles(vehicles);
+    void Promise.resolve().then(() => setFilteredVehicles(vehicles));
   }, [vehicles]);
 
   const vehicleYears = useMemo(() => {
@@ -267,7 +267,7 @@ const Quotes = () => {
   }, []);
 
   useEffect(() => {
-    fetchData();
+    void Promise.resolve().then(() => fetchData());
   }, [fetchData]);
 
   const { containerRef, isRefreshing } = usePullToRefresh({
@@ -303,9 +303,9 @@ const Quotes = () => {
   useEffect(() => {
     if (!isClient) return;
     if (!editingQuote) {
-      setQuoteNumber(generateQuoteNumber());
+      void Promise.resolve().then(() => setQuoteNumber(generateQuoteNumber()));
     } else {
-      setQuoteNumber(editingQuote.quote_number || "");
+      void Promise.resolve().then(() => setQuoteNumber(editingQuote.quote_number || ""));
     }
   }, [isClient, editingQuote]);
 

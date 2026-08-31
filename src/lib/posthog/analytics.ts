@@ -27,7 +27,7 @@ export type AnalyticsProps = Record<string, string | number | boolean | null | u
 function safeCapture(event: string, props: AnalyticsProps = {}) {
   try {
     // posthog-js is a singleton — check __loaded to avoid throwing during SSR/tests.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
     if (typeof window === "undefined" || !(posthog as any)?.__loaded) return;
     const { organization_id, ...rest } = props;
     const enriched: Record<string, unknown> = { ...rest };

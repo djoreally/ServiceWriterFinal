@@ -3,7 +3,6 @@
  */
 import { AUTH_SUPABASE_PROJECT_ID_RESOLVED, authSupabase, supabase } from "@/integrations/supabase/client";
 import { isTransientBackendError } from "@/lib/transient-backend";
-import { withOperationTimeout } from "@/lib/operation-timeout";
 
 type SignInError = { message?: string; status?: number; code?: string };
 type PasswordSignInResponse = { error: SignInError | null };
@@ -67,44 +66,20 @@ export async function signUpWithEmail(email: string, password: string): Promise<
   return error ? { error: error.message } : {};
 }
 
-const SIGN_IN_MAX_ATTEMPTS = 2;
-const SIGN_IN_RETRY_DELAY_MS = 600;
-// The auth service can legitimately take 20s+ while it is under load; aborting
-// earlier turned slow-but-valid logins into "bad credentials". Must stay below
-// the transport-level backstop abort in the Supabase client (20s → 40s there).
-const SIGN_IN_REQUEST_TIMEOUT_MS = 25_000;
-// Total wall-clock ceiling for the whole submit, retries included, so the form
-// is never disabled for an unbounded time.
-const SIGN_IN_TOTAL_BUDGET_MS = 40_000;
-
 export async function signInWithPassword(email: string, password: string): Promise<{ error?: string }> {
-  // Keep the interactive flow bounded. A user can retry after a transient
-  // transport failure, but the page must never keep retrying in the background
-  // while its only submit control remains disabled.
-  const startedAt = Date.now();
-  let error: SignInError | null = null;
-  for (let attempt = 1; attempt <= SIGN_IN_MAX_ATTEMPTS; attempt++) {
-    const remaining = SIGN_IN_TOTAL_BUDGET_MS - (Date.now() - startedAt);
-    if (attempt > 1 && remaining < 5_000) break;
-    try {
-      const signInOperation = authSupabase.auth.signInWithPassword({ email, password }) as Promise<PasswordSignInResponse>;
-      const result = await withOperationTimeout<PasswordSignInResponse>(
-        signInOperation,
-        Math.min(SIGN_IN_REQUEST_TIMEOUT_MS, Math.max(remaining, 5_000)),
-        "The sign-in request timed out before the authentication service responded.",
-      );
-      error = result.error;
-    } catch (requestError) {
-      error = {
-        message: requestError instanceof Error ? requestError.message : "The sign-in request timed out.",
-        code: "request_timeout",
-      };
-    }
-
-    if (!error || !isTransientAuthFailure(error)) break;
-    if (attempt < SIGN_IN_MAX_ATTEMPTS) {
-      await new Promise((resolve) => setTimeout(resolve, SIGN_IN_RETRY_DELAY_MS));
-    }
+  // Credential exchange is a mutation guarded by Supabase's browser auth lock.
+  // Never retry a timed-out promise that cannot be cancelled: the first call
+  // may still complete and race the retry. The shared client transport owns
+  // the single request deadline and abort signal.
+  let error: SignInError | null;
+  try {
+    const result = await authSupabase.auth.signInWithPassword({ email, password }) as PasswordSignInResponse;
+    error = result.error;
+  } catch (requestError) {
+    error = {
+      message: requestError instanceof Error ? requestError.message : "The sign-in request failed.",
+      code: "request_timeout",
+    };
   }
 
 

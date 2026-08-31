@@ -27,7 +27,7 @@ export default function TechnicianOS() {
     }
   };
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void Promise.resolve().then(() => load()); }, []);
 
   const active = technicians.filter((tech) => tech.is_active);
   const assignedToday = active.reduce((sum, tech) => sum + tech.jobs_today, 0);

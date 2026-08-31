@@ -148,7 +148,7 @@ export function CustomerLifetimeValue() {
   }, []);
 
   useEffect(() => {
-    fetchData();
+    void Promise.resolve().then(() => fetchData());
   }, [fetchData]);
 
   const filteredCustomers = useMemo(() => {

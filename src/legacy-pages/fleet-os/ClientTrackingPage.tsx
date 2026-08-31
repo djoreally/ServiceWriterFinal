@@ -8,12 +8,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Navigation, Clock, MapPin, Truck } from "lucide-react";
 
+type TrackingWorkOrder = Awaited<ReturnType<typeof fetchTrackingWorkOrder>>["data"];
+
 const ClientTrackingPage = () => {
   const { id } = useParams<{ id: string }>();
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const marker = useRef<mapboxgl.Marker | null>(null);
-  const [order, setOrder] = useState<any>(null);
+  const [order, setOrder] = useState<TrackingWorkOrder>(null);
   const [techLocation, setTechLocation] = useState<{ lat: number, lng: number } | null>(null);
   const [loading, setLoading] = useState(true);
 

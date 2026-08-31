@@ -93,7 +93,7 @@ export const TerritoryMap = ({ zipCodes }: TerritoryMapProps) => {
   }, [zipCodes]);
 
   useEffect(() => {
-    geocodeZips();
+    void Promise.resolve().then(() => geocodeZips());
   }, [geocodeZips]);
 
   // Initialize map once geocoding is done

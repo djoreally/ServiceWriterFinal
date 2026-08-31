@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -29,11 +29,8 @@ const TestimonialSubmit = () => {
     content: "",
   });
 
-  useEffect(() => {
-    fetchBusinessProfile();
-  }, [slug]);
 
-  const fetchBusinessProfile = async () => {
+  const fetchBusinessProfile = useCallback(async () => {
     if (!slug) {
       setLoading(false);
       return;
@@ -41,7 +38,11 @@ const TestimonialSubmit = () => {
     const profile = await fetchTestimonialBusinessProfile(slug);
     if (profile) setBusinessProfile(profile);
     setLoading(false);
-  };
+  }, [slug]);
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchBusinessProfile());
+  }, [fetchBusinessProfile, slug]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

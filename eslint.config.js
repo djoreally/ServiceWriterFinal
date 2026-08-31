@@ -34,6 +34,11 @@ export default tseslint.config(
   {
     ignores: [
       "dist",
+      ".next/**",
+      "next-env.d.ts",
+      "coverage/**",
+      "e2e/playwright-report/**",
+      "test-results/**",
       "apps/web-next/.next/**",
       "apps/web-next/next-env.d.ts",
       "supabase/functions/**",
@@ -42,7 +47,16 @@ export default tseslint.config(
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],
-    ignores: ["apps/web-next/.next/**", "apps/web-next/next-env.d.ts", "supabase/functions/**"],
+    ignores: [
+      ".next/**",
+      "next-env.d.ts",
+      "coverage/**",
+      "e2e/playwright-report/**",
+      "test-results/**",
+      "apps/web-next/.next/**",
+      "apps/web-next/next-env.d.ts",
+      "supabase/functions/**",
+    ],
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.browser,
@@ -56,13 +70,31 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
-      "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
+      "react-refresh/only-export-components": ["warn", {
+        allowConstantExport: true,
+        // Audited framework exports, provider hooks, and colocated public helpers.
+        // Keeping this list explicit preserves enforcement for every future export.
+        allowExportNames: [
+          "metadata", "viewport", "calculateCouponDiscount", "getDateRangeFromPreset", "VAN_COLORS",
+          "hardShadow", "hardShadowLg", "hankenStack", "interStack", "monoStack", "useMarketingFonts",
+          "subscribeOnOptIn", "statusBadge", "getPaymentMethodLabel", "PLANS", "resolveTechPresenceAction",
+          "badgeVariants", "buttonVariants", "useFormField", "PAGE_SIZE_OPTIONS", "paginate", "usePageSlice",
+          "navigationMenuTriggerStyle", "useSidebar", "getToastHistory", "notify", "toast", "toggleVariants",
+          "useKeyboardShortcuts", "CURRENCIES", "TIMEZONES", "useRegionalSettings", "isSuperAdmin",
+          "useSubscription", "useFeatureGate", "useTenant", "useRequiredTenant", "useTerminology",
+          "useInlineSearchPreview", "highlightSearchMatch", "useTechContext", "useAuth", "useRBAC",
+          "useSessionSecurity", "hasRole", "isAdmin", "isResourceOwner", "canAccessTenant",
+          "canModifyResource", "withPermission", "useFeatures",
+        ],
+      }],
       // JSX structural safety — supplementary to tsc, catches related issues at lint time.
       "react/jsx-no-undef": "error",
       "react/jsx-key": "error",
       "react/jsx-uses-vars": "error",
       "react/jsx-uses-react": "error",
       "@typescript-eslint/no-unused-vars": "off",
+      // Keep compatibility debt visible, but never allow an automated fix to
+      // replace `any` with `unknown` across untyped external boundaries.
       "@typescript-eslint/no-explicit-any": "warn",
       "@typescript-eslint/no-empty-object-type": "warn",
       "no-empty": "warn",
@@ -96,6 +128,13 @@ export default tseslint.config(
       // Forbid forbidden terminology in codebase
       "no-restricted-syntax": ["error", FORBIDDEN_PHRASE_RULE],
 
+    },
+  },
+  {
+    files: ["src/test/**/*.{ts,tsx}", "**/*.test.{ts,tsx}", "**/*.spec.{ts,tsx}"],
+    rules: {
+      // Test harness modules are not part of the browser HMR graph.
+      "react-refresh/only-export-components": "off",
     },
   },
   {

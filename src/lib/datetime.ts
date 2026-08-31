@@ -12,6 +12,11 @@ import { format, parseISO } from "date-fns";
 
 const TIME_PATTERN = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/;
 
+/** Current Unix time, exposed as a lazy-state initializer and event-time seam. */
+export function currentTimeMs(): number {
+  return Date.now();
+}
+
 /** Formats a `HH:mm[:ss]` clock value. Non-clock values are returned as-is. */
 export function formatTimeLabel(
   time: string | null | undefined,

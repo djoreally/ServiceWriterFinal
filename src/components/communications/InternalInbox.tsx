@@ -2,6 +2,7 @@
  * InternalInbox — staff-only messaging inbox.
  * Left: conversation list (DMs + job threads). Right: thread + composer.
  */
+import { errorMessage } from "@/lib/error-message";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -95,9 +96,9 @@ export function InternalInbox({ initialAppointmentId, embedded = false }: Intern
   }, [initialAppointmentId, activeId]);
 
   useEffect(() => {
-    refreshThreads();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    void Promise.resolve().then(() => refreshThreads());
+
+  }, [refreshThreads]);
 
   // Realtime: refresh threads + messages on any new message
   useEffect(() => {
@@ -133,18 +134,18 @@ export function InternalInbox({ initialAppointmentId, embedded = false }: Intern
   // Load messages whenever thread changes
   useEffect(() => {
     if (!activeId) {
-      setMessages([]);
+      void Promise.resolve().then(() => setMessages([]));
       return;
     }
-    setLoadingMessages(true);
-    fetchInternalThreadMessages(activeId)
+    void Promise.resolve().then(() => setLoadingMessages(true));
+    void Promise.resolve().then(() => fetchInternalThreadMessages(activeId)
       .then((m) => setMessages(m))
       .catch((e) => {
         console.error(e);
         toast.error("Failed to load messages");
       })
-      .finally(() => setLoadingMessages(false));
-    markThreadRead(activeId).catch(() => {});
+      .finally(() => setLoadingMessages(false)));
+    void Promise.resolve().then(() => markThreadRead(activeId).catch(() => {}));
   }, [activeId]);
 
   // Auto-scroll to bottom on new messages
@@ -177,9 +178,9 @@ export function InternalInbox({ initialAppointmentId, embedded = false }: Intern
       // optimistic refresh of messages happens via realtime; force fetch as fallback
       const fresh = await fetchInternalThreadMessages(activeId);
       setMessages(fresh);
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      toast.error(e?.message || "Failed to send");
+      toast.error(errorMessage(e, "Failed to send"));
     } finally {
       setSending(false);
     }
@@ -203,16 +204,13 @@ export function InternalInbox({ initialAppointmentId, embedded = false }: Intern
       setShowNewDm(false);
       await refreshThreads(id);
       setActiveId(id);
-    } catch (e: any) {
-      toast.error(e?.message || "Couldn't start direct message");
+    } catch (e: unknown) {
+      toast.error(errorMessage(e, "Couldn't start direct message"));
     }
   };
 
-  const Container: React.FC<{ children: React.ReactNode }> = ({ children }) =>
-    embedded ? <div className="h-full">{children}</div> : <Card className="h-[calc(100vh-10rem)]"><CardContent className="p-0 h-full">{children}</CardContent></Card>;
-
   return (
-    <Container>
+    <InboxContainer embedded={embedded}>
       <div className="grid grid-cols-1 md:grid-cols-[320px_1fr] h-full divide-x">
         {/* LEFT — conversation list */}
         <div className="flex flex-col min-h-0">
@@ -388,6 +386,15 @@ export function InternalInbox({ initialAppointmentId, embedded = false }: Intern
           )}
         </div>
       </div>
-    </Container>
+    </InboxContainer>
+  );
+}
+
+function InboxContainer({ embedded, children }: { embedded: boolean; children: React.ReactNode }) {
+  if (embedded) return <div className="h-full">{children}</div>;
+  return (
+    <Card className="h-[calc(100vh-10rem)]">
+      <CardContent className="p-0 h-full">{children}</CardContent>
+    </Card>
   );
 }

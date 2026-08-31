@@ -50,9 +50,9 @@ export default function InvitationCenter() {
   }, []);
 
   useEffect(() => {
-    if (!workspaceId) { setInvitations([]); setLoading(false); return; }
-    setLoading(true);
-    void nextApi.invitations.list(workspaceId).then((response) => setInvitations(response.data)).catch((error) => toast.error(error instanceof Error ? error.message : "Could not load invitations")).finally(() => setLoading(false));
+    if (!workspaceId) { void Promise.resolve().then(() => setInvitations([])); void Promise.resolve().then(() => setLoading(false)); return; }
+    void Promise.resolve().then(() => setLoading(true));
+    void Promise.resolve().then(() => nextApi.invitations.list(workspaceId).then((response) => setInvitations(response.data)).catch((error) => toast.error(error instanceof Error ? error.message : "Could not load invitations")).finally(() => setLoading(false)));
   }, [workspaceId]);
 
   const workspaceName = useMemo(() => memberships.find((item) => item.workspace_id === workspaceId)?.workspaces?.name ?? "your workspace", [memberships, workspaceId]);

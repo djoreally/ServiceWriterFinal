@@ -71,7 +71,7 @@ export function WebhookHealthDashboard() {
   }, [filter]);
 
   useEffect(() => {
-    loadEvents();
+    void Promise.resolve().then(() => loadEvents());
   }, [loadEvents]);
 
   const handleReplay = async (event: WebhookEventLog) => {

@@ -70,12 +70,12 @@ export default function TechMessages() {
     } catch (error) { toast.error(error instanceof Error ? error.message : "Conversation could not be loaded"); }
   }, [selectedJob, source]);
 
-  useEffect(() => { void loadJobs(); }, [loadJobs]);
-  useEffect(() => { void loadTimeline(); }, [loadTimeline]);
+  useEffect(() => { void Promise.resolve().then(() => loadJobs()); }, [loadJobs]);
+  useEffect(() => { void Promise.resolve().then(() => loadTimeline()); }, [loadTimeline]);
   useEffect(() => threadId ? subscribeJobThreadTimeline(threadId, () => { void loadTimeline(); }) : undefined, [threadId, loadTimeline]);
   useEffect(() => {
-    if (channel === "customer_sms") setRecipient(selectedJob?.customers?.phone ?? "");
-    else if (channel === "dispatch") setRecipient("");
+    if (channel === "customer_sms") void Promise.resolve().then(() => setRecipient(selectedJob?.customers?.phone ?? ""));
+    else if (channel === "dispatch") void Promise.resolve().then(() => setRecipient(""));
   }, [channel, selectedJob]);
 
   const send = async (preset?: string) => {

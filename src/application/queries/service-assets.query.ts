@@ -1,5 +1,5 @@
 /** Queries for CRM ↔ Assets linkage. Asset storage itself is not yet rebuilt on Final. */
-import { supabase } from "@/integrations/supabase/client";
+import { productionSupabase } from "@/integrations/supabase/client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import type { AssetRecord } from "@/application/commands/assets.command";
 
@@ -12,15 +12,15 @@ export interface ServiceSummary {
   customer_name: string | null;
 }
 
-function object(value: unknown): Record<string, any> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 /** Lightweight search across canonical service records + linked customer name. */
 export async function searchServicesForLinking(query: string, limit = 25): Promise<ServiceSummary[]> {
   const context = await resolveCurrentWorkspace();
   if (!context) return [];
-  const { data, error } = await (supabase.from("service_records") as any)
+  const { data, error } = await productionSupabase.from("service_records")
     .select("id,customer_id,work_performed,metadata,completed_at,created_at,customers(first_name,last_name,company_name)")
     .eq("workspace_id", context.workspaceId)
     .neq("status", "voided")
@@ -29,7 +29,7 @@ export async function searchServicesForLinking(query: string, limit = 25): Promi
   if (error) throw error;
 
   const term = query.trim().toLowerCase();
-  return ((data ?? []) as any[])
+  return (data ?? [])
     .map((row): ServiceSummary => {
       const metadata = object(row.metadata);
       const customer = row.customers;

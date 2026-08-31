@@ -71,8 +71,9 @@ export async function ingestDeliveryWebhook(provider: string, adapter: Messaging
       raw_payload: event.rawPayload,
       occurred_at: event.occurredAt,
     }, { onConflict: "provider,provider_event_id", ignoreDuplicates: true });
-    if (!error) inserted += 1;
-    await supabase.rpc("messaging_apply_delivery_event", {
+    if (error) throw error;
+    inserted += 1;
+    const reconciliation = await supabase.rpc("messaging_apply_delivery_event", {
       target_provider: provider,
       target_provider_message_id: event.providerMessageId,
       target_status: event.status,
@@ -80,13 +81,14 @@ export async function ingestDeliveryWebhook(provider: string, adapter: Messaging
       target_failure_code: event.failureCode ?? null,
       target_failure_reason: event.failureReason ?? null,
     });
+    if (reconciliation.error) throw reconciliation.error;
     if (workspaceId && event.recipient?.includes("@") && (event.status === "bounced" || event.status === "complained")) {
       const suppressionResult = await supabase.rpc("messaging_record_delivery_suppression", {
         target_workspace_id: workspaceId,
         target_email: event.recipient,
         target_reason: event.status,
       });
-      if (suppressionResult.error) console.error("[Messaging] failed to record delivery suppression", suppressionResult.error);
+      if (suppressionResult.error) throw suppressionResult.error;
     }
     if (provider === "enginemailer" && workspaceId && event.recipient?.includes("@") && event.status === "canceled") {
       const optOutResult = await supabase.rpc("messaging_record_marketing_opt_out", {
@@ -94,10 +96,11 @@ export async function ingestDeliveryWebhook(provider: string, adapter: Messaging
         target_email: event.recipient,
         target_source: "enginemailer",
       });
-      if (optOutResult.error) console.error("[Messaging] failed to record marketing opt-out", optOutResult.error);
+      if (optOutResult.error) throw optOutResult.error;
     }
   }
-  await supabase.from("webhook_events").update({ status: "processed", processed_at: new Date().toISOString() }).eq("id", webhookId);
+  const processed = await supabase.from("webhook_events").update({ status: "processed", processed_at: new Date().toISOString() }).eq("id", webhookId);
+  if (processed.error) throw processed.error;
   return { accepted: true, duplicate: inserted === 0, count: inserted };
 }
 

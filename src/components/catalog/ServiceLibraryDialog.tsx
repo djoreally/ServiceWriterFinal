@@ -40,19 +40,18 @@ export function ServiceLibraryDialog({ adoptedTemplateIds, onAdopted }: ServiceL
 
   useEffect(() => {
     if (!open || templates.length > 0) return;
-    setLoading(true);
-    Promise.all([fetchServiceTemplates(), fetchTemplateCategories()])
+    void Promise.resolve().then(() => setLoading(true));
+    void Promise.resolve().then(() => Promise.all([fetchServiceTemplates(), fetchTemplateCategories()])
       .then(([libraryTemplates, libraryCategories]) => {
         setTemplates(libraryTemplates);
         setCategories(libraryCategories);
       })
       .catch((error: unknown) => toast.error("Could not load the service library", { description: errorMessage(error) }))
-      .finally(() => setLoading(false));
+      .finally(() => setLoading(false)));
   }, [open, templates.length]);
 
-  const categoryName = (id: string | null) => categories.find((category) => category.id === id)?.name ?? "Other";
-
   const grouped = useMemo(() => {
+    const categoryName = (id: string | null) => categories.find((category) => category.id === id)?.name ?? "Other";
     const term = search.trim().toLowerCase();
     const matches = templates.filter((template) => {
       if (vertical !== "all" && template.serviceVertical !== vertical) return false;
@@ -74,8 +73,8 @@ export function ServiceLibraryDialog({ adoptedTemplateIds, onAdopted }: ServiceL
         items,
       }))
       .sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [templates, categories, search, vertical]);
+
+  }, [search, templates, vertical, categories]);
 
   const selectedCount = Object.keys(selected).length;
 

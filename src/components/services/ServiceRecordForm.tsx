@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -146,7 +147,7 @@ export function ServiceRecordForm({
 
   useEffect(() => {
     if (open) {
-      fetchData();
+      void Promise.resolve().then(() => fetchData());
     }
   }, [open, fetchData]);
 
@@ -154,11 +155,11 @@ export function ServiceRecordForm({
   useEffect(() => {
     if (editingService) {
       const isCustomType = !serviceCatalog.some(cat => cat.name === editingService.service_type);
-      setShowCustomServiceType(isCustomType);
-      setSelectedCustomerId(editingService.customer_id);
-      setVehicleId(editingService.vehicle_id);
-      setCustomerMode("choose");
-      setFormData({
+      void Promise.resolve().then(() => setShowCustomServiceType(isCustomType));
+      void Promise.resolve().then(() => setSelectedCustomerId(editingService.customer_id));
+      void Promise.resolve().then(() => setVehicleId(editingService.vehicle_id));
+      void Promise.resolve().then(() => setCustomerMode("choose"));
+      void Promise.resolve().then(() => setFormData({
         service_date: editingService.service_date,
         service_type: editingService.service_type,
         description: editingService.description,
@@ -174,9 +175,9 @@ export function ServiceRecordForm({
         tax_rate: "",
         discount_amount: "",
         discount_type: "fixed",
-      });
+      }));
     } else if (!open) {
-      setFormData({
+      void Promise.resolve().then(() => setFormData({
         service_date: format(new Date(), "yyyy-MM-dd"),
         service_type: prefillData?.serviceType || "",
         description: prefillData?.description || "",
@@ -192,18 +193,17 @@ export function ServiceRecordForm({
         tax_rate: "",
         discount_amount: "",
         discount_type: "fixed",
-      });
-      setShowCustomServiceType(false);
-      setSelectedCustomerId(prefillData?.customerId || null);
-      setVehicleId(prefillData?.vehicleId || null);
-      setCustomerMode("choose");
-      setCustomerSearch("");
-      setNewCustomer({ name: "", email: "", phone: "" });
-      setVin("");
-      setDecodedVehicle(null);
-      setManualVehicle({ year: "", make: "", model: "" });
-      setUseManual(false);
-      lastAutoDecodeVin.current = "";
+      }));
+      void Promise.resolve().then(() => setShowCustomServiceType(false));
+      void Promise.resolve().then(() => setSelectedCustomerId(prefillData?.customerId || null));
+      void Promise.resolve().then(() => setVehicleId(prefillData?.vehicleId || null));
+      void Promise.resolve().then(() => setCustomerMode("choose"));
+      void Promise.resolve().then(() => setCustomerSearch(""));
+      void Promise.resolve().then(() => setNewCustomer({ name: "", email: "", phone: "" }));
+      void Promise.resolve().then(() => setVin(""));
+      void Promise.resolve().then(() => setDecodedVehicle(null));
+      void Promise.resolve().then(() => setManualVehicle({ year: "", make: "", model: "" }));
+      void Promise.resolve().then(() => setUseManual(false));
     }
   }, [editingService, open, prefillData, serviceCatalog]);
 
@@ -254,14 +254,12 @@ export function ServiceRecordForm({
   }, [vin, decodeVinRaw]);
 
   // Auto-decode when VIN reaches 17 characters
-  const lastAutoDecodeVin = useRef("");
   useEffect(() => {
     const trimmed = vin.trim().toUpperCase();
-    if (trimmed.length === 17 && !decodedVehicle && !vinLoading && trimmed !== lastAutoDecodeVin.current) {
-      lastAutoDecodeVin.current = trimmed;
-      decodeVin();
+    if (trimmed.length === 17 && !decodedVehicle && !vinLoading && !useManual) {
+      void Promise.resolve().then(() => decodeVin());
     }
-  }, [vin, decodeVin, decodedVehicle, vinLoading]);
+  }, [vin, decodeVin, decodedVehicle, vinLoading, useManual]);
 
   // --- Customer helpers ---
   const filteredCustomers = customers.filter(c =>
@@ -476,8 +474,8 @@ export function ServiceRecordForm({
       }
 
       onOpenChange(false);
-    } catch (error: any) {
-      toast.error(error.message || `Failed to save ${terms.service.toLowerCase()} record`);
+    } catch (error: unknown) {
+      toast.error(errorMessage(error, `Failed to save ${terms.service.toLowerCase()} record`));
     } finally {
       setLoading(false);
     }
@@ -627,7 +625,7 @@ export function ServiceRecordForm({
                         onChange={e => {
                           setVin(e.target.value.toUpperCase());
                           setDecodedVehicle(null);
-                          lastAutoDecodeVin.current = "";
+                          setUseManual(false);
                         }}
                         maxLength={17}
                         className="font-mono uppercase"
@@ -657,7 +655,7 @@ export function ServiceRecordForm({
 
                   <button
                     type="button"
-                    onClick={() => { setUseManual(true); setVin(""); setDecodedVehicle(null); lastAutoDecodeVin.current = ""; }}
+                    onClick={() => { setUseManual(true); setVin(""); setDecodedVehicle(null); }}
                     className="text-xs text-primary underline-offset-2 hover:underline"
                   >
                     Enter vehicle details manually instead

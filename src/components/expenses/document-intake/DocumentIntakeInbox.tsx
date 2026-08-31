@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -47,10 +47,11 @@ export function DocumentIntakeInbox({ refreshKey, onChanged }: Props) {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<IntakeReviewStatus | "all">("pending_review");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [signedUrl, setSignedUrl] = useState<string | null>(null);
+  const [signedFile, setSignedFile] = useState<{ path: string; url: string } | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    await Promise.resolve();
     setLoading(true);
     const user = session?.user;
     if (!user) { setLoading(false); return; }
@@ -67,25 +68,28 @@ export function DocumentIntakeInbox({ refreshKey, onChanged }: Props) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filter, selectedId, session?.user]);
 
   useEffect(() => {
-    load();
-  }, [filter, refreshKey]);
+    void Promise.resolve().then(load);
+  }, [filter, load, refreshKey]);
 
   useEffect(() => {
     const hasParsing = docs.some((d) => d.parse_status === "pending" || d.parse_status === "parsing");
     if (!hasParsing) return;
     const id = setInterval(load, 4000);
     return () => clearInterval(id);
-  }, [docs]);
+  }, [docs, load]);
 
   const selected = useMemo(() => docs.find((d) => d.id === selectedId) ?? null, [docs, selectedId]);
+  const signedUrl = selected && signedFile?.path === selected.file_path ? signedFile.url : null;
 
   useEffect(() => {
-    setSignedUrl(null);
     if (!selected) return;
-    getIntakeFileSignedUrl(selected.file_path).then(setSignedUrl).catch(() => setSignedUrl(null));
+    const path = selected.file_path;
+    getIntakeFileSignedUrl(path)
+      .then((url) => setSignedFile({ path, url }))
+      .catch(() => setSignedFile(null));
   }, [selected]);
 
   const handleReparse = async (id: string) => {
@@ -393,24 +397,14 @@ function ParsedFields({
   vin: string | null;
   vinValid: boolean | null;
 }) {
-  const Row = ({ label, value }: { label: string; value: unknown }) => {
-    if (value === null || value === undefined || value === "") return null;
-    return (
-      <div className="flex items-start justify-between gap-3 py-1 text-xs border-b border-border/40 last:border-0">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="font-medium text-right break-words">{String(value)}</span>
-      </div>
-    );
-  };
-
   const lineItems = Array.isArray(parsed.line_items) ? parsed.line_items as Array<Record<string, unknown>> : [];
 
   return (
     <div className="space-y-1">
       {profile === "service" && (
         <>
-          <Row label="Vendor" value={parsed.vendor_name} />
-          <Row label="Date" value={parsed.transaction_date} />
+          <ParsedFieldRow label="Vendor" value={parsed.vendor_name} />
+          <ParsedFieldRow label="Date" value={parsed.transaction_date} />
           <div className="flex items-start justify-between gap-3 py-1 text-xs border-b border-border/40">
             <span className="text-muted-foreground">VIN</span>
             <span className="font-mono text-right">
@@ -419,27 +413,27 @@ function ParsedFields({
               {vin && vinValid && vehicleLinked && <span className="text-emerald-500 ml-1">(linked)</span>}
             </span>
           </div>
-          <Row label="Mileage" value={parsed.mileage} />
-          <Row label="Plate" value={parsed.license_plate} />
-          <Row label="Vehicle" value={[parsed.vehicle_year, parsed.vehicle_make, parsed.vehicle_model].filter(Boolean).join(" ")} />
-          <Row label="Oil type" value={parsed.oil_type} />
-          <Row label="Oil spec" value={parsed.oil_spec} />
-          <Row label="Labor" value={fmtMoney(parsed.labor_total)} />
-          <Row label="Parts" value={fmtMoney(parsed.parts_total)} />
-          <Row label="Subtotal" value={fmtMoney(parsed.subtotal)} />
-          <Row label="Tax" value={fmtMoney(parsed.tax_amount)} />
-          <Row label="Total" value={fmtMoney(parsed.total_amount)} />
+          <ParsedFieldRow label="Mileage" value={parsed.mileage} />
+          <ParsedFieldRow label="Plate" value={parsed.license_plate} />
+          <ParsedFieldRow label="Vehicle" value={[parsed.vehicle_year, parsed.vehicle_make, parsed.vehicle_model].filter(Boolean).join(" ")} />
+          <ParsedFieldRow label="Oil type" value={parsed.oil_type} />
+          <ParsedFieldRow label="Oil spec" value={parsed.oil_spec} />
+          <ParsedFieldRow label="Labor" value={fmtMoney(parsed.labor_total)} />
+          <ParsedFieldRow label="Parts" value={fmtMoney(parsed.parts_total)} />
+          <ParsedFieldRow label="Subtotal" value={fmtMoney(parsed.subtotal)} />
+          <ParsedFieldRow label="Tax" value={fmtMoney(parsed.tax_amount)} />
+          <ParsedFieldRow label="Total" value={fmtMoney(parsed.total_amount)} />
         </>
       )}
       {profile === "fuel" && (
         <>
-          <Row label="Station" value={parsed.station_name} />
-          <Row label="Location" value={parsed.station_location} />
-          <Row label="Date" value={parsed.transaction_date} />
-          <Row label="Fuel type" value={parsed.fuel_type} />
-          <Row label="Gallons" value={parsed.gallons} />
-          <Row label="Price/gal" value={fmtMoney(parsed.price_per_gallon)} />
-          <Row label="Odometer" value={parsed.odometer} />
+          <ParsedFieldRow label="Station" value={parsed.station_name} />
+          <ParsedFieldRow label="Location" value={parsed.station_location} />
+          <ParsedFieldRow label="Date" value={parsed.transaction_date} />
+          <ParsedFieldRow label="Fuel type" value={parsed.fuel_type} />
+          <ParsedFieldRow label="Gallons" value={parsed.gallons} />
+          <ParsedFieldRow label="Price/gal" value={fmtMoney(parsed.price_per_gallon)} />
+          <ParsedFieldRow label="Odometer" value={parsed.odometer} />
           <div className="flex items-start justify-between gap-3 py-1 text-xs border-b border-border/40">
             <span className="text-muted-foreground">VIN</span>
             <span className="font-mono text-right">
@@ -447,17 +441,17 @@ function ParsedFields({
               {vin && vehicleLinked && <span className="text-emerald-500 ml-1">(linked)</span>}
             </span>
           </div>
-          <Row label="Total" value={fmtMoney(parsed.total_amount)} />
+          <ParsedFieldRow label="Total" value={fmtMoney(parsed.total_amount)} />
         </>
       )}
       {profile === "general" && (
         <>
-          <Row label="Vendor" value={parsed.vendor_name} />
-          <Row label="Date" value={parsed.transaction_date} />
-          <Row label="Subtotal" value={fmtMoney(parsed.subtotal)} />
-          <Row label="Tax" value={fmtMoney(parsed.tax_amount)} />
-          <Row label="Total" value={fmtMoney(parsed.total_amount)} />
-          <Row label="Suggested category" value={parsed.suggested_category} />
+          <ParsedFieldRow label="Vendor" value={parsed.vendor_name} />
+          <ParsedFieldRow label="Date" value={parsed.transaction_date} />
+          <ParsedFieldRow label="Subtotal" value={fmtMoney(parsed.subtotal)} />
+          <ParsedFieldRow label="Tax" value={fmtMoney(parsed.tax_amount)} />
+          <ParsedFieldRow label="Total" value={fmtMoney(parsed.total_amount)} />
+          <ParsedFieldRow label="Suggested category" value={parsed.suggested_category} />
         </>
       )}
 
@@ -478,6 +472,16 @@ function ParsedFields({
       {Object.keys(parsed).length === 0 && (
         <p className="text-xs text-muted-foreground py-2">No fields extracted.</p>
       )}
+    </div>
+  );
+}
+
+function ParsedFieldRow({ label, value }: { label: string; value: unknown }) {
+  if (value === null || value === undefined || value === "") return null;
+  return (
+    <div className="flex items-start justify-between gap-3 py-1 text-xs border-b border-border/40 last:border-0">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-medium text-right break-words">{String(value)}</span>
     </div>
   );
 }

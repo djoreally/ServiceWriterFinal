@@ -65,8 +65,8 @@ export async function fetchVehicleSpecSingle(year: number, make: string, model: 
   return query.limit(1);
 }
 
-export async function invokeAIVehicleSpecs(year: number, make: string, model: string): Promise<{ data: AIVehicleSpecsResponse | null; error: any }> {
-  return supabase.functions.invoke("ai-vehicle-specs", {
+export async function invokeAIVehicleSpecs(year: number, make: string, model: string) {
+  return supabase.functions.invoke<AIVehicleSpecsResponse>("ai-vehicle-specs", {
     body: { year, make, model },
-  }) as Promise<{ data: AIVehicleSpecsResponse | null; error: any }>;
+  });
 }

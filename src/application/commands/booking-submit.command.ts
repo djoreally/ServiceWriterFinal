@@ -4,6 +4,7 @@
  * free of direct Supabase references.
  */
 import { supabase } from "@/integrations/supabase/client";
+import type { Json } from "@/integrations/supabase/types.production";
 import type { AppointmentBookingConfiguration } from "@/lib/booking-configuration";
 
 // ---------------------------------------------------------------------------
@@ -93,7 +94,7 @@ export async function saveAppointmentBookingConfiguration(
   return supabase.rpc("public_booking_save_configuration", {
     p_booking_slug: bookingSlug,
     p_appointment_id: appointmentId,
-    p_configuration: configuration,
+    p_configuration: configuration as unknown as Json,
   });
 }
 
@@ -122,7 +123,7 @@ export async function insertBookingAppointmentServices(
   return supabase.rpc("public_booking_insert_services", {
     p_booking_slug: bookingSlug,
     p_appointment_id: appointmentId,
-    p_services: services as unknown as import("@/integrations/supabase/types").Json,
+    p_services: services as unknown as Json,
   });
 }
 
@@ -230,7 +231,7 @@ export interface BookingConsentInput {
   appointmentId?: string | null;
 }
 
-export async function recordBookingConsent(input: BookingConsentInput): Promise<any> {
+export async function recordBookingConsent(input: BookingConsentInput) {
   const { signature, ...body } = input;
   return supabase.functions.invoke("record-booking-consent", {
     body,

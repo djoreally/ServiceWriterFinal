@@ -12,22 +12,47 @@ import {
 import type { PersonaPreset } from "./personas";
 import { personas } from "./personas";
 import { useStartupRoutingStore } from "@/stores/startupRoutingStore";
+import type { Session } from "@supabase/supabase-js";
+
+type FakeRow = Record<string, unknown>;
+type FakeArgs = Record<string, unknown>;
+type FakeResult = { data: unknown; error: unknown };
+type FakeHandler = (args: FakeArgs) => FakeResult | Promise<FakeResult>;
+type EdgeOptions = { body?: FakeRow } & FakeRow;
+type AuthStateListener = (event: string, session: Session | null) => void;
+type QueryResult = { data: FakeRow[] | FakeRow | null; error: unknown };
+type QueryResolve = (value: QueryResult) => unknown;
+type QueryReject = (reason: unknown) => unknown;
+
+function asRow(value: unknown): FakeRow {
+  return value !== null && typeof value === "object" ? value as FakeRow : { value };
+}
+
+function compareValues(left: unknown, right: unknown, operator: "gte" | "gt" | "lte"): boolean {
+  if (typeof left === "number" && typeof right === "number") {
+    return operator === "gte" ? left >= right : operator === "gt" ? left > right : left <= right;
+  }
+  if (typeof left === "string" && typeof right === "string") {
+    return operator === "gte" ? left >= right : operator === "gt" ? left > right : left <= right;
+  }
+  return false;
+}
 
 export interface RecordedCall {
   type: "from" | "rpc" | "functions.invoke" | "auth";
   target: string;
   method?: string;
-  args?: any;
+  args?: unknown;
   timestamp: number;
 }
 
 export class FakeBackend {
   public recordedCalls: RecordedCall[] = [];
-  public tables: Record<string, any[]> = {};
-  public rpcHandlers: Record<string, (args: any) => Promise<{ data: any; error: any }> | { data: any; error: any }> = {};
-  public edgeHandlers: Record<string, (options: any) => Promise<{ data: any; error: any }> | { data: any; error: any }> = {};
+  public tables: Record<string, FakeRow[]> = {};
+  public rpcHandlers: Record<string, FakeHandler> = {};
+  public edgeHandlers: Record<string, FakeHandler> = {};
   public currentPersona: PersonaPreset;
-  private authStateListeners: Array<(event: string, session: any) => void> = [];
+  private authStateListeners: AuthStateListener[] = [];
 
   constructor(initialPersona: PersonaPreset = personas.asOwner()) {
     this.currentPersona = initialPersona;
@@ -53,20 +78,20 @@ export class FakeBackend {
     const inv = buildInventoryItemFixture();
 
     this.tables = {
-      business_profiles: [biz],
+      business_profiles: [{ ...biz }],
       workspace_members: [
         { workspace_id: "00000000-0000-4000-8000-000000000001", user_id: "00000000-0000-0000-0000-000000000001", is_active: true, role: "owner" },
         { workspace_id: "00000000-0000-4000-8000-000000000001", user_id: "00000000-0000-0000-0000-000000000002", is_active: true, role: "dispatcher" },
         { workspace_id: "00000000-0000-4000-8000-000000000001", user_id: "00000000-0000-0000-0000-000000000003", is_active: true, role: "technician" },
       ],
-      service_catalog: [...services],
-      appointments: [appt],
-      fleet_work_orders: [wo],
-      fleet_jobs: [fleetJob],
-      technicians: [tech],
-      subscriptions: [sub],
-      payment_records: [pay],
-      inventory_items: [inv],
+      service_catalog: services.map((service) => ({ ...service })),
+      appointments: [{ ...appt }],
+      fleet_work_orders: [{ ...wo }],
+      fleet_jobs: [{ ...fleetJob }],
+      technicians: [{ ...tech }],
+      subscriptions: [{ ...sub }],
+      payment_records: [{ ...pay }],
+      inventory_items: [{ ...inv }],
       vans: [
         {
           id: "van-001",
@@ -205,7 +230,7 @@ export class FakeBackend {
         );
         return { data: profile ? [profile] : [], error: null };
       },
-      get_directory_provider_profile: (args: any) => {
+      get_directory_provider_profile: (args) => {
         const slug = args?.booking_slug_param || args?.slug || args?.p_slug || args?.business_slug;
         const profile = this.tables.business_profiles.find(
           (b) => b.business_slug === slug
@@ -230,7 +255,7 @@ export class FakeBackend {
           error: null,
         };
       },
-      get_public_booking_profile_v2: (args: any) => {
+      get_public_booking_profile_v2: (args) => {
         const slug = args?.booking_slug_param || args?.slug || args?.p_slug || args?.business_slug;
         const profile = this.tables.business_profiles.find(
           (b) => b.business_slug === slug
@@ -262,7 +287,7 @@ export class FakeBackend {
           error: null,
         };
       },
-      get_public_booking_settings: (_args: any) => {
+      get_public_booking_settings: () => {
         return {
           data: [
             {
@@ -287,19 +312,19 @@ export class FakeBackend {
           error: null,
         };
       },
-      get_public_service_catalog_v2: (_args: any) => {
+      get_public_service_catalog_v2: () => {
         return { data: this.tables.service_catalog.filter((s) => s.is_active !== false), error: null };
       },
-      get_public_service_catalog: (_args: any) => {
+      get_public_service_catalog: () => {
         return { data: this.tables.service_catalog.filter((s) => s.is_active !== false), error: null };
       },
-      get_public_service_packages: (_args: any) => {
+      get_public_service_packages: () => {
         return { data: [], error: null };
       },
-      get_public_blocked_dates: (_args: any) => {
+      get_public_blocked_dates: () => {
         return { data: [], error: null };
       },
-      get_booked_slots: (_args: any) => {
+      get_booked_slots: () => {
         return { data: [], error: null };
       },
       get_technician_app_context_v1: () => {
@@ -411,7 +436,7 @@ export class FakeBackend {
         data: { success: true, tax_amount: 540, total: 9539, tax_breakdown: [] },
         error: null,
       }),
-      "location-service": (options: any) => {
+      "location-service": (options) => {
         const body = options?.body ?? {};
         switch (body.action) {
           case "get_location_quality_queue":
@@ -464,7 +489,7 @@ export class FakeBackend {
     };
   }
 
-  public removeChannel(_channel: any) {}
+  public removeChannel(_channel: unknown) {}
 
   // Builder for query chain
   public from(table: string) {
@@ -485,9 +510,9 @@ export class FakeBackend {
         this.recordedCalls.push({ type: "from", target: table, method: "select", args: fields, timestamp: Date.now() });
         return chain;
       },
-      insert: (data: any) => {
+      insert: (data: unknown) => {
         this.recordedCalls.push({ type: "from", target: table, method: "insert", args: data, timestamp: Date.now() });
-        const items = Array.isArray(data) ? data : [data];
+        const items = (Array.isArray(data) ? data : [data]).map(asRow);
         const inserted = items.map((item, idx) => ({
           id: item.id || `gen-${table}-${Date.now()}-${idx}`,
           created_at: new Date().toISOString(),
@@ -498,12 +523,13 @@ export class FakeBackend {
         currentData = inserted;
         return chain;
       },
-      update: (data: any) => {
+      update: (data: unknown) => {
         this.recordedCalls.push({ type: "from", target: table, method: "update", args: data, timestamp: Date.now() });
-        currentData = currentData.map((item) => ({ ...item, ...data }));
+        const patch = asRow(data);
+        currentData = currentData.map((item) => ({ ...item, ...patch }));
         return chain;
       },
-      upsert: (data: any) => {
+      upsert: (data: unknown) => {
         this.recordedCalls.push({ type: "from", target: table, method: "upsert", args: data, timestamp: Date.now() });
         return chain;
       },
@@ -511,37 +537,44 @@ export class FakeBackend {
         this.recordedCalls.push({ type: "from", target: table, method: "delete", timestamp: Date.now() });
         return chain;
       },
-      eq: (column: string, value: any) => {
+      eq: (column: string, value: unknown) => {
         this.recordedCalls.push({ type: "from", target: table, method: "eq", args: { column, value }, timestamp: Date.now() });
         currentData = currentData.filter((r) => r[column] === value);
         return chain;
       },
-      neq: (column: string, value: any) => {
+      neq: (column: string, value: unknown) => {
         this.recordedCalls.push({ type: "from", target: table, method: "neq", args: { column, value }, timestamp: Date.now() });
         currentData = currentData.filter((r) => r[column] !== value);
         return chain;
       },
-      is: (column: string, value: any) => {
+      is: (column: string, value: unknown) => {
         this.recordedCalls.push({ type: "from", target: table, method: "is", args: { column, value }, timestamp: Date.now() });
         currentData = currentData.filter((r) => r[column] === value);
         return chain;
       },
-      gte: (column: string, value: any) => {
+      not: (column: string, operator: string, value: unknown) => {
+        this.recordedCalls.push({ type: "from", target: table, method: "not", args: { column, operator, value }, timestamp: Date.now() });
+        if (operator === "is") {
+          currentData = currentData.filter((r) => r[column] !== value);
+        }
+        return chain;
+      },
+      gte: (column: string, value: unknown) => {
         this.recordedCalls.push({ type: "from", target: table, method: "gte", args: { column, value }, timestamp: Date.now() });
-        currentData = currentData.filter((r) => r[column] >= value);
+        currentData = currentData.filter((r) => compareValues(r[column], value, "gte"));
         return chain;
       },
-      gt: (column: string, value: any) => {
+      gt: (column: string, value: unknown) => {
         this.recordedCalls.push({ type: "from", target: table, method: "gt", args: { column, value }, timestamp: Date.now() });
-        currentData = currentData.filter((r) => r[column] > value);
+        currentData = currentData.filter((r) => compareValues(r[column], value, "gt"));
         return chain;
       },
-      lte: (column: string, value: any) => {
+      lte: (column: string, value: unknown) => {
         this.recordedCalls.push({ type: "from", target: table, method: "lte", args: { column, value }, timestamp: Date.now() });
-        currentData = currentData.filter((r) => r[column] <= value);
+        currentData = currentData.filter((r) => compareValues(r[column], value, "lte"));
         return chain;
       },
-      in: (column: string, values: any[]) => {
+      in: (column: string, values: unknown[]) => {
         this.recordedCalls.push({ type: "from", target: table, method: "in", args: { column, values }, timestamp: Date.now() });
         currentData = currentData.filter((r) => values.includes(r[column]));
         return chain;
@@ -550,7 +583,7 @@ export class FakeBackend {
         this.recordedCalls.push({ type: "from", target: table, method: "or", args: condition, timestamp: Date.now() });
         return chain;
       },
-      order: (column: string, options?: any) => {
+      order: (column: string, options?: unknown) => {
         this.recordedCalls.push({ type: "from", target: table, method: "order", args: { column, options }, timestamp: Date.now() });
         return chain;
       },
@@ -578,8 +611,8 @@ export class FakeBackend {
         this.recordedCalls.push({ type: "from", target: table, method: "csv", timestamp: Date.now() });
         return Promise.resolve({ data: "id,name\n1,test", error: null });
       },
-      then: (resolve: any, reject?: any) => {
-        let result: any = currentData;
+      then: (resolve: QueryResolve, reject?: QueryReject) => {
+        let result: FakeRow[] | FakeRow | null = currentData;
         if (isSingle) {
           result = currentData[0] || null;
           if (!result) {
@@ -595,7 +628,7 @@ export class FakeBackend {
     return chain;
   }
 
-  public async rpc(name: string, args: any = {}) {
+  public async rpc(name: string, args: FakeArgs = {}) {
     this.recordedCalls.push({
       type: "rpc",
       target: name,
@@ -610,7 +643,7 @@ export class FakeBackend {
   }
 
   public functions = {
-    invoke: async (name: string, options: any = {}) => {
+    invoke: async (name: string, options: EdgeOptions = {}) => {
       this.recordedCalls.push({
         type: "functions.invoke",
         target: name,
@@ -633,7 +666,7 @@ export class FakeBackend {
       this.recordedCalls.push({ type: "auth", target: "getUser", timestamp: Date.now() });
       return { data: { user: this.currentPersona.user }, error: null };
     },
-    onAuthStateChange: (callback: (event: string, session: any) => void) => {
+    onAuthStateChange: (callback: AuthStateListener) => {
       this.authStateListeners.push(callback);
       return {
         data: {
@@ -645,7 +678,7 @@ export class FakeBackend {
         },
       };
     },
-    signInWithPassword: async (credentials: any) => {
+    signInWithPassword: async (credentials: { email: string; password: string }) => {
       this.recordedCalls.push({ type: "auth", target: "signInWithPassword", args: credentials, timestamp: Date.now() });
       this.setPersona(personas.asOwner());
       return { data: { session: this.currentPersona.session, user: this.currentPersona.user }, error: null };
@@ -663,8 +696,8 @@ export class FakeBackend {
 
   public channel(name: string) {
     const channelObj = {
-      on: (_event: string, _filter: any, _callback?: any) => channelObj,
-      subscribe: (_callback?: any) => channelObj,
+      on: (_event: string, _filter: unknown, _callback?: (...args: unknown[]) => void) => channelObj,
+      subscribe: (_callback?: (...args: unknown[]) => void) => channelObj,
       unsubscribe: () => {},
     };
     return channelObj;

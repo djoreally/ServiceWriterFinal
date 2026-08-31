@@ -87,15 +87,15 @@ export function WeatherMap({ lat, lng, address, jobs }: Props) {
   useEffect(() => {
     if (lat == null || lng == null) return;
     let cancelled = false;
-    setLoadingForecast(true);
-    fetch48hRisk(lat, lng)
+    void Promise.resolve().then(() => setLoadingForecast(true));
+    void Promise.resolve().then(() => fetch48hRisk(lat, lng)
       .then((data) => {
         if (!cancelled) setHourly(data);
       })
       .catch((e) => console.error("[WeatherMap] forecast error", e))
       .finally(() => {
         if (!cancelled) setLoadingForecast(false);
-      });
+      }));
     return () => {
       cancelled = true;
     };
@@ -115,7 +115,7 @@ export function WeatherMap({ lat, lng, address, jobs }: Props) {
     try {
       token = requireMapboxToken();
     } catch {
-      setError("Mapbox token not configured.");
+      void Promise.resolve().then(() => setError("Mapbox token not configured."));
       return;
     }
 

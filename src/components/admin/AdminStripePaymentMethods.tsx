@@ -34,7 +34,7 @@ export const AdminStripePaymentMethods = () => {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { void Promise.resolve().then(() => load()); }, []);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();

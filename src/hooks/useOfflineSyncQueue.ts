@@ -58,7 +58,11 @@ export function useOfflineSyncQueue<TPayload extends Record<string, unknown>>(
       const parsed = JSON.parse(stored) as Array<OfflineSyncItem<TPayload>>;
       setQueue(parsed.filter((item) => !isStale(item)));
     } catch {
-      try { localStorage.removeItem(storageKey); } catch {}
+      try {
+        localStorage.removeItem(storageKey);
+      } catch {
+        // Storage may be unavailable in private or restricted browser contexts.
+      }
     }
   }, [enabled, storageKey, isStale]);
 

@@ -118,33 +118,33 @@ export function AutomationRuleDialog({
   // Populate form on edit
   useEffect(() => {
     if (editRule) {
-      setName(editRule.name);
-      setIsActive(editRule.is_active);
-      setPriority(editRule.priority);
-      setTriggerType((editRule.trigger_jsonb as Record<string, string>)?.type || "");
+      void Promise.resolve().then(() => setName(editRule.name));
+      void Promise.resolve().then(() => setIsActive(editRule.is_active));
+      void Promise.resolve().then(() => setPriority(editRule.priority));
+      void Promise.resolve().then(() => setTriggerType((editRule.trigger_jsonb as Record<string, string>)?.type || ""));
       const acts = editRule.actions_jsonb as ActionItem[] | null;
-      setActions(acts?.length ? acts : [{ type: "" }]);
+      void Promise.resolve().then(() => setActions(acts?.length ? acts : [{ type: "" }]));
       const freq = editRule.frequency_guard_jsonb as Record<string, number> | null;
-      setFrequencyHours(freq?.min_hours_between?.toString() || "");
+      void Promise.resolve().then(() => setFrequencyHours(freq?.min_hours_between?.toString() || ""));
 
       const conds = editRule.conditions_jsonb as Record<string, { gte?: number }> | null;
-      setScoreMin(conds?.score?.gte?.toString() || "");
-      setDaysOverdueMin(conds?.days_overdue?.gte?.toString() || "");
+      void Promise.resolve().then(() => setScoreMin(conds?.score?.gte?.toString() || ""));
+      void Promise.resolve().then(() => setDaysOverdueMin(conds?.days_overdue?.gte?.toString() || ""));
 
       const aud = editRule.audience_jsonb as { minLifetimeValue?: number; segments?: string[] } | null;
-      setMinLifetimeValue(aud?.minLifetimeValue?.toString() || "");
-      setRequiredSegment(aud?.segments?.[0] || "");
+      void Promise.resolve().then(() => setMinLifetimeValue(aud?.minLifetimeValue?.toString() || ""));
+      void Promise.resolve().then(() => setRequiredSegment(aud?.segments?.[0] || ""));
     } else {
-      setName("");
-      setIsActive(true);
-      setPriority(50);
-      setTriggerType("");
-      setActions([{ type: "" }]);
-      setFrequencyHours("");
-      setScoreMin("");
-      setDaysOverdueMin("");
-      setMinLifetimeValue("");
-      setRequiredSegment("");
+      void Promise.resolve().then(() => setName(""));
+      void Promise.resolve().then(() => setIsActive(true));
+      void Promise.resolve().then(() => setPriority(50));
+      void Promise.resolve().then(() => setTriggerType(""));
+      void Promise.resolve().then(() => setActions([{ type: "" }]));
+      void Promise.resolve().then(() => setFrequencyHours(""));
+      void Promise.resolve().then(() => setScoreMin(""));
+      void Promise.resolve().then(() => setDaysOverdueMin(""));
+      void Promise.resolve().then(() => setMinLifetimeValue(""));
+      void Promise.resolve().then(() => setRequiredSegment(""));
     }
   }, [editRule, open]);
 

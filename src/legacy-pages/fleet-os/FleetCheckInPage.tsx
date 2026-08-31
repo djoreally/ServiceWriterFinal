@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FleetOSLayout } from "@/components/layout/FleetOSLayout";
@@ -52,7 +53,7 @@ const FleetCheckInPage = () => {
       if (!navigator.geolocation) { reject(new Error("Geolocation not supported")); return; }
       navigator.geolocation.getCurrentPosition(
         (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }),
-        (err) => reject(new Error(err.message)),
+        (err) => reject(new Error(errorMessage(err))),
         { enableHighAccuracy: true, timeout: 10000 }
       );
     });
@@ -68,8 +69,8 @@ const FleetCheckInPage = () => {
       geo = await getLocation();
       setCurrentPosition(geo);
       setPositionError(null);
-    } catch (e: any) {
-      setPositionError(e.message);
+    } catch (e: unknown) {
+      setPositionError(errorMessage(e));
       toast.error("Could not get GPS location — check-in recorded without coordinates");
     }
     setGeoLoading(false);

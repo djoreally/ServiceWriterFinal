@@ -12,6 +12,7 @@ import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { useAuth } from "@packages/auth";
 import { fetchActiveAiAgents } from "@/application/queries/ai-session.query";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { generateCorrelationId } from "@/lib/client-observability";
 
 interface Message {
   role: "user" | "assistant";
@@ -33,7 +34,23 @@ interface ToolResult {
   success: boolean;
   message: string;
   imageUrl?: string;
-  data?: any;
+  data?: unknown;
+}
+
+interface ActionResponse {
+  success?: boolean;
+  error?: string;
+  result?: {
+    message?: string;
+    image_url?: string;
+    [key: string]: unknown;
+  };
+}
+
+declare global {
+  interface Window {
+    __aiAssistantPendingImage?: string;
+  }
 }
 
 const CHAT_URL = `${SUPABASE_URL_RESOLVED}/functions/v1/ai-assistant`;
@@ -121,10 +138,10 @@ export function AIAssistant() {
       });
 
       const text = await resp.text();
-      let result: any = {};
+      let result: ActionResponse = {};
       if (text) {
         try {
-          result = JSON.parse(text);
+          result = JSON.parse(text) as ActionResponse;
         } catch {
           result = { success: false, error: `Invalid response from server (${resp.status})` };
         }
@@ -257,7 +274,7 @@ export function AIAssistant() {
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let textBuffer = "";
-    let assistantContent = "";
+    const assistantChunks: string[] = [];
     const toolCalls: ToolCall[] = [];
     let streamDone = false;
 
@@ -287,7 +304,8 @@ export function AIAssistant() {
 
           const content = choice?.delta?.content as string | undefined;
           if (content) {
-            assistantContent += content;
+            assistantChunks.push(content);
+            const assistantContent = assistantChunks.join("");
             setMessages(prev => prev.map((m, i) =>
               i === prev.length - 1 ? { ...m, content: assistantContent } : m
             ));
@@ -301,7 +319,7 @@ export function AIAssistant() {
               const idx = typeof tc.index === "number" ? tc.index : toolCalls.length;
               if (!toolCalls[idx]) {
                 toolCalls[idx] = {
-                  id: tc.id || `call_${idx}_${Date.now()}`,
+                  id: tc.id || generateCorrelationId(`call_${idx}`),
                   function: { name: tc.function?.name || "", arguments: tc.function?.arguments || "" },
                 };
               } else {
@@ -318,6 +336,7 @@ export function AIAssistant() {
       }
     }
 
+    const assistantContent = assistantChunks.join("");
     const requestedTools = toolCalls.filter(Boolean);
 
     if (requestedTools.length === 0) {
@@ -469,7 +488,7 @@ export function AIAssistant() {
     reader.onloadend = () => {
       const base64 = (reader.result as string).split(",")[1];
       // Store base64 for vision API — sent with next message
-      (window as any).__aiAssistantPendingImage = base64;
+      window.__aiAssistantPendingImage = base64;
       // Add a hint in the input if empty
       if (!input.trim()) {
         setInput("Scan this photo and extract all the data you can find.");
@@ -483,7 +502,7 @@ export function AIAssistant() {
 
   const clearImagePreview = () => {
     setImagePreview(null);
-    delete (window as any).__aiAssistantPendingImage;
+    delete window.__aiAssistantPendingImage;
   };
 
   const handleSubmit = async (e?: React.FormEvent) => {
@@ -491,7 +510,7 @@ export function AIAssistant() {
     if (!input.trim() || isLoading || pendingToolCalls.length > 0) return;
 
     // ⚡ Grab pending image before clearing
-    const pendingImage = (window as any).__aiAssistantPendingImage as string | null;
+    const pendingImage = window.__aiAssistantPendingImage ?? null;
 
     const userMessage: Message = { role: "user", content: input.trim() };
     const newMessages = [...messages, userMessage];

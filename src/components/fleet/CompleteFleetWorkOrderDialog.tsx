@@ -31,8 +31,8 @@ export function CompleteFleetWorkOrderDialog({
 
   useEffect(() => {
     if (!open) return;
-    setMileage(defaultMileage && defaultMileage > 0 ? String(defaultMileage) : "");
-    setNotes("");
+    void Promise.resolve().then(() => setMileage(defaultMileage && defaultMileage > 0 ? String(defaultMileage) : ""));
+    void Promise.resolve().then(() => setNotes(""));
   }, [defaultMileage, open, workOrderId]);
 
   const complete = async () => {

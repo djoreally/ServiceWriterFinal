@@ -43,7 +43,7 @@ export function TireServicePricingCard() {
 
   useEffect(() => {
     if (!selectedId) return;
-    setRule(rules.find((item) => item.serviceCatalogId === selectedId) || defaultTirePricingRule(selectedId));
+    void Promise.resolve().then(() => setRule(rules.find((item) => item.serviceCatalogId === selectedId) || defaultTirePricingRule(selectedId)));
   }, [rules, selectedId]);
 
   const selectedService = tireServices.find((service) => service.id === selectedId);

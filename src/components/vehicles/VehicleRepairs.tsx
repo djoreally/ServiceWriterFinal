@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { errorMessage } from "@/lib/error-message";
+import { useState, useEffect, useCallback } from "react";
 import { fetchVehicleRepairs, type RepairItem } from "@/application/queries/vehicle-repairs.query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -35,7 +36,7 @@ export const VehicleRepairs = ({ vin, businessId, vehicleName }: VehicleRepairsP
   const [selectedRepair, setSelectedRepair] = useState<RepairItem | null>(null);
   const [source, setSource] = useState<"cache" | "upstream" | null>(null);
 
-  const loadRepairs = async () => {
+  const loadRepairs = useCallback(async () => {
     if (!vin || vin.length !== 17) {
       setError("A valid 17-character VIN is required to pull repair cost intelligence.");
       return;
@@ -54,21 +55,21 @@ export const VehicleRepairs = ({ vin, businessId, vehicleName }: VehicleRepairsP
       } else {
         setError(response.error || "No repair details found for this vehicle.");
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Failed to load vehicle repairs:", err);
-      setError(err?.message || "Failed to load repairs intelligence from the API.");
+      setError(errorMessage(err, "Failed to load repairs intelligence from the API."));
     } finally {
       setLoading(false);
     }
-  };
+  }, [businessId, vin]);
 
   useEffect(() => {
     if (vin && vin.length === 17) {
-      loadRepairs();
+      void Promise.resolve().then(() => loadRepairs());
     } else {
-      setError("Please ensure the vehicle profile has a valid 17-character VIN configured.");
+      void Promise.resolve().then(() => setError("Please ensure the vehicle profile has a valid 17-character VIN configured."));
     }
-  }, [vin]);
+  }, [loadRepairs, vin]);
 
   const filteredRepairs = repairs.filter((item) =>
     item.title.toLowerCase().includes(searchQuery.toLowerCase())

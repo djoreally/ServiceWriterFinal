@@ -63,9 +63,6 @@ export function InspectionTemplateManager() {
     is_required: false,
   });
 
-  useEffect(() => {
-    fetchTemplates();
-  }, []);
 
   const fetchTemplates = async () => {
     try {
@@ -77,6 +74,10 @@ export function InspectionTemplateManager() {
     }
     setLoading(false);
   };
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchTemplates());
+  }, []);
 
   const handleCreateTemplate = async () => {
     if (!templateForm.name.trim()) {

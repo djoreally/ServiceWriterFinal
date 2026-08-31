@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   saveInspection,
   fetchInspectionPerformerData,
@@ -45,16 +45,17 @@ export function InspectionPerformer({ serviceId, vehicleId, appointmentId, onCom
   const [pastInspections, setPastInspections] = useState<PastInspection[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchData();
-  }, [serviceId, vehicleId]);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     const data = await fetchInspectionPerformerData(serviceId, vehicleId);
     setTemplates(data.templates);
     setPastInspections(data.pastInspections);
     setLoading(false);
-  };
+  }, [serviceId, vehicleId]);
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchData());
+  }, [fetchData, serviceId, vehicleId]);
 
   const handleSelectTemplate = async (templateId: string) => {
     const template = templates.find((t) => t.id === templateId);

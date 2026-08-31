@@ -2,6 +2,7 @@
  * CalendarIntegration — Settings UI for Google Calendar sync.
  * Allows users to view connection status, connect via Google OAuth, and disconnect.
  */
+import { errorMessage } from "@/lib/error-message";
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -46,8 +47,8 @@ export function CalendarIntegration() {
         return;
       }
       throw new Error("Google did not return an authorization URL");
-    } catch (err: any) {
-      toast.error(err?.message || "Failed to connect Google Calendar");
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, "Failed to connect Google Calendar"));
     } finally {
       setConnecting(false);
     }

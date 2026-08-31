@@ -23,7 +23,7 @@ export function logAssetEvent(
 ): string {
   const requestId = newRequestId();
   try {
-    // eslint-disable-next-line no-console
+
     console.warn(`[assets:${event}] rid=${requestId}`, meta);
   } catch {
     /* noop */

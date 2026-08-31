@@ -35,6 +35,8 @@ const AuthContext = createContext<AuthContextValue>({
 });
 
 export type AuthStateSource = {
+  getSession?: () => Promise<{ data: { session: FrontendSession | null }; error?: unknown }>;
+  signOut?: () => Promise<{ error?: unknown }>;
   onAuthStateChange?: (callback: (event: string, session: FrontendSession | null) => void) => {
     data?: { subscription?: { unsubscribe?: () => void } };
   };
@@ -50,20 +52,44 @@ export function AuthProvider({
   authStateSource?: AuthStateSource;
 }) {
   const [session, setSession] = useState<FrontendSession | null>(initialSession);
+  const [loading, setLoading] = useState(Boolean(authStateSource?.getSession && !initialSession));
 
   useEffect(() => {
-    if (!authStateSource?.onAuthStateChange) return;
-    const result = authStateSource.onAuthStateChange((_event, nextSession) => {
+    let active = true;
+    let receivedAuthEvent = false;
+    const result = authStateSource?.onAuthStateChange?.((_event, nextSession) => {
+      receivedAuthEvent = true;
+      if (!active) return;
       setSession(nextSession);
+      setLoading(false);
     });
-    return () => result?.data?.subscription?.unsubscribe?.();
+
+    if (authStateSource?.getSession) {
+      void authStateSource.getSession().then(({ data }) => {
+        if (!active) return;
+        // An auth event that arrives while getSession is in flight is newer
+        // than the snapshot and must win (notably SIGNED_IN after submit).
+        if (!receivedAuthEvent) setSession(data.session);
+        setLoading(false);
+      }).catch(() => {
+        if (active) setLoading(false);
+      });
+    }
+
+    return () => {
+      active = false;
+      result?.data?.subscription?.unsubscribe?.();
+    };
   }, [authStateSource]);
   const value = useMemo<AuthContextValue>(() => ({
     session,
     user: session?.user ?? null,
-    loading: false,
-    signOut: async () => setSession(null),
-  }), [session]);
+    loading,
+    signOut: async () => {
+      if (authStateSource?.signOut) await authStateSource.signOut();
+      setSession(null);
+    },
+  }), [authStateSource, loading, session]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
@@ -94,7 +120,7 @@ export function useSessionSecurity(options: {
       void signOut();
     }, options.idleTimeoutMs);
     return () => window.clearTimeout(timer);
-  }, [session, signOut, options.idleTimeoutMs]);
+  }, [session, signOut, options.idleTimeoutMs, options]);
 }
 
 export function hasRole(_userId: string, _role: AppRole): Promise<boolean> {

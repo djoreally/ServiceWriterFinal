@@ -19,7 +19,7 @@ export async function saveQBOSettings(settings: {
     .eq("user_id", user.id);
 }
 
-export async function invokeQBOConnect(): Promise<any> {
+export async function invokeQBOConnect() {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error("Not authenticated");
 
@@ -28,7 +28,7 @@ export async function invokeQBOConnect(): Promise<any> {
   });
 }
 
-export async function invokeQBODisconnect(): Promise<any> {
+export async function invokeQBODisconnect() {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error("Not authenticated");
 
@@ -37,7 +37,7 @@ export async function invokeQBODisconnect(): Promise<any> {
   });
 }
 
-export async function invokeQBOSync(entityType?: string): Promise<any> {
+export async function invokeQBOSync(entityType?: string) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error("Not authenticated");
 

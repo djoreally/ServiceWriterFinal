@@ -1,5 +1,5 @@
 /** Quote Document Query — canonical workspace-scoped document adapter. */
-import { supabase } from "@/integrations/supabase/client";
+import { productionSupabase } from "@/integrations/supabase/client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 function object(value: unknown): Record<string, any> {
@@ -13,11 +13,11 @@ function quoteStatus(status: string): string {
   return status;
 }
 
-function customerName(row: any): string {
+function customerName(row: { first_name?: string | null; last_name?: string | null; company_name?: string | null }): string {
   return [row?.first_name, row?.last_name].filter(Boolean).join(" ").trim() || row?.company_name || "Customer";
 }
 
-function address(row: any): string | null {
+function address(row: { address_line1?: string | null; address_line2?: string | null; city?: string | null; region?: string | null; postal_code?: string | null } | null): string | null {
   const value = [row?.address_line1, row?.address_line2, row?.city, row?.region, row?.postal_code].filter(Boolean).join(", ");
   return value || null;
 }
@@ -25,7 +25,7 @@ function address(row: any): string | null {
 export async function fetchQuoteDocumentData(quoteId: string, customerId: string, vehicleId: string) {
   const context = await resolveCurrentWorkspace();
   if (!context) return null;
-  const client = supabase as any;
+  const client = productionSupabase;
 
   const [quoteRes, itemsRes, customerRes, vehicleRes, workspaceRes, settingsRes] = await Promise.all([
     client.from("quotes")
@@ -84,7 +84,7 @@ export async function fetchQuoteDocumentData(quoteId: string, customerId: string
       notes: metadata.notes == null ? null : String(metadata.notes),
       fleet_metadata: metadata.fleet_metadata ?? null,
     },
-    quoteItems: (itemsRes.data ?? []).map((item: any) => ({
+    quoteItems: (itemsRes.data ?? []).map((item) => ({
       id: item.id,
       description: item.description,
       quantity: Number(item.quantity ?? 0),
@@ -106,7 +106,7 @@ export async function fetchQuoteDocumentData(quoteId: string, customerId: string
       vin: vehicle.vin ?? null,
       mileage: vehicle.mileage ?? null,
       color: vehicle.color ?? null,
-      engine: vehicleMeta.engine ?? null,
+      engine: typeof vehicleMeta.engine === "string" ? vehicleMeta.engine : null,
     } : null,
     business: workspaceRes.data ? {
       business_name: workspaceRes.data.name,

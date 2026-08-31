@@ -94,9 +94,6 @@ export function ProviderSnapshot() {
   const [data, setData] = useState<SnapshotData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchSnapshot();
-  }, []);
 
   async function fetchSnapshot() {
     try {
@@ -108,6 +105,10 @@ export function ProviderSnapshot() {
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchSnapshot());
+  }, []);
 
   // ── Derived metrics ──────────────────────────────────
   const metrics = useMemo(() => {

@@ -63,12 +63,6 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
   const isSupported = isRecordingSupported();
 
   // Clean up on unmount
-  useEffect(() => {
-    return () => {
-      cleanup();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const cleanup = useCallback(() => {
     if (timerRef.current) {
@@ -90,6 +84,13 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     analyserRef.current = null;
     mediaRecorderRef.current = null;
   }, []);
+
+  useEffect(() => {
+    return () => {
+      cleanup();
+    };
+
+  }, [cleanup]);
 
   // Meter the audio level for visualization
   const startMetering = useCallback(() => {

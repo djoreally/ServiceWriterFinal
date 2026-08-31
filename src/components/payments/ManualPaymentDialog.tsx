@@ -66,8 +66,8 @@ export function ManualPaymentDialog({
   // Reset the wizard whenever the dialog is closed so it never reopens on review.
   useEffect(() => {
     if (!open) {
-      setStep("form");
-      setProcessing(false);
+      void Promise.resolve().then(() => setStep("form"));
+      void Promise.resolve().then(() => setProcessing(false));
     }
   }, [open]);
 

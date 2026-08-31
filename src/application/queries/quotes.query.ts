@@ -1,5 +1,5 @@
 /** Quotes Query — canonical workspace-scoped reads with a legacy UI adapter. */
-import { supabase } from "@/integrations/supabase/client";
+import { productionSupabase, supabase } from "@/integrations/supabase/client";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
@@ -8,8 +8,8 @@ export async function getCurrentUser() {
   return user;
 }
 
-function object(value: unknown): Record<string, any> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 function uiStatus(status: string): string {
@@ -22,7 +22,7 @@ function uiStatus(status: string): string {
   }
 }
 
-function customerName(row: any): string {
+function customerName(row: { first_name?: string | null; last_name?: string | null; company_name?: string | null }): string {
   return [row?.first_name, row?.last_name].filter(Boolean).join(" ").trim() || row?.company_name || "Customer";
 }
 
@@ -33,7 +33,7 @@ export async function fetchQuotesPageData() {
     return [empty, empty, empty, empty, empty] as const;
   }
 
-  const client = supabase as any;
+  const client = productionSupabase;
   const [quotesRes, customersRes, vehiclesRes, catalogRes] = await Promise.all([
     client.from("quotes")
       .select("id,workspace_id,customer_id,vehicle_id,work_order_id,status,subtotal,tax_total,total,expires_at,created_at,updated_at,metadata")
@@ -50,13 +50,13 @@ export async function fetchQuotesPageData() {
       .neq("status", "archived")
       .order("created_at", { ascending: false }),
     client.from("service_catalog")
-      .select("id,name,description,default_price,labor_rate")
+      .select("id,name,description,labor_price,metadata")
       .eq("workspace_id", context.workspaceId)
       .eq("is_active", true)
       .order("name"),
   ]);
 
-  const quotes = ((quotesRes.data ?? []) as any[])
+  const quotes = (quotesRes.data ?? [])
     .filter((row) => !object(row.metadata).archived_at)
     .map((row) => {
       const metadata = object(row.metadata);
@@ -81,10 +81,22 @@ export async function fetchQuotesPageData() {
 
   return [
     { data: quotes, error: quotesRes.error },
-    { data: ((customersRes.data ?? []) as any[]).map((row) => ({ id: row.id, name: customerName(row) })), error: customersRes.error },
+    { data: (customersRes.data ?? []).map((row) => ({ id: row.id, name: customerName(row) })), error: customersRes.error },
     { data: vehiclesRes.data ?? [], error: vehiclesRes.error },
     { data: [], error: null },
-    { data: catalogRes.data ?? [], error: catalogRes.error },
+    {
+      data: (catalogRes.data ?? []).map((row) => {
+        const metadata = object(row.metadata);
+        return {
+          id: row.id,
+          name: row.name,
+          description: row.description,
+          default_price: Number(metadata.default_price ?? row.labor_price),
+          labor_rate: metadata.labor_rate == null ? null : Number(metadata.labor_rate),
+        };
+      }),
+      error: catalogRes.error,
+    },
   ] as const;
 }
 

@@ -93,7 +93,7 @@ const Carousel = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivEl
         return;
       }
 
-      onSelect(api);
+      void Promise.resolve().then(() => onSelect(api));
       api.on("reInit", onSelect);
       api.on("select", onSelect);
 

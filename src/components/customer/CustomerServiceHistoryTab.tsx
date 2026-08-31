@@ -40,7 +40,7 @@ export function CustomerServiceHistoryTab({ account }: Props) {
   }, [account.id]);
 
   useEffect(() => {
-    fetchRecords();
+    void Promise.resolve().then(() => fetchRecords());
   }, [fetchRecords]);
 
   const toggleExpand = (id: string) =>

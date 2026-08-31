@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -71,7 +72,7 @@ export function RecurringExpensesTab({ ownerUserId, onLedgerChanged }: Props) {
     }
   }, [ownerUserId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { void Promise.resolve().then(() => load()); }, [load]);
 
   // Auto-process due recurring expenses when tab loads
   useEffect(() => {
@@ -84,12 +85,12 @@ export function RecurringExpensesTab({ ownerUserId, onLedgerChanged }: Props) {
           await load();
           onLedgerChanged?.();
         }
-      } catch (e: any) {
-        console.warn("Auto-generate recurring failed:", e?.message);
+      } catch (e: unknown) {
+        console.warn("Auto-generate recurring failed:", errorMessage(e));
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ownerUserId]);
+
+  }, [load, onLedgerChanged, ownerUserId]);
 
   const runGenerate = async () => {
     if (!ownerUserId) return;
@@ -99,8 +100,8 @@ export function RecurringExpensesTab({ ownerUserId, onLedgerChanged }: Props) {
       toast({ title: n > 0 ? `${n} expense(s) posted` : "Nothing due", description: n > 0 ? "Generated ledger entries from due recurring templates." : "All recurring expenses are up to date." });
       await load();
       if (n > 0) onLedgerChanged?.();
-    } catch (e: any) {
-      toast({ title: "Failed", description: e?.message ?? "Try again", variant: "destructive" });
+    } catch (e: unknown) {
+      toast({ title: "Failed", description: errorMessage(e, "Try again"), variant: "destructive" });
     } finally {
       setGenerating(false);
     }
@@ -121,8 +122,8 @@ export function RecurringExpensesTab({ ownerUserId, onLedgerChanged }: Props) {
     try {
       await toggleRecurringExpenseActive(r.id, v);
       setRows((prev) => prev.map((x) => x.id === r.id ? { ...x, is_active: v } : x));
-    } catch (e: any) {
-      toast({ title: "Could not update", description: e?.message ?? "Try again", variant: "destructive" });
+    } catch (e: unknown) {
+      toast({ title: "Could not update", description: errorMessage(e, "Try again"), variant: "destructive" });
     }
   };
 
@@ -132,8 +133,8 @@ export function RecurringExpensesTab({ ownerUserId, onLedgerChanged }: Props) {
       await deleteRecurringExpense(r.id);
       setRows((prev) => prev.filter((x) => x.id !== r.id));
       toast({ title: "Deleted", description: r.name });
-    } catch (e: any) {
-      toast({ title: "Could not delete", description: e?.message ?? "Try again", variant: "destructive" });
+    } catch (e: unknown) {
+      toast({ title: "Could not delete", description: errorMessage(e, "Try again"), variant: "destructive" });
     }
   };
 

@@ -13,6 +13,7 @@ const supabase = new Proxy({}, handler);
 
 module.exports = {
   supabase,
+  productionSupabase: supabase,
   authSupabase: supabase,
   SUPABASE_URL_RESOLVED: "http://localhost:54321",
   SUPABASE_PUBLISHABLE_KEY_RESOLVED: "test-anon-key",

@@ -57,7 +57,7 @@ const FleetVehiclesPage = () => {
   }, [clientFilter, contractFilter, dataFilter, filterOptions, locationFilter, page, pageSize, search, sortBy, statusFilter]);
 
   useEffect(() => {
-    void loadVehicles();
+    void Promise.resolve().then(() => loadVehicles());
   }, [loadVehicles]);
   useEffect(() => {
     if (!user?.id) return;
@@ -84,7 +84,7 @@ const FleetVehiclesPage = () => {
   }, [filterOptions]);
 
   useEffect(() => {
-    setPage(1);
+    void Promise.resolve().then(() => setPage(1));
   }, [clientFilter, contractFilter, dataFilter, locationFilter, pageSize, search, sortBy, statusFilter]);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));

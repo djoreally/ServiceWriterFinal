@@ -10,7 +10,7 @@ export const useMediaQuery = (query: string, delay = 200): boolean => {
     const handler = (event: MediaQueryListEvent) => setMatches(event.matches);
 
     // Set the initial state
-    setMatches(mediaQuery.matches);
+    void Promise.resolve().then(() => setMatches(mediaQuery.matches));
 
     // Add the listener
     mediaQuery.addEventListener('change', handler);

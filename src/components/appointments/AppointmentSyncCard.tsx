@@ -130,7 +130,7 @@ export function AppointmentSyncCard({ appointmentId }: AppointmentSyncCardProps)
     return m > 0 ? `${m}m ${s}s` : `${s}s`;
   }, [latest, now]);
 
-  const handleSync = useCallback(async () => {
+  const handleSync = useCallback(async function syncAppointment() {
     setSyncing(true);
     // Refresh the version probe in the background so the badge in the header
     // reflects what the running function actually exposes right now.
@@ -152,7 +152,7 @@ export function AppointmentSyncCard({ appointmentId }: AppointmentSyncCardProps)
         description: message,
         action: {
           label: "Retry",
-          onClick: () => { void handleSync(); },
+          onClick: () => { void syncAppointment(); },
         },
       });
     } finally {

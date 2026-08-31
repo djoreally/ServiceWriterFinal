@@ -2,7 +2,9 @@
  * Admin Database Explorer Commands — Write operations for admin database access.
  */
 import { supabase } from "@/integrations/supabase/client";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/integrations/supabase/types";
+
+type AdminTableName = keyof Database["public"]["Tables"];
 
 export interface AdminAiMessage {
   role: "user" | "assistant";
@@ -30,8 +32,8 @@ export async function executeInsertQuery(
   tableName: string,
   insertData: Record<string, string>,
 ): Promise<void> {
-  const { error } = await (supabase as SupabaseClient<any>)
-    .from(tableName)
+  const { error } = await supabase
+    .from(tableName as AdminTableName)
     .insert(insertData as never);
   if (error) throw error;
 }
@@ -42,10 +44,10 @@ export async function executeUpdateQuery(
   whereColumn: string,
   whereValue: string,
 ): Promise<void> {
-  const { error } = await (supabase as SupabaseClient<any>)
-    .from(tableName)
-    .update(updates)
-    .eq(whereColumn, whereValue);
+  const { error } = await supabase
+    .from(tableName as AdminTableName)
+    .update(updates as never)
+    .eq(whereColumn as never, whereValue);
   if (error) throw error;
 }
 
@@ -54,10 +56,10 @@ export async function executeDeleteQuery(
   whereColumn: string,
   whereValue: string,
 ): Promise<void> {
-  const { error } = await (supabase as SupabaseClient<any>)
-    .from(tableName)
+  const { error } = await supabase
+    .from(tableName as AdminTableName)
     .delete()
-    .eq(whereColumn, whereValue);
+    .eq(whereColumn as never, whereValue);
   if (error) throw error;
 }
 

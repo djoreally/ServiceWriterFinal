@@ -3,13 +3,13 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 
-export async function invokeTranscribeAudio(audioBase64: string, mimeType: string, vehicleInfo: string): Promise<any> {
+export async function invokeTranscribeAudio(audioBase64: string, mimeType: string, vehicleInfo: string) {
   return supabase.functions.invoke("transcribe-audio", {
     body: { audioBase64, mimeType, vehicleInfo },
   });
 }
 
-export async function uploadInspectionMedia(path: string, file: File | Blob): Promise<any> {
+export async function uploadInspectionMedia(path: string, file: File | Blob) {
   return supabase.storage.from("inspection-media").upload(path, file);
 }
 

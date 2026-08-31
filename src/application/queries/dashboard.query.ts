@@ -1,5 +1,5 @@
 /** Dashboard query adapters for Final's canonical workspace schema. */
-import { supabase } from "@/integrations/supabase/client";
+import { productionSupabase, supabase } from "@/integrations/supabase/client";
 import { format, subDays } from "date-fns";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
@@ -93,21 +93,48 @@ export interface DashboardOnboardingInfo {
   resolved: boolean;
 }
 
-function obj(value: unknown): Record<string, any> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
+interface DashboardCustomerSource {
+  first_name?: string | null;
+  last_name?: string | null;
 }
 
-function customerName(value: any): string {
+interface DashboardAppointmentSource {
+  id: string;
+  status: string;
+  starts_at: string;
+  metadata?: unknown;
+}
+
+interface DashboardServiceSource {
+  id: string;
+  status: string;
+  work_performed?: string | null;
+  metadata?: unknown;
+  started_at?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+  total_amount?: number | null;
+  tax_amount?: number | null;
+  discount_amount?: number | null;
+  customers?: DashboardCustomerSource | null;
+  vehicles?: { make?: string | null; model?: string | null; year?: number | null } | null;
+}
+
+function obj(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function customerName(value: DashboardCustomerSource | null | undefined): string {
   if (!value) return "Customer";
   return [value.first_name, value.last_name].filter(Boolean).join(" ").trim() || "Customer";
 }
 
-function appointmentTitle(row: any): string {
+function appointmentTitle(row: Pick<DashboardAppointmentSource, "metadata">): string {
   const metadata = obj(row.metadata);
   return String(metadata.title ?? metadata.service_name ?? "Appointment");
 }
 
-function appointmentLegacy(row: any): AppointmentRecord {
+function appointmentLegacy(row: DashboardAppointmentSource): AppointmentRecord {
   const metadata = obj(row.metadata);
   const startsAt = new Date(row.starts_at);
   return {
@@ -116,19 +143,19 @@ function appointmentLegacy(row: any): AppointmentRecord {
     scheduled_date: format(startsAt, "yyyy-MM-dd"),
     scheduled_time: format(startsAt, "HH:mm"),
     status: row.status,
-    guest_name: metadata.guest_name ?? undefined,
-    guest_email: metadata.guest_email ?? undefined,
+    guest_name: typeof metadata.guest_name === "string" ? metadata.guest_name : undefined,
+    guest_email: typeof metadata.guest_email === "string" ? metadata.guest_email : undefined,
     estimated_cost: metadata.estimated_cost != null ? Number(metadata.estimated_cost) : undefined,
   };
 }
 
-function serviceLegacy(row: any): ServiceRecord {
+function serviceLegacy(row: DashboardServiceSource): ServiceRecord {
   const metadata = obj(row.metadata);
   const when = row.completed_at ?? row.started_at ?? row.created_at;
   return {
     id: row.id,
     service_type: String(metadata.service_type ?? metadata.title ?? row.work_performed ?? "Service"),
-    payment_status: metadata.payment_status ?? null,
+    payment_status: typeof metadata.payment_status === "string" ? metadata.payment_status : null,
     total_cost: Number(row.total_amount ?? 0),
     tax_amount: row.tax_amount != null ? Number(row.tax_amount) : null,
     discount_amount: row.discount_amount != null ? Number(row.discount_amount) : null,
@@ -156,7 +183,7 @@ export async function fetchDashboardOnboardingInfo(): Promise<DashboardOnboardin
     if (!context) {
       return { hasUser: true, onboardingCompleted: false, ownerName: null, resolved: true };
     }
-    const { data, error } = await (supabase.from("workspace_settings") as any)
+    const { data, error } = await productionSupabase.from("workspace_settings")
       .select("owner_name")
       .eq("workspace_id", context.workspaceId)
       .maybeSingle();
@@ -180,19 +207,19 @@ export async function fetchDashboardOverview(): Promise<DashboardOverviewResult>
 
   const nowIso = new Date().toISOString();
   const [vehiclesRes, pendingRes, activeRes, upcomingRes] = await Promise.all([
-    supabase.from("vehicles").select("id", { count: "exact", head: true }).eq("workspace_id", context.workspaceId).eq("status", "active"),
-    supabase.from("service_records").select("id", { count: "exact", head: true }).eq("workspace_id", context.workspaceId).eq("status", "in_progress"),
-    (supabase.from("service_records") as any)
+    productionSupabase.from("vehicles").select("id", { count: "exact", head: true }).eq("workspace_id", context.workspaceId).eq("status", "active"),
+    productionSupabase.from("service_records").select("id", { count: "exact", head: true }).eq("workspace_id", context.workspaceId).eq("status", "in_progress"),
+    productionSupabase.from("service_records")
       .select("id,work_performed,metadata,customers(first_name,last_name),vehicles(year,make,model)")
       .eq("workspace_id", context.workspaceId)
       .eq("status", "in_progress")
       .limit(5),
-    (supabase.from("appointments") as any)
+    productionSupabase.from("appointments")
       .select("id,status,starts_at,metadata,vehicles(year,make,model)")
       .eq("workspace_id", context.workspaceId)
       .neq("source", "fleet_work_order")
       .gte("starts_at", nowIso)
-      .in("status", ["confirmed", "pending"])
+      .in("status", ["confirmed", "requested"])
       .order("starts_at", { ascending: true })
       .limit(5),
   ]);
@@ -202,14 +229,14 @@ export async function fetchDashboardOverview(): Promise<DashboardOverviewResult>
   if (activeRes.error) throw activeRes.error;
   if (upcomingRes.error) throw upcomingRes.error;
 
-  const activeServices: ActiveService[] = ((activeRes.data ?? []) as any[]).map((row) => ({
+  const activeServices: ActiveService[] = (activeRes.data ?? []).map((row) => ({
     id: row.id,
     vehicle: row.vehicles ? `${row.vehicles.year ?? ""} ${row.vehicles.make ?? ""} ${row.vehicles.model ?? ""}`.trim() : "Unknown",
     customer: customerName(row.customers),
     serviceType: String(obj(row.metadata).service_type ?? obj(row.metadata).title ?? row.work_performed ?? "Service"),
   }));
 
-  const upcomingAppointments: UpcomingAppointment[] = ((upcomingRes.data ?? []) as any[]).map((row) => {
+  const upcomingAppointments: UpcomingAppointment[] = (upcomingRes.data ?? []).map((row) => {
     const startsAt = new Date(row.starts_at);
     return {
       id: row.id,
@@ -217,7 +244,7 @@ export async function fetchDashboardOverview(): Promise<DashboardOverviewResult>
       date: startsAt,
       time: format(startsAt, "HH:mm"),
       vehicle: row.vehicles ? `${row.vehicles.year ?? ""} ${row.vehicles.make ?? ""} ${row.vehicles.model ?? ""}`.trim() : undefined,
-      status: row.status as "confirmed" | "pending",
+      status: row.status === "confirmed" ? "confirmed" : "pending",
     };
   });
 
@@ -244,26 +271,26 @@ export async function fetchDashboardReporting(range: DashboardDateRange): Promis
   const prevTo = subDays(range.from, 1); prevTo.setHours(23, 59, 59, 999);
 
   const [paymentsRes, servicesRes, appointmentsRes, prevPaymentsRes] = await Promise.all([
-    (supabase.from("payments") as any)
-      .select("id,amount,created_at,status,metadata,customers(first_name,last_name,email),appointments(status)")
+    productionSupabase.from("payments")
+      .select("id,amount,created_at,status,metadata,customers(first_name,last_name,email)")
       .eq("workspace_id", context.workspaceId)
       .gte("created_at", fromIso.toISOString())
       .lte("created_at", toIso.toISOString())
       .order("created_at", { ascending: true }),
-    (supabase.from("service_records") as any)
+    productionSupabase.from("service_records")
       .select("id,status,work_performed,metadata,started_at,completed_at,created_at,total_amount,tax_amount,discount_amount,customers(first_name,last_name),vehicles(make,model,year)")
       .eq("workspace_id", context.workspaceId)
       .gte("created_at", fromIso.toISOString())
       .lte("created_at", toIso.toISOString())
       .order("created_at", { ascending: true }),
-    (supabase.from("appointments") as any)
+    productionSupabase.from("appointments")
       .select("id,status,starts_at,metadata")
       .eq("workspace_id", context.workspaceId)
       .neq("source", "fleet_work_order")
       .gte("starts_at", fromIso.toISOString())
       .lte("starts_at", toIso.toISOString())
       .order("starts_at", { ascending: true }),
-    (supabase.from("payments") as any)
+    productionSupabase.from("payments")
       .select("id,amount,status,metadata")
       .eq("workspace_id", context.workspaceId)
       .gte("created_at", prevFrom.toISOString())
@@ -275,10 +302,10 @@ export async function fetchDashboardReporting(range: DashboardDateRange): Promis
   if (appointmentsRes.error) throw appointmentsRes.error;
   if (prevPaymentsRes.error) throw prevPaymentsRes.error;
 
-  const payments: PaymentRecord[] = ((paymentsRes.data ?? []) as any[])
+  const payments: PaymentRecord[] = (paymentsRes.data ?? [])
     .filter((row) => {
       const metadata = obj(row.metadata);
-      const appointmentStatus = row.appointments?.status ?? metadata.appointment_status;
+      const appointmentStatus = metadata.appointment_status;
       return !(row.status === "pending" && appointmentStatus === "cancelled");
     })
     .map((row) => {
@@ -288,16 +315,23 @@ export async function fetchDashboardReporting(range: DashboardDateRange): Promis
         amount: Number(row.amount ?? 0),
         created_at: row.created_at,
         status: row.status,
-        customer_email: row.customers?.email ?? row.customer_email ?? metadata.customer_email ?? undefined,
-        customer_name: row.customers ? customerName(row.customers) : row.customer_name ?? metadata.customer_name ?? undefined,
+        customer_email:
+          row.customers?.email ??
+          (typeof metadata.customer_email === "string" ? metadata.customer_email : undefined),
+        customer_name:
+          row.customers
+            ? customerName(row.customers)
+            : typeof metadata.customer_name === "string"
+              ? metadata.customer_name
+              : undefined,
         refund_amount:
           row.status === "refunded"
             ? Number(row.amount ?? 0)
-            : Number(row.refund_amount ?? metadata.refunded_amount ?? 0) || undefined,
+            : Number(metadata.refunded_amount ?? 0) || undefined,
       };
     });
 
-  const previousPeriodPayments: PreviousPeriodPayment[] = ((prevPaymentsRes.data ?? []) as any[]).map((row) => ({
+  const previousPeriodPayments: PreviousPeriodPayment[] = (prevPaymentsRes.data ?? []).map((row) => ({
     id: row.id,
     amount: Number(row.amount ?? 0),
     status: row.status,
@@ -306,8 +340,8 @@ export async function fetchDashboardReporting(range: DashboardDateRange): Promis
 
   return {
     payments,
-    services: ((servicesRes.data ?? []) as any[]).map(serviceLegacy),
-    appointments: ((appointmentsRes.data ?? []) as any[]).map(appointmentLegacy),
+    services: (servicesRes.data ?? []).map(serviceLegacy),
+    appointments: (appointmentsRes.data ?? []).map(appointmentLegacy),
     previousPeriodPayments,
   };
 }

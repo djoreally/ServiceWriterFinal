@@ -70,7 +70,7 @@ export function CustomerTrainingTab() {
   const [completed, setCompleted] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
-    setCompleted(readCompleted());
+    void Promise.resolve().then(() => setCompleted(readCompleted()));
   }, []);
 
   const completedCount = completed.size;

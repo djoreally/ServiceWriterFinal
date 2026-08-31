@@ -28,7 +28,7 @@ export const StripeConnectCard = () => {
   };
 
   useEffect(() => {
-    fetchStatus();
+    void Promise.resolve().then(() => fetchStatus());
 
     if (typeof window !== 'undefined') {
       try {
@@ -36,7 +36,7 @@ export const StripeConnectCard = () => {
         if (params.get("stripe_success") === "true") {
           toast.success("Stripe account setup in progress! Status will update shortly.");
           window.history.replaceState({}, "", window.location.pathname);
-          setTimeout(fetchStatus, 2000);
+          void Promise.resolve().then(() => setTimeout(fetchStatus, 2000));
         } else if (params.get("stripe_refresh") === "true") {
           toast.info("Please complete your Stripe account setup.");
           window.history.replaceState({}, "", window.location.pathname);

@@ -33,9 +33,6 @@ export const AddPurchaseOrderDialog = ({ open, onClose, onCreated, clientId }: P
     status: "open",
   });
 
-  useEffect(() => {
-    if (clientId) set("fleet_client_id", clientId);
-  }, [clientId]);
 
   useEffect(() => {
     if (!user?.id || !open) return;
@@ -43,6 +40,10 @@ export const AddPurchaseOrderDialog = ({ open, onClose, onCreated, clientId }: P
   }, [user?.id, open]);
 
   const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
+
+  useEffect(() => {
+    if (clientId) void Promise.resolve().then(() => set("fleet_client_id", clientId));
+  }, [clientId]);
 
   const handleSave = async () => {
     if (!user?.id || !form.po_number || !form.fleet_client_id) {

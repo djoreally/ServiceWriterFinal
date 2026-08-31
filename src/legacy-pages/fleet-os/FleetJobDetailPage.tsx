@@ -73,7 +73,7 @@ const FleetJobDetailPage = () => {
     }
   }, [user?.id, id]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void Promise.resolve().then(() => load()); }, [load]);
 
   const totals = useMemo(() => {
     const orders = job?.work_orders ?? [];

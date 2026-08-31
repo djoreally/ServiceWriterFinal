@@ -34,15 +34,15 @@ export function AttachToServiceDialog({ open, count, onOpenChange, onConfirm }: 
 
   useEffect(() => {
     if (!open) return;
-    setQuery("");
-    setSelectedId(null);
+    void Promise.resolve().then(() => setQuery(""));
+    void Promise.resolve().then(() => setSelectedId(null));
   }, [open]);
 
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    setLoading(true);
-    searchServicesForLinking(debouncedQuery, 30)
+    void Promise.resolve().then(() => setLoading(true));
+    void Promise.resolve().then(() => searchServicesForLinking(debouncedQuery, 30)
       .then((rows) => {
         if (!cancelled) setResults(rows);
       })
@@ -51,7 +51,7 @@ export function AttachToServiceDialog({ open, count, onOpenChange, onConfirm }: 
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
-      });
+      }));
     return () => {
       cancelled = true;
     };

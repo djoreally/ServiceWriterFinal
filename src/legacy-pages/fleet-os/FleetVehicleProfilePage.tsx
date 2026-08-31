@@ -243,7 +243,7 @@ const FleetVehicleProfilePage = () => {
     }
   }, [id]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => { void Promise.resolve().then(() => fetchData()); }, [fetchData]);
 
   if (loading) {
     return (

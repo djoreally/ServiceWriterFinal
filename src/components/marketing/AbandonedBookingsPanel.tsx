@@ -72,10 +72,10 @@ export function AbandonedBookingsPanel() {
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [user]);
 
   useEffect(() => {
-    fetchRows();
+    void Promise.resolve().then(() => fetchRows());
   }, [fetchRows]);
 
   const metrics = useMemo(() => {

@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message";
 import { useEffect, useMemo, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -97,14 +98,14 @@ export function RecurringExpenseDialog({ open, onOpenChange, existing, onSaved }
         setAutopost(existing.autopost);
       }
     })();
-  }, [open, existing]);
+  }, [open, existing, session?.user]);
 
   useEffect(() => {
     if (open) return;
-    setName(""); setVendorName(""); setVendorId(null); setCategoryId("");
-    setAmount(""); setFrequency("monthly"); setDayOfMonth("1");
-    setStartDate(new Date().toISOString().slice(0, 10)); setEndDate("");
-    setPaymentMethod("card"); setNotes(""); setAutopost(true);
+    void Promise.resolve().then(() => setName("")); void Promise.resolve().then(() => setVendorName("")); void Promise.resolve().then(() => setVendorId(null)); void Promise.resolve().then(() => setCategoryId(""));
+    void Promise.resolve().then(() => setAmount("")); void Promise.resolve().then(() => setFrequency("monthly")); void Promise.resolve().then(() => setDayOfMonth("1"));
+    void Promise.resolve().then(() => setStartDate(new Date().toISOString().slice(0, 10))); void Promise.resolve().then(() => setEndDate(""));
+    void Promise.resolve().then(() => setPaymentMethod("card")); void Promise.resolve().then(() => setNotes("")); void Promise.resolve().then(() => setAutopost(true));
   }, [open]);
 
   const computedNextDue = useMemo(() => {
@@ -155,8 +156,8 @@ export function RecurringExpenseDialog({ open, onOpenChange, existing, onSaved }
       }
       onSaved?.();
       onOpenChange(false);
-    } catch (e: any) {
-      toast({ title: "Failed to save", description: e?.message ?? "Try again", variant: "destructive" });
+    } catch (e: unknown) {
+      toast({ title: "Failed to save", description: errorMessage(e, "Try again"), variant: "destructive" });
     } finally {
       setSaving(false);
     }

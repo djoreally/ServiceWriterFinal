@@ -17,6 +17,7 @@ import { buildTechMissionBoard } from "@/lib/tech-mission-board";
 import { useTechShiftManagement } from "@/hooks/useTechShiftManagement";
 import { trackTechShiftTransition, trackTechSyncFailure } from "@/lib/tech-telemetry";
 import { useTechContext } from "./TechAppLayout";
+import { currentTimeMs } from "@/lib/datetime";
 
 const ACCENT = "#1439cc";
 const MUTED = "#5c5f68";
@@ -29,6 +30,7 @@ export default function TechShiftReview() {
   const [shiftStart, setShiftStart] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [ending, setEnding] = useState(false);
+  const [now] = useState(currentTimeMs);
 
   const load = useCallback(async () => {
     try {
@@ -45,7 +47,7 @@ export default function TechShiftReview() {
   }, []);
 
   useEffect(() => {
-    void load();
+    void Promise.resolve().then(() => load());
   }, [load]);
 
   const today = format(new Date(), "yyyy-MM-dd");
@@ -69,7 +71,7 @@ export default function TechShiftReview() {
   );
 
   const hoursOnShift = shiftStart
-    ? Math.round(((Date.now() - new Date(shiftStart).getTime()) / 3_600_000) * 10) / 10
+    ? Math.round(((now - new Date(shiftStart).getTime()) / 3_600_000) * 10) / 10
     : 0;
 
   const handleEndShift = async () => {

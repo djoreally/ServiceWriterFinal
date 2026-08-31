@@ -1,11 +1,46 @@
 /** Reports Query — compatibility adapters over Final's canonical schema. */
-import { supabase } from "@/integrations/supabase/client";
+import { productionSupabase } from "@/integrations/supabase/client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 export type QueryResult<T> = { data: T | null; error: unknown };
 
-function obj(value: unknown): Record<string, any> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
+interface CustomerNameSource {
+  first_name?: string | null;
+  last_name?: string | null;
+  postal_code?: string | null;
+}
+
+interface AppointmentReportSource {
+  id: string;
+  customer_id?: string | null;
+  assigned_user_id?: string | null;
+  status: string;
+  starts_at: string;
+  ends_at: string;
+  metadata?: unknown;
+  updated_at?: string | null;
+  customers?: CustomerNameSource | null;
+  vehicles?: { make?: string | null; model?: string | null; year?: number | null } | null;
+}
+
+interface ServiceReportSource {
+  id: string;
+  appointment_id?: string | null;
+  status: string;
+  work_performed?: string | null;
+  metadata?: unknown;
+  started_at?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+  total_amount?: number | null;
+  tax_amount?: number | null;
+  discount_amount?: number | null;
+  customers?: CustomerNameSource | null;
+  vehicles?: { make?: string | null; model?: string | null; year?: number | null } | null;
+}
+
+function obj(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 async function context() {
@@ -22,12 +57,12 @@ async function result<T>(work: () => Promise<T>): Promise<QueryResult<T>> {
   }
 }
 
-function name(customer: any): string {
+function name(customer: CustomerNameSource | null | undefined): string {
   if (!customer) return "";
   return [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim();
 }
 
-function appointmentRow(row: any) {
+function appointmentRow(row: AppointmentReportSource) {
   const metadata = obj(row.metadata);
   const starts = new Date(row.starts_at);
   const ends = new Date(row.ends_at);
@@ -59,7 +94,7 @@ function appointmentRow(row: any) {
   };
 }
 
-function serviceRow(row: any) {
+function serviceRow(row: ServiceReportSource) {
   const metadata = obj(row.metadata);
   const date = row.completed_at ?? row.started_at ?? row.created_at;
   return {
@@ -83,14 +118,14 @@ function serviceRow(row: any) {
 export async function fetchReportPayments(fromDate: string, toDate: string) {
   return result(async () => {
     const { workspaceId } = await context();
-    const { data, error } = await (supabase.from("payments") as any)
+    const { data, error } = await productionSupabase.from("payments")
       .select("id,amount,created_at,status,provider,metadata,customers(first_name,last_name,email),invoices(id,status)")
       .eq("workspace_id", workspaceId)
       .gte("created_at", `${fromDate}T00:00:00`)
       .lte("created_at", `${toDate}T23:59:59`)
       .order("created_at", { ascending: false });
     if (error) throw error;
-    return ((data ?? []) as any[]).map((row) => {
+    return (data ?? []).map((row) => {
       const metadata = obj(row.metadata);
       return {
         id: row.id,
@@ -116,7 +151,7 @@ export async function fetchReportPayments(fromDate: string, toDate: string) {
 export async function fetchReportServices(fromDate: string, toDate: string, limit?: number) {
   return result(async () => {
     const { workspaceId } = await context();
-    let q = (supabase.from("service_records") as any)
+    let q = productionSupabase.from("service_records")
       .select("id,appointment_id,status,work_performed,metadata,started_at,completed_at,created_at,total_amount,tax_amount,discount_amount,customers(first_name,last_name),vehicles(make,model,year)")
       .eq("workspace_id", workspaceId)
       .gte("created_at", `${fromDate}T00:00:00`)
@@ -125,14 +160,14 @@ export async function fetchReportServices(fromDate: string, toDate: string, limi
     if (limit) q = q.limit(limit);
     const { data, error } = await q;
     if (error) throw error;
-    return ((data ?? []) as any[]).map(serviceRow);
+    return (data ?? []).map(serviceRow);
   });
 }
 
 export async function fetchReportAppointments(fromDate: string, toDate: string, limit?: number) {
   return result(async () => {
     const { workspaceId } = await context();
-    let q = (supabase.from("appointments") as any)
+    let q = productionSupabase.from("appointments")
       .select("id,customer_id,assigned_user_id,status,starts_at,ends_at,source,metadata,updated_at,customers(first_name,last_name,postal_code),vehicles(make,model,year)")
       .eq("workspace_id", workspaceId)
       .neq("source", "fleet_work_order")
@@ -142,20 +177,20 @@ export async function fetchReportAppointments(fromDate: string, toDate: string, 
     if (limit) q = q.limit(limit);
     const { data, error } = await q;
     if (error) throw error;
-    return ((data ?? []) as any[]).map(appointmentRow);
+    return (data ?? []).map(appointmentRow);
   });
 }
 
 export async function fetchReportCustomers(limit = 200) {
   return result(async () => {
     const { workspaceId } = await context();
-    const { data, error } = await (supabase.from("customers") as any)
+    const { data, error } = await productionSupabase.from("customers")
       .select("id,first_name,last_name,email,phone,metadata,created_at")
       .eq("workspace_id", workspaceId)
       .order("created_at", { ascending: false })
       .limit(limit);
     if (error) throw error;
-    return ((data ?? []) as any[]).map((row) => {
+    return (data ?? []).map((row) => {
       const metadata = obj(row.metadata);
       return {
         id: row.id,
@@ -180,13 +215,13 @@ export async function fetchReportCustomers(limit = 200) {
 export async function fetchReportVehicles(limit = 500) {
   return result(async () => {
     const { workspaceId } = await context();
-    const { data, error } = await (supabase.from("vehicles") as any)
+    const { data, error } = await productionSupabase.from("vehicles")
       .select("id,year,make,model,vin,license_plate,mileage,metadata,updated_at,customers(first_name,last_name),vehicle_service_specs(engine,oil_type)")
       .eq("workspace_id", workspaceId)
       .order("updated_at", { ascending: false })
       .limit(limit);
     if (error) throw error;
-    return ((data ?? []) as any[]).map((row) => {
+    return (data ?? []).map((row) => {
       const specs = Array.isArray(row.vehicle_service_specs) ? row.vehicle_service_specs[0] : row.vehicle_service_specs;
       const metadata = obj(row.metadata);
       return {
@@ -210,38 +245,38 @@ export async function fetchReportVehicles(limit = 500) {
 export async function fetchPreviousPeriodPayments(prevFrom: string, prevTo: string) {
   return result(async () => {
     const { workspaceId } = await context();
-    const { data, error } = await supabase.from("payments")
+    const { data, error } = await productionSupabase.from("payments")
       .select("id,amount,status")
       .eq("workspace_id", workspaceId)
       .gte("created_at", `${prevFrom}T00:00:00`)
       .lte("created_at", `${prevTo}T23:59:59`);
     if (error) throw error;
-    return (data ?? []).map((row: any) => ({ id: row.id, amount: Number(row.amount ?? 0), status: row.status }));
+    return (data ?? []).map((row) => ({ id: row.id, amount: Number(row.amount ?? 0), status: row.status }));
   });
 }
 
 export async function fetchYtdPayments(ytdFrom: string) {
   return result(async () => {
     const { workspaceId } = await context();
-    const { data, error } = await supabase.from("payments")
+    const { data, error } = await productionSupabase.from("payments")
       .select("amount,status")
       .eq("workspace_id", workspaceId)
       .gte("created_at", `${ytdFrom}T00:00:00`);
     if (error) throw error;
-    return (data ?? []).map((row: any) => ({ amount: Number(row.amount ?? 0), status: row.status }));
+    return (data ?? []).map((row) => ({ amount: Number(row.amount ?? 0), status: row.status }));
   });
 }
 
 export async function fetchActiveTechnicians() {
   return result(async () => {
     const { workspaceId } = await context();
-    const { data, error } = await (supabase.from("workspace_members") as any)
+    const { data, error } = await productionSupabase.from("workspace_members")
       .select("user_id,role,is_active,profiles(display_name)")
       .eq("workspace_id", workspaceId)
       .eq("is_active", true)
       .eq("role", "technician");
     if (error) throw error;
-    return ((data ?? []) as any[]).map((row) => ({
+    return (data ?? []).map((row) => ({
       id: row.user_id,
       name: row.profiles?.display_name ?? "Technician",
       status: "active",
@@ -253,7 +288,7 @@ export async function fetchActiveTechnicians() {
 export async function fetchTechnicianAppointmentsForPerformance(fromDate: string, toDate: string) {
   return result(async () => {
     const { workspaceId } = await context();
-    const { data, error } = await (supabase.from("appointments") as any)
+    const { data, error } = await productionSupabase.from("appointments")
       .select("id,assigned_user_id,status,starts_at,ends_at,metadata")
       .eq("workspace_id", workspaceId)
       .neq("source", "fleet_work_order")
@@ -261,7 +296,7 @@ export async function fetchTechnicianAppointmentsForPerformance(fromDate: string
       .lte("starts_at", `${toDate}T23:59:59`)
       .not("assigned_user_id", "is", null);
     if (error) throw error;
-    return ((data ?? []) as any[]).map((row) => {
+    return (data ?? []).map((row) => {
       const metadata = obj(row.metadata);
       const starts = new Date(row.starts_at);
       const ends = new Date(row.ends_at);

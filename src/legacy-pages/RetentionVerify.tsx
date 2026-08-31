@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message";
 import { useEffect, useState, useCallback } from "react";
 import {
   insertRetentionEvents,
@@ -31,7 +32,7 @@ export default function RetentionVerify() {
   const [loading, setLoading] = useState(false);
   const [running, setRunning] = useState(false);
   const [lastRun, setLastRun] = useState<string | null>(null);
-  const [workerResult, setWorkerResult] = useState<any>(null);
+  const [workerResult, setWorkerResult] = useState<Record<string, unknown> | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
 
   const retryEmail = async (emailQueueId: string) => {
@@ -40,8 +41,8 @@ export default function RetentionVerify() {
       await retryQueuedEmail(emailQueueId);
       toast({ title: "Retry queued", description: "Worker re-invoked. Refresh in a few seconds." });
       await refresh();
-    } catch (err: any) {
-      toast({ title: "Retry failed", description: err.message, variant: "destructive" });
+    } catch (err: unknown) {
+      toast({ title: "Retry failed", description: errorMessage(err), variant: "destructive" });
     } finally {
       setRetryingId(null);
     }
@@ -56,12 +57,12 @@ export default function RetentionVerify() {
       setRecentEvents(snapshot.recentEvents as Row[]);
       setRecentActions(snapshot.recentActions as Row[]);
       setRecentEmails(snapshot.recentEmails as Row[]);
-    } catch (err: any) {
-      toast({ title: "Refresh failed", description: err.message, variant: "destructive" });
+    } catch (err: unknown) {
+      toast({ title: "Refresh failed", description: errorMessage(err), variant: "destructive" });
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [user]);
 
   useEffect(() => {
     refresh();
@@ -107,25 +108,13 @@ export default function RetentionVerify() {
       });
       setLastRun(new Date().toISOString());
       await refresh();
-    } catch (err: any) {
-      toast({ title: "Verification failed", description: err.message, variant: "destructive" });
-      setWorkerResult({ error: err.message });
+    } catch (err: unknown) {
+      toast({ title: "Verification failed", description: errorMessage(err), variant: "destructive" });
+      setWorkerResult({ error: errorMessage(err) });
     } finally {
       setRunning(false);
     }
   };
-
-  const StatCard = ({ label, value, ok }: { label: string; value: number; ok?: boolean }) => (
-    <Card>
-      <CardContent className="pt-6">
-        <div className="text-xs text-muted-foreground uppercase tracking-wide">{label}</div>
-        <div className="text-3xl font-semibold mt-1 flex items-center gap-2">
-          {value}
-          {ok !== undefined && (ok ? <CheckCircle2 className="h-5 w-5 text-green-600" /> : <XCircle className="h-5 w-5 text-muted-foreground" />)}
-        </div>
-      </CardContent>
-    </Card>
-  );
 
   return (
     <div className="container max-w-5xl py-8 space-y-6">
@@ -240,5 +229,19 @@ export default function RetentionVerify() {
         </Card>
       </div>
     </div>
+  );
+}
+
+function StatCard({ label, value, ok }: { label: string; value: number; ok?: boolean }) {
+  return (
+    <Card>
+      <CardContent className="pt-6">
+        <div className="text-xs text-muted-foreground uppercase tracking-wide">{label}</div>
+        <div className="text-3xl font-semibold mt-1 flex items-center gap-2">
+          {value}
+          {ok !== undefined && (ok ? <CheckCircle2 className="h-5 w-5 text-green-600" /> : <XCircle className="h-5 w-5 text-muted-foreground" />)}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

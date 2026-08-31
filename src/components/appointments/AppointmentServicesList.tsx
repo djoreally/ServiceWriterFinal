@@ -74,7 +74,7 @@ export function AppointmentServicesList({
   }, [appointmentId, serviceCatalogId, calculateTotals]);
 
   useEffect(() => {
-    fetchServices();
+    void Promise.resolve().then(() => fetchServices());
   }, [fetchServices]);
 
   // Fetch business profile fee settings

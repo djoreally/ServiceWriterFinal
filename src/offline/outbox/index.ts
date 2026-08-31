@@ -1,6 +1,7 @@
-import { Q } from '@nozbe/watermelondb';
+import { Q, type Model } from '@nozbe/watermelondb';
 import { getOfflineDatabase } from '@/offline/database';
 import { supabase } from '@/integrations/supabase/client';
+import type { Database } from '@/integrations/supabase/types';
 import { isOfflineEligibleForCurrentUser } from '@/offline/rollout';
 import { getRuntimeEnvString } from '@/lib/runtime-env';
 
@@ -54,6 +55,10 @@ export interface OutboxAck {
   ackedAt: number;
 }
 
+export interface DeadLetterOutboxItem {
+  mutationId: string;
+}
+
 const RETRY_BASE_MS = 5_000;
 const RETRY_MAX_MS = 5 * 60_000;
 const DEFAULT_MAX_RETRY_ATTEMPTS = 5;
@@ -67,6 +72,53 @@ function resolveMaxRetryAttempts(): number {
 }
 
 const MAX_RETRY_ATTEMPTS = resolveMaxRetryAttempts(); // Escalate to dead-letter after this many attempts
+
+type ServiceCatalogInsert = Database['public']['Tables']['service_catalog']['Insert'];
+type ServiceCatalogUpdate = Database['public']['Tables']['service_catalog']['Update'];
+
+function readRawRecord(model: Model): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(model._raw)) {
+    result[key] = Reflect.get(model._raw, key);
+  }
+  return result;
+}
+
+function writeRawFields(model: Model, fields: Record<string, unknown>): void {
+  for (const [key, value] of Object.entries(fields)) {
+    Reflect.set(model._raw, key, value);
+  }
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(value)) {
+    result[key] = Reflect.get(value, key);
+  }
+  return result;
+}
+
+function requiredString(record: Record<string, unknown>, key: string): string {
+  const value = record[key];
+  if (typeof value !== 'string' || !value) {
+    throw new Error(`Missing required field: ${key}`);
+  }
+  return value;
+}
+
+function requiredNumber(record: Record<string, unknown>, key: string): number {
+  const value = record[key];
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new Error(`Missing required field: ${key}`);
+  }
+  return value;
+}
+
+function optionalString(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === 'string' && value ? value : undefined;
+}
 
 async function hasSyncedMutationWithIdempotencyKey(idempotencyKey: string): Promise<boolean> {
   const db = getOfflineDatabase();
@@ -119,16 +171,18 @@ export async function queueAppointmentStatusForSync(
   if (!db) return;
 
   await db.write(async () => {
-    await db.get('offline_outbox').create((outbox: any) => {
-      outbox.mutation_id = `appointment-${appointmentId}-status-${Date.now()}`;
-      outbox.entity = 'appointment';
-      outbox.operation = 'update_status';
-      outbox.payload = JSON.stringify({ appointmentId, status });
-      outbox.created_at = Date.now();
-      outbox.updated_at = Date.now();
-      outbox.status = 'pending';
-      outbox.attempt_count = 0;
-      outbox.idempotency_key = `appointment-${appointmentId}-status-${status}`;
+    await db.get('offline_outbox').create((outbox) => {
+      writeRawFields(outbox, {
+        mutation_id: `appointment-${appointmentId}-status-${Date.now()}`,
+        entity: 'appointment',
+        operation: 'update_status',
+        payload: JSON.stringify({ appointmentId, status }),
+        created_at: Date.now(),
+        updated_at: Date.now(),
+        status: 'pending',
+        attempt_count: 0,
+        idempotency_key: `appointment-${appointmentId}-status-${status}`,
+      });
     });
   });
 }
@@ -147,16 +201,18 @@ export async function enqueueInventoryTransfer(
   if (!db) return;
 
   await db.write(async () => {
-    await db.get('offline_outbox').create((outbox: any) => {
-      outbox.mutation_id = `inventory-${payload.vanId}-${payload.itemId}-${Date.now()}`;
-      outbox.entity = 'inventory';
-      outbox.operation = 'transfer';
-      outbox.payload = JSON.stringify(payload);
-      outbox.created_at = Date.now();
-      outbox.updated_at = Date.now();
-      outbox.status = 'pending';
-      outbox.attempt_count = 0;
-      outbox.idempotency_key = `inventory-transfer-${payload.vanId}-${payload.itemId}-${payload.quantity}`;
+    await db.get('offline_outbox').create((outbox) => {
+      writeRawFields(outbox, {
+        mutation_id: `inventory-${payload.vanId}-${payload.itemId}-${Date.now()}`,
+        entity: 'inventory',
+        operation: 'transfer',
+        payload: JSON.stringify(payload),
+        created_at: Date.now(),
+        updated_at: Date.now(),
+        status: 'pending',
+        attempt_count: 0,
+        idempotency_key: `inventory-transfer-${payload.vanId}-${payload.itemId}-${payload.quantity}`,
+      });
     });
   });
 }
@@ -176,17 +232,19 @@ export async function queueJobThreadMessage(
   if (!db) return false;
 
   await db.write(async () => {
-    await db.get('offline_outbox').create((outbox: any) => {
-      outbox.mutation_id = `job-message-${payload.clientMessageId}`;
-      outbox.entity = 'job_message';
-      outbox.operation = 'send';
-      outbox.payload = JSON.stringify(payload);
-      outbox.created_at = Date.now();
-      outbox.updated_at = Date.now();
-      outbox.status = 'pending';
-      outbox.attempt_count = 0;
+    await db.get('offline_outbox').create((outbox) => {
+      writeRawFields(outbox, {
+        mutation_id: `job-message-${payload.clientMessageId}`,
+        entity: 'job_message',
+        operation: 'send',
+        payload: JSON.stringify(payload),
+        created_at: Date.now(),
+        updated_at: Date.now(),
+        status: 'pending',
+        attempt_count: 0,
       // The server dedupes on client_message_id, so a replay can never double-send.
-      outbox.idempotency_key = `job-message-${payload.clientMessageId}`;
+        idempotency_key: `job-message-${payload.clientMessageId}`,
+      });
     });
   });
 
@@ -207,16 +265,18 @@ export async function queueInventoryMovement(
   if (!db) return false;
 
   await db.write(async () => {
-    await db.get('offline_outbox').create((outbox: any) => {
-      outbox.mutation_id = `inventory-movement-${payload.idempotencyKey}`;
-      outbox.entity = 'inventory_movement';
-      outbox.operation = payload.entryType;
-      outbox.payload = JSON.stringify(payload);
-      outbox.created_at = Date.now();
-      outbox.updated_at = Date.now();
-      outbox.status = 'pending';
-      outbox.attempt_count = 0;
-      outbox.idempotency_key = `inventory-movement-${payload.idempotencyKey}`;
+    await db.get('offline_outbox').create((outbox) => {
+      writeRawFields(outbox, {
+        mutation_id: `inventory-movement-${payload.idempotencyKey}`,
+        entity: 'inventory_movement',
+        operation: payload.entryType,
+        payload: JSON.stringify(payload),
+        created_at: Date.now(),
+        updated_at: Date.now(),
+        status: 'pending',
+        attempt_count: 0,
+        idempotency_key: `inventory-movement-${payload.idempotencyKey}`,
+      });
     });
   });
 
@@ -237,16 +297,18 @@ export async function queueChecklistStep(
   if (!db) return false;
 
   await db.write(async () => {
-    await db.get('offline_outbox').create((outbox: any) => {
-      outbox.mutation_id = `checklist-${payload.idempotencyKey}`;
-      outbox.entity = 'job_checklist';
-      outbox.operation = 'advance';
-      outbox.payload = JSON.stringify(payload);
-      outbox.created_at = Date.now();
-      outbox.updated_at = Date.now();
-      outbox.status = 'pending';
-      outbox.attempt_count = 0;
-      outbox.idempotency_key = `checklist-${payload.idempotencyKey}`;
+    await db.get('offline_outbox').create((outbox) => {
+      writeRawFields(outbox, {
+        mutation_id: `checklist-${payload.idempotencyKey}`,
+        entity: 'job_checklist',
+        operation: 'advance',
+        payload: JSON.stringify(payload),
+        created_at: Date.now(),
+        updated_at: Date.now(),
+        status: 'pending',
+        attempt_count: 0,
+        idempotency_key: `checklist-${payload.idempotencyKey}`,
+      });
     });
   });
 
@@ -269,16 +331,18 @@ export async function enqueueServiceCatalogChange(
   if (!db) return false;
 
   await db.write(async () => {
-    await db.get('offline_outbox').create((outbox: any) => {
-      outbox.mutation_id = `service-catalog-${payload.action}-${payload.itemId || 'new'}-${Date.now()}`;
-      outbox.entity = 'service_catalog';
-      outbox.operation = payload.action as 'create' | 'update' | 'delete';
-      outbox.payload = JSON.stringify(payload.data || {});
-      outbox.created_at = Date.now();
-      outbox.updated_at = Date.now();
-      outbox.status = 'pending';
-      outbox.attempt_count = 0;
-      outbox.idempotency_key = `service-catalog-${payload.action}-${payload.itemId || 'new'}`;
+    await db.get('offline_outbox').create((outbox) => {
+      writeRawFields(outbox, {
+        mutation_id: `service-catalog-${payload.action}-${payload.itemId || 'new'}-${Date.now()}`,
+        entity: 'service_catalog',
+        operation: payload.action,
+        payload: JSON.stringify(payload),
+        created_at: Date.now(),
+        updated_at: Date.now(),
+        status: 'pending',
+        attempt_count: 0,
+        idempotency_key: `service-catalog-${payload.action}-${payload.itemId || 'new'}`,
+      });
     });
   });
 
@@ -304,16 +368,15 @@ export async function processOfflineOutbox(): Promise<void> {
   if (!db) return;
 
   const outbox = await db.get('offline_outbox').query().fetch();
-  const orderedMutations = [...outbox].sort((a: any, b: any) => {
-    const ar = a?._raw || {};
-    const br = b?._raw || {};
-    return Number(ar.created_at || 0) - Number(br.created_at || 0);
-  });
+  const orderedMutations = [...outbox].sort(
+    (a, b) =>
+      Number(Reflect.get(a._raw, 'created_at') || 0) -
+      Number(Reflect.get(b._raw, 'created_at') || 0),
+  );
   const processedKeys = new Set<string>();
 
   for (const mutation of orderedMutations) {
-    const m = mutation as any;
-    const rawData = m._raw || {};
+    const rawData = readRawRecord(mutation);
 
     // Skip already synced mutations
     if (rawData.status === 'synced') {
@@ -341,10 +404,12 @@ export async function processOfflineOutbox(): Promise<void> {
       if (idempotencyKey && processedKeys.has(idempotencyKey)) {
         const now = Date.now();
         await db.write(async () => {
-          await mutation.update((rec: any) => {
-            rec._raw.status = 'discarded';
-            rec._raw.updated_at = now;
-            rec._raw.last_error = 'discarded: duplicate idempotency key in current replay window';
+          await mutation.update((record) => {
+            writeRawFields(record, {
+              status: 'discarded',
+              updated_at: now,
+              last_error: 'discarded: duplicate idempotency key in current replay window',
+            });
           });
         });
         continue;
@@ -352,11 +417,13 @@ export async function processOfflineOutbox(): Promise<void> {
       if (idempotencyKey && (await hasSyncedMutationWithIdempotencyKey(idempotencyKey))) {
         const now = Date.now();
         await db.write(async () => {
-          await mutation.update((rec: any) => {
-            rec._raw.status = 'synced';
-            rec._raw.acked_at = now;
-            rec._raw.updated_at = now;
-            rec._raw.last_error = null;
+          await mutation.update((record) => {
+            writeRawFields(record, {
+              status: 'synced',
+              acked_at: now,
+              updated_at: now,
+              last_error: null,
+            });
           });
         });
         console.info(`[offline:outbox] replay-safe skip for idempotency_key=${idempotencyKey}`);
@@ -365,31 +432,33 @@ export async function processOfflineOutbox(): Promise<void> {
 
       const entity = rawData.entity as string;
       const operation = rawData.operation as string;
-      let payloadData = {};
+      let payloadData: Record<string, unknown> = {};
 
       // Safely parse JSON payload
       if (rawData.payload && typeof rawData.payload === 'string') {
         try {
-          payloadData = JSON.parse(rawData.payload);
+          payloadData = objectRecord(JSON.parse(rawData.payload)) ?? {};
         } catch {
           payloadData = {};
         }
-      } else if (typeof rawData.payload === 'object') {
-        payloadData = rawData.payload;
+      } else {
+        payloadData = objectRecord(rawData.payload) ?? {};
       }
 
-      console.info(`[offline:outbox] processing ${entity}.${operation} (attempt ${rawData.attempt_count + 1})`);
+      console.info(
+        `[offline:outbox] processing ${entity}.${operation} (attempt ${Number(rawData.attempt_count ?? 0) + 1})`,
+      );
 
       // Route to appropriate sync handler
       switch (entity) {
         case 'appointment':
-          await syncAppointmentMutation(m, operation, payloadData);
+          await syncAppointmentMutation(mutation, operation, payloadData);
           break;
         case 'inventory':
-          await syncInventoryTransfer(m, operation, payloadData);
+          await syncInventoryTransfer(mutation, operation, payloadData);
           break;
         case 'service_catalog':
-          await syncServiceCatalogMutation(m, operation, payloadData);
+          await syncServiceCatalogMutation(operation, payloadData);
           break;
         case 'job_message':
           await syncJobThreadMessage(payloadData);
@@ -407,11 +476,13 @@ export async function processOfflineOutbox(): Promise<void> {
       // Mark as synced on success
       const now = Date.now();
       await db.write(async () => {
-        await mutation.update((rec: any) => {
-          rec._raw.status = 'synced';
-          rec._raw.acked_at = now;
-          rec._raw.updated_at = now;
-          rec._raw.last_error = null;
+        await mutation.update((record) => {
+          writeRawFields(record, {
+            status: 'synced',
+            acked_at: now,
+            updated_at: now,
+            last_error: null,
+          });
         });
       });
 
@@ -419,7 +490,7 @@ export async function processOfflineOutbox(): Promise<void> {
       if (idempotencyKey) {
         processedKeys.add(idempotencyKey);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       const attemptCount = Number(rawData.attempt_count ?? 0);
       const nextAttempt = attemptCount + 1;
       const classification = classifySyncError(error);
@@ -438,22 +509,29 @@ export async function processOfflineOutbox(): Promise<void> {
       );
 
       await db.write(async () => {
-        await mutation.update((rec: any) => {
-          rec._raw.attempt_count = nextAttempt;
-          rec._raw.updated_at = now;
-          rec._raw.last_error = errorMsg;
+        await mutation.update((record) => {
+          writeRawFields(record, {
+            attempt_count: nextAttempt,
+            updated_at: now,
+            last_error: errorMsg,
+          });
 
           if (isFinal) {
             // Escalate to dead-letter after max attempts OR immediately for non-retryable command rejection.
-            rec._raw.status = classification.retryable ? 'dead_letter' : 'discarded';
-            rec._raw.dead_letter_reason = classification.retryable
+            const deadLetterReason = classification.retryable
               ? `Max retry attempts (${MAX_RETRY_ATTEMPTS}) exceeded: ${errorMsg}`
               : `Permanent rejection: ${errorMsg}`;
-            console.warn(`[offline:outbox] ⚠ escalated to dead-letter: ${rec._raw.dead_letter_reason}`);
+            writeRawFields(record, {
+              status: classification.retryable ? 'dead_letter' : 'discarded',
+              dead_letter_reason: deadLetterReason,
+            });
+            console.warn(`[offline:outbox] ⚠ escalated to dead-letter: ${deadLetterReason}`);
           } else {
             // Schedule next retry
-            rec._raw.status = 'failed';
-            rec._raw.next_retry_at = now + nextRetryDelay;
+            writeRawFields(record, {
+              status: 'failed',
+              next_retry_at: now + nextRetryDelay,
+            });
           }
         });
       });
@@ -462,12 +540,12 @@ export async function processOfflineOutbox(): Promise<void> {
 }
 
 async function syncAppointmentMutation(
-  mutation: any,
+  mutation: Model,
   operation: string,
   payload: Record<string, unknown>,
 ): Promise<void> {
-  const rawData = mutation._raw || {};
-  const appointmentId = rawData.mutation_id?.split('-')[1]; // Extract from mutation_id
+  const mutationId = Reflect.get(mutation._raw, 'mutation_id');
+  const appointmentId = typeof mutationId === 'string' ? mutationId.split('-')[1] : undefined;
 
   if (!appointmentId) {
     throw new Error('Missing appointmentId in mutation');
@@ -513,7 +591,7 @@ async function syncAppointmentMutation(
 }
 
 async function syncInventoryTransfer(
-  mutation: any,
+  mutation: Model,
   operation: string,
   payload: Record<string, unknown>,
 ): Promise<void> {
@@ -522,13 +600,9 @@ async function syncInventoryTransfer(
   }
 
   // Type-safe extraction of inventory transfer fields
-  const itemId = payload.itemId as string | undefined;
-  const vanId = payload.vanId as string | undefined;
-  const quantity = payload.quantity as number | undefined;
-
-  if (!itemId || !vanId || quantity === undefined) {
-    throw new Error('Missing required fields for inventory transfer');
-  }
+  const itemId = requiredString(payload, 'itemId');
+  const vanId = requiredString(payload, 'vanId');
+  const quantity = requiredNumber(payload, 'quantity');
 
   // Transactional server-side transfer. The queued mutation's idempotency key is
   // passed through so a retried replay resolves to the original ledger entry
@@ -538,7 +612,7 @@ async function syncInventoryTransfer(
     p_van_id: vanId,
     p_quantity: quantity,
     p_idempotency_key:
-      (mutation?._raw?.idempotency_key as string | undefined) ??
+      optionalString(readRawRecord(mutation), 'idempotency_key') ??
       `inventory-transfer-${vanId}-${itemId}-${quantity}`,
   });
 
@@ -547,18 +621,17 @@ async function syncInventoryTransfer(
 }
 
 async function syncServiceCatalogMutation(
-  mutation: any,
   operation: string,
   payload: Record<string, unknown>,
 ): Promise<void> {
-  const rawData = mutation._raw || {};
-  const itemId = payload.itemId as string | undefined;
+  const itemId = optionalString(payload, 'itemId');
+  const mutationData = objectRecord(payload.data) ?? payload;
 
   switch (operation) {
     case 'create': {
       const { error } = await supabase
         .from('service_catalog')
-        .insert(payload as any);
+        .insert(mutationData as ServiceCatalogInsert);
       if (error) throw error;
       break;
     }
@@ -568,7 +641,7 @@ async function syncServiceCatalogMutation(
       }
       const { error } = await supabase
         .from('service_catalog')
-        .update(payload as any)
+        .update(mutationData as ServiceCatalogUpdate)
         .eq('id', itemId);
       if (error) throw error;
       break;
@@ -590,37 +663,37 @@ async function syncServiceCatalogMutation(
 }
 
 async function syncJobThreadMessage(payload: Record<string, unknown>): Promise<void> {
-  const { error } = await (supabase.rpc as any)('send_job_thread_message_v2', {
-    p_job_id: payload.jobId,
-    p_job_source: payload.jobSource,
-    p_content: payload.content,
-    p_channel: payload.channel ?? 'dispatch',
-    p_recipient: payload.recipient ?? null,
+  const { error } = await supabase.rpc('send_job_thread_message_v2', {
+    p_job_id: requiredString(payload, 'jobId'),
+    p_job_source: requiredString(payload, 'jobSource'),
+    p_content: requiredString(payload, 'content'),
+    p_channel: optionalString(payload, 'channel') ?? 'dispatch',
+    p_recipient: optionalString(payload, 'recipient'),
     p_attachments: [],
-    p_client_message_id: payload.clientMessageId,
+    p_client_message_id: requiredString(payload, 'clientMessageId'),
   });
   if (error) throw error;
 }
 
 async function syncInventoryMovement(payload: Record<string, unknown>): Promise<void> {
-  const { error } = await (supabase.rpc as any)('record_inventory_movement_v1', {
-    p_van_inventory_id: payload.vanInventoryId,
-    p_entry_type: payload.entryType,
-    p_quantity: payload.quantity,
-    p_idempotency_key: payload.idempotencyKey,
-    p_job_id: payload.jobId ?? null,
-    p_job_source: payload.jobSource ?? null,
-    p_note: payload.note ?? null,
+  const { error } = await supabase.rpc('record_inventory_movement_v1', {
+    p_van_inventory_id: requiredString(payload, 'vanInventoryId'),
+    p_entry_type: requiredString(payload, 'entryType'),
+    p_quantity: requiredNumber(payload, 'quantity'),
+    p_idempotency_key: requiredString(payload, 'idempotencyKey'),
+    p_job_id: optionalString(payload, 'jobId'),
+    p_job_source: optionalString(payload, 'jobSource'),
+    p_note: optionalString(payload, 'note'),
   });
   if (error) throw error;
 }
 
 async function syncChecklistStep(payload: Record<string, unknown>): Promise<void> {
-  const { error } = await (supabase.rpc as any)('advance_job_execution_step_v1', {
-    p_step_id: payload.stepId,
-    p_status: payload.status,
-    p_evidence_url: payload.evidenceUrl ?? undefined,
-    p_notes: payload.notes ?? undefined,
+  const { error } = await supabase.rpc('advance_job_execution_step_v1', {
+    p_step_id: requiredString(payload, 'stepId'),
+    p_status: requiredString(payload, 'status'),
+    p_evidence_url: optionalString(payload, 'evidenceUrl'),
+    p_notes: optionalString(payload, 'notes'),
   });
   if (error) throw error;
 }
@@ -649,7 +722,7 @@ export async function getPendingOutboxCount(): Promise<number> {
 /**
  * Get all dead-letter items (failed after max retries).
  */
-export async function getDeadLetterOutboxItems(): Promise<any[]> {
+export async function getDeadLetterOutboxItems(): Promise<DeadLetterOutboxItem[]> {
   if (!(await isOfflineEligibleForCurrentUser())) {
     return [];
   }
@@ -662,7 +735,10 @@ export async function getDeadLetterOutboxItems(): Promise<any[]> {
     .query(Q.where('status', 'dead_letter'))
     .fetch();
 
-  return rows;
+  return rows.flatMap((row) => {
+    const mutationId: unknown = Reflect.get(row._raw, 'mutation_id');
+    return typeof mutationId === 'string' ? [{ mutationId }] : [];
+  });
 }
 
 /**
@@ -689,16 +765,17 @@ export async function retryDeadLetterOutboxItem(mutationId: string): Promise<voi
   }
 
   const mutation = rows[0];
-  const rawData = mutation._raw || {};
   const nextRetryDelay = RETRY_BASE_MS; // Reset retry backoff when operator retries
 
   await db.write(async () => {
-    await mutation.update((rec: any) => {
-      rec._raw.status = 'failed';
-      rec._raw.attempt_count = 0; // Reset attempt counter
-      rec._raw.next_retry_at = Date.now() + nextRetryDelay;
-      rec._raw.updated_at = Date.now();
-      rec._raw.dead_letter_reason = null;
+    await mutation.update((record) => {
+      writeRawFields(record, {
+        status: 'failed',
+        attempt_count: 0,
+        next_retry_at: Date.now() + nextRetryDelay,
+        updated_at: Date.now(),
+        dead_letter_reason: null,
+      });
     });
   });
 
@@ -731,9 +808,11 @@ export async function discardDeadLetterOutboxItem(mutationId: string): Promise<v
   const mutation = rows[0];
 
   await db.write(async () => {
-    await mutation.update((rec: any) => {
-      rec._raw.status = 'discarded';
-      rec._raw.updated_at = Date.now();
+    await mutation.update((record) => {
+      writeRawFields(record, {
+        status: 'discarded',
+        updated_at: Date.now(),
+      });
     });
   });
 

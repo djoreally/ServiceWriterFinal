@@ -43,7 +43,7 @@ export function QuoteRequestsInbox({ onConvert }: QuoteRequestsInboxProps) {
   };
 
   useEffect(() => {
-    load();
+    void Promise.resolve().then(() => load());
   }, []);
 
   const handleStatus = async (request: QuoteRequest, status: QuoteRequest["status"]) => {

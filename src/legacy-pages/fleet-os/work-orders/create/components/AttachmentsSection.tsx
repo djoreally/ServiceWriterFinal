@@ -30,15 +30,15 @@ export const AttachmentsSection = ({ draftId, onRequireDraft }: Props) => {
 
   useEffect(() => {
     if (!draftId) {
-      setRows([]);
+      void Promise.resolve().then(() => setRows([]));
       return;
     }
     let cancelled = false;
-    setLoading(true);
-    listDraftAttachments(draftId)
+    void Promise.resolve().then(() => setLoading(true));
+    void Promise.resolve().then(() => listDraftAttachments(draftId)
       .then((r) => !cancelled && setRows(r))
       .catch((e) => console.error("[AttachmentsSection] list", e))
-      .finally(() => !cancelled && setLoading(false));
+      .finally(() => !cancelled && setLoading(false)));
     return () => {
       cancelled = true;
     };

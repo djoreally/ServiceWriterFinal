@@ -60,7 +60,10 @@ export function ProximityPicker({ value, onChange }: Props) {
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const markerRef = useRef<mapboxgl.Marker | null>(null);
   const valueRef = useRef(value);
-  valueRef.current = value;
+
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
 
   const hasCenter = value.lat != null && value.lng != null;
   const lat = value.lat ?? DEFAULT_CENTER.lat;
@@ -124,8 +127,8 @@ export function ProximityPicker({ value, onChange }: Props) {
       mapRef.current = null;
       markerRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+
+  }, [hasCenter, lat, lng, onChange, radius]);
 
   // Sync marker + circle whenever value changes
   useEffect(() => {

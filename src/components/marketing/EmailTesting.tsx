@@ -100,9 +100,6 @@ export const EmailTesting = () => {
   const [businessProfile, setBusinessProfile] = useState<{ business_name: string; email: string } | null>(null);
   const [emailConfigured, setEmailConfigured] = useState<boolean | null>(null);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
 
   const fetchData = async () => {
     setLoading(true);
@@ -127,6 +124,10 @@ export const EmailTesting = () => {
     setEmailLogs(result.emailLogs as unknown as EmailLogEntry[]);
     setLoading(false);
   };
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchData());
+  }, []);
 
   const fetchEmailQueue = async () => {
     setRefreshing(true);

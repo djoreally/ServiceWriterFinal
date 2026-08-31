@@ -120,7 +120,7 @@ export function useTechShiftManagement(technician_id?: string) {
   }, [technician_id, now]);
 
   useEffect(() => {
-    fetchShiftData();
+    void Promise.resolve().then(() => fetchShiftData());
   }, [fetchShiftData]);
 
   // ⚡ Enterprise shift transition methods

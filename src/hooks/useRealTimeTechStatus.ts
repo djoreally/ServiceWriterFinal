@@ -47,59 +47,6 @@ export function useRealTimeTechStatus(technician_id?: string) {
   const [state, setState] = useState<TechOperationalState | null>(null);
   const [loading, setLoading] = useState(true);
   // ⚡ Real-time subscription for dispatch events
-  useEffect(() => {
-    if (!technician_id) return;
-
-    // Every callback is attached synchronously BEFORE subscribe(). The
-    // previous version awaited getUser() mid-setup; supabase.channel()
-    // reuses one channel instance per topic, so a remount during that await
-    // returned the already-subscribed channel and .on() threw
-    // "cannot add postgres_changes callbacks after subscribe()".
-    const channel = supabase.channel(`tech-dispatch-${technician_id}`);
-
-    channel.on('postgres_changes', {
-      event: '*',
-      schema: 'public',
-      table: 'appointments',
-      filter: `assigned_technician_id=eq.${technician_id}`,
-    }, (payload) => {
-      const next = (payload.new ?? {}) as { status?: unknown; dispatch_status?: unknown };
-      const prev = (payload.old ?? {}) as { status?: unknown; dispatch_status?: unknown };
-      const nextDispatch = deriveDispatchStatusFromAppointment(next.status, next.dispatch_status);
-      const prevDispatch = deriveDispatchStatusFromAppointment(prev.status, prev.dispatch_status);
-
-      const updateType: RealTimeUpdate['type'] =
-        payload.eventType === 'INSERT'
-          ? 'job_assigned'
-          : payload.eventType === 'DELETE' ||
-              (isClosedDispatchStatus(nextDispatch) && !isClosedDispatchStatus(prevDispatch))
-            ? 'job_cancelled'
-            : 'status_sync';
-
-      console.info('⚡ Real-time appointment update:', payload);
-      handleRealTimeUpdate({
-        type: updateType,
-        action: payload.eventType as RealTimeUpdate['action'],
-        payload,
-      });
-    });
-
-    channel.on('postgres_changes', {
-      event: '*',
-      schema: 'public',
-      table: 'dispatch_events',
-      filter: `technician_id=eq.${technician_id}`,
-    }, (payload) => {
-      console.info('⚡ Real-time dispatch event:', payload);
-      handleRealTimeUpdate({ type: 'status_sync', payload });
-    });
-
-    channel.subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [technician_id]);
 
   // ⚡ Fetch technician operational state
   const fetchTechState = useCallback(async () => {
@@ -166,7 +113,7 @@ export function useRealTimeTechStatus(technician_id?: string) {
     fetchTechState();
   }, [fetchTechState]);
 
-  const handleRealTimeUpdate = (update: RealTimeUpdate) => {
+  const handleRealTimeUpdate = useCallback((update: RealTimeUpdate) => {
     switch (update.type) {
       case 'job_assigned':
         fetchTechState(); // Refresh state
@@ -187,7 +134,61 @@ export function useRealTimeTechStatus(technician_id?: string) {
         fetchTechState();
         break;
     }
-  };
+  }, [fetchTechState]);
+
+  useEffect(() => {
+    if (!technician_id) return;
+
+    // Every callback is attached synchronously BEFORE subscribe(). The
+    // previous version awaited getUser() mid-setup; supabase.channel()
+    // reuses one channel instance per topic, so a remount during that await
+    // returned the already-subscribed channel and .on() threw
+    // "cannot add postgres_changes callbacks after subscribe()".
+    const channel = supabase.channel(`tech-dispatch-${technician_id}`);
+
+    channel.on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'appointments',
+      filter: `assigned_technician_id=eq.${technician_id}`,
+    }, (payload) => {
+      const next = (payload.new ?? {}) as { status?: unknown; dispatch_status?: unknown };
+      const prev = (payload.old ?? {}) as { status?: unknown; dispatch_status?: unknown };
+      const nextDispatch = deriveDispatchStatusFromAppointment(next.status, next.dispatch_status);
+      const prevDispatch = deriveDispatchStatusFromAppointment(prev.status, prev.dispatch_status);
+
+      const updateType: RealTimeUpdate['type'] =
+        payload.eventType === 'INSERT'
+          ? 'job_assigned'
+          : payload.eventType === 'DELETE' ||
+              (isClosedDispatchStatus(nextDispatch) && !isClosedDispatchStatus(prevDispatch))
+            ? 'job_cancelled'
+            : 'status_sync';
+
+      console.info('⚡ Real-time appointment update:', payload);
+      handleRealTimeUpdate({
+        type: updateType,
+        action: payload.eventType as RealTimeUpdate['action'],
+        payload,
+      });
+    });
+
+    channel.on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'dispatch_events',
+      filter: `technician_id=eq.${technician_id}`,
+    }, (payload) => {
+      console.info('⚡ Real-time dispatch event:', payload);
+      handleRealTimeUpdate({ type: 'status_sync', payload });
+    });
+
+    channel.subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [handleRealTimeUpdate, technician_id]);
 
   // ⚡ Enterprise-level status transition methods
   const transitionToEnRoute = async (appointment_id: string, location?: { lat: number; lng: number }) => {

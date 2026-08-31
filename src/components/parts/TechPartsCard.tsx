@@ -25,12 +25,12 @@ export function TechPartsCard({ vehicleId }: TechPartsCardProps) {
   useEffect(() => {
     let active = true;
     if (!vehicleId) {
-      setParts([]);
-      setLoading(false);
+      void Promise.resolve().then(() => setParts([]));
+      void Promise.resolve().then(() => setLoading(false));
       return;
     }
-    setLoading(true);
-    fetchVehiclePartSuggestions("retail", vehicleId)
+    void Promise.resolve().then(() => setLoading(true));
+    void Promise.resolve().then(() => fetchVehiclePartSuggestions("retail", vehicleId)
       .then((rows) => {
         if (active) setParts(rows);
       })
@@ -39,7 +39,7 @@ export function TechPartsCard({ vehicleId }: TechPartsCardProps) {
       })
       .finally(() => {
         if (active) setLoading(false);
-      });
+      }));
     return () => {
       active = false;
     };

@@ -1,5 +1,5 @@
 /** Financials Query — canonical payment/service reads with legacy chart adapters. */
-import { supabase } from "@/integrations/supabase/client";
+import { productionSupabase } from "@/integrations/supabase/client";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
@@ -30,7 +30,7 @@ export async function getCurrentUserId(): Promise<string | null> {
 export async function fetchSucceededPayments(_userId: string, sinceIso: string) {
   const context = await resolveCurrentWorkspace();
   if (!context) return { data: [], error: null };
-  const { data, error } = await (supabase.from("payments") as any)
+  const { data, error } = await productionSupabase.from("payments")
     .select("id,amount,status,provider,paid_at,created_at,metadata")
     .eq("workspace_id", context.workspaceId)
     .in("status", ["succeeded", "partially_refunded", "refunded"])
@@ -38,7 +38,7 @@ export async function fetchSucceededPayments(_userId: string, sinceIso: string) 
     .order("created_at");
   if (error) return { data: null, error };
   return {
-    data: ((data ?? []) as any[]).map((row) => {
+    data: (data ?? []).map((row) => {
       const metadata = object(row.metadata);
       return {
         id: row.id,
@@ -58,13 +58,13 @@ export async function fetchSucceededPayments(_userId: string, sinceIso: string) 
 export async function fetchPendingPayments(_userId: string) {
   const context = await resolveCurrentWorkspace();
   if (!context) return { data: [], error: null };
-  const { data, error } = await (supabase.from("payments") as any)
+  const { data, error } = await productionSupabase.from("payments")
     .select("id,amount,metadata")
     .eq("workspace_id", context.workspaceId)
     .eq("status", "pending");
   if (error) return { data: null, error };
   return {
-    data: ((data ?? []) as any[]).map((row) => ({
+    data: (data ?? []).map((row) => ({
       id: row.id,
       amount: cents(row.amount),
       appointment_id: object(row.metadata).appointment_id ?? null,
@@ -76,14 +76,14 @@ export async function fetchPendingPayments(_userId: string) {
 export async function fetchAppointmentStatuses(appointmentIds: string[]) {
   const context = await resolveCurrentWorkspace();
   if (!context || appointmentIds.length === 0) return { data: [], error: null };
-  return supabase.from("appointments").select("id,status").eq("workspace_id", context.workspaceId).in("id", appointmentIds);
+  return productionSupabase.from("appointments").select("id,status").eq("workspace_id", context.workspaceId).in("id", appointmentIds);
 }
 
 /** Completed job snapshots remain dollars because canonical service financial helpers consume dollars. */
 export async function fetchCompletedServices(_userId: string, sinceIso: string) {
   const context = await resolveCurrentWorkspace();
   if (!context) return { data: [], error: null };
-  const { data, error } = await (supabase.from("service_records") as any)
+  const { data, error } = await productionSupabase.from("service_records")
     .select("id,total_amount,tax_amount,discount_amount,status,completed_at,created_at,updated_at,metadata")
     .eq("workspace_id", context.workspaceId)
     .eq("status", "completed")
@@ -91,7 +91,7 @@ export async function fetchCompletedServices(_userId: string, sinceIso: string) 
     .order("completed_at");
   if (error) return { data: null, error };
   return {
-    data: ((data ?? []) as any[]).map((row) => {
+    data: (data ?? []).map((row) => {
       const metadata = object(row.metadata);
       return {
         id: row.id,

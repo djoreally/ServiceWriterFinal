@@ -56,18 +56,18 @@ export function useSlotWeatherDecision({
   const cacheKey = `${businessUserId ?? "public"}|${dateStr}|${selectedTime}|${scope}`;
 
   useEffect(() => {
-    setDismissed(false);
+    void Promise.resolve().then(() => setDismissed(false));
   }, [cacheKey]);
 
   useEffect(() => {
     if (!enabled || !selectedDate || !selectedTime || lat == null || lng == null) {
-      setState({ loading: false, result: null, error: null });
+      void Promise.resolve().then(() => setState({ loading: false, result: null, error: null }));
       return;
     }
 
     const cached = cacheRef.current.get(cacheKey);
     if (cached) {
-      setState({ loading: false, result: cached, error: null });
+      void Promise.resolve().then(() => setState({ loading: false, result: cached, error: null }));
       return;
     }
 
@@ -76,7 +76,7 @@ export function useSlotWeatherDecision({
     const start = startDate.toISOString();
     const end = new Date(startDate.getTime() + durationMinutes * 60_000).toISOString();
 
-    setState((s) => ({ ...s, loading: true, error: null }));
+    void Promise.resolve().then(() => setState((s) => ({ ...s, loading: true, error: null })));
 
     const timer = setTimeout(async () => {
       try {
@@ -94,7 +94,7 @@ export function useSlotWeatherDecision({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [enabled, businessUserId, lat, lng, dateStr, selectedTime, cacheKey, durationMinutes, scope]);
+  }, [enabled, businessUserId, lat, lng, dateStr, selectedTime, cacheKey, durationMinutes, scope, selectedDate]);
 
   return {
     ...state,

@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Appointment, Customer, Vehicle, ServiceCatalogItem, BusinessHours } from "@/shared/types";
 import type { AppointmentFormState, CustomerFormData, VehicleFormData } from "@/shared/types/forms";
 import { Button } from '@/components/ui/button';import { normalizePhoneToE164, formatPhoneInput } from "@/lib/phone";import { Input } from '@/components/ui/input';
@@ -85,22 +85,22 @@ export const AppointmentForm = ({
       // Cast to any to access raw DB id fields (vehicle_id, customer_id) which exist at runtime
       // but are not on the Appointment type (which uses relations). Sanitize to prevent "undefined" UUID errors.
       const raw = initialData as Record<string, unknown>;
-      setFormData({
+      void Promise.resolve().then(() => setFormData({
         ...initialData,
         vehicle_id: toSafeStr(raw.vehicle_id) || undefined,
         customer_id: toSafeStr(raw.customer_id) || undefined,
         service_catalog_id: toSafeStr(raw.service_catalog_id) || undefined,
-      } as AppointmentFormState);
-      setSelectedDate(date);
+      } as AppointmentFormState));
+      void Promise.resolve().then(() => setSelectedDate(date));
     } else {
       const restored = restoreDraft();
-      setFormData(restored ?? {
+      void Promise.resolve().then(() => setFormData(restored ?? {
         status: 'confirmed',
         duration_minutes: 60,
         scheduled_time: '09:00',
         scheduled_date: format(new Date(), 'yyyy-MM-dd')
-      });
-      setSelectedDate(new Date());
+      }));
+      void Promise.resolve().then(() => setSelectedDate(new Date()));
     }
   }, [initialData, open, restoreDraft]);
 
@@ -114,7 +114,7 @@ export const AppointmentForm = ({
   };
 
   // Generate time slots based on business hours + the configured slot increment.
-  const generateTimeSlots = (opening: string, closing: string, interval: number) => {
+  const generateTimeSlots = useCallback((opening: string, closing: string, interval: number) => {
       const slots: string[] = [];
       const open = toHHMM(opening) || '08:00';
       const close = toHHMM(closing) || '17:00';
@@ -127,27 +127,27 @@ export const AppointmentForm = ({
           currentTime.setMinutes(currentTime.getMinutes() + safeInterval);
       }
       return slots;
-  };
+  }, []);
 
   useEffect(() => {
     const dayName = format(selectedDate, 'EEEE');
     if (businessHours.working_days.includes(dayName)) {
-      setAvailableSlots(generateTimeSlots(
+      void Promise.resolve().then(() => setAvailableSlots(generateTimeSlots(
         businessHours.opening_time,
         businessHours.closing_time,
         businessHours.slot_duration_minutes ?? 30,
-      ));
+      )));
     } else {
-      setAvailableSlots([]);
+      void Promise.resolve().then(() => setAvailableSlots([]));
     }
-    setFormData((prev) => ({ ...prev, scheduled_date: format(selectedDate, 'yyyy-MM-dd') }));
-  }, [selectedDate, businessHours]);
+    void Promise.resolve().then(() => setFormData((prev) => ({ ...prev, scheduled_date: format(selectedDate, 'yyyy-MM-dd') })));
+  }, [selectedDate, businessHours, generateTimeSlots]);
 
   // Fetch the same booked-slot data the public booking flow uses, so the admin
   // grid is grounded in the system's source of truth.
   useEffect(() => {
     if (!open || !businessUserId) {
-      setBookedSlots([]);
+      void Promise.resolve().then(() => setBookedSlots([]));
       return;
     }
     let cancelled = false;

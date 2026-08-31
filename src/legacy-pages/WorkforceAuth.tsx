@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@packages/auth";
 import { ChevronRight, LogIn, UserPlus } from "lucide-react";
@@ -108,11 +108,28 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
   const copy = VARIANT_COPY[variant];
   const autoRouteRef = useRef(false);
 
+  const activateWorkspace = useCallback(async (membership: WorkforceMembership) => {
+    const selected = await selectActiveWorkspace(membership.workspaceUserId, membership.role);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      queryClient.setQueryData<WorkforceMembership[]>(["workforce-identity", user.id], (current) => {
+        const source = current?.length ? current : memberships ?? [membership];
+        const exists = source.some((item) => item.workspaceUserId === selected.workspaceUserId && item.role === selected.role);
+        const next = exists ? source : [selected, ...source];
+        return next.map((item) => ({
+          ...item,
+          isDefault: item.workspaceUserId === selected.workspaceUserId && item.role === selected.role,
+        }));
+      });
+    }
+    navigate(nextPath ?? landingPathFor(selected), { replace: true });
+  }, [memberships, navigate, nextPath, queryClient]);
+
   /**
    * Single source of truth for the post-sign-in destination: only memberships
    * matching the login entry point the user picked are eligible.
    */
-  const routeIdentity = async () => {
+  const routeIdentity = useCallback(async () => {
     await withOperationTimeout(
       (async () => {
         const identity = await fetchWorkforceIdentity();
@@ -131,7 +148,7 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
       IDENTITY_RESOLUTION_TIMEOUT_MS,
       "Workspace setup took too long to respond.",
     );
-  };
+  }, [activateWorkspace, variant]);
 
   /**
    * Already-authenticated visitors (bookmark, browser back, page reload):
@@ -145,7 +162,7 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
    * valid, so send the user into the app (the shell re-resolves the role) and
    * report the real backend message instead of blocking on a dead-end card.
    */
-  const continueWithoutIdentity = (error: unknown) => {
+  const continueWithoutIdentity = useCallback((error: unknown) => {
     const destination = nextPath ?? VARIANT_FALLBACK_LANDING[variant];
     console.error("[workforce-auth] identity resolution failed", error);
     // Non-blocking: the app shell shows an inline retry banner (see
@@ -155,7 +172,7 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
     });
     setIntendedPath(destination);
     navigate(destination, { replace: true });
-  };
+  }, [navigate, nextPath, setIntendedPath, variant]);
 
   useEffect(() => {
     if (isSignup || authLoading || !session || loading || autoRouteRef.current) return;
@@ -164,8 +181,8 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
     void routeIdentity()
       .catch(continueWithoutIdentity)
       .finally(() => setLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSignup, authLoading, session, loading]);
+
+  }, [isSignup, authLoading, session, loading, routeIdentity, continueWithoutIdentity]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -221,27 +238,8 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
     }
 
   };
-
-
-  const activateWorkspace = async (membership: WorkforceMembership) => {
-    const selected = await selectActiveWorkspace(membership.workspaceUserId, membership.role);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      queryClient.setQueryData<WorkforceMembership[]>(["workforce-identity", user.id], (current) => {
-        const source = current?.length ? current : memberships ?? [membership];
-        const exists = source.some((item) => item.workspaceUserId === selected.workspaceUserId && item.role === selected.role);
-        const next = exists ? source : [selected, ...source];
-        return next.map((item) => ({
-          ...item,
-          isDefault: item.workspaceUserId === selected.workspaceUserId && item.role === selected.role,
-        }));
-      });
-    }
-    navigate(nextPath ?? landingPathFor(selected), { replace: true });
-  };
-
   const chooseWorkspace = async (membership: WorkforceMembership) => { setLoading(true); try { await withOperationTimeout(activateWorkspace(membership), IDENTITY_RESOLUTION_TIMEOUT_MS, "Workspace setup took too long to respond."); } catch (error) { toast.error(error instanceof Error ? error.message : "Unable to select that workspace."); } finally { setLoading(false); } };
-  
+
 
   if (roleMismatch) return <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4"><Card className="w-full max-w-md"><CardHeader className="text-center"><CardTitle>Wrong sign-in for this account</CardTitle><CardDescription>This account isn't set up as {copy.badge}. Pick the option that matches your role and sign in there.</CardDescription></CardHeader><CardContent className="space-y-3"><Button className="w-full" onClick={() => navigate("/login")}>Choose a different role</Button><Button className="w-full" variant="outline" disabled={loading} onClick={() => { setRoleMismatch(false); void supabase.auth.signOut(); }}>Use a different account</Button></CardContent></Card></main>;
   if (memberships) return <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4"><Card className="w-full max-w-md"><CardHeader className="text-center"><CardTitle>Choose a workspace</CardTitle><CardDescription>You belong to more than one workspace. Choose where you want to work.</CardDescription></CardHeader><CardContent className="space-y-3">{memberships.map((membership) => <Button key={`${membership.workspaceUserId}-${membership.role}`} className="h-auto w-full justify-between p-4 text-left" variant="outline" disabled={loading} onClick={() => void chooseWorkspace(membership)}><span><span className="block font-semibold">{membership.workspaceName}</span><span className="text-xs capitalize text-muted-foreground">{membership.role}</span></span><ChevronRight className="h-4 w-4" /></Button>)}</CardContent></Card></main>;

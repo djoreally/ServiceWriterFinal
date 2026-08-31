@@ -4,25 +4,97 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { nextApi } from "@/lib/nextApiClient";
+import { z } from "zod";
+import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
+
+const nullableString = z.string().nullable().optional();
+const nullableNumber = z.number().nullable().optional();
+
+const publicBookingProfileSchema = z.object({
+  user_id: z.string().min(1),
+  business_name: nullableString,
+  phone: nullableString,
+  email: nullableString,
+  logo_url: nullableString,
+  opening_time: nullableString,
+  closing_time: nullableString,
+  working_days: z.array(z.string()).nullable().optional(),
+  currency: nullableString,
+  service_radius_miles: nullableNumber,
+  service_address: nullableString,
+  service_coordinates: z.object({ lat: z.number(), lng: z.number() }).nullable().optional(),
+  // The public RPC returns null when a shop inherits application defaults.
+  buffer_time_before: nullableNumber,
+  buffer_time_after: nullableNumber,
+  min_lead_time_hours: nullableNumber,
+  max_advance_days: nullableNumber,
+  slot_duration_minutes: nullableNumber,
+  stripe_charges_enabled: z.boolean().optional(),
+  oil_price_per_quart: nullableNumber,
+  require_approval: z.boolean().optional(),
+  weather_guard_enabled: z.boolean().optional(),
+  weather_guard_settings: z.unknown().optional(),
+}).passthrough();
+
+const publicBusinessSettingsSchema = z.object({
+  day_hours: z.record(z.string(), z.unknown()).nullable().optional(),
+  payment_provider: nullableString,
+  square_charges_enabled: z.boolean().optional(),
+  square_merchant_id: nullableString,
+  oil_price_per_quart: nullableNumber,
+  waste_oil_fee_enabled: z.boolean().optional(),
+  waste_oil_fee: nullableNumber,
+  shop_fee_enabled: z.boolean().optional(),
+  shop_fee_type: nullableString,
+  shop_fee_value: nullableNumber,
+  shop_fee_description: nullableString,
+  surcharge_enabled: z.boolean().optional(),
+  surcharge_type: nullableString,
+  surcharge_value: nullableNumber,
+  surcharge_description: nullableString,
+  weather_guard_enabled: z.boolean().optional(),
+  weather_guard_settings: z.unknown().optional(),
+  service_verticals: z.array(z.string()).optional(),
+}).passthrough();
+
+const publicBlockedDatesSchema = z.array(z.object({ blocked_date: z.string() }));
+
+export type PublicBookingProfileData = z.infer<typeof publicBookingProfileSchema>;
+export type PublicBusinessExtendedSettings = z.infer<typeof publicBusinessSettingsSchema>;
+
+export interface PublicSubscriptionPlan {
+  id: string;
+  name: string;
+  description: string | null;
+  price: number;
+  billing_cycle: string;
+  tier: string;
+  features: string[];
+  badge_label: string | null;
+  badge_color: string | null;
+  highlight: boolean;
+  cta_label: string;
+  display_order: number;
+}
 /** Fetch business profile via the safe versioned public RPC. */
 export async function fetchPublicBookingProfile(slug: string) {
   try {
     const response = await nextApi.publicBooking.get(slug, "profile");
-    return { data: [response.data], error: null as unknown };
+    return { data: [publicBookingProfileSchema.parse(response.data)], error: null as unknown };
   } catch (error) {
-    return { data: null as unknown, error };
+    return { data: null, error };
   }
 }
 
 /** Fetch additional business settings (fees, payment provider, etc.). */
 export async function fetchBusinessFeeSettings(userId: string) {
-  return (supabase
+  return supabase
     .from("business_profiles")
-    .select("oil_price_per_quart, waste_oil_fee_enabled, waste_oil_fee, shop_fee_enabled, shop_fee_type, shop_fee_value, shop_fee_description, surcharge_enabled, surcharge_type, surcharge_value, surcharge_description, payment_provider") as any)
+    .select("oil_price_per_quart, waste_oil_fee_enabled, waste_oil_fee, shop_fee_enabled, shop_fee_type, shop_fee_value, shop_fee_description, surcharge_enabled, surcharge_type, surcharge_value, surcharge_description, payment_provider")
     .eq("user_id", userId)
-    .single() as { data: any | null; error: any };
+    .single();
 }
 
 /**
@@ -37,7 +109,7 @@ export async function fetchPublicServiceCatalog(bookingSlug: string) {
     const response = await nextApi.publicBooking.get(bookingSlug, "catalog");
     return { data: response.data, error: null as unknown };
   } catch (error) {
-    return { data: null as unknown, error };
+    return { data: null, error };
   }
 }
 
@@ -48,7 +120,7 @@ export async function fetchPublicServicePackages(bookingSlug: string) {
     const response = await nextApi.publicBooking.get(bookingSlug, "packages");
     return { data: response.data, error: null as unknown };
   } catch (error) {
-    return { data: null as unknown, error };
+    return { data: null, error };
   }
 }
 
@@ -73,7 +145,7 @@ export async function fetchPublicSubscriptionPlans(businessUserId: string) {
 
   if (error) return { data: null as null, error };
 
-  const mapped = (data || []).map((plan: any) => ({
+  const mapped: PublicSubscriptionPlan[] = (data || []).map((plan) => ({
     id: plan.id,
     user_id: plan.user_id,
     name: plan.name,
@@ -114,7 +186,7 @@ export async function fetchBookedSlotsForDate(bookingSlug: string, dateStr: stri
 /** Subscribe to appointment changes for a business (realtime). */
 export function subscribeToAppointmentChanges(
   businessUserId: string,
-  onPayload: (payload: any) => void,
+  onPayload: (payload: RealtimePostgresChangesPayload<Record<string, unknown>>) => void,
 ) {
   const channel = supabase
     .channel('appointments-realtime')
@@ -134,7 +206,7 @@ export function subscribeToAppointmentChanges(
 }
 
 /** Invoke tax calculation edge function. */
-export async function calculateTax(body: Record<string, unknown>): Promise<any> {
+export async function calculateTax(body: Record<string, unknown>) {
   return supabase.functions.invoke("calculate-tax", { body });
 }
 
@@ -153,9 +225,7 @@ export async function fetchPublicBlockedDates(bookingSlug: string): Promise<stri
     // Pass both params to disambiguate overloaded RPC (1-arg vs 2-arg variants).
     // Without this, PostgREST returns PGRST203 and the picker silently shows blocked days as bookable.
     const { data } = await nextApi.publicBooking.get(bookingSlug, "blocked_dates");
-    return ((data as any[]) ?? [])
-      .map((row) => (typeof row?.blocked_date === "string" ? row.blocked_date : null))
-      .filter((d): d is string => !!d);
+    return publicBlockedDatesSchema.parse(data).map((row) => row.blocked_date);
   } catch (e) {
     console.warn("[fetchPublicBlockedDates] threw:", e);
     return [];
@@ -166,9 +236,12 @@ export async function fetchPublicBlockedDates(bookingSlug: string): Promise<stri
 export async function fetchPublicBusinessExtendedSettings(bookingSlug: string) {
   try {
     const response = await nextApi.publicBooking.get(bookingSlug, "settings");
-    return { data: (response.data ?? null) as Record<string, unknown> | null, error: null as unknown };
+    return {
+      data: response.data == null ? null : publicBusinessSettingsSchema.parse(response.data),
+      error: null as unknown,
+    };
   } catch (error) {
-    return { data: null as unknown, error };
+    return { data: null, error };
   }
 }
 

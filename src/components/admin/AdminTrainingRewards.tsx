@@ -49,7 +49,7 @@ export const AdminTrainingRewards = () => {
     setLoading(false);
   };
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void Promise.resolve().then(() => load()); }, []);
 
   const savePolicy = async () => {
     if (!policy) return;

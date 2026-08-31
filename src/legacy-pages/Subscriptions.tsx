@@ -226,8 +226,8 @@ const Subscriptions = () => {
   }, []);
 
   useEffect(() => {
-    loadData();
-    loadServices();
+    void Promise.resolve().then(() => loadData());
+    void Promise.resolve().then(() => loadServices());
   }, [loadData, loadServices]);
 
   // ── Helpers ──

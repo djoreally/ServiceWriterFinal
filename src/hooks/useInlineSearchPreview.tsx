@@ -1,4 +1,4 @@
-/* eslint-disable react-refresh/only-export-components */
+
 import { ReactNode, useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 

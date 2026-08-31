@@ -103,6 +103,31 @@ interface TechnicianStatus {
   active_clock_entry: boolean;
 }
 
+interface MobileDispatchJobRow {
+  id: string;
+  customer: { name: string | null; phone: string | null; address: string | null } | null;
+  vehicle: {
+    year: number | null;
+    make: string | null;
+    model: string | null;
+    color: string | null;
+    license_plate: string | null;
+  } | null;
+  service_catalog: { name: string | null } | null;
+  notes: string | null;
+  scheduled_date: string;
+  scheduled_time: string;
+  estimated_duration_minutes: number | null;
+  dispatch_status: string | null;
+  job_priority: string | null;
+  actual_start_time: string | null;
+  actual_end_time: string | null;
+}
+
+function normalizeJobPriority(value: string | null): Job["job_priority"] {
+  return value === "low" || value === "high" || value === "urgent" ? value : "normal";
+}
+
 // ⚡ Status flow with customer-facing SMS text for each transition
 const DISPATCH_STATUS_FLOW: Partial<Record<DispatchStatus, { next: DispatchStatus; action: string; icon: typeof Play; smsTemplate?: string }>> = {
   assigned: { next: "en_route", action: "Start Route", icon: Navigation, smsTemplate: "Your technician is on the way! ETA approximately {duration} minutes." },
@@ -162,12 +187,12 @@ export function MobileDispatchView() {
         const { data: jobsData } = await fetchTechnicianJobs(techData.id);
 
         if (jobsData) {
-          const mapped = (jobsData as any[]).map((j: any) => ({
+          const mapped: Job[] = (jobsData as unknown as MobileDispatchJobRow[]).map((j) => ({
             id: j.id,
             customer_name: j.customer?.name || "Unknown",
             customer_phone: j.customer?.phone || null,
             address: j.customer?.address || null,
-            location: null as any,
+            location: null,
             vehicle_year: j.vehicle?.year || 0,
             vehicle_make: j.vehicle?.make || "Unknown",
             vehicle_model: j.vehicle?.model || "",
@@ -179,10 +204,10 @@ export function MobileDispatchView() {
             scheduled_time: j.scheduled_time,
             estimated_duration: j.estimated_duration_minutes || 60,
             dispatch_status: normalizeDispatchStatus(j.dispatch_status || "assigned"),
-            job_priority: (j.job_priority || "normal") as Job["job_priority"],
+            job_priority: normalizeJobPriority(j.job_priority),
             actual_start_time: j.actual_start_time,
             actual_end_time: j.actual_end_time,
-          })) as Job[];
+          }));
 
           const currentJob =
             mapped.find((job) => job.dispatch_status === "in_progress") ||
@@ -230,7 +255,7 @@ export function MobileDispatchView() {
   }, [selectedJob]);
 
   useEffect(() => {
-    fetchData();
+    void Promise.resolve().then(() => fetchData());
     const sub = subscribeMobileDispatch(() => fetchData());
     return () => { sub.unsubscribe(); };
   }, [fetchData]);

@@ -67,7 +67,7 @@ export function AppointmentPaymentsTab({
   }, [appointmentId]);
 
   useEffect(() => {
-    fetchPayments();
+    void Promise.resolve().then(() => fetchPayments());
   }, [fetchPayments]);
 
   const handleCreatePaymentRecord = async () => {

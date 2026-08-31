@@ -35,7 +35,7 @@ export function ExpenseDetailPane({ expense, categoryName, onChanged, onEdit }: 
   const [activity, setActivity] = useState<ExpenseActivityRow[]>([]);
 
   useEffect(() => {
-    if (!expense) { setItems([]); setSignedUrl(null); setActivity([]); return; }
+    if (!expense) { void Promise.resolve().then(() => setItems([])); void Promise.resolve().then(() => setSignedUrl(null)); void Promise.resolve().then(() => setActivity([])); return; }
     (async () => {
       const [{ data: lineItems }, { data: timeline }] = await Promise.all([
         fetchExpenseLineItems(expense.id),

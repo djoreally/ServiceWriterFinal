@@ -48,7 +48,7 @@ export default function TechProfile() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { fetchProfile(); }, [fetchProfile]);
+  useEffect(() => { void Promise.resolve().then(() => fetchProfile()); }, [fetchProfile]);
 
   if (loading) {
     return (

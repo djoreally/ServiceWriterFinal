@@ -9,7 +9,7 @@
  * 5. Redirects to team member dashboard
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   fetchTeamInvitation,
@@ -61,8 +61,8 @@ const TeamJoin = () => {
 
   useEffect(() => {
     if (!token) {
-      setError("No invitation token provided");
-      setLoading(false);
+      void Promise.resolve().then(() => setError("No invitation token provided"));
+      void Promise.resolve().then(() => setLoading(false));
       return;
     }
 
@@ -105,10 +105,10 @@ const TeamJoin = () => {
       }
     };
 
-    fetchInvitation();
+    void Promise.resolve().then(() => fetchInvitation());
   }, [token]);
 
-  const acceptInvitation = async () => {
+  const acceptInvitation = useCallback(async () => {
     if (!token) return;
 
     const { data, error: rpcError } = await acceptTeamInvitation(token);
@@ -126,16 +126,16 @@ const TeamJoin = () => {
 
     void supabase.rpc("record_auth_security_event_v1", { p_event_type: "invite_accepted" });
     return true;
-  };
+  }, [token]);
 
   useEffect(() => {
     if (!invitation || !token || accepted || autoAcceptAttempted) {
       return;
     }
 
-    setAutoAcceptAttempted(true);
+    void Promise.resolve().then(() => setAutoAcceptAttempted(true));
 
-    (async () => {
+    void Promise.resolve().then(() => (async () => {
       const { data: { session } } = await getSession();
       if (!session) {
         return;
@@ -149,8 +149,8 @@ const TeamJoin = () => {
       }
     })().catch((err) => {
       console.error("[TeamJoin] Auto-accept failed:", err);
-    });
-  }, [invitation, token, accepted, autoAcceptAttempted, navigate]);
+    }));
+  }, [invitation, token, accepted, autoAcceptAttempted, navigate, acceptInvitation]);
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();

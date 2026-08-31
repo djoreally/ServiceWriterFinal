@@ -115,7 +115,7 @@ export async function fetchClientInvoices(clientId: string) {
 
 /** Fetch purchase orders for a client. */
 export async function fetchClientPurchaseOrders(clientId: string) {
-  return (supabase as any)
+  return supabase
     .from("fleet_purchase_orders")
     .select("*")
     .eq("fleet_client_id", clientId)
@@ -128,8 +128,8 @@ export async function fetchClientReportStats(clientId: string) {
     supabase.from("fleet_vehicles").select("id", { count: "exact", head: true }).eq("fleet_client_id", clientId),
     supabase.from("fleet_work_orders").select("id, total, status").eq("fleet_client_id", clientId),
   ]);
-  const completed = (woRes.data ?? []).filter((o: any) => ["completed", "invoiced", "paid"].includes(o.status));
-  const totalSpend = completed.reduce((sum: number, o: any) => sum + (o.total || 0), 0);
+  const completed = (woRes.data ?? []).filter((order) => ["completed", "invoiced", "paid"].includes(order.status));
+  const totalSpend = completed.reduce((sum, order) => sum + (order.total || 0), 0);
   return { totalSpend, vehicleCount: vRes.count ?? 0, woCount: (woRes.data ?? []).length };
 }
 

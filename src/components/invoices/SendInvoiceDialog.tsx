@@ -44,13 +44,13 @@ export function SendInvoiceDialog({ invoice, businessName, open, onOpenChange, o
       ? invoice.fleet_clients?.company_name ?? "Customer"
       : invoice.customers?.name ?? invoice.contact_name ?? "Customer";
     const biz = businessName || "your shop";
-    setRecipient(invoice.contact_email ?? defaultEmail ?? "");
-    setSubject(
+    void Promise.resolve().then(() => setRecipient(invoice.contact_email ?? defaultEmail ?? ""));
+    void Promise.resolve().then(() => setSubject(
       `Invoice ${invoice.invoice_number} from ${biz} — ${formatCurrency(Number(invoice.total) || 0)}`,
-    );
-    setMessage(
+    ));
+    void Promise.resolve().then(() => setMessage(
       `Hi ${billToName},\n\nPlease find your invoice ${invoice.invoice_number} attached below. Let us know if you have any questions.\n\nThanks,\n${biz}`,
-    );
+    ));
   }, [open, invoice, businessName, formatCurrency]);
 
   const billToName = invoice?.bill_to_type === "fleet"

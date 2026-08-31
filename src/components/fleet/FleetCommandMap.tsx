@@ -127,7 +127,7 @@ export const FleetCommandMap = ({ vans, jobs = [], height = "h-[600px]" }: Props
     setError(null);
 
     let token: string;
-    try { token = requireMapboxToken(); } catch (e: any) {
+    try { token = requireMapboxToken(); } catch (e: unknown) {
       setError("Mapbox token not configured. Set VITE_MAPBOX_PUBLIC_TOKEN to enable the command map.");
       setLoading(false);
       return;
@@ -280,7 +280,7 @@ export const FleetCommandMap = ({ vans, jobs = [], height = "h-[600px]" }: Props
   }, [vans, jobs, showTerritories, showVanLocations, showTechLocations, showJobs]);
 
   useEffect(() => {
-    buildMap();
+    void Promise.resolve().then(() => buildMap());
     return () => {
       map.current?.remove();
       map.current = null;

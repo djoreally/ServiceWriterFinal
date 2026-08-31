@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message";
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -116,7 +117,7 @@ const VanDetail = () => {
     setWarehouseItems(result.warehouseItems);
   }, [id, navigate]);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => { void Promise.resolve().then(() => fetchAll()); }, [fetchAll]);
 
   const handleSaveVan = async () => {
     if (!id) return;
@@ -143,7 +144,7 @@ const VanDetail = () => {
       toast.success(`Zip code ${newZip} added`);
       setNewZip("");
       fetchAll();
-    } catch (e: any) { toast.error(e.message); }
+    } catch (e: unknown) { toast.error(errorMessage(e)); }
   };
 
   const handleBulkAddZips = async () => {
@@ -154,7 +155,7 @@ const VanDetail = () => {
       toast.success(`${zips.length} zip codes added`);
       setBulkZips("");
       fetchAll();
-    } catch (e: any) { toast.error(e.message); }
+    } catch (e: unknown) { toast.error(errorMessage(e)); }
   };
 
   const handleRemoveZip = async (territoryId: string) => {
@@ -183,7 +184,7 @@ const VanDetail = () => {
       setRestockItemId("");
       setRestockQty("1");
       fetchAll();
-    } catch (e: any) { toast.error(e.message); }
+    } catch (e: unknown) { toast.error(errorMessage(e)); }
   };
 
   const handleAddInventoryItem = async () => {
@@ -196,7 +197,7 @@ const VanDetail = () => {
       setAddItemQty("1");
       setAddItemMin("1");
       fetchAll();
-    } catch (e: any) { toast.error(e.message); }
+    } catch (e: unknown) { toast.error(errorMessage(e)); }
   };
 
   if (!van) return (

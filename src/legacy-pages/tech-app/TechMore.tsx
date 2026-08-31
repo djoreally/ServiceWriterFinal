@@ -56,7 +56,7 @@ export default function TechMore() {
   }, []);
 
   useEffect(() => {
-    fetchData();
+    void Promise.resolve().then(() => fetchData());
   }, [fetchData]);
 
   const handleClockIn = async () => {

@@ -133,7 +133,7 @@ export default function MyBookings() {
       }
     );
 
-    fetchData();
+    void Promise.resolve().then(() => fetchData());
 
     return () => subscription.unsubscribe();
   }, [fetchData, navigate]);

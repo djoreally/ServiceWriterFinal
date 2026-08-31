@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -39,7 +39,7 @@ export function AddressDisplay({
 }: AddressDisplayProps) {
   const addressInputRef = useRef<HTMLInputElement>(null);
 
-  const syncAutofillValuesFromForm = () => {
+  const syncAutofillValuesFromForm = useCallback(() => {
     const form = addressInputRef.current?.closest("form");
     if (!form) return;
 
@@ -55,7 +55,7 @@ export function AddressDisplay({
     if (stateInput?.value && stateInput.value !== state) setState(stateInput.value);
     if (zipInput?.value && zipInput.value !== zipCode) setZipCode(zipInput.value);
     setLocationVerified(false);
-  };
+  }, [addressLine2, city, customerAddress, setAddressLine2, setCity, setCustomerAddress, setLocationVerified, setState, setZipCode, state, zipCode]);
 
   // Handle autofill events from Mapbox
   useEffect(() => {
@@ -84,19 +84,7 @@ export function AddressDisplay({
         addressInput.removeEventListener('blur', handleAutofill);
       }
     };
-  }, [
-    customerAddress,
-    addressLine2,
-    city,
-    state,
-    zipCode,
-    setCustomerAddress,
-    setAddressLine2,
-    setCity,
-    setState,
-    setZipCode,
-    setLocationVerified,
-  ]);
+  }, [customerAddress, addressLine2, city, state, zipCode, setCustomerAddress, setAddressLine2, setCity, setState, setZipCode, setLocationVerified, syncAutofillValuesFromForm]);
 
   const resetVerification = () => {
     setLocationVerified(false);

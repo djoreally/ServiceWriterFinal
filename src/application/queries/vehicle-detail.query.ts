@@ -2,24 +2,37 @@
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { coreApiFetch } from "@/lib/coreApiFetch";
+import type { Database } from "@/integrations/supabase/types.production";
 
 export async function getCurrentUser() {
   const { data: { user } } = await getCurrentAuthUser();
   return user;
 }
 
+type TableRow<Table extends keyof Database["public"]["Tables"]> = Database["public"]["Tables"][Table]["Row"];
+type CustomerPreview = Pick<TableRow<"customers">, "id" | "first_name" | "last_name" | "email" | "phone">;
+type VehicleSpecPreview = Pick<TableRow<"vehicle_service_specs">, "engine" | "oil_type" | "oil_capacity" | "oil_filter" | "metadata">;
+type VehicleDetailRow = TableRow<"vehicles"> & {
+  customers: CustomerPreview | null;
+  vehicle_service_specs: VehicleSpecPreview | VehicleSpecPreview[] | null;
+};
+
 type VehicleSummary = {
-  vehicle: any;
-  service_records: any[];
-  appointments: any[];
-  work_orders: any[];
-  invoices: any[];
+  vehicle: VehicleDetailRow;
+  service_records: TableRow<"service_records">[];
+  appointments: TableRow<"appointments">[];
+  work_orders: TableRow<"work_orders">[];
+  invoices: TableRow<"invoices">[];
 };
 
 const summaryCache = new Map<string, Promise<VehicleSummary>>();
 
-function metadataObject(value: unknown): Record<string, any> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
+function metadataObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function metadataText(metadata: Record<string, unknown>, key: string): string | null {
+  return typeof metadata[key] === "string" ? metadata[key] : null;
 }
 
 function localDateTime(iso: string, timezone = "America/New_York") {
@@ -51,7 +64,7 @@ async function fetchSummary(vehicleId: string): Promise<VehicleSummary> {
   return request;
 }
 
-function legacyVehicle(vehicle: any) {
+function legacyVehicle(vehicle: VehicleDetailRow) {
   const specs = Array.isArray(vehicle.vehicle_service_specs)
     ? vehicle.vehicle_service_specs[0]
     : vehicle.vehicle_service_specs;
@@ -83,7 +96,7 @@ export async function fetchCustomerById(customerId: string) {
   try {
     const context = await resolveCurrentWorkspace();
     if (!context) return { data: null, error: null };
-    const response = await coreApiFetch<{ data: any }>(
+    const response = await coreApiFetch<{ data: CustomerPreview }>(
       `/v1/customers/${customerId}?workspace_id=${encodeURIComponent(context.workspaceId)}`,
     );
     const customer = response.data;
@@ -111,11 +124,11 @@ export async function fetchVehicleServices(vehicleId: string) {
       return {
         ...record,
         service_date: serviceDate ? serviceDate.slice(0, 10) : null,
-        service_type: metadata.service_type || metadata.title || record.work_performed || "Service",
-        description: record.work_performed || metadata.description || "",
+        service_type: metadataText(metadata, "service_type") || metadataText(metadata, "title") || record.work_performed || "Service",
+        description: record.work_performed || metadataText(metadata, "description") || "",
         total_cost: Number(record.total_amount ?? 0),
-        service_number: metadata.service_number ?? null,
-        technician: metadata.technician ?? null,
+        service_number: metadataText(metadata, "service_number"),
+        technician: metadataText(metadata, "technician"),
         parts_used: metadata.parts_used ?? null,
       };
     });
@@ -134,11 +147,11 @@ export async function fetchVehicleAppointments(vehicleId: string) {
       const local = localDateTime(appointment.starts_at);
       return {
         ...appointment,
-        title: metadata.title || "Appointment",
+        title: metadataText(metadata, "title") || "Appointment",
         scheduled_date: local.date,
         scheduled_time: local.time,
         duration_minutes: Math.max(5, Math.round((Date.parse(appointment.ends_at) - Date.parse(appointment.starts_at)) / 60000)),
-        description: metadata.description || appointment.notes || null,
+        description: metadataText(metadata, "description") || appointment.notes || null,
         estimated_cost: metadata.estimated_cost != null ? Number(metadata.estimated_cost) : null,
       };
     });

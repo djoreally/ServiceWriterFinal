@@ -74,7 +74,7 @@ const Inventory = () => {
     }
   }, []);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => { void Promise.resolve().then(() => fetchAll()); }, [fetchAll]);
 
   const { containerRef, isRefreshing } = usePullToRefresh({ onRefresh: fetchAll });
 

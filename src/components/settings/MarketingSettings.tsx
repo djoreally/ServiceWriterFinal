@@ -47,15 +47,16 @@ export const MarketingSettings = () => {
     service_reminder_months: 3,
   });
 
-  useEffect(() => {
-    loadSettings();
-  }, []);
 
   const loadSettings = async () => {
     const data = await fetchMarketingSettings();
     if (data) setSettings(data);
     setLoading(false);
   };
+
+  useEffect(() => {
+    void Promise.resolve().then(() => loadSettings());
+  }, []);
 
   const handleSave = async () => {
     const googleError = validateReviewUrl(settings.google_review_url, "google");

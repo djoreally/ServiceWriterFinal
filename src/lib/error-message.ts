@@ -26,3 +26,10 @@ export function errorMessage(error: unknown, fallback = "Unexpected error"): str
 
   return fallback;
 }
+
+/** Read a provider/database error code without trusting the thrown value's shape. */
+export function errorCode(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const code: unknown = Reflect.get(error, "code");
+  return typeof code === "string" ? code : undefined;
+}

@@ -11,10 +11,10 @@ export function getRuntimeEnv(): RuntimeEnvMap {
     return globalThis.__RUNTIME_ENV__;
   }
 
-  const processEnv =
-    typeof globalThis !== 'undefined' && 'process' in globalThis && (globalThis as any).process?.env
-      ? ((globalThis as any).process.env as Record<string, string | undefined>)
-      : undefined;
+  const runtimeGlobal = globalThis as typeof globalThis & {
+    process?: { env?: Record<string, string | undefined> };
+  };
+  const processEnv = runtimeGlobal.process?.env;
 
   return processEnv ?? {};
 }

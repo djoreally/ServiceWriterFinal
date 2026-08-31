@@ -59,7 +59,7 @@ export const WeeklyAvailabilityGrid = ({ technicianId, userId }: Props) => {
     setLoading(false);
   }, [technicianId]);
 
-  useEffect(() => { loadAvailability(); }, [loadAvailability]);
+  useEffect(() => { void Promise.resolve().then(() => loadAvailability()); }, [loadAvailability]);
 
   const update = (idx: number, patch: Partial<DayRow>) =>
     setRows(prev => prev.map((r, i) => i === idx ? { ...r, ...patch } : r));

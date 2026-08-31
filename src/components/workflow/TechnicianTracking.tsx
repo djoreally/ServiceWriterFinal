@@ -236,16 +236,6 @@ export function TechnicianTracking() {
     }
   }, []);
 
-  useEffect(() => {
-    fetchData();
-
-    const { unsubscribe } = subscribeToTrackingChanges(
-      () => fetchData(true),
-      () => { if (selectedTech) fetchLocationHistoryData(selectedTech.id); }
-    );
-
-    return () => { unsubscribe(); };
-  }, [fetchData, selectedTech]);
 
   useEffect(() => {
     if (mapRef.current || !mapContainerRef.current) return;
@@ -290,6 +280,17 @@ export function TechnicianTracking() {
       })));
     }
   };
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchData());
+
+    const { unsubscribe } = subscribeToTrackingChanges(
+      () => fetchData(true),
+      () => { if (selectedTech) fetchLocationHistoryData(selectedTech.id); }
+    );
+
+    return () => { unsubscribe(); };
+  }, [fetchData, selectedTech]);
 
   const filteredTechnicians = useMemo(() => {
     return technicians.filter((tech) => {
@@ -462,12 +463,12 @@ export function TechnicianTracking() {
   useEffect(() => {
     if (!mapReady) return;
     if (!selectedTech) {
-      setRouteResult(null);
-      setRouteLabel(null);
-      removeRouteLayer();
+      void Promise.resolve().then(() => setRouteResult(null));
+      void Promise.resolve().then(() => setRouteLabel(null));
+      void Promise.resolve().then(() => removeRouteLayer());
       return;
     }
-    buildRouteToNextJob(selectedTech);
+    void Promise.resolve().then(() => buildRouteToNextJob(selectedTech));
   }, [mapReady, selectedTech, jobs, buildRouteToNextJob, removeRouteLayer]);
 
   const handleSelectTechnician = (tech: Technician) => {

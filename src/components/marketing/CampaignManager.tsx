@@ -56,38 +56,29 @@ export const CampaignManager = () => {
   const [segmentNames, setSegmentNames] = useState<string[]>([]);
   const [searchParams, setSearchParams] = useSearchParams();
 
-  useEffect(() => {
-    fetchCampaigns();
-    fetchCustomerCount();
-    (async () => {
-      if (!user?.id) return;
-      const names = await fetchActiveSegmentNames(user.id);
-      setSegmentNames(names);
-    })();
-  }, [user?.id]);
 
   // Pre-fill from ?segment=<name> query param sent by segment cards
   useEffect(() => {
     const seg = searchParams.get("segment");
     const prefillSubject = searchParams.get("subject");
     if (!seg) return;
-    setNewCampaign((prev) => ({
+    void Promise.resolve().then(() => setNewCampaign((prev) => ({
       ...prev,
       name: prev.name || `${seg} Campaign`,
       subject: prev.subject || prefillSubject || "",
       recipient_type: `segment:${seg}`,
-    }));
-    setDialogOpen(true);
+    })));
+    void Promise.resolve().then(() => setDialogOpen(true));
     const next = new URLSearchParams(searchParams);
     next.delete("segment");
     next.delete("subject");
-    setSearchParams(next, { replace: true });
+    void Promise.resolve().then(() => setSearchParams(next, { replace: true }));
   }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     if (!previewCampaign) {
-      setPreviewAudienceSize(null);
-      setPreviewAudienceLoading(false);
+      void Promise.resolve().then(() => setPreviewAudienceSize(null));
+      void Promise.resolve().then(() => setPreviewAudienceLoading(false));
       return;
     }
 
@@ -112,7 +103,7 @@ export const CampaignManager = () => {
       }
     };
 
-    loadAudienceSize();
+    void Promise.resolve().then(() => loadAudienceSize());
 
     return () => {
       cancelled = true;
@@ -133,6 +124,16 @@ export const CampaignManager = () => {
       setCustomerCount(count);
     } catch { /* ignore */ }
   };
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchCampaigns());
+    void Promise.resolve().then(() => fetchCustomerCount());
+    (async () => {
+      if (!user?.id) return;
+      const names = await fetchActiveSegmentNames(user.id);
+      setSegmentNames(names);
+    })();
+  }, [user?.id]);
 
   const [recipientPreview, setRecipientPreview] = useState<Array<{ id: string; name: string; email: string }>>([]);
   const [recipientLoading, setRecipientLoading] = useState(false);

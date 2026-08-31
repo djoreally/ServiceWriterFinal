@@ -1,7 +1,64 @@
 /** Invoice read adapters for the canonical Final ledger. */
-import { supabase } from "@/integrations/supabase/client";
+import { z } from "zod";
+import { productionSupabase } from "@/integrations/supabase/client";
 import { nextApi } from "@/lib/nextApiClient";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
+
+const invoiceCustomerSchema = z.object({
+  id: z.string(),
+  first_name: z.string().nullable().optional(),
+  last_name: z.string().nullable().optional(),
+  company_name: z.string().nullable().optional(),
+  email: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  address_line1: z.string().nullable().optional(),
+  address_line2: z.string().nullable().optional(),
+  city: z.string().nullable().optional(),
+  region: z.string().nullable().optional(),
+  postal_code: z.string().nullable().optional(),
+  metadata: z.unknown().optional(),
+}).passthrough();
+
+const invoiceLineSchema = z.object({
+  id: z.string(),
+  invoice_id: z.string(),
+  vehicle_id: z.string().nullable().optional(),
+  service_catalog_id: z.string().nullable().optional(),
+  description: z.string(),
+  quantity: z.number(),
+  unit_price: z.number(),
+  sort_order: z.number().optional(),
+  metadata: z.unknown().optional(),
+}).passthrough();
+
+const invoiceApiSchema = z.object({
+  id: z.string(),
+  invoice_number: z.union([z.number(), z.string()]),
+  customer_id: z.string().nullable().optional(),
+  issued_at: z.string().nullable().optional(),
+  due_at: z.string().nullable().optional(),
+  created_at: z.string(),
+  status: z.string(),
+  subtotal: z.number().optional(),
+  tax_total: z.number().optional(),
+  total: z.number().optional(),
+  amount_paid: z.number().optional(),
+  metadata: z.unknown().optional(),
+  customers: z.union([invoiceCustomerSchema, z.array(invoiceCustomerSchema)]).nullable().optional(),
+  invoice_lines: z.array(invoiceLineSchema).optional(),
+}).passthrough();
+
+const invoiceVehicleSchema = z.object({
+  id: z.string(),
+  customer_id: z.string().nullable().optional(),
+  year: z.number().nullable().optional(),
+  make: z.string().nullable().optional(),
+  model: z.string().nullable().optional(),
+  license_plate: z.string().nullable().optional(),
+}).passthrough();
+
+type InvoiceApiCustomer = z.infer<typeof invoiceCustomerSchema>;
+type InvoiceApiRow = z.infer<typeof invoiceApiSchema>;
 
 export interface InvoiceListRow {
   id: string;
@@ -130,8 +187,24 @@ function workspaceId(): string {
   return id;
 }
 
-function object(value: unknown): Record<string, any> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function optionalString(value: unknown): string | null {
+  return typeof value === "string" && value ? value : null;
+}
+
+function optionalNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function relatedCustomer(
+  customer: InvoiceApiCustomer | InvoiceApiCustomer[] | null | undefined,
+): InvoiceApiCustomer | null {
+  return Array.isArray(customer) ? customer[0] ?? null : customer ?? null;
 }
 
 function legacyStatus(status: string): string {
@@ -140,19 +213,20 @@ function legacyStatus(status: string): string {
   return status;
 }
 
-function displayInvoiceNumber(row: Record<string, any>): string {
+function displayInvoiceNumber(row: InvoiceApiRow): string {
   const metadata = object(row.metadata);
-  return typeof metadata.legacy_invoice_label === "string" && metadata.legacy_invoice_label
-    ? metadata.legacy_invoice_label
+  const legacyLabel = optionalString(metadata.legacy_invoice_label);
+  return legacyLabel
+    ? legacyLabel
     : `INV-${row.invoice_number}`;
 }
 
-function customerName(customer: any): string {
+function customerName(customer: InvoiceApiCustomer | null | undefined): string {
   if (!customer) return "";
   return [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim() || customer.company_name || "Customer";
 }
 
-function customerAddress(customer: any): string | null {
+function customerAddress(customer: InvoiceApiCustomer | null | undefined): string | null {
   if (!customer) return null;
   const metadata = object(customer.metadata);
   const address = [customer.address_line1, customer.address_line2, customer.city, customer.region, customer.postal_code]
@@ -163,22 +237,23 @@ function customerAddress(customer: any): string | null {
 export async function fetchInvoiceList(_userId: string): Promise<InvoiceListRow[]> {
   const id = workspaceId();
   const response = await nextApi.invoices.list(id);
-  return ((response.data ?? []) as Record<string, any>[]).map((row) => {
+  return z.array(invoiceApiSchema).parse(response.data ?? []).map((row) => {
     const metadata = object(row.metadata);
+    const customer = relatedCustomer(row.customers);
     return {
       id: row.id,
       invoice_number: displayInvoiceNumber(row),
       bill_to_type: "retail",
       customer_id: row.customer_id ?? null,
       fleet_client_id: null,
-      contact_name: metadata.contact_name ?? null,
+      contact_name: optionalString(metadata.contact_name),
       issue_date: (row.issued_at ?? row.created_at).slice(0, 10),
       due_date: row.due_at ? row.due_at.slice(0, 10) : null,
       status: legacyStatus(row.status),
       total: Number(row.total ?? 0),
       amount_paid: Number(row.amount_paid ?? 0),
       created_at: row.created_at,
-      customers: row.customers ? { name: customerName(row.customers) } : null,
+      customers: customer ? { name: customerName(customer) } : null,
       fleet_clients: null,
     };
   });
@@ -187,10 +262,10 @@ export async function fetchInvoiceList(_userId: string): Promise<InvoiceListRow[
 export async function fetchInvoiceDetail(invoiceId: string): Promise<InvoiceFullRow> {
   const id = workspaceId();
   const response = await nextApi.invoices.get(id, invoiceId);
-  const row = response.data as Record<string, any>;
+  const row = invoiceApiSchema.parse(response.data);
   const metadata = object(row.metadata);
-  const customer = row.customers;
-  const lines = ((row.invoice_lines ?? []) as Record<string, any>[])
+  const customer = relatedCustomer(row.customers);
+  const lines = (row.invoice_lines ?? [])
     .map((line): InvoiceLineItemRow => {
       const meta = object(line.metadata);
       return {
@@ -203,15 +278,15 @@ export async function fetchInvoiceDetail(invoiceId: string): Promise<InvoiceFull
         unit_price: Number(line.unit_price ?? 0),
         line_total: Number(line.quantity ?? 0) * Number(line.unit_price ?? 0),
         display_order: Number(line.sort_order ?? 0),
-        vin: meta.vin ?? null,
-        vehicle_year: meta.vehicle_year ?? null,
-        vehicle_make: meta.vehicle_make ?? null,
-        vehicle_model: meta.vehicle_model ?? null,
-        vehicle_trim: meta.vehicle_trim ?? null,
-        vehicle_engine: meta.vehicle_engine ?? null,
-        oil_type: meta.oil_type ?? null,
-        oil_capacity: meta.oil_capacity ?? null,
-        oil_filter: meta.oil_filter ?? null,
+        vin: optionalString(meta.vin),
+        vehicle_year: optionalNumber(meta.vehicle_year),
+        vehicle_make: optionalString(meta.vehicle_make),
+        vehicle_model: optionalString(meta.vehicle_model),
+        vehicle_trim: optionalString(meta.vehicle_trim),
+        vehicle_engine: optionalString(meta.vehicle_engine),
+        oil_type: optionalString(meta.oil_type),
+        oil_capacity: optionalString(meta.oil_capacity),
+        oil_filter: optionalString(meta.oil_filter),
       };
     })
     .sort((a, b) => a.display_order - b.display_order);
@@ -222,15 +297,15 @@ export async function fetchInvoiceDetail(invoiceId: string): Promise<InvoiceFull
     bill_to_type: "retail",
     customer_id: row.customer_id ?? null,
     fleet_client_id: null,
-    contact_name: metadata.contact_name ?? null,
-    contact_email: metadata.contact_email ?? null,
-    contact_phone: metadata.contact_phone ?? null,
+    contact_name: optionalString(metadata.contact_name),
+    contact_email: optionalString(metadata.contact_email),
+    contact_phone: optionalString(metadata.contact_phone),
     issue_date: (row.issued_at ?? row.created_at).slice(0, 10),
     due_date: row.due_at ? row.due_at.slice(0, 10) : null,
-    payment_terms: metadata.payment_terms ?? null,
+    payment_terms: optionalString(metadata.payment_terms),
     status: legacyStatus(row.status),
-    notes: metadata.notes ?? null,
-    terms_text: metadata.terms_text ?? null,
+    notes: optionalString(metadata.notes),
+    terms_text: optionalString(metadata.terms_text),
     subtotal: Number(row.subtotal ?? 0),
     discount_type: metadata.discount_type === "percentage" ? "percentage" : "fixed",
     discount_amount: Number(metadata.discount_amount ?? 0),
@@ -273,12 +348,12 @@ export async function fetchInvoiceFormOptions(_userId: string): Promise<{
   const [customersRes, vehiclesRes, catalogRes, settingsRes] = await Promise.all([
     nextApi.customers.list(id),
     nextApi.vehicles.list(id),
-    (supabase.from("service_catalog") as any)
-      .select("id,name,description,default_price")
+    productionSupabase.from("service_catalog")
+      .select("id,name,description,labor_price")
       .eq("workspace_id", id)
       .eq("is_active", true)
       .order("name"),
-    (supabase.from("workspace_settings") as any)
+    productionSupabase.from("workspace_settings")
       .select("waste_oil_fee,waste_oil_fee_enabled,shop_fee_value,shop_fee_type,shop_fee_enabled,surcharge_value,surcharge_type,surcharge_enabled,tax_rate")
       .eq("workspace_id", id)
       .maybeSingle(),
@@ -287,15 +362,18 @@ export async function fetchInvoiceFormOptions(_userId: string): Promise<{
   if (catalogRes.error) throw catalogRes.error;
   if (settingsRes.error) throw settingsRes.error;
 
+  const customers = z.array(invoiceCustomerSchema).parse(customersRes.data ?? []);
+  const vehicles = z.array(invoiceVehicleSchema).parse(vehiclesRes.data ?? []);
+
   return {
-    customers: ((customersRes.data ?? []) as Record<string, any>[]).map((row) => ({
+    customers: customers.map((row) => ({
       id: row.id,
       name: customerName(row),
       email: row.email ?? null,
       phone: row.phone ?? null,
     })),
     fleetClients: [],
-    vehicles: ((vehiclesRes.data ?? []) as Record<string, any>[]).map((row) => ({
+    vehicles: vehicles.map((row) => ({
       id: row.id,
       customer_id: row.customer_id ?? null,
       year: Number(row.year ?? 0),
@@ -303,11 +381,11 @@ export async function fetchInvoiceFormOptions(_userId: string): Promise<{
       model: row.model ?? "",
       license_plate: row.license_plate ?? null,
     })),
-    catalog: ((catalogRes.data ?? []) as Record<string, any>[]).map((row) => ({
+    catalog: (catalogRes.data ?? []).map((row) => ({
       id: row.id,
       name: row.name,
       description: row.description ?? null,
-      default_price: Number(row.default_price ?? 0),
+      default_price: Number(row.labor_price ?? 0),
     })),
     fees: settingsRes.data ? {
       waste_oil_fee: Number(settingsRes.data.waste_oil_fee ?? 0),
@@ -326,7 +404,7 @@ export async function fetchInvoiceFormOptions(_userId: string): Promise<{
 /** Display-only legacy label. The database assigns the canonical bigint. */
 export async function generateInvoiceNumber(_userId: string): Promise<string> {
   const id = workspaceId();
-  const { count, error } = await supabase
+  const { count, error } = await productionSupabase
     .from("invoices")
     .select("id", { count: "exact", head: true })
     .eq("workspace_id", id);

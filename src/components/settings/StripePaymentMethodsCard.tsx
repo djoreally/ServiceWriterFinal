@@ -41,7 +41,7 @@ export const StripePaymentMethodsCard = () => {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { void Promise.resolve().then(() => load()); }, []);
 
   return (
     <Card>

@@ -335,10 +335,10 @@ export function CreateInvoiceDialog({ open, onOpenChange, onSuccess, invoiceId }
     return () => {
       cancelled = true;
     };
-  }, [open, isEdit, invoiceId]);
+  }, [open, isEdit, invoiceId, session?.user]);
 
   useEffect(() => {
-    if (!open) reset();
+    if (!open) void Promise.resolve().then(() => reset());
   }, [open, reset]);
 
   // Flatten lines for total computation, attaching vehicle context

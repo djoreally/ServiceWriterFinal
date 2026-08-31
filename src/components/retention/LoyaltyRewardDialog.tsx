@@ -69,18 +69,18 @@ export function LoyaltyRewardDialog({
 
   useEffect(() => {
     if (editReward) {
-      setName(editReward.name);
-      setDescription(editReward.description || "");
-      setPointsRequired(editReward.points_required.toString());
-      setRewardType(editReward.reward_type);
+      void Promise.resolve().then(() => setName(editReward.name));
+      void Promise.resolve().then(() => setDescription(editReward.description || ""));
+      void Promise.resolve().then(() => setPointsRequired(editReward.points_required.toString()));
+      void Promise.resolve().then(() => setRewardType(editReward.reward_type));
       const cfg = editReward.config_jsonb as Record<string, string> | null;
-      setConfigValue(cfg?.value?.toString() || cfg?.amount?.toString() || "");
+      void Promise.resolve().then(() => setConfigValue(cfg?.value?.toString() || cfg?.amount?.toString() || ""));
     } else {
-      setName("");
-      setDescription("");
-      setPointsRequired("100");
-      setRewardType("credit");
-      setConfigValue("");
+      void Promise.resolve().then(() => setName(""));
+      void Promise.resolve().then(() => setDescription(""));
+      void Promise.resolve().then(() => setPointsRequired("100"));
+      void Promise.resolve().then(() => setRewardType("credit"));
+      void Promise.resolve().then(() => setConfigValue(""));
     }
   }, [editReward, open]);
 

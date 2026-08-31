@@ -16,9 +16,6 @@ export const PaymentSetupStep = ({ onNext, onBack, onSkip }: PaymentSetupStepPro
   const [connecting, setConnecting] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
 
-  useEffect(() => {
-    checkStripeStatus();
-  }, []);
 
   const checkStripeStatus = async () => {
     try {
@@ -32,6 +29,10 @@ export const PaymentSetupStep = ({ onNext, onBack, onSkip }: PaymentSetupStepPro
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    void Promise.resolve().then(() => checkStripeStatus());
+  }, []);
 
   const handleConnectStripe = async () => {
     setConnecting(true);

@@ -15,9 +15,15 @@ export async function coreApiFetch<T>(path: string, init: RequestInit = {}): Pro
     },
   });
 
-  const payload = await response.json().catch(() => ({})) as any;
+  const payload: unknown = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload?.error?.message || `API request failed (${response.status})`);
+    const message =
+      typeof payload === "object" && payload !== null &&
+      "error" in payload && typeof payload.error === "object" && payload.error !== null &&
+      "message" in payload.error && typeof payload.error.message === "string"
+        ? payload.error.message
+        : `API request failed (${response.status})`;
+    throw new Error(message);
   }
   return payload as T;
 }

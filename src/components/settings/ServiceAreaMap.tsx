@@ -78,7 +78,7 @@ export const ServiceAreaMap = ({ coordinates, radiusMiles }: ServiceAreaMapProps
     return () => {
       map.current?.remove();
     };
-  }, []);
+  }, [coordinates, radiusMiles]);
 
   // Update circle when radius changes
   useEffect(() => {

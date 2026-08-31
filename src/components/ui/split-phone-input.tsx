@@ -101,7 +101,7 @@ export function SplitPhoneInput({
   const showError = showValidation !== false && touched && !isComplete && digits.length > 0;
 
   useEffect(() => {
-    if (showValidation === true && !isComplete) setTouched(true);
+    if (showValidation === true && !isComplete) void Promise.resolve().then(() => setTouched(true));
   }, [showValidation, isComplete]);
 
   const boxClass = cn(

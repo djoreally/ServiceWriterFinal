@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { createDraft, updateDraft, type WorkOrderDraftPayload } from "@/application/commands/fleet-work-order-draft.command";
 import { computeEstimate, type WorkOrderDraftState } from "../state/workOrderReducer";
 
@@ -34,7 +34,10 @@ export function useWorkOrderDraft(
   // as "Draft could not be saved." on the Create button).
   const inflightRef = useRef<Promise<string | null> | null>(null);
   const draftIdRef = useRef<string | null>(state.draftId ?? null);
-  draftIdRef.current = state.draftId ?? draftIdRef.current;
+
+  useEffect(() => {
+    if (state.draftId) draftIdRef.current = state.draftId;
+  }, [state.draftId]);
 
   const persist = useCallback(async (): Promise<string | null> => {
     if (inflightRef.current) return inflightRef.current;

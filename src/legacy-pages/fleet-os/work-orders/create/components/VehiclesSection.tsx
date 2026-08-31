@@ -43,12 +43,12 @@ export const VehiclesSection = ({ state, dispatch, options }: Props) => {
   // Fetch real eligibility whenever the customer changes.
   useEffect(() => {
     if (!state.customer) {
-      setEligibility({});
+      void Promise.resolve().then(() => setEligibility({}));
       return;
     }
     let cancelled = false;
-    setLoadingEligibility(true);
-    fetchFleetVehicleEligibility(state.customer.id)
+    void Promise.resolve().then(() => setLoadingEligibility(true));
+    void Promise.resolve().then(() => fetchFleetVehicleEligibility(state.customer.id)
       .then((rows) => {
         if (cancelled) return;
         // Keep the most-critical row per vehicle.
@@ -64,7 +64,7 @@ export const VehiclesSection = ({ state, dispatch, options }: Props) => {
       .catch((err) => console.error("[VehiclesSection] eligibility fetch failed", err))
       .finally(() => {
         if (!cancelled) setLoadingEligibility(false);
-      });
+      }));
     return () => {
       cancelled = true;
     };

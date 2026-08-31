@@ -46,6 +46,30 @@ const apiServiceRecordSchema = z.object({
   created_at: z.string().optional(),
 });
 
+interface OfflineCustomerRecord {
+  _raw: {
+    is_deleted?: boolean;
+    server_id: string;
+    name?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    updated_at_local?: number | null;
+  };
+}
+
+interface OfflineVehicleRecord {
+  _raw: {
+    is_deleted?: boolean;
+    server_id: string;
+    customer_server_id?: string | null;
+    make?: string | null;
+    model?: string | null;
+    year?: number | string | null;
+    vin?: string | null;
+    updated_at_local?: number | null;
+  };
+}
+
 export async function fetchVehicleOverviewFromOffline(): Promise<VehicleOverviewResult | null> {
   const database = getOfflineDatabase();
   if (!database) return null;
@@ -55,9 +79,9 @@ export async function fetchVehicleOverviewFromOffline(): Promise<VehicleOverview
     database.get("offline_customers").query().fetch(),
   ]);
 
-  const customers = customersRecords
-    .filter((record: any) => !record._raw.is_deleted)
-    .map((record: any) => ({
+  const customers = (customersRecords as unknown as OfflineCustomerRecord[])
+    .filter((record) => !record._raw.is_deleted)
+    .map((record) => ({
       id: record._raw.server_id,
       name: record._raw.name || "Unknown",
       email: record._raw.email || null,
@@ -69,9 +93,9 @@ export async function fetchVehicleOverviewFromOffline(): Promise<VehicleOverview
       notes: null as string | null,
     })) as Customer[];
 
-  const vehicles = vehiclesRecords
-    .filter((record: any) => !record._raw.is_deleted)
-    .map((record: any) => ({
+  const vehicles = (vehiclesRecords as unknown as OfflineVehicleRecord[])
+    .filter((record) => !record._raw.is_deleted)
+    .map((record) => ({
       id: record._raw.server_id,
       customer_id: record._raw.customer_server_id || null,
       make: record._raw.make || "Unknown",

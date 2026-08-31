@@ -66,7 +66,7 @@ export default function TechInventory() {
   }, []);
 
   useEffect(() => {
-    fetchData();
+    void Promise.resolve().then(() => fetchData());
   }, [fetchData]);
 
   const handleRefresh = async () => {

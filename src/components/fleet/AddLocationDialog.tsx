@@ -17,8 +17,43 @@ interface Props {
   onClose: () => void;
   onCreated: () => void;
   clientId?: string;
-  editingLocation?: any;
+  editingLocation?: EditingLocation;
 }
+
+type RegistrationOptions = Awaited<ReturnType<typeof fetchFleetLocationRegistrationOptions>>;
+type FleetClientOption = RegistrationOptions["clients"][number];
+type FleetContractOption = RegistrationOptions["contracts"][number];
+
+interface EditingLocation {
+  id: string;
+  fleet_client_id?: string | null;
+  name?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postal_code?: string | null;
+  site_contact_name?: string | null;
+  site_contact_phone?: string | null;
+  service_window_start?: string | null;
+  service_window_end?: string | null;
+  access_instructions?: string | null;
+  notes?: string | null;
+  is_primary?: boolean | null;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const nestedRecord = (value: Record<string, unknown>, key: string): Record<string, unknown> => {
+  const nested = value[key];
+  return isRecord(nested) ? nested : {};
+};
+
+const stringValue = (value: unknown): string | undefined =>
+  typeof value === "string" ? value : undefined;
+
+const numberValue = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
 type Step = "site" | "operations" | "access" | "billing";
 
@@ -26,8 +61,8 @@ export const AddLocationDialog = ({ open, onClose, onCreated, clientId, editingL
   const { user } = useAuth();
   const [saving, setSaving] = useState(false);
   const [step, setStep] = useState<Step>("site");
-  const [clients, setClients] = useState<any[]>([]);
-  const [contracts, setContracts] = useState<any[]>([]);
+  const [clients, setClients] = useState<FleetClientOption[]>([]);
+  const [contracts, setContracts] = useState<FleetContractOption[]>([]);
 
   const [form, setForm] = useState({
     fleet_client_id: clientId || "",
@@ -61,15 +96,19 @@ export const AddLocationDialog = ({ open, onClose, onCreated, clientId, editingL
     if (editingLocation) {
       const noteData = (() => {
         try {
-          return editingLocation.notes ? JSON.parse(editingLocation.notes) : {};
+          const parsed: unknown = editingLocation.notes ? JSON.parse(editingLocation.notes) : {};
+          return isRecord(parsed) ? parsed : {};
         } catch {
           return {};
         }
       })();
+      const schedulingPolicy = nestedRecord(noteData, "scheduling_policy");
+      const accessProfile = nestedRecord(noteData, "access_profile");
+      const billingContext = nestedRecord(noteData, "billing_context");
 
-      setForm({
+      void Promise.resolve().then(() => setForm({
         fleet_client_id: editingLocation.fleet_client_id || clientId || "",
-        default_contract_id: noteData.default_contract_id || "",
+        default_contract_id: stringValue(noteData.default_contract_id) || "",
         name: editingLocation.name || "",
         address: editingLocation.address || "",
         city: editingLocation.city || "",
@@ -77,30 +116,30 @@ export const AddLocationDialog = ({ open, onClose, onCreated, clientId, editingL
         postal_code: editingLocation.postal_code || "",
         site_contact_name: editingLocation.site_contact_name || "",
         site_contact_phone: editingLocation.site_contact_phone || "",
-        site_contact_role: noteData.site_contact_role || "site_manager",
+        site_contact_role: stringValue(noteData.site_contact_role) || "site_manager",
         service_window_start: editingLocation.service_window_start || "08:00",
         service_window_end: editingLocation.service_window_end || "17:00",
-        slot_interval_minutes: String(noteData.scheduling_policy?.slot_interval_minutes || 30),
-        max_jobs_per_slot: String(noteData.scheduling_policy?.max_jobs_per_slot || 2),
-        dispatch_buffer_minutes: String(noteData.scheduling_policy?.dispatch_buffer_minutes || 15),
-        gate_access: noteData.access_profile?.gate_access || "none",
-        security_checkin_required: Boolean(noteData.access_profile?.security_checkin_required),
-        ppe_required: Boolean(noteData.access_profile?.ppe_required),
-        parking_type: noteData.access_profile?.parking_type || "lot",
+        slot_interval_minutes: String(numberValue(schedulingPolicy.slot_interval_minutes) || 30),
+        max_jobs_per_slot: String(numberValue(schedulingPolicy.max_jobs_per_slot) || 2),
+        dispatch_buffer_minutes: String(numberValue(schedulingPolicy.dispatch_buffer_minutes) || 15),
+        gate_access: stringValue(accessProfile.gate_access) || "none",
+        security_checkin_required: Boolean(accessProfile.security_checkin_required),
+        ppe_required: Boolean(accessProfile.ppe_required),
+        parking_type: stringValue(accessProfile.parking_type) || "lot",
         access_instructions: editingLocation.access_instructions || "",
-        invoice_group: noteData.billing_context?.invoice_group || "",
-        cost_center: noteData.billing_context?.cost_center || "",
-        billing_mode: noteData.billing_context?.billing_mode || "contract",
-        tax_region: noteData.billing_context?.tax_region || "local",
+        invoice_group: stringValue(billingContext.invoice_group) || "",
+        cost_center: stringValue(billingContext.cost_center) || "",
+        billing_mode: stringValue(billingContext.billing_mode) || "contract",
+        tax_region: stringValue(billingContext.tax_region) || "local",
         is_primary: !!editingLocation.is_primary,
-      });
+      }));
     } else {
-      setForm((prev) => ({
+      void Promise.resolve().then(() => setForm((prev) => ({
         ...prev,
         fleet_client_id: clientId || "",
-      }));
+      })));
     }
-    setStep("site");
+    void Promise.resolve().then(() => setStep("site"));
   }, [editingLocation, clientId, open]);
 
   useEffect(() => {

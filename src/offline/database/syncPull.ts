@@ -1,4 +1,4 @@
-import { Q } from '@nozbe/watermelondb';
+import { Q, type Model } from '@nozbe/watermelondb';
 import { supabase } from '@/integrations/supabase/client';
 import { getOfflineDatabase } from './index';
 import { isOfflineEligibleForUser } from '../rollout';
@@ -24,6 +24,16 @@ type PullEntity =
 interface SyncRow {
   id: string;
   updated_at?: string | null;
+}
+
+function readRaw(model: Model, key: string): unknown {
+  return Reflect.get(model._raw, key);
+}
+
+function writeRaw(model: Model, fields: Record<string, unknown>): void {
+  for (const [key, value] of Object.entries(fields)) {
+    Reflect.set(model._raw, key, value);
+  }
 }
 
 function toEpoch(value?: string | null): number | undefined {
@@ -65,7 +75,8 @@ async function getCursor(entity: PullEntity): Promise<string | null> {
     return null;
   }
 
-  return ((rows[0] as any)._raw.cursor as string | null) ?? null;
+  const cursor: unknown = readRaw(rows[0], 'cursor');
+  return typeof cursor === 'string' ? cursor : null;
 }
 
 async function setCursor(entity: PullEntity, cursor: string): Promise<void> {
@@ -77,17 +88,14 @@ async function setCursor(entity: PullEntity, cursor: string): Promise<void> {
 
   await database.write(async () => {
     if (rows.length > 0) {
-      await rows[0].update((record: any) => {
-        record._raw.cursor = cursor;
-        record._raw.updated_at = now;
+      await rows[0].update((record) => {
+        writeRaw(record, { cursor, updated_at: now });
       });
       return;
     }
 
-    await database.get('offline_sync_state').create((record: any) => {
-      record._raw.entity = entity;
-      record._raw.cursor = cursor;
-      record._raw.updated_at = now;
+    await database.get('offline_sync_state').create((record) => {
+      writeRaw(record, { entity, cursor, updated_at: now });
     });
   });
 }
@@ -102,16 +110,16 @@ async function markMissingAsDeletedFromIdList(
   const localRows = await database.get(tableName).query().fetch();
 
   await database.write(async () => {
-    for (const row of localRows as any[]) {
-      const serverId = row?._raw?.server_id;
-      if (!serverId || activeIds.has(serverId)) {
+    for (const row of localRows) {
+      const serverId: unknown = Reflect.get(row._raw, 'server_id');
+      if (typeof serverId !== 'string' || activeIds.has(serverId)) {
         continue;
       }
 
-      await row.update((record: any) => {
-        record._raw.is_deleted = true;
-        record._raw.sync_status = SYNCED;
-        record._raw.updated_at_local = Date.now();
+      await row.update((record) => {
+        Reflect.set(record._raw, 'is_deleted', true);
+        Reflect.set(record._raw, 'sync_status', SYNCED);
+        Reflect.set(record._raw, 'updated_at_local', Date.now());
       });
     }
   });
@@ -128,17 +136,13 @@ async function markMissingAsDeleted(
     return;
   }
 
-  const activeIds = new Set<string>((source.data ?? []).map((row: any) => String(row.id)));
+  const activeIds = new Set<string>((source.data ?? []).map((row) => String(row.id)));
   await markMissingAsDeletedFromIdList(tableName, activeIds);
 }
 
-function shouldAcceptServerRecord(localRaw: any, serverUpdatedAt?: number): boolean {
-  if (!localRaw) {
-    return true;
-  }
-
-  const localSyncStatus = localRaw.sync_status as string | undefined;
-  const localUpdatedAt = Number(localRaw.updated_at_local ?? 0);
+function shouldAcceptServerRecord(localRecord: Model, serverUpdatedAt?: number): boolean {
+  const localSyncStatus = readRaw(localRecord, 'sync_status');
+  const localUpdatedAt = Number(readRaw(localRecord, 'updated_at_local') ?? 0);
   const serverStamp = Number(serverUpdatedAt ?? 0);
 
   // Protected Pending Policy: Local edits in 'pending' or 'failed' state are protected
@@ -158,7 +162,7 @@ function shouldAcceptServerRecord(localRaw: any, serverUpdatedAt?: number): bool
 async function upsertRows<T extends SyncRow>(
   tableName: string,
   rows: T[],
-  project: (record: any, row: T, now: number) => void,
+  project: (record: Model, row: T, now: number) => void,
 ): Promise<void> {
   const database = getOfflineDatabase();
   if (!database) return;
@@ -172,27 +176,30 @@ async function upsertRows<T extends SyncRow>(
       const serverUpdatedAt = toEpoch(row.updated_at);
 
       if (existing.length > 0) {
-        const localRaw = (existing[0] as any)._raw;
-        if (!shouldAcceptServerRecord(localRaw, serverUpdatedAt)) {
+        if (!shouldAcceptServerRecord(existing[0], serverUpdatedAt)) {
           protectedPendingSkipCount += 1;
           continue;
         }
 
-        await existing[0].update((record: any) => {
+        await existing[0].update((record) => {
           project(record, row, now);
-          record._raw.updated_at_server = serverUpdatedAt;
-          record._raw.updated_at_local = now;
-          record._raw.sync_status = SYNCED;
-          record._raw.is_deleted = false;
+          writeRaw(record, {
+            updated_at_server: serverUpdatedAt,
+            updated_at_local: now,
+            sync_status: SYNCED,
+            is_deleted: false,
+          });
         });
       } else {
-        await collection.create((record: any) => {
-          record._raw.server_id = row.id;
+        await collection.create((record) => {
+          writeRaw(record, { server_id: row.id });
           project(record, row, now);
-          record._raw.updated_at_server = serverUpdatedAt;
-          record._raw.updated_at_local = now;
-          record._raw.sync_status = SYNCED;
-          record._raw.is_deleted = false;
+          writeRaw(record, {
+            updated_at_server: serverUpdatedAt,
+            updated_at_local: now,
+            sync_status: SYNCED,
+            is_deleted: false,
+          });
         });
       }
     }
@@ -230,13 +237,15 @@ async function pullAppointments(userId: string): Promise<void> {
   if (response.error) throw new Error(`[offline] appointments pull failed: ${response.error.message}`);
 
   const rows = response.data ?? [];
-  await upsertRows('offline_appointments', rows, (record, row: any) => {
-    record._raw.title = row.title;
-    record._raw.status = row.status;
-    record._raw.scheduled_date = row.scheduled_date;
-    record._raw.scheduled_time = row.scheduled_time;
-    record._raw.customer_server_id = row.customer_id;
-    record._raw.vehicle_server_id = row.vehicle_id;
+  await upsertRows('offline_appointments', rows, (record, row) => {
+    writeRaw(record, {
+      title: row.title,
+      status: row.status,
+      scheduled_date: row.scheduled_date,
+      scheduled_time: row.scheduled_time,
+      customer_server_id: row.customer_id,
+      vehicle_server_id: row.vehicle_id,
+    });
   });
 
   const nextCursor = getLatestCursor(rows, cursor);
@@ -258,10 +267,8 @@ async function pullCustomers(userId: string): Promise<void> {
   if (response.error) throw new Error(`[offline] customers pull failed: ${response.error.message}`);
 
   const rows = response.data ?? [];
-  await upsertRows('offline_customers', rows, (record, row: any) => {
-    record._raw.name = row.name;
-    record._raw.email = row.email;
-    record._raw.phone = row.phone;
+  await upsertRows('offline_customers', rows, (record, row) => {
+    writeRaw(record, { name: row.name, email: row.email, phone: row.phone });
   });
 
   const nextCursor = getLatestCursor(rows, cursor);
@@ -283,12 +290,14 @@ async function pullVehicles(userId: string): Promise<void> {
   if (response.error) throw new Error(`[offline] vehicles pull failed: ${response.error.message}`);
 
   const rows = response.data ?? [];
-  await upsertRows('offline_vehicles', rows, (record, row: any) => {
-    record._raw.customer_server_id = row.customer_id;
-    record._raw.make = row.make;
-    record._raw.model = row.model;
-    record._raw.year = row.year;
-    record._raw.vin = row.vin;
+  await upsertRows('offline_vehicles', rows, (record, row) => {
+    writeRaw(record, {
+      customer_server_id: row.customer_id,
+      make: row.make,
+      model: row.model,
+      year: row.year,
+      vin: row.vin,
+    });
   });
 
   const nextCursor = getLatestCursor(rows, cursor);
@@ -310,19 +319,21 @@ async function pullFleetWorkOrders(userId: string): Promise<void> {
   if (response.error) throw new Error(`[offline] fleet work order pull failed: ${response.error.message}`);
 
   const rows = response.data ?? [];
-  await upsertRows('offline_fleet_work_orders', rows as SyncRow[], (record, row: any) => {
-    record._raw.order_number = row.order_number;
-    record._raw.status = row.status;
-    record._raw.priority = row.priority;
-    record._raw.scheduled_date = row.scheduled_date;
-    record._raw.service_type = row.service_type;
-    record._raw.po_number = row.po_number;
-    record._raw.total = row.total;
-    record._raw.vehicle_server_id = row.fleet_vehicle_id;
-    record._raw.client_server_id = row.fleet_client_id;
+  await upsertRows('offline_fleet_work_orders', rows, (record, row) => {
+    writeRaw(record, {
+      order_number: row.order_number,
+      status: row.status,
+      priority: row.priority,
+      scheduled_date: row.scheduled_date,
+      service_type: row.service_type,
+      po_number: row.po_number,
+      total: row.total,
+      vehicle_server_id: row.fleet_vehicle_id,
+      client_server_id: row.fleet_client_id,
+    });
   });
 
-  const nextCursor = getLatestCursor(rows as SyncRow[], cursor);
+  const nextCursor = getLatestCursor(rows, cursor);
   if (nextCursor) await setCursor(ENTITY_FLEET_WORK_ORDERS, nextCursor);
   await markMissingAsDeleted(ENTITY_FLEET_WORK_ORDERS, 'offline_fleet_work_orders', userId);
 }
@@ -341,12 +352,14 @@ async function pullServiceCatalog(userId: string): Promise<void> {
   if (response.error) throw new Error(`[offline] service catalog pull failed: ${response.error.message}`);
 
   const rows = response.data ?? [];
-  await upsertRows('offline_service_catalog', rows, (record, row: any) => {
-    record._raw.name = row.name;
-    record._raw.category = row.category;
-    record._raw.default_price = row.default_price;
-    record._raw.is_active = row.is_active;
-    record._raw.sort_order = row.sort_order;
+  await upsertRows('offline_service_catalog', rows, (record, row) => {
+    writeRaw(record, {
+      name: row.name,
+      category: row.category,
+      default_price: row.default_price,
+      is_active: row.is_active,
+      sort_order: row.sort_order,
+    });
   });
 
   const nextCursor = getLatestCursor(rows, cursor);
@@ -373,28 +386,30 @@ async function pullTechnicianMessages(userId: string): Promise<void> {
   const response = await query;
   if (response.error) throw new Error(`[offline] technician message pull failed: ${response.error.message}`);
 
-  const rows = (response.data ?? []).map((row: any) => ({
+  const rows = (response.data ?? []).map((row) => ({
     id: row.id,
     appointment_id: row.id,
     dispatch_notes: row.dispatch_notes,
     updated_at: row.updated_at,
   }));
 
-  await upsertRows('offline_technician_messages', rows as any[], (record, row: any) => {
+  await upsertRows('offline_technician_messages', rows, (record, row) => {
     const body = row.dispatch_notes || '';
     const type = body.toLowerCase().includes('urgent') ? 'urgent' : 'dispatch';
-    record._raw.appointment_server_id = row.appointment_id;
-    record._raw.message_type = type;
-    record._raw.title = 'Dispatch Note';
-    record._raw.body = body;
     const stamp = toEpoch(row.updated_at);
-    record._raw.created_at_server = stamp;
+    writeRaw(record, {
+      appointment_server_id: row.appointment_id,
+      message_type: type,
+      title: 'Dispatch Note',
+      body,
+      created_at_server: stamp,
+    });
   });
 
-  const nextCursor = getLatestCursor(rows as any[], cursor);
+  const nextCursor = getLatestCursor(rows, cursor);
   if (nextCursor) await setCursor(ENTITY_TECH_MESSAGES, nextCursor);
 
-  const activeIds = new Set<string>(rows.map((row: any) => String(row.id)));
+  const activeIds = new Set<string>(rows.map((row) => String(row.id)));
   await markMissingAsDeletedFromIdList('offline_technician_messages', activeIds);
 }
 

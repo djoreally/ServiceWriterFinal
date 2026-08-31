@@ -10,11 +10,14 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
+import { format } from "date-fns";
 
 const mockOwner = "owner-user-id";
 const TECH_A = "tech-a";
 const TECH_B = "tech-b";
-const TODAY = new Date().toISOString().slice(0, 10);
+// Match the application's local-calendar scheduling contract. Using the UTC
+// portion of ISO timestamps makes "today" jobs disappear near day boundaries.
+const TODAY = format(new Date(), "yyyy-MM-dd");
 
 interface AppointmentRow {
   id: string;
@@ -48,12 +51,56 @@ interface FleetRow {
   updated_at: string;
 }
 
+type MockQueryRow = Record<string, unknown>;
+
+interface AssignmentRpcArgs extends Record<string, unknown> {
+  p_appointment_id?: string | null;
+  p_work_order_id?: string | null;
+  p_job_source?: string;
+  p_job_id?: string | null;
+  p_technician_id?: string | null;
+  p_van_id?: string | null;
+  p_date?: string | null;
+  p_start?: string | null;
+  p_expected_updated_at?: string | null;
+  p_notes?: string | null;
+}
+
+interface DispatchApiPayload {
+  job_source: string;
+  job_id: string;
+  technician_id?: string | null;
+  van_id?: string | null;
+  date?: string | null;
+  start?: string | null;
+  duration_minutes?: number | null;
+  expected_updated_at?: string | null;
+  notes?: string | null;
+}
+
+interface MockQueryBuilder {
+  select: () => MockQueryBuilder;
+  order: () => MockQueryBuilder;
+  limit: (count: number) => MockQueryBuilder;
+  eq: (column: string, value: unknown) => MockQueryBuilder;
+  neq: (column: string, value: unknown) => MockQueryBuilder;
+  is: (column: string, value: unknown) => MockQueryBuilder;
+  gte: (column: string, value: string) => MockQueryBuilder;
+  lte: (column: string, value: string) => MockQueryBuilder;
+  in: (column: string, values: unknown[]) => MockQueryBuilder;
+  not: () => MockQueryBuilder;
+  maybeSingle: () => Promise<{ data: MockQueryRow | null; error: null }>;
+  single: () => Promise<{ data: MockQueryRow | null; error: null }>;
+  insert: (payload: MockQueryRow) => Promise<{ data: null; error: null }>;
+  then: (resolve: (value: { data: MockQueryRow[]; error: null }) => unknown) => unknown;
+}
+
 const mockStore: {
   appointments: AppointmentRow[];
   fleet_work_orders: FleetRow[];
   technicians: Array<{ id: string; name: string; is_active: boolean }>;
   fleet_activity_logs: Array<Record<string, unknown>>;
-  rpcCalls: Array<{ name: string; args: any }>;
+  rpcCalls: Array<{ name: string; args: Record<string, unknown> }>;
 } = {
   appointments: [],
   fleet_work_orders: [],
@@ -136,7 +183,7 @@ function mockResetStore() {
 }
 
 /** Emulates the domain-specific server-side assignment transactions. */
-function mockApplyAssignment(args: any) {
+function mockApplyAssignment(args: AssignmentRpcArgs) {
   const appointmentId = args.p_appointment_id ?? (args.p_job_source === "appointment" ? args.p_job_id : null);
   const fleetWorkOrderId = args.p_work_order_id ?? (args.p_job_source === "fleet_work_order" ? args.p_job_id : null);
   const assigning = Boolean(args.p_technician_id ?? args.p_van_id);
@@ -208,14 +255,34 @@ function operationalJobRows() {
   return [...appts, ...fleet];
 }
 
-function tableRows(table: string): any[] {
+function tableRows(table: string): MockQueryRow[] {
   switch (table) {
     case "workspace_members":
       return [{ workspace_id: "00000000-0000-4000-8000-000000000001", user_id: mockOwner, is_active: true }];
     case "dispatch_operational_jobs_v1":
       return operationalJobRows();
     case "appointments":
-      return mockStore.appointments;
+      return mockStore.appointments.map((appointment) => {
+        const startsAt = `${appointment.scheduled_date}T${appointment.scheduled_time}`;
+        return {
+          id: appointment.id,
+          workspace_id: "00000000-0000-4000-8000-000000000001",
+          status: appointment.status,
+          starts_at: startsAt,
+          ends_at: new Date(new Date(startsAt).getTime() + appointment.duration_minutes * 60_000).toISOString(),
+          assigned_user_id: appointment.assigned_technician_id,
+          updated_at: appointment.updated_at,
+          metadata: {
+            title: appointment.title,
+            duration_minutes: appointment.duration_minutes,
+            dispatch_status: appointment.dispatch_status,
+            dispatch_notes: appointment.dispatch_notes,
+          },
+          customers: null,
+          vehicles: null,
+          locations: null,
+        };
+      });
     case "fleet_work_orders":
       return mockStore.fleet_work_orders.map((f) => ({
         ...f,
@@ -224,7 +291,7 @@ function tableRows(table: string): any[] {
         fleet_vehicles: { year: 2021, make: "Ford", model: "Transit", unit_number: "12", license_plate: null },
       }));
     case "technicians":
-      return mockStore.technicians;
+      return mockStore.technicians.map((technician) => ({ ...technician }));
     case "time_clock_entries":
       return [];
     case "fleet_work_order_line_items":
@@ -236,7 +303,7 @@ function tableRows(table: string): any[] {
 
 function mockCreateBuilder(table: string) {
   let rows = tableRows(table);
-  const builder: any = {
+  const builder: MockQueryBuilder = {
     select: () => builder,
     order: () => builder,
     limit: (n: number) => {
@@ -249,6 +316,10 @@ function mockCreateBuilder(table: string) {
     },
     neq: (col: string, value: unknown) => {
       rows = rows.filter((r) => r[col] !== value);
+      return builder;
+    },
+    is: (col: string, value: unknown) => {
+      rows = rows.filter((r) => r[col] === value);
       return builder;
     },
     gte: (col: string, value: string) => {
@@ -270,30 +341,31 @@ function mockCreateBuilder(table: string) {
       if (table === "fleet_activity_logs") mockStore.fleet_activity_logs.push(payload);
       return { data: null, error: null };
     },
-    then: (resolve: (value: { data: any[]; error: null }) => unknown) => resolve({ data: rows, error: null }),
+    then: (resolve: (value: { data: MockQueryRow[]; error: null }) => unknown) => resolve({ data: rows, error: null }),
   };
   return builder;
 }
 
-jest.mock("@/integrations/supabase/client", () => ({
-  supabase: {
+jest.mock("@/integrations/supabase/client", () => {
+  const client = {
     auth: { getUser: async () => ({ data: { user: { id: mockOwner } } }) },
     from: (table: string) => mockCreateBuilder(table),
-    rpc: async (name: string, args: any) => {
+    rpc: async (name: string, args: Record<string, unknown>) => {
       mockStore.rpcCalls.push({ name, args });
-      if (name === "assign_dispatch_job_v1" || name === "assign_appointment_job_v1" || name === "assign_fleet_work_order_dispatch_v1") return mockApplyAssignment(args);
+      if (name === "assign_dispatch_job_v1" || name === "assign_appointment_job_v1" || name === "assign_fleet_work_order_dispatch_v1") return mockApplyAssignment(args as AssignmentRpcArgs);
       if (name === "current_workspace_owner_user_id") return { data: mockOwner, error: null };
       if (name === "transition_fleet_work_order") return { data: null, error: null };
       return { data: null, error: null };
     },
     functions: { invoke: async () => ({ data: { success: true, ranked_candidates: [] }, error: null }) },
-  },
-}));
+  };
+  return { supabase: client, productionSupabase: client };
+});
 
 jest.mock("@/lib/nextApiClient", () => ({
   nextApi: {
     dispatch: {
-      assign:       async (payload: any) => {
+      assign:       async (payload: DispatchApiPayload) => {
         const result = await supabase.rpc("assign_dispatch_job_v1", {
 
           p_job_source: payload.job_source,
@@ -338,7 +410,7 @@ const identity = (techId: string) => ({
 
 async function techDashboardJobs(techId: string) {
   const { jobs } = await fetchTechTodayData(identity(techId));
-  return jobs as Array<Record<string, any>>;
+  return jobs as unknown as MockQueryRow[];
 }
 
 describe("dispatch assignment paths → technician dashboards (E2E)", () => {

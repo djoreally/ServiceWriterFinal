@@ -33,6 +33,7 @@ import {
 } from "@/application/queries/weather-guard.query";
 import { subscribeWeatherRiskLogs } from "@/application/queries/weather-guard.query";
 import { cn } from "@/lib/utils";
+import { currentTimeMs } from "@/lib/datetime";
 
 const WeatherMap = lazy(() => import("@/components/weather-guard/WeatherMap"));
 
@@ -99,6 +100,7 @@ function hoursUntil(job: AtRiskAppointment): number {
 export default function WeatherGuard() {
   const [seeded, setSeeded] = useState(false);
   const [layers, setLayers] = useState({ precipitation: true, wind: true, gps: true });
+  const [now] = useState(currentTimeMs);
 
   useEffect(() => {
     ensureDefaultRules().finally(() => setSeeded(true));
@@ -146,7 +148,7 @@ export default function WeatherGuard() {
     logsQuery.refetch();
   }, [jobsQuery, logsQuery]);
 
-  const jobs = jobsQuery.data ?? [];
+  const jobs = useMemo(() => jobsQuery.data ?? [], [jobsQuery.data]);
   const rules = rulesQuery.data ?? [];
   const logs = logsQuery.data ?? [];
   const shop = shopQuery.data;
@@ -156,13 +158,13 @@ export default function WeatherGuard() {
     const bins = Array.from({ length: 12 }, () => 0); // 4h buckets
     for (const j of jobs) {
       const t = new Date(`${j.scheduled_date}T${j.scheduled_time}`).getTime();
-      const hrs = (t - Date.now()) / 3_600_000;
+      const hrs = (t - now) / 3_600_000;
       if (hrs < 0 || hrs > 48) continue;
       const idx = Math.min(11, Math.floor(hrs / 4));
       bins[idx] = Math.max(bins[idx], j.weather_risk_score ?? 0);
     }
     return bins;
-  }, [jobs]);
+  }, [jobs, now]);
 
   const trendingUp = forecastBars.slice(6).some((v) => v >= 60);
 

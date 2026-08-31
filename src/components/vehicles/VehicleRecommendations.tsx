@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   fetchVehicleRecommendations,
   fetchMaintenanceIntervals,
@@ -67,21 +67,22 @@ export const VehicleRecommendations = ({
     due_date: ""
   });
 
-  useEffect(() => {
-    fetchRecs();
-    fetchIntervals();
-  }, [vehicleId]);
 
-  const fetchRecs = async () => {
+  const fetchRecs = useCallback(async () => {
     const data = await fetchVehicleRecommendations(vehicleId);
     setRecommendations(data);
     setLoading(false);
-  };
+  }, [vehicleId]);
 
   const fetchIntervals = async () => {
     const data = await fetchMaintenanceIntervals();
     setMaintenanceIntervals(data);
   };
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchRecs());
+    void Promise.resolve().then(() => fetchIntervals());
+  }, [fetchRecs, vehicleId]);
 
   const handleGenerateFromHistory = async () => {
     setLoading(true);

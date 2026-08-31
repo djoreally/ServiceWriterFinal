@@ -116,13 +116,13 @@ export default function FindProvider() {
 
   useEffect(() => {
     if (!hasSearched) {
-      setLoading(false);
-      setProviders([]);
-      setTotalCount(0);
+      void Promise.resolve().then(() => setLoading(false));
+      void Promise.resolve().then(() => setProviders([]));
+      void Promise.resolve().then(() => setTotalCount(0));
       return;
     }
 
-    void fetchProviders(appliedQuery, page);
+    void Promise.resolve().then(() => fetchProviders(appliedQuery, page));
   }, [fetchProviders, appliedQuery, hasSearched, page]);
 
   useEffect(() => {

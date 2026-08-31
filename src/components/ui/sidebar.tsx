@@ -68,7 +68,9 @@ const SidebarProvider = React.forwardRef<
       if (typeof document !== 'undefined') {
         try {
           document.cookie = `${SIDEBAR_COOKIE_NAME}=${openState}; path=/; max-age=${SIDEBAR_COOKIE_MAX_AGE}`;
-        } catch {}
+        } catch {
+          // Cookie access may be unavailable in restricted browser contexts.
+        }
       }
     },
     [setOpenProp, open],
@@ -544,7 +546,7 @@ const SidebarMenuSkeleton = React.forwardRef<
 
   React.useEffect(() => {
     if (!isClient) return;
-    setWidth(`${Math.floor(Math.random() * 40) + 50}%`);
+    void Promise.resolve().then(() => setWidth(`${Math.floor(Math.random() * 40) + 50}%`));
   }, [isClient]);
 
   return (

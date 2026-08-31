@@ -66,20 +66,20 @@ export function CompleteAppointmentDialog({
   // Pre-populate VIN, oil quarts, and current oil type from vehicle data
   useEffect(() => {
     if (appointment?.vehicle) {
-      setFormData(prev => ({
+      void Promise.resolve().then(() => setFormData(prev => ({
         ...prev,
         vin: appointment.vehicle?.vin || "",
         oilQuartsUsed: formatOilQuarts(parseOilCapacityToQuarts(appointment.vehicle?.oil_capacity)),
         oilType: appointment.vehicle?.oil_type || "",
-      }));
+      })));
     }
-  }, [appointment?.vehicle?.vin, appointment?.vehicle?.oil_capacity, appointment?.vehicle?.oil_type]);
+  }, [appointment?.vehicle?.vin, appointment?.vehicle?.oil_capacity, appointment?.vehicle?.oil_type, appointment?.vehicle]);
 
   // Load oil type options from vehicle_specifications for this year/make/model
   useEffect(() => {
     const v = appointment?.vehicle;
     if (!v?.year || !v?.make || !v?.model || !open) {
-      setOilOptions([]);
+      void Promise.resolve().then(() => setOilOptions([]));
       return;
     }
     (async () => {
@@ -95,7 +95,7 @@ export function CompleteAppointmentDialog({
       });
       setOilOptions(unique);
     })();
-  }, [appointment?.vehicle?.year, appointment?.vehicle?.make, appointment?.vehicle?.model, open]);
+  }, [appointment?.vehicle?.year, appointment?.vehicle?.make, appointment?.vehicle?.model, open, appointment?.vehicle]);
 
   const handleComplete = async () => {
     if (!appointment) return;

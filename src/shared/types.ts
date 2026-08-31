@@ -37,6 +37,11 @@ export interface Vehicle {
   customer_id?: string;
   oil_type?: string;
   oil_capacity?: string;
+  engine?: string | null;
+  tire_size?: string | null;
+  tire_size_source?: string | null;
+  tire_load_index?: string | null;
+  tire_speed_rating?: string | null;
 }
 
 export interface ServiceCatalogItem {

@@ -92,8 +92,8 @@ export default function TechJobs() {
 
   useEffect(() => {
     if (identity) {
-      setLoading(true);
-      fetchData();
+      void Promise.resolve().then(() => setLoading(true));
+      void Promise.resolve().then(() => fetchData());
     }
   }, [fetchData, identity]);
 

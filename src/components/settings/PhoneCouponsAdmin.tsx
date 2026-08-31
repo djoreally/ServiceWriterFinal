@@ -105,7 +105,7 @@ export const PhoneCouponsAdmin = ({ enabled }: Props) => {
   }, []);
 
   useEffect(() => {
-    load();
+    void Promise.resolve().then(() => load());
   }, [load]);
 
   const upsertOverride = async (customerId: string, patch: Partial<Override>) => {

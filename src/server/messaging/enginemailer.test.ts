@@ -130,6 +130,29 @@ describe("Enginemailer marketing adapter", () => {
     ]);
   });
 
+  it.each([
+    ["delivery", "delivered"],
+    ["delivered", "delivered"],
+    ["spam", "complained"],
+    ["spam-complaint", "complained"],
+    ["unsubscribe", "canceled"],
+    ["unsubscribed", "canceled"],
+  ] as const)("normalizes the %s webhook alias", (event, status) => {
+    const rawBody = JSON.stringify({
+      event,
+      details: { txid: 12345, email: "customer@example.com" },
+    });
+
+    expect(new EnginemailerEmailAdapter().normalizeDelivery(rawBody, webhookRequest({}))).toEqual([
+      expect.objectContaining({ providerMessageId: "12345", status }),
+    ]);
+  });
+
+  it.each(["open", "click"])("accepts %s as a non-delivery-state event", (event) => {
+    const rawBody = JSON.stringify({ event, details: { txid: 12345, email: "customer@example.com" } });
+    expect(new EnginemailerEmailAdapter().normalizeDelivery(rawBody, webhookRequest({}))).toEqual([]);
+  });
+
   it("rejects replayed Enginemailer webhooks", () => {
     const rawBody = JSON.stringify({ event: "delivered", details: { txid: 12345 } });
     const staleTimestamp = String(Math.floor(Date.now() / 1000) - 301);

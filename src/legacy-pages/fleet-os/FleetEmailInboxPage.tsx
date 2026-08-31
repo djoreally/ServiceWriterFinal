@@ -65,7 +65,7 @@ export default function FleetEmailInboxPage() {
     }
   }, []);
 
-  useEffect(() => { void load(); return subscribeToFleetEmailMessages(() => void load()); }, [load]);
+  useEffect(() => { void Promise.resolve().then(() => load()); return subscribeToFleetEmailMessages(() => void load()); }, [load]);
   useEffect(() => {
     if (!configuration?.imap_configured) return;
     const refresh = (): void => {

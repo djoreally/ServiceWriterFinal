@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { createElement, useEffect, useState } from "react";
 import { getAssetSignedUrl } from "@/application/queries/assets.query";
 import type { AssetRecord } from "@/application/commands/assets.command";
 import { getAssetIcon } from "./asset-icons";
@@ -50,7 +50,7 @@ export function AssetThumbnail({ asset, className }: Props) {
         "h-full w-full flex items-center justify-center bg-muted text-muted-foreground"
       }
     >
-      <Icon className="h-10 w-10" />
+      {createElement(Icon, { className: "h-10 w-10" })}
     </div>
   );
 }

@@ -286,10 +286,10 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
     } finally {
       setLoading(false);
     }
-  }, [user, session?.access_token, authLoading]);
+  }, [user, session, authLoading]);
 
   useEffect(() => {
-    fetchSubscription();
+    void Promise.resolve().then(() => fetchSubscription());
   }, [fetchSubscription]);
 
   useEffect(() => {
@@ -376,7 +376,7 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
       setError(err instanceof Error ? err.message : 'Failed to create checkout session');
       return null;
     }
-  }, [session?.access_token]);
+  }, [session]);
 
   const manageSubscription = useCallback(async (): Promise<string | null> => {
     setError('Subscription management portal is not configured yet.');
@@ -395,7 +395,7 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
     } catch (err) {
       console.error('Failed to track usage:', err);
     }
-  }, [user?.id, fetchSubscription]);
+  }, [user, fetchSubscription]);
 
   return (
     <SubscriptionContext.Provider

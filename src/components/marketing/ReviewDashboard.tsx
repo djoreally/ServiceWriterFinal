@@ -26,9 +26,6 @@ export const ReviewDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
 
   const fetchData = async () => {
     setLoading(true);
@@ -42,6 +39,10 @@ export const ReviewDashboard = () => {
     }
     setLoading(false);
   };
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchData());
+  }, []);
 
   const getStatusBadge = (request: ReviewRequest) => {
     if (request.clicked_at) {

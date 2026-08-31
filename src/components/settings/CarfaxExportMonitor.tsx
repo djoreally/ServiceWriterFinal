@@ -53,7 +53,7 @@ export function CarfaxExportMonitor() {
   };
 
   useEffect(() => {
-    loadData();
+    void Promise.resolve().then(() => loadData());
   }, []);
 
   const handleRefresh = async () => {

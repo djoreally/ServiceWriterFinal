@@ -1,3 +1,4 @@
+import { errorCode } from "@/lib/error-message";
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
@@ -105,9 +106,6 @@ export const PaymentSettings = () => {
   const [savingCoupon, setSavingCoupon] = useState(false);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
 
   const fetchData = async () => {
     try {
@@ -120,6 +118,10 @@ export const PaymentSettings = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchData());
+  }, []);
 
   const handleSaveSettings = async () => {
     setSaving(true);
@@ -153,8 +155,8 @@ export const PaymentSettings = () => {
       toast.success(editingCoupon ? "Coupon updated" : "Coupon created");
       setCouponDialogOpen(false);
       fetchData();
-    } catch (error: any) {
-      if (error?.code === "23505") {
+    } catch (error: unknown) {
+      if (errorCode(error) === "23505") {
         toast.error("A coupon with this code already exists");
       } else {
         toast.error(editingCoupon ? "Failed to update coupon" : "Failed to create coupon");

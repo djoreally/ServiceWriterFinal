@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -40,11 +40,8 @@ export const ContractServicesStep = ({ contractId, userId, onChanged }: Props) =
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadData();
-  }, [contractId, userId]);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const items = await fetchCatalogItems();
@@ -59,7 +56,11 @@ export const ContractServicesStep = ({ contractId, userId, onChanged }: Props) =
     } finally {
       setLoading(false);
     }
-  };
+  }, [contractId]);
+
+  useEffect(() => {
+    void Promise.resolve().then(() => loadData());
+  }, [contractId, loadData, userId]);
 
   const attachedCatalogIds = new Set([
     ...attachedServices.map((s) => s.service_catalog_id),

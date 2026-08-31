@@ -56,7 +56,7 @@ export async function validateAssignment(
 
   const { data: existingJobs } = await query;
 
-  const slots: ScheduleSlot[] = (existingJobs ?? []).map((j: any) => ({
+  const slots: ScheduleSlot[] = (existingJobs ?? []).map((j) => ({
     scheduledTime: j.scheduled_time?.substring(0, 5) ?? "09:00",
     durationMinutes: j.estimated_duration_minutes || j.duration_minutes || 60,
   }));

@@ -101,7 +101,7 @@ export function TimeClock() {
       }
       
       const totalMinutes = differenceInMinutes(new Date(), clockIn) - breakMinutes - currentBreakMinutes;
-      setElapsedTime(Math.max(0, totalMinutes));
+      void Promise.resolve().then(() => setElapsedTime(Math.max(0, totalMinutes)));
     }
   }, [currentEntry, currentTime]);
 
@@ -128,7 +128,7 @@ export function TimeClock() {
   }, []);
 
   useEffect(() => {
-    fetchData();
+    void Promise.resolve().then(() => fetchData());
   }, [fetchData]);
 
   const getCurrentLocation = (): Promise<LocationData | null> => {

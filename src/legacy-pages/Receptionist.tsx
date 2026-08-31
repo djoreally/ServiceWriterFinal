@@ -2,6 +2,7 @@
  * Receptionist.tsx — AI Phone Receptionist provisioning + management.
  * Refactored to completely disable telephony search and purchase after decommission.
  */
+import { errorMessage } from "@/lib/error-message";
 import { useEffect, useMemo, useState } from "react";
 import { fetchReceptionistProfile, type ReceptionistProfile } from "@/application/queries/receptionist.query";
 import {
@@ -75,10 +76,10 @@ export default function Receptionist() {
   };
 
   useEffect(() => {
-    loadProfile();
+    void Promise.resolve().then(() => loadProfile());
   }, []);
 
-  useEffect(() => { if (isProvisioned) void runHealthCheck(); }, [isProvisioned]);
+  useEffect(() => { if (isProvisioned) void Promise.resolve().then(() => runHealthCheck()); }, [isProvisioned]);
 
   const saveConfig = async () => {
     setSaving(true);
@@ -86,8 +87,8 @@ export default function Receptionist() {
       await updateReceptionistConfig({ voiceId, firstMessage, systemPrompt });
       toast({ title: "Saved", description: "Receptionist updated." });
       await loadProfile();
-    } catch (e: any) {
-      toast({ title: "Save failed", description: e.message ?? String(e), variant: "destructive" });
+    } catch (e: unknown) {
+      toast({ title: "Save failed", description: errorMessage(e), variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -100,8 +101,8 @@ export default function Receptionist() {
       await deprovisionReceptionist();
       toast({ title: "Receptionist deactivated" });
       await loadProfile();
-    } catch (e: any) {
-      toast({ title: "Deactivate failed", description: e.message ?? String(e), variant: "destructive" });
+    } catch (e: unknown) {
+      toast({ title: "Deactivate failed", description: errorMessage(e), variant: "destructive" });
     } finally {
       setDeprovisioning(false);
     }

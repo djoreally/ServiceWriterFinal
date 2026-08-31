@@ -1,8 +1,58 @@
-import { supabase } from "@/integrations/supabase/client";
+import { z } from "zod";
+import { productionSupabase } from "@/integrations/supabase/client";
 import type { Appointment, BusinessHours, Customer, ServiceCatalogItem, Vehicle } from "@/shared/types";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { fetchBusinessSettings, resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { nextApi } from "@/lib/nextApiClient";
+
+const customerApiSchema = z.object({
+  id: z.string(),
+  first_name: z.string().nullable().optional(),
+  last_name: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  email: z.string().nullable().optional(),
+  address_line1: z.string().nullable().optional(),
+  address_line2: z.string().nullable().optional(),
+  city: z.string().nullable().optional(),
+  region: z.string().nullable().optional(),
+  postal_code: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  created_at: z.string().optional(),
+}).passthrough();
+
+const vehicleApiSchema = z.object({
+  id: z.string(),
+  customer_id: z.string().nullable().optional(),
+  make: z.string().nullable().optional(),
+  model: z.string().nullable().optional(),
+  year: z.number().nullable().optional(),
+  vin: z.string().nullable().optional(),
+  license_plate: z.string().nullable().optional(),
+  plate_region: z.string().nullable().optional(),
+  color: z.string().nullable().optional(),
+  mileage: z.number().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  created_at: z.string().optional(),
+}).passthrough();
+
+const appointmentApiSchema = z.object({
+  id: z.string(),
+  // Public/guest bookings are valid before a customer record is linked.
+  customer_id: z.string().nullable().optional(),
+  vehicle_id: z.string().nullable().optional(),
+  starts_at: z.string(),
+  ends_at: z.string(),
+  status: z.string(),
+  assigned_user_id: z.string().nullable().optional(),
+  source: z.string(),
+  notes: z.string().nullable().optional(),
+  metadata: z.unknown().optional(),
+  customers: z.union([customerApiSchema, z.array(customerApiSchema)]).nullable().optional(),
+}).passthrough();
+
+type CustomerApiRow = z.infer<typeof customerApiSchema>;
+type VehicleApiRow = z.infer<typeof vehicleApiSchema>;
+type AppointmentApiRow = z.infer<typeof appointmentApiSchema>;
 
 export interface AppointmentWithSource extends Appointment {
   source?: "manual" | "online_booking" | "ai_intake" | string;
@@ -60,7 +110,21 @@ function localDateTime(iso: string): { date: string; time: string } {
   return { date: `${get("year")}-${get("month")}-${get("day")}`, time: `${get("hour")}:${get("minute")}` };
 }
 
-function mapCustomer(row: any): Customer {
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value ? value : undefined;
+}
+
+function metadataObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function relatedCustomer(row: AppointmentApiRow): CustomerApiRow | null {
+  return Array.isArray(row.customers) ? row.customers[0] ?? null : row.customers ?? null;
+}
+
+function mapCustomer(row: CustomerApiRow): Customer {
   return {
     id: row.id,
     name: [row.first_name, row.last_name].filter(Boolean).join(" ") || "Customer",
@@ -72,7 +136,7 @@ function mapCustomer(row: any): Customer {
   };
 }
 
-function mapVehicle(row: any): Vehicle {
+function mapVehicle(row: VehicleApiRow): Vehicle {
   return {
     id: row.id,
     customer_id: row.customer_id ?? undefined,
@@ -89,7 +153,15 @@ function mapVehicle(row: any): Vehicle {
   };
 }
 
-function mapCatalog(row: any): ServiceCatalogItem {
+function mapCatalog(row: {
+  id: string;
+  name: string;
+  description: string | null;
+  labor_price: number;
+  estimated_minutes: number | null;
+  category: string | null;
+  is_active: boolean;
+}): ServiceCatalogItem {
   return {
     id: row.id,
     name: row.name,
@@ -101,16 +173,18 @@ function mapCatalog(row: any): ServiceCatalogItem {
   };
 }
 
-function mapAppointment(row: any, customerMap: Map<string, Customer>, vehicleMap: Map<string, Vehicle>): AppointmentWithSource {
-  const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata as Record<string, any> : {};
-  const customer = customerMap.get(row.customer_id) ?? null;
+function mapAppointment(row: AppointmentApiRow, customerMap: Map<string, Customer>, vehicleMap: Map<string, Vehicle>): AppointmentWithSource {
+  const metadata = metadataObject(row.metadata);
+  const customer = row.customer_id ? customerMap.get(row.customer_id) ?? null : null;
   const vehicle = row.vehicle_id ? vehicleMap.get(row.vehicle_id) ?? null : null;
-  const startsAt = row.starts_at ?? `${row.scheduled_date}T${row.scheduled_time ?? "00:00"}:00`;
-  const endsAt = row.ends_at ?? new Date(Date.parse(startsAt) + Number(row.duration_minutes ?? 60) * 60_000).toISOString();
+  const startsAt = row.starts_at;
+  const endsAt = row.ends_at;
   const start = localDateTime(startsAt);
   const duration = Math.max(15, Math.round((Date.parse(endsAt) - Date.parse(startsAt)) / 60000));
   const vehicleLabel = vehicle ? `${vehicle.year} ${vehicle.make} ${vehicle.model}` : "Vehicle";
-  const title = row.title ?? metadata.title ?? metadata.service_name ?? (customer ? `${customer.name} — ${vehicleLabel}` : vehicleLabel);
+  const title = optionalString(metadata.title)
+    ?? optionalString(metadata.service_name)
+    ?? (customer ? `${customer.name} — ${vehicleLabel}` : vehicleLabel);
   return {
     id: row.id,
     title,
@@ -120,14 +194,14 @@ function mapAppointment(row: any, customerMap: Map<string, Customer>, vehicleMap
     status: row.status,
     customer,
     vehicle,
-    guest_name: row.guest_name ?? customer?.name ?? null,
-    guest_email: row.guest_email ?? customer?.email ?? null,
-    guest_phone: row.guest_phone ?? customer?.phone ?? null,
-    notes: row.notes ?? metadata.notes ?? undefined,
-    description: row.notes ?? metadata.description ?? undefined,
+    guest_name: optionalString(metadata.guest_name) ?? customer?.name ?? null,
+    guest_email: optionalString(metadata.guest_email) ?? customer?.email ?? null,
+    guest_phone: optionalString(metadata.guest_phone) ?? customer?.phone ?? null,
+    notes: row.notes ?? optionalString(metadata.notes),
+    description: optionalString(metadata.description) ?? row.notes ?? undefined,
     assigned_technician_id: row.assigned_user_id ?? null,
     source: row.source,
-    intake_responses: row.metadata && typeof row.metadata === "object" ? row.metadata : null,
+    intake_responses: metadata,
   };
 }
 
@@ -145,7 +219,7 @@ export async function fetchAppointmentsPageData(): Promise<AppointmentsPageData>
     nextApi.customers.list(context.workspaceId),
     nextApi.vehicles.list(context.workspaceId),
     fetchBusinessSettings(),
-    (supabase as any).from("service_catalog").select("*").eq("workspace_id", context.workspaceId).eq("is_active", true).order("name"),
+    productionSupabase.from("service_catalog").select("*").eq("workspace_id", context.workspaceId).eq("is_active", true).order("name"),
   ]);
 
   const customerRows = customersResult.status === "fulfilled" ? customersResult.value.data : [];
@@ -160,14 +234,14 @@ export async function fetchAppointmentsPageData(): Promise<AppointmentsPageData>
     errors.catalog = "Failed to load service catalog";
   }
 
-  const customers = (customerRows as any[]).map(mapCustomer);
-  const vehicles = (vehicleRows as any[]).map(mapVehicle);
+  const customers = z.array(customerApiSchema).parse(customerRows).map(mapCustomer);
+  const vehicles = z.array(vehicleApiSchema).parse(vehicleRows).map(mapVehicle);
   const customerMap = new Map(customers.map((customer) => [customer.id, customer]));
   const vehicleMap = new Map(vehicles.map((vehicle) => [vehicle.id, vehicle]));
-  const appointments = (appointmentRows as any[])
-    .filter((row) => row.source !== "fleet_work_order" && !(row.metadata && typeof row.metadata === "object" && row.metadata.fleet_work_order_id))
+  const appointments = z.array(appointmentApiSchema).parse(appointmentRows)
+    .filter((row) => row.source !== "fleet_work_order" && !metadataObject(row.metadata).fleet_work_order_id)
     .map((row) => mapAppointment(row, customerMap, vehicleMap));
-  const serviceCatalog = (catalogRows as any[]).map(mapCatalog);
+  const serviceCatalog = catalogRows.map(mapCatalog);
 
   const settings = settingsResult.status === "fulfilled" ? settingsResult.value : null;
   const businessHours: BusinessHours = settings ? {
@@ -209,10 +283,14 @@ export async function fetchAppointmentPickerOption(appointmentId: string): Promi
   const context = await resolveCurrentWorkspace();
   if (!context) return null;
   const response = await nextApi.appointments.get(context.workspaceId, appointmentId);
-  const row = response.data as any;
-  if (!row) return null;
+  const parsed = appointmentApiSchema.nullable().parse(response.data);
+  if (!parsed) return null;
+  const row = parsed;
   const start = localDateTime(row.starts_at);
-  const customerName = row.customers ? [row.customers.first_name, row.customers.last_name].filter(Boolean).join(" ") : null;
+  const customer = relatedCustomer(row);
+  const customerName = customer
+    ? [customer.first_name, customer.last_name].filter(Boolean).join(" ") || null
+    : null;
   return {
     id: row.id,
     title: customerName ? `${customerName} appointment` : "Appointment",
@@ -233,11 +311,14 @@ export async function searchAppointmentPickerOptions(params: {
   if (!context) return [];
   const response = await nextApi.appointments.list(context.workspaceId);
   const q = params.query.trim().toLowerCase();
-  return (response.data as any[])
+  return z.array(appointmentApiSchema).parse(response.data)
     .filter((row) => params.status === "all" || row.status === params.status)
     .map((row) => {
       const start = localDateTime(row.starts_at);
-      const customerName = row.customers ? [row.customers.first_name, row.customers.last_name].filter(Boolean).join(" ") : null;
+      const customer = relatedCustomer(row);
+      const customerName = customer
+        ? [customer.first_name, customer.last_name].filter(Boolean).join(" ") || null
+        : null;
       return {
         id: row.id,
         title: customerName ? `${customerName} appointment` : "Appointment",

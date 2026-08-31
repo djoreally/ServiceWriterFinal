@@ -47,21 +47,21 @@ export function InvoiceDetailDialog({ invoiceId, open, onOpenChange, onEdit, onC
   useEffect(() => {
     if (!open || !invoiceId) return;
     let cancelled = false;
-    setLoading(true);
-    fetchInvoiceDetail(invoiceId)
+    void Promise.resolve().then(() => setLoading(true));
+    void Promise.resolve().then(() => fetchInvoiceDetail(invoiceId)
       .then((d) => !cancelled && setInvoice(d))
       .catch((err) => {
         console.error("[InvoiceDetailDialog] fetch failed", err);
         toast.error("Failed to load invoice");
       })
-      .finally(() => !cancelled && setLoading(false));
+      .finally(() => !cancelled && setLoading(false)));
     return () => {
       cancelled = true;
     };
   }, [open, invoiceId]);
 
   useEffect(() => {
-    if (!open) setInvoice(null);
+    if (!open) void Promise.resolve().then(() => setInvoice(null));
   }, [open]);
 
   const billToName = invoice?.bill_to_type === "fleet"

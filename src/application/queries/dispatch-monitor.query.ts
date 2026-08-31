@@ -47,7 +47,7 @@ export interface DispatchMonitorResult {
 /** Fetch unfinished appointments for dispatch monitor dropdown */
 export async function fetchDispatchableAppointments() {
   const { data: workspaceOwnerId, error: workspaceError } = await supabase.rpc("current_workspace_owner_user_id");
-  if (workspaceError) return { data: null as any, error: workspaceError };
+  if (workspaceError) return { data: null, error: workspaceError };
   return supabase
     .from("appointments")
     .select("id, title, scheduled_date, scheduled_time, status, duration_minutes")

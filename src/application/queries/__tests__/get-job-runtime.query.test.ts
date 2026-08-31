@@ -8,14 +8,30 @@ jest.mock("@/integrations/supabase/client", () => ({
 import { supabase } from "@/integrations/supabase/client";
 import { getJobRuntime } from "@/application/queries/get-job-runtime.query";
 
-function makeThenableQuery(result: { data: any; error: any }) {
-  const builder: any = {
+interface QueryResult<T> {
+  data: T;
+  error: unknown;
+}
+
+interface ThenableQuery<T> {
+  select: jest.Mock<ThenableQuery<T>>;
+  eq: jest.Mock<ThenableQuery<T>>;
+  single: jest.Mock<Promise<QueryResult<T>>>;
+  then: <TResult1 = QueryResult<T>, TResult2 = never>(
+    resolve?: ((value: QueryResult<T>) => TResult1 | PromiseLike<TResult1>) | null,
+    reject?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+  ) => Promise<TResult1 | TResult2>;
+}
+
+function makeThenableQuery<T>(result: QueryResult<T>): ThenableQuery<T> {
+  const builder = {} as ThenableQuery<T>;
+  Object.assign(builder, {
     select: jest.fn(() => builder),
     eq: jest.fn(() => builder),
     single: jest.fn(() => Promise.resolve(result)),
-    then: (resolve: (value: any) => unknown, reject?: (reason: unknown) => unknown) =>
+    then: (resolve: (value: QueryResult<T>) => unknown, reject?: (reason: unknown) => unknown) =>
       Promise.resolve(result).then(resolve, reject),
-  };
+  });
   return builder;
 }
 

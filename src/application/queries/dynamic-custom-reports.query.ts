@@ -111,6 +111,7 @@ export async function fetchRawReportingRecords(
       actual_end_time,
       travel_time_minutes,
       estimated_cost,
+      title,
       customer_id,
       customer_city,
       customer_postal_code,
@@ -146,7 +147,7 @@ export async function fetchRawReportingRecords(
       scheduled_time,
       labor_hours,
       fleet_vehicles ( make, model, year, fuel_type ),
-      fleet_locations ( city, postal_code, state ),
+      fleet_locations ( city, postal_code, state, latitude, longitude ),
       technicians ( name ),
       vans ( name )
     `)
@@ -168,19 +169,19 @@ export async function fetchRawReportingRecords(
 
   const records: UnifiedReportingRecord[] = [];
 
-  for (const appt of (appointmentsRes.data ?? []) as any[]) {
+  for (const appt of appointmentsRes.data ?? []) {
     if (!filter.includeLegacy && appt.data_origin === "legacy_import") continue;
 
-    const vehicle = appt.vehicles || {};
-    const customer = appt.customers || {};
+    const vehicle = appt.vehicles;
+    const customer = appt.customers;
     const service = Array.isArray(appt.services) ? appt.services[0] : appt.services;
 
-    const address = appt.location_address || customer.address || "";
+    const address = appt.location_address || customer?.address || "";
     const postal =
       appt.customer_postal_code ||
       zipFromAddress(appt.location_address) ||
-      customer.postal_code ||
-      zipFromAddress(customer.address) ||
+      customer?.postal_code ||
+      zipFromAddress(customer?.address) ||
       "Unknown";
     const city = appt.customer_city || cityFromAddress(address) || "Unknown";
     const state = appt.customer_state || stateFromAddress(address) || "Unknown";
@@ -198,8 +199,8 @@ export async function fetchRawReportingRecords(
           )
         : 0;
 
-    const latitude = appt.location_lat ?? customer.latitude ?? null;
-    const longitude = appt.location_lng ?? customer.longitude ?? null;
+    const latitude = appt.location_lat ?? customer?.latitude ?? null;
+    const longitude = appt.location_lng ?? customer?.longitude ?? null;
 
     records.push({
       appointment_id: appt.id,
@@ -207,12 +208,12 @@ export async function fetchRawReportingRecords(
       city,
       postal_code: postal,
       state,
-      make: vehicle.make || "Unknown",
-      model: vehicle.model || "Unknown",
-      year: Number(vehicle.year) || 0,
-      fuel_type: vehicle.fuel_type || "Unknown",
-      oil_type: vehicle.oil_type || "Unknown",
-      oil_capacity: Number.parseFloat(vehicle.oil_capacity) || 0,
+      make: vehicle?.make || "Unknown",
+      model: vehicle?.model || "Unknown",
+      year: Number(vehicle?.year) || 0,
+      fuel_type: "Unknown",
+      oil_type: vehicle?.oil_type || "Unknown",
+      oil_capacity: Number.parseFloat(vehicle?.oil_capacity ?? "") || 0,
       scheduled_time_slot: timeSlotForClock(appt.scheduled_time),
       scheduled_date: appt.scheduled_date || "",
       client_type: "Retail",
@@ -234,9 +235,9 @@ export async function fetchRawReportingRecords(
     });
   }
 
-  for (const wo of (fleetOrdersRes.data ?? []) as any[]) {
-    const vehicle = wo.fleet_vehicles || {};
-    const location = wo.fleet_locations || {};
+  for (const wo of fleetOrdersRes.data ?? []) {
+    const vehicle = wo.fleet_vehicles;
+    const location = wo.fleet_locations;
     const totalVal = Number(wo.total) || 0;
     const paidVal = Number(wo.invoice_paid_amount) || 0;
     const balanceVal = wo.invoice_balance_due != null ? Number(wo.invoice_balance_due) : totalVal - paidVal;
@@ -244,15 +245,15 @@ export async function fetchRawReportingRecords(
     records.push({
       appointment_id: null,
       customer_id: null,
-      city: location.city || "Unknown",
-      postal_code: location.postal_code || "Unknown",
-      state: location.state || "Unknown",
-      make: vehicle.make || "Unknown",
-      model: vehicle.model || "Unknown",
-      year: Number(vehicle.year) || 0,
-      fuel_type: vehicle.fuel_type || "Unknown",
-      oil_type: vehicle.oil_type || "Unknown",
-      oil_capacity: Number.parseFloat(vehicle.oil_capacity) || 0,
+      city: location?.city || "Unknown",
+      postal_code: location?.postal_code || "Unknown",
+      state: location?.state || "Unknown",
+      make: vehicle?.make || "Unknown",
+      model: vehicle?.model || "Unknown",
+      year: Number(vehicle?.year) || 0,
+      fuel_type: vehicle?.fuel_type || "Unknown",
+      oil_type: "Unknown",
+      oil_capacity: 0,
       scheduled_time_slot: timeSlotForClock(wo.scheduled_time),
       scheduled_date: wo.scheduled_date || "",
       client_type: "Fleet",
@@ -264,13 +265,13 @@ export async function fetchRawReportingRecords(
       total_billed: totalVal,
       net_collected: paidVal,
       balance_due: Math.max(0, balanceVal),
-      quarts_used: Number(wo.oil_quarts_used) || 0,
+      quarts_used: 0,
       job_count: 1,
       duration_minutes: Number(wo.labor_hours) > 0 ? Number(wo.labor_hours) * 60 : 0,
       actual_minutes: 0,
       travel_minutes: 0,
-      latitude: location.latitude != null ? Number(location.latitude) : undefined,
-      longitude: location.longitude != null ? Number(location.longitude) : undefined,
+      latitude: location?.latitude != null ? Number(location.latitude) : undefined,
+      longitude: location?.longitude != null ? Number(location.longitude) : undefined,
     });
   }
 
@@ -289,7 +290,7 @@ export function pivotDataset(
   // Apply Filter Clauses
   const filtered = records.filter(record => {
     return config.filters.every(filter => {
-      const val = (record as any)[filter.field];
+      const val = record[filter.field as keyof UnifiedReportingRecord];
       if (val === undefined) return true;
 
       switch (filter.operator) {
@@ -321,10 +322,10 @@ export function pivotDataset(
 
   filtered.forEach(record => {
     const rowKey = config.rows.length > 0
-      ? config.rows.map(r => String((record as any)[r] ?? "Unknown")).join(" / ")
+      ? config.rows.map(r => String(record[r as keyof UnifiedReportingRecord] ?? "Unknown")).join(" / ")
       : "Grand Total";
     const colKey = config.columns.length > 0
-      ? config.columns.map(c => String((record as any)[c] ?? "Unknown")).join(" / ")
+      ? config.columns.map(c => String(record[c as keyof UnifiedReportingRecord] ?? "Unknown")).join(" / ")
       : "Metric Value";
 
     rowSet.add(rowKey);
@@ -335,7 +336,7 @@ export function pivotDataset(
 
     config.values.forEach(v => {
       const mField = v.field;
-      const mVal = Number((record as any)[mField]) || 0;
+      const mVal = Number(record[mField as keyof UnifiedReportingRecord]) || 0;
 
       if (pivotData[rowKey][colKey][mField] === undefined) {
         pivotData[rowKey][colKey][mField] = 0;

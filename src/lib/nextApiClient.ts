@@ -87,7 +87,7 @@ export const nextApi = {
       marketing_email_consent: boolean;
       consent_texts: { transactional_sms: string; marketing_sms: string; marketing_email: string };
     }) =>
-      request<{ data: { status: "accepted" | "sent" | "delivered"; provider_message_id: string } }>(
+      request<{ data: { status: "queued"; provider_message_id?: string } }>(
         `/v1/public-booking/${encodeURIComponent(slug)}/confirmation`,
         { method: "POST", body: JSON.stringify(payload) },
       ),

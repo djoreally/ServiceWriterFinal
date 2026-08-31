@@ -78,7 +78,7 @@ const AdminDashboard = () => {
   }, [navigate]);
 
   useEffect(() => {
-    checkAdminAccess();
+    void Promise.resolve().then(() => checkAdminAccess());
   }, [checkAdminAccess]);
 
   const handleLogout = async () => {

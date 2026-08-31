@@ -11,7 +11,7 @@ export type TechTelemetryProps = Record<string, string | number | boolean | null
 
 function capture(event: string, props: TechTelemetryProps = {}) {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
     if (typeof window === "undefined" || !(posthog as any)?.__loaded) return;
     const { workspace_user_id, ...rest } = props;
     const enriched: Record<string, unknown> = { surface: "tech_app", ...rest };

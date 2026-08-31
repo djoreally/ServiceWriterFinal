@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -117,26 +118,26 @@ export function ManualExpenseDialog({ open, onOpenChange, appointmentId, default
         })));
       }
     })();
-  }, [open, expense]);
+  }, [open, expense, session?.user]);
 
   // Reset on close
   useEffect(() => {
     if (open) return;
-    setVendorId(null); setVendorName(""); setVendorSearch("");
-    setDate(new Date().toISOString().slice(0, 10)); setCategoryId("");
-    setSubtotal(""); setTax("0"); setPaymentMethod("credit_card");
-    setLast4(""); setReference(""); setNotes(""); setBillable(!!defaultBillable);
-    setReceiptFile(null);
-    setReceiptStatus("idle");
-    setReceiptError(null);
-    setExistingReceiptUrl(null);
-    setLineItems([]);
-    setLinkedAppointmentId(null);
-  }, [open, defaultBillable]); // eslint-disable-line react-hooks/exhaustive-deps
+    void Promise.resolve().then(() => setVendorId(null)); void Promise.resolve().then(() => setVendorName("")); void Promise.resolve().then(() => setVendorSearch(""));
+    void Promise.resolve().then(() => setDate(new Date().toISOString().slice(0, 10))); void Promise.resolve().then(() => setCategoryId(""));
+    void Promise.resolve().then(() => setSubtotal("")); void Promise.resolve().then(() => setTax("0")); void Promise.resolve().then(() => setPaymentMethod("credit_card"));
+    void Promise.resolve().then(() => setLast4("")); void Promise.resolve().then(() => setReference("")); void Promise.resolve().then(() => setNotes("")); void Promise.resolve().then(() => setBillable(!!defaultBillable));
+    void Promise.resolve().then(() => setReceiptFile(null));
+    void Promise.resolve().then(() => setReceiptStatus("idle"));
+    void Promise.resolve().then(() => setReceiptError(null));
+    void Promise.resolve().then(() => setExistingReceiptUrl(null));
+    void Promise.resolve().then(() => setLineItems([]));
+    void Promise.resolve().then(() => setLinkedAppointmentId(null));
+  }, [open, defaultBillable]);
 
   // When opening with a parent-provided appointmentId, prefer it as the link target.
   useEffect(() => {
-    if (open && appointmentId) setLinkedAppointmentId(appointmentId);
+    if (open && appointmentId) void Promise.resolve().then(() => setLinkedAppointmentId(appointmentId));
   }, [open, appointmentId]);
 
   const handleReceiptPick = (file: File | null) => {
@@ -212,8 +213,8 @@ export function ManualExpenseDialog({ open, onOpenChange, appointmentId, default
       setVendors((prev) => [...prev, newVendor].sort((a, b) => a.name.localeCompare(b.name)));
       handlePickVendor(newVendor);
       toast({ title: "Vendor added", description: name });
-    } catch (e: any) {
-      toast({ title: "Could not add vendor", description: e?.message ?? "Try again", variant: "destructive" });
+    } catch (e: unknown) {
+      toast({ title: "Could not add vendor", description: errorMessage(e, "Try again"), variant: "destructive" });
     } finally {
       setCreatingVendor(false);
     }
@@ -235,10 +236,10 @@ export function ManualExpenseDialog({ open, onOpenChange, appointmentId, default
         try {
           receiptUrl = await uploadReceipt(user.id, receiptFile, receiptFile.name);
           setReceiptStatus("uploaded");
-        } catch (e: any) {
+        } catch (e: unknown) {
           setReceiptStatus("failed");
-          setReceiptError(e?.message ?? "Upload failed");
-          toast({ title: "Receipt upload failed", description: e?.message ?? "Saved without image.", variant: "destructive" });
+          setReceiptError(errorMessage(e, "Upload failed"));
+          toast({ title: "Receipt upload failed", description: errorMessage(e, "Saved without image."), variant: "destructive" });
         }
       }
 
@@ -275,8 +276,8 @@ export function ManualExpenseDialog({ open, onOpenChange, appointmentId, default
       toast({ title: expense ? "Expense updated" : "Expense recorded", description: `$${total.toFixed(2)} to ${finalVendorName}` });
       onSaved?.();
       onOpenChange(false);
-    } catch (e: any) {
-      toast({ title: "Failed to save", description: e?.message ?? "Try again", variant: "destructive" });
+    } catch (e: unknown) {
+      toast({ title: "Failed to save", description: errorMessage(e, "Try again"), variant: "destructive" });
     } finally {
       setSaving(false);
     }

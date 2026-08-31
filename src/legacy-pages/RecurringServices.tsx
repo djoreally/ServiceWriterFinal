@@ -19,13 +19,22 @@ import {
 } from "@/application/queries/recurring-services.query";
 import { createRecurringService } from "@/application/commands/recurring-services.command";
 
+interface RecurringServiceFormData {
+  service_catalog_id?: string;
+  customer_id?: string;
+  vehicle_id?: string;
+  frequency: "days" | "weeks" | "months" | "years";
+  interval: number;
+  start_date: string;
+}
+
 const RecurringServices = () => {
   const [serviceCatalog, setServiceCatalog] = useState<RecurringServiceCatalogItem[]>([]);
   const [customers, setCustomers] = useState<RecurringCustomer[]>([]);
   const [vehicles, setVehicles] = useState<RecurringVehicle[]>([]);
   const [services, setServices] = useState<RecurringServiceRecord[]>([]);
   const [open, setOpen] = useState(false);
-  const [formData, setFormData] = useState<any>({
+  const [formData, setFormData] = useState<RecurringServiceFormData>({
     frequency: 'months',
     interval: 1,
     start_date: format(new Date(), 'yyyy-MM-dd'),
@@ -46,7 +55,7 @@ const RecurringServices = () => {
   }, []);
 
   useEffect(() => {
-    fetchData();
+    void Promise.resolve().then(() => fetchData());
   }, [fetchData]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -148,7 +157,12 @@ const RecurringServices = () => {
               </div>
               <div>
                 <Label>Frequency</Label>
-                <Select value={formData.frequency} onValueChange={(v) => setFormData({...formData, frequency: v})}>
+                <Select
+                  value={formData.frequency}
+                  onValueChange={(frequency: RecurringServiceFormData["frequency"]) =>
+                    setFormData({ ...formData, frequency })
+                  }
+                >
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="days">Days</SelectItem>

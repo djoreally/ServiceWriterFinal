@@ -122,9 +122,6 @@ export const CashDrawerSettings = () => {
   const [discoveringReaders, setDiscoveringReaders] = useState(false);
   const [stripeConnected, setStripeConnected] = useState(false);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
 
   const fetchData = async () => {
     const userId = await getCurrentUserId();
@@ -138,6 +135,10 @@ export const CashDrawerSettings = () => {
     setActiveSession(result.activeSession);
     setLoading(false);
   };
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchData());
+  }, []);
 
   const handleDiscoverReaders = async () => {
     setDiscoveringReaders(true);

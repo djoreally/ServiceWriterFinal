@@ -17,6 +17,7 @@ import {
   type MobileRelease,
   type MobileReleasePlatform,
 } from "@/application/commands/mobile-release-distribution.command";
+import { currentTimeMs } from "@/lib/datetime";
 
 const initialForm = {
   platform: "android" as MobileReleasePlatform,
@@ -35,6 +36,7 @@ export default function FieldCompanion() {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
   const [form, setForm] = useState(initialForm);
+  const [now] = useState(currentTimeMs);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -49,12 +51,12 @@ export default function FieldCompanion() {
   }, [isManager]);
 
   useEffect(() => {
-    void refresh();
+    void Promise.resolve().then(() => refresh());
   }, [refresh]);
 
   const availableReleases = useMemo(
-    () => releases.filter((release) => release.status === "published" && (!release.expires_at || new Date(release.expires_at).getTime() > Date.now())),
-    [releases],
+    () => releases.filter((release) => release.status === "published" && (!release.expires_at || new Date(release.expires_at).getTime() > now)),
+    [releases, now],
   );
 
   const downloadRelease = async (release: MobileRelease) => {

@@ -4,17 +4,23 @@ import { Check, ChevronRight, Circle } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
-const ContextMenu = ContextMenuPrimitive.Root;
+const ContextMenu = (props: React.ComponentProps<typeof ContextMenuPrimitive.Root>) => <ContextMenuPrimitive.Root {...props} />;
+ContextMenu.displayName = ContextMenuPrimitive.Root.displayName;
 
-const ContextMenuTrigger = ContextMenuPrimitive.Trigger;
+const ContextMenuTrigger = (props: React.ComponentProps<typeof ContextMenuPrimitive.Trigger>) => <ContextMenuPrimitive.Trigger {...props} />;
+ContextMenuTrigger.displayName = ContextMenuPrimitive.Trigger.displayName;
 
-const ContextMenuGroup = ContextMenuPrimitive.Group;
+const ContextMenuGroup = (props: React.ComponentProps<typeof ContextMenuPrimitive.Group>) => <ContextMenuPrimitive.Group {...props} />;
+ContextMenuGroup.displayName = ContextMenuPrimitive.Group.displayName;
 
-const ContextMenuPortal = ContextMenuPrimitive.Portal;
+const ContextMenuPortal = (props: React.ComponentProps<typeof ContextMenuPrimitive.Portal>) => <ContextMenuPrimitive.Portal {...props} />;
+ContextMenuPortal.displayName = ContextMenuPrimitive.Portal.displayName;
 
-const ContextMenuSub = ContextMenuPrimitive.Sub;
+const ContextMenuSub = (props: React.ComponentProps<typeof ContextMenuPrimitive.Sub>) => <ContextMenuPrimitive.Sub {...props} />;
+ContextMenuSub.displayName = ContextMenuPrimitive.Sub.displayName;
 
-const ContextMenuRadioGroup = ContextMenuPrimitive.RadioGroup;
+const ContextMenuRadioGroup = (props: React.ComponentProps<typeof ContextMenuPrimitive.RadioGroup>) => <ContextMenuPrimitive.RadioGroup {...props} />;
+ContextMenuRadioGroup.displayName = ContextMenuPrimitive.RadioGroup.displayName;
 
 const ContextMenuSubTrigger = React.forwardRef<
   React.ElementRef<typeof ContextMenuPrimitive.SubTrigger>,

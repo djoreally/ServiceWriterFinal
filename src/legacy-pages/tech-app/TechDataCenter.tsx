@@ -87,14 +87,31 @@ export default function TechDataCenter() {
     setVinLoading(true);
     setVinResult(null);
 
-    const result = await decodeVinEdge(vin);
-    if (result) {
-      setVinResult(result);
-      toast.success("VIN decoded successfully");
-    } else {
+    try {
+      const { data, error } = await decodeVinEdge(vin);
+      if (error) throw error;
+
+      if (
+        typeof data?.year === "number" &&
+        typeof data.make === "string" &&
+        typeof data.model === "string"
+      ) {
+        setVinResult({
+          year: data.year,
+          make: data.make,
+          model: data.model,
+          engine: data.engine ?? undefined,
+        });
+        toast.success("VIN decoded successfully");
+      } else {
+        toast.error("Failed to decode VIN");
+      }
+    } catch (error) {
+      console.error("Failed to decode VIN", error);
       toast.error("Failed to decode VIN");
+    } finally {
+      setVinLoading(false);
     }
-    setVinLoading(false);
   };
 
   const handleOilSearch = async () => {

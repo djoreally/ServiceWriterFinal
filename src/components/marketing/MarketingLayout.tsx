@@ -60,7 +60,7 @@ export function MarketingNav() {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
-    setMobileOpen(false);
+    void Promise.resolve().then(() => setMobileOpen(false));
   }, [location.pathname]);
 
   const isActive = (to: string) => location.pathname === to || location.pathname.startsWith(`${to}/`);

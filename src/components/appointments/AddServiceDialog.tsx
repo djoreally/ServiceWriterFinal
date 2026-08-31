@@ -48,23 +48,6 @@ export function AddServiceDialog({
     quantity: "1",
   });
 
-  useEffect(() => {
-    if (open) {
-      fetchServiceCatalog();
-      if (editService) {
-        setFormData({
-          name: editService.name,
-          description: editService.description || "",
-          price: editService.price.toString(),
-          quantity: editService.quantity.toString(),
-        });
-        setSelectedCatalogId(editService.service_catalog_id || "custom");
-        setIsCustom(!editService.service_catalog_id);
-      } else {
-        resetForm();
-      }
-    }
-  }, [open, editService]);
 
   const fetchServiceCatalog = async () => {
     const { data } = await fetchActiveServiceCatalog();
@@ -78,6 +61,24 @@ export function AddServiceDialog({
     setSelectedCatalogId("");
     setIsCustom(false);
   };
+
+  useEffect(() => {
+    if (open) {
+      void Promise.resolve().then(() => fetchServiceCatalog());
+      if (editService) {
+        void Promise.resolve().then(() => setFormData({
+          name: editService.name,
+          description: editService.description || "",
+          price: editService.price.toString(),
+          quantity: editService.quantity.toString(),
+        }));
+        void Promise.resolve().then(() => setSelectedCatalogId(editService.service_catalog_id || "custom"));
+        void Promise.resolve().then(() => setIsCustom(!editService.service_catalog_id));
+      } else {
+        void Promise.resolve().then(() => resetForm());
+      }
+    }
+  }, [open, editService]);
 
   const handleCatalogSelect = (value: string) => {
     setSelectedCatalogId(value);

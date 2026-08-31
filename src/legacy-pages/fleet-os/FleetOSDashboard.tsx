@@ -110,8 +110,8 @@ const FleetOSDashboard = () => {
   useEffect(() => {
     if (!user?.id) return;
     let cancelled = false;
-    setLoading(true);
-    fetchFleetOpsDashboard(user.id)
+    void Promise.resolve().then(() => setLoading(true));
+    void Promise.resolve().then(() => fetchFleetOpsDashboard(user.id)
       .then((d) => {
         if (cancelled) return;
         setData(d);
@@ -121,7 +121,7 @@ const FleetOSDashboard = () => {
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
-      });
+      }));
     return () => {
       cancelled = true;
     };

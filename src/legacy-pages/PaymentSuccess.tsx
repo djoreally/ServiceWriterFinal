@@ -68,7 +68,7 @@ export default function PaymentSuccess() {
   useEffect(() => {
     // If no session ID and just payment=success, show pending state
     if (paymentStatus === "success" && !sessionId) {
-      setBooking({
+      void Promise.resolve().then(() => setBooking({
         businessName: "Auto Service",
         customerName: "Customer",
         customerEmail: "",
@@ -79,14 +79,14 @@ export default function PaymentSuccess() {
         currency: "USD",
         confirmationNumber: "PROCESSING",
         status: "pending",
-      });
-      setLoading(false);
+      }));
+      void Promise.resolve().then(() => setLoading(false));
       return;
     }
 
     if (!sessionId && !paymentRecordId) {
-      setError("No session information found");
-      setLoading(false);
+      void Promise.resolve().then(() => setError("No session information found"));
+      void Promise.resolve().then(() => setLoading(false));
       return;
     }
 
@@ -113,14 +113,14 @@ export default function PaymentSuccess() {
           setLoading(false);
 
           const commonProps = {
-            organization_id: (result as any).userId ?? undefined,
-            appointment_id: (result as any).appointmentId ?? undefined,
+            organization_id: result.userId ?? undefined,
+            appointment_id: result.appointmentId ?? undefined,
             payment_id: paymentRecordId ?? undefined,
             amount_cents: typeof result.amount === "number"
               ? Math.round(result.amount * 100)
               : undefined,
-            currency: (result as any).currency ?? undefined,
-            provider: (result as any).provider ?? "stripe",
+            currency: result.currency ?? undefined,
+            provider: result.provider ?? "stripe",
           };
           if (result.status === "succeeded") {
             trackPaymentSucceeded(commonProps);

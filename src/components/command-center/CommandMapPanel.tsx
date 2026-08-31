@@ -81,7 +81,7 @@ const CommandMapPanel = ({ jobs, techs, routes = [] }: Props) => {
     try {
       token = requireMapboxToken();
     } catch {
-      setError("Mapbox token not configured.");
+      void Promise.resolve().then(() => setError("Mapbox token not configured."));
       return;
     }
 

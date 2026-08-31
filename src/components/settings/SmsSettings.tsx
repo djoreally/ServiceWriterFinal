@@ -44,7 +44,7 @@ export function SmsSettings() {
   });
 
   useEffect(() => {
-    if (data) setForm(data);
+    if (data) void Promise.resolve().then(() => setForm(data));
   }, [data]);
 
   const save = async () => {

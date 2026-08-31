@@ -116,19 +116,8 @@ export function useWorkOrderValidation(
   // Immediate client-side entries so the summary rail is never empty.
   useEffect(() => {
     dispatch({ type: "SET_VALIDATION", entries: computeClientEntries(state) });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    state.customer,
-    state.location,
-    state.vehicles,
-    state.servicePackage,
-    state.scheduledDate,
-    state.scheduledTime,
-    state.technicianId,
-    state.assignLater,
-    state.poNumber,
-    state.contract,
-  ]);
+
+  }, [state.customer, state.location, state.vehicles, state.servicePackage, state.scheduledDate, state.scheduledTime, state.technicianId, state.assignLater, state.poNumber, state.contract, dispatch, state]);
 
   // Debounced server-authoritative sync once the draft has been persisted.
   const runRef = useRef(0);

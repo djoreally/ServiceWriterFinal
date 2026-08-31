@@ -17,18 +17,18 @@ export async function checkTeamMembership(authUserId: string) {
     supabase
       .from("technicians")
       .select("id")
-      .eq("auth_user_id", authUserId as any)
+      .eq("auth_user_id", authUserId)
       .maybeSingle(),
     supabase
       .from("team_user_links")
       .select("id, role")
-      .eq("member_user_id", authUserId as any)
+      .eq("member_user_id", authUserId)
       .maybeSingle(),
   ]);
 
   const data = techRes.data ?? linkRes.data ?? null;
   const error = techRes.error ?? linkRes.error ?? null;
-  return { data, error } as { data: any; error: any };
+  return { data, error };
 }
 
 export async function signInWithPassword(email: string, password: string) {

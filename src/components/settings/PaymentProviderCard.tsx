@@ -75,43 +75,8 @@ export const PaymentProviderCard = () => {
     }
   }, []);
 
-  useEffect(() => {
-    fetchStatuses();
 
-    if (typeof window !== "undefined") {
-      try {
-        const params = new URLSearchParams(window.location.search);
-
-        // Handle Stripe return
-        if (params.get("stripe_success") === "true") {
-          toast.success("Stripe account setup in progress! Status will update shortly.");
-          window.history.replaceState({}, "", window.location.pathname);
-          setTimeout(fetchStatuses, 2000);
-        } else if (params.get("stripe_refresh") === "true") {
-          toast.info("Please complete your Stripe account setup.");
-          window.history.replaceState({}, "", window.location.pathname);
-        }
-
-        // Handle Square OAuth callback
-        if (params.get("square_callback") === "true") {
-          const code = params.get("code");
-          const error = params.get("error");
-          window.history.replaceState({}, "", window.location.pathname);
-
-          if (error) {
-            toast.error("Square authorization was cancelled or failed.");
-          } else if (code) {
-            // Exchange code for tokens via edge function
-            handleSquareCallback(code);
-          }
-        }
-      } catch {
-        // ignore URL parsing errors
-      }
-    }
-  }, [fetchStatuses]);
-
-  const handleSquareCallback = async (code: string) => {
+  const handleSquareCallback = useCallback(async (code: string) => {
     try {
       setConnecting(true);
       const response = await completeSquareCallback(code);
@@ -129,7 +94,43 @@ export const PaymentProviderCard = () => {
     } finally {
       setConnecting(false);
     }
-  };
+  }, [fetchStatuses]);
+
+  useEffect(() => {
+    void Promise.resolve().then(() => fetchStatuses());
+
+    if (typeof window !== "undefined") {
+      try {
+        const params = new URLSearchParams(window.location.search);
+
+        // Handle Stripe return
+        if (params.get("stripe_success") === "true") {
+          toast.success("Stripe account setup in progress! Status will update shortly.");
+          window.history.replaceState({}, "", window.location.pathname);
+          void Promise.resolve().then(() => setTimeout(fetchStatuses, 2000));
+        } else if (params.get("stripe_refresh") === "true") {
+          toast.info("Please complete your Stripe account setup.");
+          window.history.replaceState({}, "", window.location.pathname);
+        }
+
+        // Handle Square OAuth callback
+        if (params.get("square_callback") === "true") {
+          const code = params.get("code");
+          const error = params.get("error");
+          window.history.replaceState({}, "", window.location.pathname);
+
+          if (error) {
+            toast.error("Square authorization was cancelled or failed.");
+          } else if (code) {
+            // Exchange code for tokens via edge function
+            void Promise.resolve().then(() => handleSquareCallback(code));
+          }
+        }
+      } catch {
+        // ignore URL parsing errors
+      }
+    }
+  }, [fetchStatuses, handleSquareCallback]);
 
   const handleConnectStripe = async () => {
     setConnecting(true);

@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/error-message";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FleetOSLayout } from "@/components/layout/FleetOSLayout";
@@ -112,8 +113,8 @@ const FleetClientNew = () => {
       await createFleetClient(user.id, form, contacts as FleetClientContactPayload[]);
       toast.success(`${form.company_name} added to Fleet OS`);
       navigate("/fleet-os/clients");
-    } catch (err: any) {
-      toast.error(err.message || "Failed to create client");
+    } catch (err: unknown) {
+      toast.error(errorMessage(err, "Failed to create client"));
     } finally {
       setSaving(false);
     }

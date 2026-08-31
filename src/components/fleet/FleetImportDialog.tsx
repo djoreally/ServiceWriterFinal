@@ -38,7 +38,7 @@ import { toast } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
 import * as XLSX from "xlsx";
 
-interface FleetImportDialogProps {
+interface FleetImportDialogProps<T> {
   open: boolean;
   onClose: () => void;
   title: string;
@@ -46,16 +46,16 @@ interface FleetImportDialogProps {
   templateColumns: string[];
   templateFileName: string;
   onValidate: (rows: Record<string, string>[]) => {
-    valid: any[];
+    valid: T[];
     errors: Array<{ row: number; message: string }>;
   };
-  onImport: (validRows: any[]) => Promise<{ inserted: number; errors: string[] }>;
+  onImport: (validRows: T[]) => Promise<{ inserted: number; errors: string[] }>;
   onComplete: () => void;
 }
 
 type ImportStep = "upload" | "preview" | "importing" | "done";
 
-export const FleetImportDialog = ({
+export function FleetImportDialog<T>({
   open,
   onClose,
   title,
@@ -65,13 +65,13 @@ export const FleetImportDialog = ({
   onValidate,
   onImport,
   onComplete,
-}: FleetImportDialogProps) => {
+}: FleetImportDialogProps<T>) {
   const [step, setStep] = useState<ImportStep>("upload");
   const [dragging, setDragging] = useState(false);
   const [fileName, setFileName] = useState("");
   const [rawRows, setRawRows] = useState<Record<string, string>[]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
-  const [validRows, setValidRows] = useState<any[]>([]);
+  const [validRows, setValidRows] = useState<T[]>([]);
   const [validationErrors, setValidationErrors] = useState<Array<{ row: number; message: string }>>([]);
   const [importResult, setImportResult] = useState<{ inserted: number; errors: string[] } | null>(null);
   const [importing, setImporting] = useState(false);
@@ -390,4 +390,4 @@ export const FleetImportDialog = ({
       </DialogContent>
     </Dialog>
   );
-};
+}

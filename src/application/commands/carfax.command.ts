@@ -3,8 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
-function object(value: unknown): Record<string, any> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 export async function saveCarfaxSettings(settings: {
@@ -61,8 +61,27 @@ interface CarfaxExportVehicle {
   vin: string | null; make: string | null; model: string | null; year: number | null;
   license_plate: string | null; plate_state: string | null; mileage: number | null; odometer_measure: string | null;
 }
+interface CarfaxSourceVehicle {
+  vin: string | null; make: string | null; model: string | null; year: number | null;
+  license_plate: string | null; plate_region: string | null; mileage: number | null; mileage_unit: string | null;
+}
 interface CarfaxExportLaborItem { description: string | null; }
 interface CarfaxExportServiceItem { description: string | null; quantity: number | null; }
+interface CarfaxSourceLine {
+  item_type: string | null;
+  description: string | null;
+  quantity: number | null;
+  labor_hours: number | null;
+}
+interface CarfaxSourceRow {
+  id: string;
+  work_performed: string | null;
+  metadata: unknown;
+  completed_at: string | null;
+  created_at: string;
+  vehicles: CarfaxSourceVehicle | null;
+  service_record_line_items: CarfaxSourceLine[] | null;
+}
 export interface CarfaxExportServiceRecord {
   id: string; service_number: string | null; service_date: string | null; service_type: string | null;
   description: string | null; created_at: string; vehicles: CarfaxExportVehicle;
@@ -86,12 +105,12 @@ export async function fetchCarfaxExportServices(exportType: "PROD" | "HIST"): Pr
   if (error) throw error;
 
   const today = new Date().toISOString().slice(0, 10);
-  return ((data ?? []) as any[])
+  return ((data ?? []) as unknown as CarfaxSourceRow[])
     .map((row): CarfaxExportServiceRecord => {
       const meta = object(row.metadata);
       const completedDate = (row.completed_at ?? row.created_at)?.slice(0, 10) ?? null;
-      const vehicle = row.vehicles ?? {};
-      const lines = (row.service_record_line_items ?? []) as any[];
+      const vehicle = row.vehicles;
+      const lines = row.service_record_line_items ?? [];
       return {
         id: row.id,
         service_number: meta.service_number ? String(meta.service_number) : row.id.slice(0, 8).toUpperCase(),
@@ -100,14 +119,14 @@ export async function fetchCarfaxExportServices(exportType: "PROD" | "HIST"): Pr
         description: row.work_performed ?? (meta.description ? String(meta.description) : null),
         created_at: row.created_at,
         vehicles: {
-          vin: meta.vin ? String(meta.vin) : vehicle.vin ?? null,
-          make: vehicle.make ?? null,
-          model: vehicle.model ?? null,
-          year: vehicle.year ?? null,
-          license_plate: vehicle.license_plate ?? null,
-          plate_state: vehicle.plate_region ?? null,
-          mileage: meta.mileage != null ? Number(meta.mileage) : vehicle.mileage ?? null,
-          odometer_measure: meta.odometer_measure ? String(meta.odometer_measure) : vehicle.mileage_unit ?? "MI",
+          vin: meta.vin ? String(meta.vin) : vehicle?.vin ?? null,
+          make: vehicle?.make ?? null,
+          model: vehicle?.model ?? null,
+          year: vehicle?.year ?? null,
+          license_plate: vehicle?.license_plate ?? null,
+          plate_state: vehicle?.plate_region ?? null,
+          mileage: meta.mileage != null ? Number(meta.mileage) : vehicle?.mileage ?? null,
+          odometer_measure: meta.odometer_measure ? String(meta.odometer_measure) : vehicle?.mileage_unit ?? "MI",
         },
         labor_items: lines.filter((line) => line.item_type === "labor" || Number(line.labor_hours ?? 0) > 0).map((line) => ({ description: line.description ?? null })),
         service_items: lines.filter((line) => line.item_type !== "labor").map((line) => ({ description: line.description ?? null, quantity: line.quantity == null ? null : Number(line.quantity) })),

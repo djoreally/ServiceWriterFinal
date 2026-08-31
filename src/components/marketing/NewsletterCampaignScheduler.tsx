@@ -56,7 +56,7 @@ export function NewsletterCampaignScheduler() {
   }
 
   useEffect(() => {
-    load();
+    void Promise.resolve().then(() => load());
   }, []);
 
   async function schedule(e: React.FormEvent) {

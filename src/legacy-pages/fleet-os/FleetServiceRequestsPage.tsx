@@ -61,7 +61,7 @@ function FleetServiceRequestsWorkspace() {
     finally { setLoading(false); }
   }, [searchParams]);
 
-  useEffect(() => { void load(); return subscribeFleetServiceRequests(() => void load()); }, [load]);
+  useEffect(() => { void Promise.resolve().then(() => load()); return subscribeFleetServiceRequests(() => void load()); }, [load]);
   useEffect(() => {
     const handle = window.setTimeout(() => {
       setSearching(true);

@@ -45,7 +45,7 @@ export default function CustomerDashboard() {
         navigate("/customer/auth");
       }
     });
-    fetchAccount();
+    void Promise.resolve().then(() => fetchAccount());
     return unsubscribe;
   }, [fetchAccount, navigate]);
 

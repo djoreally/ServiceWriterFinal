@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { FleetOSLayout } from "@/components/layout/FleetOSLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,20 +16,21 @@ import type { FleetContract } from "@/application/queries/fleet-contracts.query"
 
 const FleetContractsPage = () => {
   const { user } = useAuth();
+  const userId = user?.id ?? "";
   const [contracts, setContracts] = useState<FleetContract[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<FleetContract | null>(null);
 
-  const loadContracts = async () => {
-    if (!user?.id) return;
-    const data = await fetchFleetContracts(user.id);
+  const loadContracts = useCallback(async () => {
+    if (!userId) return;
+    const data = await fetchFleetContracts(userId);
     setContracts(data);
     setLoading(false);
-  };
+  }, [userId]);
 
-  useEffect(() => { loadContracts(); }, [user?.id]);
+  useEffect(() => { void Promise.resolve().then(() => loadContracts()); }, [loadContracts]);
 
   const filtered = contracts.filter((c) => {
     if (!search) return true;

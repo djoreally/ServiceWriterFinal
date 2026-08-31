@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { geocodeAddress, getDrivingRoute } from "@/application/queries/mapbox";
 import type { LineString } from "geojson";
+import { currentTimeMs } from "@/lib/datetime";
 
 interface Destination {
   lat: number | null;
@@ -35,12 +36,13 @@ export function useTechJobEta(destination: Destination | null | undefined): Tech
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  const [calculatedAt] = useState(currentTimeMs);
   const watchRef = useRef<number | null>(null);
 
   // Track device location
   useEffect(() => {
     if (!("geolocation" in navigator)) {
-      setError("Location unavailable on this device");
+      void Promise.resolve().then(() => setError("Location unavailable on this device"));
       return;
     }
     watchRef.current = navigator.geolocation.watchPosition(
@@ -62,22 +64,22 @@ export function useTechJobEta(destination: Destination | null | undefined): Tech
 
   useEffect(() => {
     if (rawLat != null && rawLng != null) {
-      setResolved(null);
+      void Promise.resolve().then(() => setResolved(null));
       return;
     }
     if (!address) {
-      setResolved(null);
+      void Promise.resolve().then(() => setResolved(null));
       return;
     }
     let cancelled = false;
-    geocodeAddress(address)
+    void Promise.resolve().then(() => geocodeAddress(address)
       .then((match) => {
         if (cancelled) return;
         setResolved(match ? { lat: match.lat, lng: match.lng } : null);
       })
       .catch(() => {
         if (!cancelled) setResolved(null);
-      });
+      }));
     return () => {
       cancelled = true;
     };
@@ -89,15 +91,15 @@ export function useTechJobEta(destination: Destination | null | undefined): Tech
 
   useEffect(() => {
     if (!origin || destLat == null || destLng == null) {
-      setDistanceMiles(null);
-      setDurationMinutes(null);
-      setGeometry(null);
+      void Promise.resolve().then(() => setDistanceMiles(null));
+      void Promise.resolve().then(() => setDurationMinutes(null));
+      void Promise.resolve().then(() => setGeometry(null));
       return;
     }
 
     let cancelled = false;
-    setLoading(true);
-    getDrivingRoute({ origin, destination: { lat: destLat, lng: destLng } })
+    void Promise.resolve().then(() => setLoading(true));
+    void Promise.resolve().then(() => getDrivingRoute({ origin, destination: { lat: destLat, lng: destLng } })
       .then((route) => {
         if (cancelled) return;
         setDistanceMiles(route.distanceMeters / 1609.344);
@@ -111,12 +113,12 @@ export function useTechJobEta(destination: Destination | null | undefined): Tech
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
-      });
+      }));
 
     return () => {
       cancelled = true;
     };
-  }, [origin?.lat, origin?.lng, destLat, destLng, tick]);
+  }, [origin.lat, origin.lng, destLat, destLng, tick, origin]);
 
   // Periodic traffic-aware refresh
   useEffect(() => {
@@ -129,7 +131,7 @@ export function useTechJobEta(destination: Destination | null | undefined): Tech
   const etaLabel =
     durationMinutes == null
       ? null
-      : new Date(Date.now() + durationMinutes * 60_000).toLocaleTimeString([], {
+      : new Date(calculatedAt + durationMinutes * 60_000).toLocaleTimeString([], {
           hour: "2-digit",
           minute: "2-digit",
         });

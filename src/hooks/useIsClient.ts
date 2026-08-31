@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 export default function useIsClient(): boolean {
   const [isClient, setIsClient] = useState(false);
   useEffect(() => {
-    setIsClient(typeof window !== 'undefined');
+    void Promise.resolve().then(() => setIsClient(typeof window !== 'undefined'));
   }, []);
   return isClient;
 }

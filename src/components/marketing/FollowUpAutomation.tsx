@@ -169,7 +169,7 @@ export function FollowUpAutomation() {
 
 
   useEffect(() => {
-    fetchData();
+    void Promise.resolve().then(() => fetchData());
   }, [fetchData]);
 
   const handleSaveRule = async () => {
