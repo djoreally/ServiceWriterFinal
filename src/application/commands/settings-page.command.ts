@@ -40,7 +40,10 @@ export async function uploadCoverImage(userId: string, file: File) {
 export async function upsertBusinessProfile(_userId: string, data: Record<string, unknown>) {
   const context = await resolveCurrentWorkspace();
   if (!context?.workspaceId) {
-    return { data: null, error: new Error("No active workspace found") };
+    return {
+      data: null,
+      error: { code: "workspace_not_found", message: "No active workspace found" },
+    };
   }
 
   const workspacePatch: Record<string, unknown> = {};
