@@ -59,21 +59,26 @@ const DEFAULT_PROFILE: Omit<BusinessProfileSettings, "user_id"> = {
 export type WorkspaceContext = { workspaceId: string; userId: string };
 type WorkspaceSettingsRow = Database["public"]["Tables"]["workspace_settings"]["Row"];
 
-export async function resolveCurrentWorkspace(): Promise<WorkspaceContext | null> {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) return null;
+type CachedWorkspaceContext = {
+  key: string;
+  value: WorkspaceContext | null;
+  expiresAt: number;
+};
 
-  const selectedWorkspaceId = getSelectedWorkspaceId();
+const WORKSPACE_CONTEXT_TTL_MS = 5 * 60 * 1000;
+const BUSINESS_SETTINGS_TTL_MS = 5 * 60 * 1000;
+let workspaceContextCache: CachedWorkspaceContext | null = null;
+let workspaceContextInFlight: { key: string; promise: Promise<WorkspaceContext | null> } | null = null;
+const businessSettingsCache = new Map<string, { value: BusinessProfileSettings | null; expiresAt: number }>();
+const businessSettingsInFlight = new Map<string, Promise<BusinessProfileSettings | null>>();
+
+async function resolveWorkspaceFromDatabase(userId: string, selectedWorkspaceId: string | null): Promise<WorkspaceContext | null> {
   let membershipQuery = productionSupabase
     .from("workspace_members")
     .select("workspace_id")
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .eq("is_active", true);
 
-  // Every workspace-scoped surface must honor the workspace selected in the
-  // application shell. Previously this resolver used an unordered limit(1),
-  // so users with multiple memberships could see the dashboard for one shop
-  // while the appointments API and calendar loaded another.
   if (selectedWorkspaceId) {
     membershipQuery = membershipQuery.eq("workspace_id", selectedWorkspaceId);
   }
@@ -82,11 +87,12 @@ export async function resolveCurrentWorkspace(): Promise<WorkspaceContext | null
     .limit(1)
     .maybeSingle();
   if (membershipError) throw membershipError;
+
   if (!membership && selectedWorkspaceId) {
     const fallback = await productionSupabase
       .from("workspace_members")
       .select("workspace_id")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .eq("is_active", true)
       .limit(1)
       .maybeSingle();
@@ -94,17 +100,74 @@ export async function resolveCurrentWorkspace(): Promise<WorkspaceContext | null
     membershipError = fallback.error;
     if (membershipError) throw membershipError;
   }
-  if (membership?.workspace_id) return { workspaceId: membership.workspace_id, userId: user.id };
+
+  if (membership?.workspace_id) {
+    return { workspaceId: membership.workspace_id, userId };
+  }
 
   const { data: owned, error: ownedError } = await productionSupabase
     .from("workspaces")
     .select("id")
-    .eq("created_by", user.id)
+    .eq("created_by", userId)
     .eq("is_active", true)
     .limit(1)
     .maybeSingle();
   if (ownedError) throw ownedError;
-  return owned?.id ? { workspaceId: owned.id, userId: user.id } : null;
+  return owned?.id ? { workspaceId: owned.id, userId } : null;
+}
+
+/**
+ * Resolve the active workspace once per user/selection and share the same
+ * in-flight request across concurrent page loaders. The selected workspace id
+ * is part of the cache key, so changing workspaces bypasses the old entry
+ * immediately without requiring a full application reload.
+ */
+export async function resolveCurrentWorkspace(): Promise<WorkspaceContext | null> {
+  const { data: { user } } = await getCurrentAuthUser();
+  if (!user) return null;
+
+  const selectedWorkspaceId = getSelectedWorkspaceId();
+  const key = `${user.id}:${selectedWorkspaceId ?? "default"}`;
+  const now = Date.now();
+
+  if (workspaceContextCache?.key === key && workspaceContextCache.expiresAt > now) {
+    return workspaceContextCache.value;
+  }
+
+  if (workspaceContextInFlight?.key === key) {
+    return workspaceContextInFlight.promise;
+  }
+
+  const promise = resolveWorkspaceFromDatabase(user.id, selectedWorkspaceId)
+    .then((value) => {
+      workspaceContextCache = {
+        key,
+        value,
+        expiresAt: Date.now() + WORKSPACE_CONTEXT_TTL_MS,
+      };
+      return value;
+    })
+    .finally(() => {
+      if (workspaceContextInFlight?.key === key) workspaceContextInFlight = null;
+    });
+
+  workspaceContextInFlight = { key, promise };
+  return promise;
+}
+
+export function resetCurrentWorkspaceCache(): void {
+  workspaceContextCache = null;
+  workspaceContextInFlight = null;
+}
+
+export function invalidateBusinessSettings(workspaceId?: string): void {
+  if (workspaceId) {
+    businessSettingsCache.delete(workspaceId);
+    businessSettingsInFlight.delete(workspaceId);
+    return;
+  }
+  businessSettingsCache.clear();
+  businessSettingsInFlight.clear();
 }
 
 function parseTerminology(value: unknown): Terminology {
@@ -131,44 +194,68 @@ function toJson(value: unknown): Json {
   return JSON.parse(JSON.stringify(value)) as Json;
 }
 
+async function loadBusinessSettings(context: WorkspaceContext): Promise<BusinessProfileSettings | null> {
+  const [{ data: workspace, error: workspaceError }, { data: settings, error: settingsError }] = await Promise.all([
+    productionSupabase.from("workspaces").select("id, name, slug, timezone, currency_code").eq("id", context.workspaceId).maybeSingle(),
+    productionSupabase.from("workspace_settings").select("*").eq("workspace_id", context.workspaceId).maybeSingle(),
+  ]);
+  if (workspaceError) throw workspaceError;
+  if (settingsError) throw settingsError;
+  if (!workspace) return null;
+
+  const operational = readOperationalObject(settings?.operational_settings);
+  const coordinates = readOperationalObject(operational.service_coordinates);
+  const serviceCoordinates = Number.isFinite(Number(coordinates.lat)) && Number.isFinite(Number(coordinates.lng))
+    ? { lat: Number(coordinates.lat), lng: Number(coordinates.lng) } : null;
+
+  return {
+    id: context.workspaceId,
+    user_id: context.userId,
+    business_name: workspace.name || "",
+    owner_name: settings?.owner_name || "",
+    phone: settings?.phone || "",
+    email: settings?.email || "",
+    address: buildAddress(settings),
+    logo_url: settings?.logo_url || "",
+    terminology: parseTerminology(settings?.terminology),
+    date_format: typeof operational.date_format === "string" ? operational.date_format : DEFAULT_PROFILE.date_format,
+    timezone: workspace.timezone || (typeof operational.timezone === "string" ? operational.timezone : DEFAULT_PROFILE.timezone),
+    currency: workspace.currency_code || (typeof operational.currency === "string" ? operational.currency : DEFAULT_PROFILE.currency),
+    opening_time: settings?.opening_time || DEFAULT_PROFILE.opening_time,
+    closing_time: settings?.closing_time || DEFAULT_PROFILE.closing_time,
+    working_days: Array.isArray(settings?.working_days) ? settings.working_days : DEFAULT_PROFILE.working_days,
+    booking_slug: settings?.booking_slug || workspace.slug || "",
+    service_radius_miles: Number(settings?.service_radius_miles ?? DEFAULT_PROFILE.service_radius_miles),
+    service_address: typeof operational.service_address === "string" ? operational.service_address : buildAddress(settings),
+    service_coordinates: serviceCoordinates,
+  };
+}
+
 export async function fetchBusinessSettings(): Promise<BusinessProfileSettings | null> {
   try {
     const context = await resolveCurrentWorkspace();
     if (!context) return null;
-    const [{ data: workspace, error: workspaceError }, { data: settings, error: settingsError }] = await Promise.all([
-      productionSupabase.from("workspaces").select("id, name, slug, timezone, currency_code").eq("id", context.workspaceId).maybeSingle(),
-      productionSupabase.from("workspace_settings").select("*").eq("workspace_id", context.workspaceId).maybeSingle(),
-    ]);
-    if (workspaceError) throw workspaceError;
-    if (settingsError) throw settingsError;
-    if (!workspace) return null;
 
-    const operational = readOperationalObject(settings?.operational_settings);
-    const coordinates = readOperationalObject(operational.service_coordinates);
-    const serviceCoordinates = Number.isFinite(Number(coordinates.lat)) && Number.isFinite(Number(coordinates.lng))
-      ? { lat: Number(coordinates.lat), lng: Number(coordinates.lng) } : null;
+    const cached = businessSettingsCache.get(context.workspaceId);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
 
-    return {
-      id: context.workspaceId,
-      user_id: context.userId,
-      business_name: workspace.name || "",
-      owner_name: settings?.owner_name || "",
-      phone: settings?.phone || "",
-      email: settings?.email || "",
-      address: buildAddress(settings),
-      logo_url: settings?.logo_url || "",
-      terminology: parseTerminology(settings?.terminology),
-      date_format: typeof operational.date_format === "string" ? operational.date_format : DEFAULT_PROFILE.date_format,
-      timezone: workspace.timezone || (typeof operational.timezone === "string" ? operational.timezone : DEFAULT_PROFILE.timezone),
-      currency: workspace.currency_code || (typeof operational.currency === "string" ? operational.currency : DEFAULT_PROFILE.currency),
-      opening_time: settings?.opening_time || DEFAULT_PROFILE.opening_time,
-      closing_time: settings?.closing_time || DEFAULT_PROFILE.closing_time,
-      working_days: Array.isArray(settings?.working_days) ? settings.working_days : DEFAULT_PROFILE.working_days,
-      booking_slug: settings?.booking_slug || workspace.slug || "",
-      service_radius_miles: Number(settings?.service_radius_miles ?? DEFAULT_PROFILE.service_radius_miles),
-      service_address: typeof operational.service_address === "string" ? operational.service_address : buildAddress(settings),
-      service_coordinates: serviceCoordinates,
-    };
+    const existingRequest = businessSettingsInFlight.get(context.workspaceId);
+    if (existingRequest) return existingRequest;
+
+    const request = loadBusinessSettings(context)
+      .then((value) => {
+        businessSettingsCache.set(context.workspaceId, {
+          value,
+          expiresAt: Date.now() + BUSINESS_SETTINGS_TTL_MS,
+        });
+        return value;
+      })
+      .finally(() => {
+        businessSettingsInFlight.delete(context.workspaceId);
+      });
+
+    businessSettingsInFlight.set(context.workspaceId, request);
+    return await request;
   } catch {
     return null;
   }
@@ -216,6 +303,7 @@ export async function saveBusinessSettings(profile: BusinessProfileSettings, slu
     }).eq("workspace_id", context.workspaceId);
     if (settingsError) throw settingsError;
 
+    invalidateBusinessSettings(context.workspaceId);
     return { success: true };
   } catch (err: unknown) {
     if (errorMessage(err)?.includes("unique") || errorMessage(err)?.includes("duplicate")) {
