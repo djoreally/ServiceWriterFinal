@@ -1,4 +1,4 @@
-import { productionSupabase, supabase } from "@/integrations/supabase/client";
+import { productionSupabase } from "@/integrations/supabase/client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { buildCommandCenterBuckets } from "@/lib/command-center-filters";
 import { format } from "date-fns";
@@ -97,11 +97,6 @@ interface WorkOrderJobSource {
   locations: OperationalLocationSource | null;
   work_order_assignments: Array<{ user_id: string; assigned_at: string; unassigned_at: string | null }>;
 }
-
-type DispatchOperationalViewRow = Omit<Partial<OperationalJobRow>, "source"> & {
-  id?: string;
-  source?: string;
-};
 
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -269,22 +264,9 @@ async function fetchCanonicalJobs(
   const context = await resolveCurrentWorkspace();
   if (!context) return { data: [], error: null };
   const workspaceId = context.workspaceId;
-  // The compatibility view is intentionally absent from the generated schema.
-  // Prefer it when available because it is the canonical dispatch read model;
-  // fall back to normalized production tables on older deployments.
-  const compatibilityClient = supabase as any;
-  const viewResult = await compatibilityClient.from("dispatch_operational_jobs_v1")
-    .select("*")
-    .eq("user_id", context.userId)
-    .gte("scheduled_date", fromDate)
-    .lte("scheduled_date", toDate)
-    .order("scheduled_date");
-  if (!viewResult.error && Array.isArray(viewResult.data)) {
-    return {
-      data: (viewResult.data as DispatchOperationalViewRow[]).map(normalizeDispatchViewRow),
-      error: null,
-    };
-  }
+  // Always read normalized workspace tables. The old compatibility view is
+  // keyed by a legacy user ID and can return a different dataset than the
+  // workspace-scoped appointment list.
   const startIso = new Date(`${fromDate}T00:00:00`).toISOString();
   const endIso = new Date(`${toDate}T23:59:59.999`).toISOString();
 

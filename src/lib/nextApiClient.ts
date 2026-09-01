@@ -143,7 +143,22 @@ export const nextApi = {
     accept: (id: string, token: string) => request<{ data: InvitationRecord }>(`/v1/invitations/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify({ token }) }),
   },
   customers: {
-    list: (workspaceId: string, search?: string) => request<{ data: unknown[] }>(`/v1/customers?workspace_id=${encodeURIComponent(workspaceId)}${search ? `&search=${encodeURIComponent(search)}` : ""}`),
+    list: async (workspaceId: string, search?: string) => {
+      // Customer records are paginated by the API. Fetch every page so the
+      // dashboard never silently presents only the first 25 imported records.
+      const pageSize = 100;
+      const data: unknown[] = [];
+      let offset = 0;
+      for (;;) {
+        const response = await request<{ data: unknown[] }>(
+          `/v1/customers?workspace_id=${encodeURIComponent(workspaceId)}&limit=${pageSize}&offset=${offset}${search ? `&search=${encodeURIComponent(search)}` : ""}`,
+        );
+        data.push(...response.data);
+        if (response.data.length < pageSize) break;
+        offset += pageSize;
+      }
+      return { data };
+    },
     create: (payload: Record<string, unknown>) => request<{ data: unknown }>("/v1/customers", { method: "POST", body: JSON.stringify(payload) }),
     update: (id: string, payload: Record<string, unknown>) => request<{ data: unknown }>(`/v1/customers/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
     remove: (workspaceId: string, id: string) => request<{ data: unknown }>(`/v1/customers/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "DELETE" }),

@@ -19,7 +19,12 @@ export async function POST(request: Request) {
   } catch (error) {
     const details = error instanceof Error
       ? { name: error.name, message: error.message, stack: error.stack?.split("\\n").slice(0, 4).join("\\n") }
-      : { name: typeof error, message: "Non-Error exception thrown" };
+      : {
+        name: typeof error,
+        message: typeof error === "object" && error !== null
+          ? JSON.stringify(error, Object.getOwnPropertyNames(error)).slice(0, 1000)
+          : String(error),
+      };
     console.error("enginemailer_webhook_failed", {
       requestId,
       route: "/api/v1/webhooks/enginemailer",

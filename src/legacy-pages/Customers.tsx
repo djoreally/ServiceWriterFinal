@@ -33,9 +33,8 @@ import { useCustomerImport } from "@/hooks/useDataImport";
 import { formatDateLabel } from "@/lib/datetime";
 import { fetchCustomerOverview } from "@/application/queries";
 import { createCustomer, updateCustomer, deleteCustomer } from "@/application/commands";
-import { fetchCustomerOverviewFromNextApi, fetchCustomerOverviewFromOffline } from "@/application/queries/customers.query";
+import { fetchCustomerOverviewFromNextApi } from "@/application/queries/customers.query";
 import { useWorkspaceSelection } from "@/hooks/useWorkspaceSelection";
-import { isOfflineEligibleForCurrentUser } from "@/offline/rollout";
 import { ListPagination, usePageSlice, DEFAULT_PAGE_SIZE } from "@/components/ui/list-pagination";
 
 interface Customer {
@@ -114,20 +113,9 @@ const Customers = () => {
     setCustomersError(null); setVehiclesError(null); setServicesError(null);
 
     try {
-      if (await isOfflineEligibleForCurrentUser()) {
-        const offlineSnapshot = await fetchCustomerOverviewFromOffline();
-        if (offlineSnapshot) {
-          setCustomers(offlineSnapshot.customers);
-          setVehicleCounts(offlineSnapshot.vehicleCounts);
-          setLastServiceDates(offlineSnapshot.lastServiceDates);
-
-          // Local-first: render cached data immediately, then refresh from remote.
-          setCustomersLoading(false);
-          setVehiclesLoading(false);
-          setServicesLoading(false);
-        }
-      }
-
+      // The customer directory is the source of truth for the active workspace.
+      // Rendering an offline snapshot here can mix an old/demo cache with the
+      // signed-in account while the canonical request is still in flight.
       const overview = selectedWorkspaceId
         ? await fetchCustomerOverviewFromNextApi(selectedWorkspaceId)
         : await fetchCustomerOverview();

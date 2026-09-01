@@ -406,8 +406,10 @@ export function DispatchBoard() {
       setVans(data.vans);
       setJobs(data.jobs);
       setInventoryCount(data.inventoryCount);
-    } catch {
-      // silently handle
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load dispatch jobs";
+      console.error("Failed to load dispatch jobs", error);
+      toast.error(message);
     } finally {
       setLoading(false);
     }

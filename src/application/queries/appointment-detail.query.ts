@@ -1,8 +1,6 @@
 /**
  * Appointment Detail Query — Read operations for the AppointmentDetail page.
  */
-import { supabase } from "@/integrations/supabase/client";
-
 import { getCurrentAuthUser as resolveCurrentAuthUser } from "@/lib/auth/current-user";
 
 /** Get the current authenticated user. */
@@ -17,19 +15,15 @@ import { nextApi } from "@/lib/nextApiClient";
 /** Fetch a single appointment with all related data. */
 export async function fetchAppointmentWithRelations(id: string, _userId: string) {
   const context = await resolveCurrentWorkspace();
-  if (context) {
-    try {
-      const response = await nextApi.appointments.get(context.workspaceId, id);
-      if (response.data) return { data: response.data as any, error: null };
-    } catch (e) {
-      console.warn("[AppointmentDetail] Next API get failed, falling back:", e);
-    }
+  if (!context) return { data: null, error: new Error("No active workspace is available.") };
+  try {
+    const response = await nextApi.appointments.get(context.workspaceId, id);
+    return { data: response.data as any, error: null };
+  } catch (error) {
+    // Do not fall back to the legacy client: it can read a stale local/demo
+    // dataset and does not enforce the active workspace boundary.
+    return { data: null, error };
   }
-  return supabase
-    .from("appointments")
-    .select("*, customer:customers(*), vehicle:vehicles(*), service_catalog:service_catalog(*), service_record_id")
-    .eq("id", id)
-    .single();
 }
 
 /** Fetch vehicle specification data (oil type, capacity, engine). */

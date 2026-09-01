@@ -124,10 +124,13 @@ export async function subscribeToDispatchChanges(onUpdate: () => void): Promise<
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return () => undefined;
 
+  const context = await resolveCurrentWorkspace();
+  if (!context) return () => undefined;
+
   const channel = supabase
-    .channel(`dispatch-updates:${user.id}`)
-    .on("postgres_changes", { event: "*", schema: "public", table: "appointments", filter: `user_id=eq.${user.id}` }, onUpdate)
-    .on("postgres_changes", { event: "*", schema: "public", table: "technicians", filter: `user_id=eq.${user.id}` }, onUpdate)
+    .channel(`dispatch-updates:${context.workspaceId}`)
+    .on("postgres_changes", { event: "*", schema: "public", table: "appointments", filter: `workspace_id=eq.${context.workspaceId}` }, onUpdate)
+    .on("postgres_changes", { event: "*", schema: "public", table: "work_orders", filter: `workspace_id=eq.${context.workspaceId}` }, onUpdate)
     .subscribe();
 
   return () => { supabase.removeChannel(channel); };
