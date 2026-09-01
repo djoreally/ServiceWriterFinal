@@ -40,9 +40,6 @@ const compatibilityKeys = [
 ] as const;
 
 function parseLocalTimestamp(date: string, time: string) {
-  // The preserved app's scheduling UI operates in the workspace's local time.
-  // Current MOMS workspace is America/New_York; canonical API callers that
-  // already have ISO timestamps should use starts_at/ends_at directly.
   const raw = new Date(`${date}T${time}`);
   if (Number.isNaN(raw.getTime())) throw new Error("Invalid appointment date/time.");
   return raw;
@@ -55,7 +52,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
     const { data, error } = await supabase
       .from("appointments")
-      .select("*,customers(id,first_name,last_name,email,phone),vehicles(id,customer_id,year,make,model,vin,license_plate,plate_region,color,mileage,notes)")
+      .select("*,customers(id,first_name,last_name,company_name,email,phone,address_line1,address_line2,city,region,postal_code,notes),vehicles(id,customer_id,year,make,model,vin,license_plate,plate_region,color,mileage,notes)")
       .eq("workspace_id", workspaceId)
       .eq("id", id)
       .single();
@@ -71,7 +68,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const id = z.string().uuid().parse((await context.params).id);
     const body = patchSchema.parse(await request.json());
     const { workspace_id } = body;
-    const { supabase } = await requireWorkspaceMember(workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher"]);
+    const { supabase } = await requireWorkspaceMember(
+      workspace_id,
+      ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher"],
+      request,
+    );
 
     const { data: current, error: currentError } = await supabase
       .from("appointments")
@@ -143,11 +144,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (error) throw error;
     try {
       const { data: workspace } = await supabase.from("workspaces").select("name,timezone").eq("id", workspace_id).single();
-      const metadata = data.metadata && typeof data.metadata === "object" && !Array.isArray(data.metadata)
+      const updatedMetadata = data.metadata && typeof data.metadata === "object" && !Array.isArray(data.metadata)
         ? data.metadata as Record<string, unknown>
         : {};
-      const customerUrl = typeof metadata.manage_url === "string" && /^https?:\/\//i.test(metadata.manage_url)
-        ? metadata.manage_url
+      const customerUrl = typeof updatedMetadata.manage_url === "string" && /^https?:\/\//i.test(updatedMetadata.manage_url)
+        ? updatedMetadata.manage_url
         : new URL("/my-bookings", request.url).toString();
       const changedFields = Object.keys(body).filter((key) => key !== "workspace_id");
       const eventKey = data.status === "cancelled" && current.status !== "cancelled"
