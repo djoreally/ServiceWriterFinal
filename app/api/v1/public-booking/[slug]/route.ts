@@ -9,9 +9,25 @@ const querySchema = z.object({
 });
 
 type RpcRow = Record<string, unknown>;
+type Requirement = "basic_vehicle" | "oil_fitment" | "tire_fitment" | "tire_quantity" | "detailing_assessment";
 
-function unavailable() {
-  return new Error("public_booking_unavailable");
+function unavailable() { return new Error("public_booking_unavailable"); }
+
+function normalizedRequirements(row: RpcRow): Requirement[] {
+  const requirements = new Set<Requirement>(["basic_vehicle"]);
+  const stored = Array.isArray(row.booking_requirements) ? row.booking_requirements : [];
+  for (const requirement of stored) {
+    if (["basic_vehicle", "oil_fitment", "tire_fitment", "tire_quantity", "detailing_assessment"].includes(String(requirement))) requirements.add(requirement as Requirement);
+  }
+  const identity = [row.category_id, row.category, row.name].filter((value): value is string => typeof value === "string").join(" ").toLowerCase().replaceAll("_", " ");
+  if (/\b(oil|lube|lubrication|oil fluids?|fluid service)\b/.test(identity)) requirements.add("oil_fitment");
+  if (/\b(tire|tires|tyre|wheel|wheels|tpms|rotation)\b/.test(identity)) requirements.add("tire_fitment");
+  if (/\b(detail|detailing|wash|ceramic|coating|wax|polish|interior|exterior)\b/.test(identity)) requirements.add("detailing_assessment");
+  return Array.from(requirements);
+}
+
+function normalizeCatalog(rows: RpcRow[]): RpcRow[] {
+  return rows.map((row) => ({ ...row, booking_requirements: normalizedRequirements(row) }));
 }
 
 async function profileForSlug(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, slug: string) {
@@ -25,10 +41,7 @@ export async function GET(request: Request, context: { params: Promise<{ slug: s
     const { slug: rawSlug } = await context.params;
     const slug = slugSchema.parse(rawSlug);
     const url = new URL(request.url);
-    const query = querySchema.parse({
-      section: url.searchParams.get("section") ?? undefined,
-      date: url.searchParams.get("date") ?? undefined,
-    });
+    const query = querySchema.parse({ section: url.searchParams.get("section") ?? undefined, date: url.searchParams.get("date") ?? undefined });
     const supabase = await createSupabaseServerClient();
     const profile = await profileForSlug(supabase, slug);
     const businessUserId = z.string().uuid().parse(profile.user_id);
@@ -36,14 +49,11 @@ export async function GET(request: Request, context: { params: Promise<{ slug: s
     if (query.section === "profile") return json({ data: profile }, { headers: { "Cache-Control": "no-store" } });
 
     if (query.section === "catalog") {
-      const v2 = await supabase.rpc("get_public_service_catalog_v2", {
-        p_business_user_id: businessUserId,
-        p_booking_context_id: null,
-      });
-      if (!v2.error && Array.isArray(v2.data)) return json({ data: v2.data }, { headers: { "Cache-Control": "no-store" } });
+      const v2 = await supabase.rpc("get_public_service_catalog_v2", { p_business_user_id: businessUserId, p_booking_context_id: null });
+      if (!v2.error && Array.isArray(v2.data)) return json({ data: normalizeCatalog(v2.data as RpcRow[]) }, { headers: { "Cache-Control": "no-store" } });
       const v1 = await supabase.rpc("get_public_service_catalog", { business_user_id: businessUserId });
       if (v1.error || !Array.isArray(v1.data)) throw unavailable();
-      return json({ data: v1.data }, { headers: { "Cache-Control": "no-store" } });
+      return json({ data: normalizeCatalog(v1.data as RpcRow[]) }, { headers: { "Cache-Control": "no-store" } });
     }
 
     if (query.section === "packages") {
@@ -60,10 +70,7 @@ export async function GET(request: Request, context: { params: Promise<{ slug: s
     }
 
     if (query.section === "blocked_dates") {
-      const { data, error } = await supabase.rpc("get_public_blocked_dates", {
-        p_business_user_id: businessUserId,
-        p_customer_account_id: null,
-      });
+      const { data, error } = await supabase.rpc("get_public_blocked_dates", { p_business_user_id: businessUserId, p_customer_account_id: null });
       if (error || !Array.isArray(data)) throw unavailable();
       return json({ data }, { headers: { "Cache-Control": "no-store" } });
     }
@@ -73,9 +80,7 @@ export async function GET(request: Request, context: { params: Promise<{ slug: s
     return json({ data: Array.isArray(data) ? data[0] ?? null : data ?? null }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     if (error instanceof z.ZodError) return json({ error: { code: "invalid_public_booking_request", message: "Invalid public booking request" } }, { status: 400 });
-    if (error instanceof Error && error.message === "public_booking_unavailable") {
-      return json({ error: { code: "public_booking_unavailable", message: "This booking page is not currently available." } }, { status: 503 });
-    }
+    if (error instanceof Error && error.message === "public_booking_unavailable") return json({ error: { code: "public_booking_unavailable", message: "This booking page is not currently available." } }, { status: 503 });
     return errorResponse(error);
   }
 }
