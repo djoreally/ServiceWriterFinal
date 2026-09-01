@@ -1,23 +1,21 @@
 /**
- * Service Category Policy Query — reads category hierarchy + behavior flags.
+ * Service Category Policy Query
+ *
+ * The legacy service_categories table is not part of the production canonical
+ * schema. Public service rows already carry category/category_id and the policy
+ * resolver has deterministic keyword/category fallbacks. Keep only stable
+ * built-in vertical categories here so booking never performs a guaranteed 404.
  */
-import { supabase } from "@/integrations/supabase/client";
-import type { BookingRequirement, ServiceCategoryPolicyRow, VehicleSelectorKind } from "@/lib/service-category-policy";
+import type { ServiceCategoryPolicyRow } from "@/lib/service-category-policy";
+
+const BUILTIN_POLICIES: ServiceCategoryPolicyRow[] = [
+  { id: "oil_fluids", name: "Oil & Fluids", parent_id: null, vehicle_selector: "ymm_engine", shows_fluid_specs: true, booking_requirements: ["basic_vehicle", "oil_fitment"] },
+  { id: "oil_change", name: "Oil Change", parent_id: null, vehicle_selector: "ymm_engine", shows_fluid_specs: true, booking_requirements: ["basic_vehicle", "oil_fitment"] },
+  { id: "tires", name: "Tires", parent_id: null, vehicle_selector: "wheel_tire", shows_fluid_specs: false, booking_requirements: ["basic_vehicle", "tire_fitment"] },
+  { id: "tire_service", name: "Tire Service", parent_id: null, vehicle_selector: "wheel_tire", shows_fluid_specs: false, booking_requirements: ["basic_vehicle", "tire_fitment"] },
+  { id: "detailing", name: "Detailing", parent_id: null, vehicle_selector: "ymm_engine", shows_fluid_specs: false, booking_requirements: ["basic_vehicle", "detailing_assessment"] },
+];
 
 export async function fetchServiceCategoryPolicies(): Promise<ServiceCategoryPolicyRow[]> {
-  const { data, error } = await supabase
-    .from("service_categories")
-    .select("id, name, parent_id, vehicle_selector, shows_fluid_specs, booking_requirements")
-    .order("sort_order");
-
-  if (error || !data) return [];
-
-  return data.map((row) => ({
-    id: row.id,
-    name: row.name,
-    parent_id: (row as { parent_id: string | null }).parent_id ?? null,
-    vehicle_selector: ((row as { vehicle_selector: string }).vehicle_selector ?? "ymm_engine") as VehicleSelectorKind,
-    shows_fluid_specs: (row as { shows_fluid_specs: boolean }).shows_fluid_specs ?? true,
-    booking_requirements: (((row as { booking_requirements?: string[] }).booking_requirements ?? ["basic_vehicle"]) as BookingRequirement[]),
-  }));
+  return BUILTIN_POLICIES;
 }
