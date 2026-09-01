@@ -1,31 +1,176 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createSupabaseAdminClient } from "@/lib/supabase";
 
 const currentYear = new Date().getUTCFullYear();
 const requestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("years") }),
-  z.object({ action: z.literal("makes"), year: z.number().int().min(1981).max(currentYear + 2) }),
-  z.object({ action: z.literal("models"), year: z.number().int().min(1981).max(currentYear + 2), make: z.string().trim().min(1).max(120) }),
-  z.object({ action: z.literal("specs"), year: z.number().int().min(1981).max(currentYear + 2), make: z.string().trim().min(1).max(120), model: z.string().trim().min(1).max(160) }),
+  z.object({ action: z.literal("makes"), year: z.number().int().min(1990).max(currentYear + 2) }),
+  z.object({ action: z.literal("models"), year: z.number().int().min(1990).max(currentYear + 2), make: z.string().trim().min(1).max(120) }),
+  z.object({ action: z.literal("specs"), year: z.number().int().min(1990).max(currentYear + 2), make: z.string().trim().min(1).max(120), model: z.string().trim().min(1).max(160) }),
 ]);
 
-type JsonRecord = Record<string, unknown>;
-const clean = (value: unknown): string => typeof value === "string" ? value.trim() : "";
-const metaText = (metadata: unknown, key: string): string | null => {
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
-  const value = (metadata as JsonRecord)[key];
-  return typeof value === "string" && value.trim() ? value.trim() : null;
-};
+const VEHICLE_SPEC_FILE = path.join(
+  process.cwd(),
+  "data/vehicle-catalog-staging/vehicle_specifications_import_eligible_verified.csv",
+);
 
-async function nhtsa(path: string) {
-  const response = await fetch(`https://vpic.nhtsa.dot.gov/api/vehicles/${path}${path.includes("?") ? "&" : "?"}format=json`, {
-    headers: { Accept: "application/json" },
-    signal: AbortSignal.timeout(12_000),
-    next: { revalidate: 86_400 },
+interface VehicleCatalogRow {
+  record_id: string;
+  year: number;
+  make: string;
+  model: string;
+  engine: string | null;
+  oil_type: string | null;
+  oil_capacity: string | null;
+  oil_filter: string | null;
+  transmission_fluid: string | null;
+  source: string;
+  additional_specs: Record<string, unknown>;
+}
+
+interface VehicleCatalogIndex {
+  years: number[];
+  makesByYear: Map<number, string[]>;
+  modelsByYearMake: Map<string, string[]>;
+  specsByYmm: Map<string, VehicleCatalogRow[]>;
+}
+
+let catalogPromise: Promise<VehicleCatalogIndex> | null = null;
+
+const normalize = (value: string) => value.trim().toLowerCase();
+const ymmKey = (year: number, make: string, model?: string) =>
+  [String(year), normalize(make), model ? normalize(model) : ""].join("|");
+
+function parseCsv(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let quoted = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    if (quoted) {
+      if (char === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i += 1;
+        } else {
+          quoted = false;
+        }
+      } else {
+        field += char;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      quoted = true;
+    } else if (char === ",") {
+      row.push(field);
+      field = "";
+    } else if (char === "\n") {
+      row.push(field.replace(/\r$/, ""));
+      if (row.some((value) => value.length > 0)) rows.push(row);
+      row = [];
+      field = "";
+    } else {
+      field += char;
+    }
+  }
+
+  if (field.length > 0 || row.length > 0) {
+    row.push(field.replace(/\r$/, ""));
+    rows.push(row);
+  }
+  return rows;
+}
+
+function nullable(value: string | undefined): string | null {
+  const cleaned = value?.trim() ?? "";
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+function parseAdditionalSpecs(value: string | undefined): Record<string, unknown> {
+  if (!value?.trim()) return {};
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+async function loadCatalog(): Promise<VehicleCatalogIndex> {
+  const text = await readFile(VEHICLE_SPEC_FILE, "utf8");
+  const parsed = parseCsv(text);
+  const header = parsed.shift();
+  if (!header) throw new Error("Vehicle specification catalog is empty");
+
+  const column = new Map(header.map((name, index) => [name.trim(), index]));
+  const required = ["record_id", "year", "make", "model", "engine", "oil_type", "oil_capacity", "oil_filter", "transmission_fluid", "source", "additional_specs"];
+  for (const name of required) {
+    if (!column.has(name)) throw new Error(`Vehicle specification catalog missing ${name}`);
+  }
+
+  const rows: VehicleCatalogRow[] = [];
+  for (const values of parsed) {
+    const year = Number(values[column.get("year")!]);
+    const make = values[column.get("make")!]?.trim() ?? "";
+    const model = values[column.get("model")!]?.trim() ?? "";
+    if (!Number.isInteger(year) || !make || !model) continue;
+
+    rows.push({
+      record_id: values[column.get("record_id")!]?.trim() ?? "",
+      year,
+      make,
+      model,
+      engine: nullable(values[column.get("engine")!]),
+      oil_type: nullable(values[column.get("oil_type")!]),
+      oil_capacity: nullable(values[column.get("oil_capacity")!]),
+      oil_filter: nullable(values[column.get("oil_filter")!]),
+      transmission_fluid: nullable(values[column.get("transmission_fluid")!]),
+      source: values[column.get("source")!]?.trim() ?? "consolidated",
+      additional_specs: parseAdditionalSpecs(values[column.get("additional_specs")!]),
+    });
+  }
+
+  const years = Array.from(new Set(rows.map((row) => row.year))).sort((a, b) => b - a);
+  const makes = new Map<number, Set<string>>();
+  const models = new Map<string, Set<string>>();
+  const specsByYmm = new Map<string, VehicleCatalogRow[]>();
+
+  for (const row of rows) {
+    if (!makes.has(row.year)) makes.set(row.year, new Set());
+    makes.get(row.year)!.add(row.make);
+
+    const makeKey = ymmKey(row.year, row.make);
+    if (!models.has(makeKey)) models.set(makeKey, new Set());
+    models.get(makeKey)!.add(row.model);
+
+    const specKey = ymmKey(row.year, row.make, row.model);
+    const group = specsByYmm.get(specKey) ?? [];
+    group.push(row);
+    specsByYmm.set(specKey, group);
+  }
+
+  return {
+    years,
+    makesByYear: new Map(Array.from(makes, ([year, values]) => [year, Array.from(values).sort((a, b) => a.localeCompare(b))])),
+    modelsByYearMake: new Map(Array.from(models, ([key, values]) => [key, Array.from(values).sort((a, b) => a.localeCompare(b))])),
+    specsByYmm,
+  };
+}
+
+function getCatalog() {
+  catalogPromise ??= loadCatalog().catch((error) => {
+    catalogPromise = null;
+    throw error;
   });
-  if (!response.ok) throw new Error(`NHTSA lookup failed (${response.status})`);
-  return response.json() as Promise<{ Results?: JsonRecord[] }>;
+  return catalogPromise;
 }
 
 export async function POST(request: Request) {
@@ -33,98 +178,37 @@ export async function POST(request: Request) {
     const parsed = requestSchema.safeParse(await request.json().catch(() => ({})));
     if (!parsed.success) return NextResponse.json({ error: "Invalid vehicle lookup request" }, { status: 400 });
     const input = parsed.data;
+    const catalog = await getCatalog();
 
     if (input.action === "years") {
-      return NextResponse.json({ years: Array.from({ length: currentYear + 2 - 1981 + 1 }, (_, index) => currentYear + 2 - index) });
+      return NextResponse.json({ years: catalog.years }, { headers: { "Cache-Control": "public, s-maxage=86400" } });
     }
 
     if (input.action === "makes") {
-      // vPIC does not expose a make-by-model-year endpoint. Return its normalized
-      // light-vehicle make catalog after a year is selected; model lookup below is year-specific.
-      const vehicleTypes = ["car", "truck", "multipurpose passenger vehicle (mpv)"];
-      const payloads = await Promise.all(vehicleTypes.map((type) => nhtsa(`GetMakesForVehicleType/${encodeURIComponent(type)}`)));
-      const makes = Array.from(new Set(payloads.flatMap((payload) => payload.Results ?? [])
-        .map((row) => clean(row.MakeName ?? row.Make_Name)).filter(Boolean))).sort((a, b) => a.localeCompare(b));
-      return NextResponse.json({ makes });
+      return NextResponse.json({ makes: catalog.makesByYear.get(input.year) ?? [] }, { headers: { "Cache-Control": "public, s-maxage=86400" } });
     }
 
     if (input.action === "models") {
-      const payload = await nhtsa(`GetModelsForMakeYear/make/${encodeURIComponent(input.make)}/modelyear/${input.year}`);
-      const models = Array.from(new Set((payload.Results ?? []).map((row) => clean(row.Model_Name ?? row.ModelName)).filter(Boolean)))
-        .sort((a, b) => a.localeCompare(b));
-      return NextResponse.json({ models });
+      return NextResponse.json({ models: catalog.modelsByYearMake.get(ymmKey(input.year, input.make)) ?? [] }, { headers: { "Cache-Control": "public, s-maxage=86400" } });
     }
 
-    const admin = createSupabaseAdminClient();
-    const { data: vehicles, error: vehicleError } = await admin
-      .from("vehicles")
-      .select("id,metadata")
-      .eq("year", input.year)
-      .ilike("make", input.make)
-      .ilike("model", input.model)
-      .limit(100);
-    if (vehicleError) throw vehicleError;
+    const rows = (catalog.specsByYmm.get(ymmKey(input.year, input.make, input.model)) ?? []).map((row) => ({
+      id: row.record_id || undefined,
+      year: row.year,
+      make: row.make,
+      model: row.model,
+      engine: row.engine,
+      oil_type: row.oil_type,
+      oil_capacity: row.oil_capacity,
+      oil_filter: row.oil_filter,
+      tire_size: null,
+      rear_tire_size: null,
+      transmission_fluid: row.transmission_fluid,
+      additional_specs: row.additional_specs,
+      source: row.source,
+    }));
 
-    const vehicleIds = (vehicles ?? []).map((vehicle) => vehicle.id);
-    const serviceSpecs = vehicleIds.length
-      ? await admin.from("vehicle_service_specs")
-          .select("id,vehicle_id,engine,oil_type,oil_capacity,oil_filter,metadata")
-          .in("vehicle_id", vehicleIds)
-          .limit(100)
-      : { data: [], error: null };
-    if (serviceSpecs.error) throw serviceSpecs.error;
-
-    const rows: Array<Record<string, unknown>> = [];
-    for (const spec of serviceSpecs.data ?? []) {
-      rows.push({
-        id: spec.id,
-        year: input.year,
-        make: input.make,
-        model: input.model,
-        engine: spec.engine ?? null,
-        oil_type: spec.oil_type ?? null,
-        oil_capacity: spec.oil_capacity ?? null,
-        oil_filter: spec.oil_filter ?? null,
-        tire_size: metaText(spec.metadata, "tire_size"),
-        rear_tire_size: metaText(spec.metadata, "rear_tire_size"),
-        transmission_fluid: metaText(spec.metadata, "transmission_fluid"),
-        additional_specs: spec.metadata && typeof spec.metadata === "object" ? spec.metadata : {},
-        source: "vehicle_service_specs",
-      });
-    }
-
-    for (const vehicle of vehicles ?? []) {
-      const engine = metaText(vehicle.metadata, "engine");
-      const oilType = metaText(vehicle.metadata, "oil_type");
-      const oilCapacity = metaText(vehicle.metadata, "oil_capacity");
-      const oilFilter = metaText(vehicle.metadata, "oil_filter");
-      const tireSize = metaText(vehicle.metadata, "tire_size");
-      if (!engine && !oilType && !oilCapacity && !oilFilter && !tireSize) continue;
-      rows.push({
-        year: input.year,
-        make: input.make,
-        model: input.model,
-        engine,
-        oil_type: oilType,
-        oil_capacity: oilCapacity,
-        oil_filter: oilFilter,
-        tire_size: tireSize,
-        rear_tire_size: metaText(vehicle.metadata, "rear_tire_size"),
-        transmission_fluid: metaText(vehicle.metadata, "transmission_fluid"),
-        additional_specs: vehicle.metadata ?? {},
-        source: "vehicle_metadata",
-      });
-    }
-
-    const seen = new Set<string>();
-    const deduped = rows.filter((row) => {
-      const key = [row.engine, row.oil_type, row.oil_capacity, row.oil_filter, row.tire_size, row.rear_tire_size].map((value) => clean(value)).join("|").toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-
-    return NextResponse.json({ rows: deduped }, { headers: { "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400" } });
+    return NextResponse.json({ rows }, { headers: { "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400" } });
   } catch (error) {
     console.error("public_vehicle_catalog_api_failed", error instanceof Error ? error.message : String(error));
     return NextResponse.json({ error: "Vehicle catalog lookup failed" }, { status: 502 });
