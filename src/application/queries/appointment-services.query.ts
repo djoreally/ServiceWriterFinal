@@ -56,11 +56,20 @@ export async function fetchAppointmentServices(appointmentId: string, serviceCat
     service_catalog_id: item.service_catalog_id, is_prepaid: item.is_prepaid,
     added_at_service: item.added_at_service, created_at: item.created_at,
   }));
-  if (services.length || !serviceCatalogId) return { services, catalogService: null };
+  if (services.length) return { services, catalogService: null };
+
+  const appointment = await productionSupabase.from("appointments").select("metadata")
+    .eq("workspace_id", context.workspaceId).eq("id", appointmentId).maybeSingle();
+  if (appointment.error) throw appointment.error;
+  const metadata = appointment.data?.metadata && typeof appointment.data.metadata === "object" && !Array.isArray(appointment.data.metadata)
+    ? appointment.data.metadata as Record<string, unknown> : {};
+  const metadataCatalogId = typeof metadata.service_catalog_id === "string" ? metadata.service_catalog_id : null;
+  const catalogId = serviceCatalogId ?? metadataCatalogId;
+  if (!catalogId) return { services, catalogService: null };
 
   const { data: catalog, error: catalogError } = await productionSupabase
     .from("service_catalog").select("id,name,description,labor_price")
-    .eq("workspace_id", context.workspaceId).eq("id", serviceCatalogId).maybeSingle();
+    .eq("workspace_id", context.workspaceId).eq("id", catalogId).maybeSingle();
   if (catalogError) throw catalogError;
   return { services, catalogService: catalog ? { id: catalog.id, name: catalog.name, description: catalog.description, default_price: Number(catalog.labor_price) } : null };
 }
