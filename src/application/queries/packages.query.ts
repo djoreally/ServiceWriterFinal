@@ -1,6 +1,7 @@
 /** Service package read operations backed by canonical workspace tables. */
-import { supabase } from "@/integrations/supabase/client";
+import { productionSupabase } from "@/integrations/supabase/client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+const db = productionSupabase as any;
 
 export interface PackageServiceItem {
   id: string; name: string; description: string | null; default_price: number; estimated_duration: number | null; category: string | null;
@@ -16,14 +17,14 @@ function one<T>(value: T | T[] | null | undefined): T | null { return Array.isAr
 export async function fetchServicePackages(): Promise<ServicePackageRow[]> {
   const context = await resolveCurrentWorkspace();
   if (!context) return [];
-  const { data: packagesData, error: packagesError } = await (supabase as any)
+  const { data: packagesData, error: packagesError } = await db
     .from("service_packages").select("id,name,description,package_price,discount_type,discount_value,is_active,estimated_duration,created_at")
     .eq("workspace_id", context.workspaceId).order("created_at", { ascending: false });
   if (packagesError) throw packagesError;
 
   const result: ServicePackageRow[] = [];
   for (const pkg of packagesData ?? []) {
-    const { data: items, error } = await (supabase as any).from("service_package_items").select(`
+    const { data: items, error } = await db.from("service_package_items").select(`
       id,service_catalog_id,quantity,override_price,
       service_catalog(id,name,description,labor_price,estimated_minutes,category)
     `).eq("package_id", pkg.id);
@@ -58,13 +59,16 @@ export async function fetchServicePackages(): Promise<ServicePackageRow[]> {
 export async function fetchPackageServiceCatalog(): Promise<PackageServiceItem[]> {
   const context = await resolveCurrentWorkspace();
   if (!context) return [];
-  const { data, error } = await supabase.from("service_catalog")
+  const { data, error } = await db.from("service_catalog")
     .select("id,name,description,labor_price,estimated_minutes,category")
     .eq("workspace_id", context.workspaceId).eq("is_active", true).order("name");
   if (error) throw error;
-  return (data ?? []).map((row) => ({
-    id: row.id, name: row.name, description: row.description,
+  return (data ?? []).map((row: any) => ({
+    id: row.id,
+    name: row.name,
+    description: row.description,
     default_price: Number(row.labor_price ?? 0),
-    estimated_duration: row.estimated_minutes == null ? null : Number(row.estimated_minutes), category: row.category,
+    estimated_duration: row.estimated_minutes == null ? null : Number(row.estimated_minutes),
+    category: row.category,
   }));
 }
