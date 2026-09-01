@@ -133,6 +133,7 @@ async function importAppointment(ctx: ImportContext, row: Record<string, unknown
     guest_name: nullable(text(row, "guest_name")),
     guest_email: normalizeEmail(row),
     guest_phone: normalizePhone(row),
+    service_catalog_id: nullable(text(row, "service_catalog_id")),
     location_address: nullable(text(row, "location_address")),
     legacy_payment_status: nullable(text(row, "payment_status")),
     legacy_dispatch_status: nullable(text(row, "dispatch_status")),

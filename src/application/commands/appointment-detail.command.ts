@@ -3,6 +3,8 @@
  */
 import { errorMessage } from "@/lib/error-message";
 import { supabase } from "@/integrations/supabase/client";
+import { nextApi } from "@/lib/nextApiClient";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { trackAppointmentStatusChanged } from "@/lib/posthog/analytics";
 
 /**
@@ -75,16 +77,15 @@ export async function startAppointmentJob(
   appointmentId: string,
 ): Promise<{ success: boolean; alreadyStarted?: boolean; error?: string }> {
   try {
-    const { data, error } = await supabase.rpc(
-      "start_appointment_job" as any,
-      { p_appointment_id: appointmentId },
-    );
-    if (error) throw new Error(errorMessage(error));
-    const result = data as any;
-    return {
-      success: !!result?.success,
-      alreadyStarted: !!result?.already_started,
-    };
+    const context = await resolveCurrentWorkspace();
+    if (!context) throw new Error("No active workspace is available.");
+    // `start_appointment_job` was never deployed. Use the canonical API,
+    // which authorizes the workspace and persists the appointment state.
+    await nextApi.appointments.update(appointmentId, {
+      workspace_id: context.workspaceId,
+      status: "in_progress",
+    });
+    return { success: true };
   } catch (err: unknown) {
     return { success: false, error: errorMessage(err, "Failed to start job") };
   }
