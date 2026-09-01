@@ -11,13 +11,24 @@ export async function getCurrentAuthUser() {
   return user;
 }
 
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+import { nextApi } from "@/lib/nextApiClient";
+
 /** Fetch a single appointment with all related data. */
-export async function fetchAppointmentWithRelations(id: string, userId: string) {
+export async function fetchAppointmentWithRelations(id: string, _userId: string) {
+  const context = await resolveCurrentWorkspace();
+  if (context) {
+    try {
+      const response = await nextApi.appointments.get(context.workspaceId, id);
+      if (response.data) return { data: response.data as any, error: null };
+    } catch (e) {
+      console.warn("[AppointmentDetail] Next API get failed, falling back:", e);
+    }
+  }
   return supabase
     .from("appointments")
     .select("*, customer:customers(*), vehicle:vehicles(*), service_catalog:service_catalog(*), service_record_id")
     .eq("id", id)
-    .eq("user_id", userId)
     .single();
 }
 
