@@ -10,6 +10,7 @@ import { z } from "zod";
 import { hardDelete } from "@/lib/soft-delete";
 import { nextApi } from "@/lib/nextApiClient";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
+import { invalidateCustomerOverview } from "@/application/queries/customers.query";
 
 export interface CustomerWritePayload {
   name: string;
@@ -58,6 +59,7 @@ export async function createCustomerAndReturn(
     address: payload.address || undefined,
     notes: payload.notes || undefined,
   });
+  invalidateCustomerOverview(workspace_id);
   const customer = customerResponseSchema.parse(response.data);
   return {
     id: customer.id,
@@ -77,11 +79,13 @@ export async function updateCustomer(id: string, payload: CustomerWritePayload):
     address: payload.address,
     notes: payload.notes,
   });
+  invalidateCustomerOverview(workspace_id);
 }
 
 export async function deleteCustomer(id: string): Promise<void> {
   const workspace_id = requireSelectedWorkspaceId();
   await nextApi.customers.remove(workspace_id, id);
+  invalidateCustomerOverview(workspace_id);
 }
 
 /**
@@ -93,6 +97,8 @@ export async function deleteCustomer(id: string): Promise<void> {
  * - Compliance requirements
  */
 export async function hardDeleteCustomer(id: string): Promise<void> {
+  const workspace_id = requireSelectedWorkspaceId();
   const { error } = await hardDelete(supabase, "customers", id);
   if (error) throw error;
+  invalidateCustomerOverview(workspace_id);
 }
