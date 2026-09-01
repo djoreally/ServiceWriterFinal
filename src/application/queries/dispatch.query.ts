@@ -7,6 +7,7 @@ import { addDays, format } from "date-fns";
 import { fetchOperationalJobsByDate, fetchOperationalJobsByDateRange, fetchAllUpcomingOperationalJobs, type OperationalJobRow } from "./operational-jobs.query";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 export interface DispatchTechnician {
   id: string;
   name: string;
