@@ -1,6 +1,7 @@
 /**
  * Appointment Detail Query — Read operations for the AppointmentDetail page.
  */
+import { supabase } from "@/integrations/supabase/client";
 import { getCurrentAuthUser as resolveCurrentAuthUser } from "@/lib/auth/current-user";
 
 /** Get the current authenticated user. */

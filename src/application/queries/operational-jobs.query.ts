@@ -108,47 +108,6 @@ function optionalString(value: unknown): string | null {
   return typeof value === "string" && value ? value : null;
 }
 
-function normalizeDispatchViewRow(row: DispatchOperationalViewRow): OperationalJobRow {
-  const source = row.source === "work_order" || row.source === "fleet_work_order" ? "work_order" : "appointment";
-  return {
-    job_id: String(row.job_id ?? row.id ?? ""),
-    user_id: String(row.user_id ?? ""),
-    title: String(row.title ?? "Service Appointment"),
-    scheduled_date: String(row.scheduled_date ?? ""),
-    scheduled_time: String(row.scheduled_time ?? "00:00:00"),
-    status: row.status ?? null,
-    dispatch_status: row.dispatch_status ?? null,
-    canonical_state: String(row.canonical_state ?? row.status ?? "queued"),
-    job_priority: row.job_priority ?? null,
-    estimated_duration_minutes: row.estimated_duration_minutes == null ? null : Number(row.estimated_duration_minutes),
-    duration_minutes: row.duration_minutes == null ? null : Number(row.duration_minutes),
-    assigned_technician_id: row.assigned_technician_id ?? null,
-    assigned_technician_name: row.assigned_technician_name ?? null,
-    assigned_van_id: row.assigned_van_id ?? null,
-    assigned_van_name: row.assigned_van_name ?? null,
-    assigned_at: row.assigned_at ?? null,
-    dispatch_notes: row.dispatch_notes ?? null,
-    guest_name: row.guest_name ?? null,
-    guest_phone: row.guest_phone ?? null,
-    location_address: row.location_address ?? null,
-    location_lat: row.location_lat == null ? null : Number(row.location_lat),
-    location_lng: row.location_lng == null ? null : Number(row.location_lng),
-    estimated_cost: row.estimated_cost == null ? null : Number(row.estimated_cost),
-    source,
-    fleet_job_id: row.fleet_job_id ?? null,
-    fleet_job_number: row.fleet_job_number ?? null,
-    fleet_job_vehicle_count: row.fleet_job_vehicle_count == null ? null : Number(row.fleet_job_vehicle_count),
-    customer_name: row.customer_name ?? null,
-    customer_phone: row.customer_phone ?? null,
-    vehicle_year: row.vehicle_year == null ? null : Number(row.vehicle_year),
-    vehicle_make: row.vehicle_make ?? null,
-    vehicle_model: row.vehicle_model ?? null,
-    service_catalog_name: row.service_catalog_name ?? null,
-    last_event_at: row.last_event_at ?? null,
-    source_freshness_ms: row.source_freshness_ms == null ? null : Number(row.source_freshness_ms),
-  };
-}
-
 function customerName(customer: OperationalCustomerSource | null): string | null {
   if (!customer) return null;
   return [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim() || customer.company_name || null;
