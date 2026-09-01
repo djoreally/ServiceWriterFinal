@@ -143,10 +143,7 @@ export function useBookingPricing(deps: PricingDeps) {
     }
 
     const extraQuarts = vehicles.reduce((sum, vehicle) => {
-      const hasBillableCapacity =
-        vehicle.oilCapacitySource === "db" ||
-        vehicle.oilCapacitySource === "ai" ||
-        vehicle.oilCapacitySource === "manual";
+      const hasBillableCapacity = vehicle.oilCapacitySource === "db";
       if (!hasBillableCapacity) return sum;
       return sum + calculateExtraOilQuarts(vehicle.oilCapacity);
     }, 0);
@@ -191,7 +188,13 @@ export function useBookingPricing(deps: PricingDeps) {
 
   /** Fee breakdown (waste oil, shop fee, surcharge). */
   const feeBreakdown = useMemo(() => {
-    const wasteOilFee = allowFluidFees && feeSettings?.waste_oil_fee_enabled ? (feeSettings.waste_oil_fee || 0) : 0;
+    const hasOilService = activeServicesForPricing.some((service) =>
+      service.name.toLowerCase().includes("oil") ||
+      (isCategorizedService(service) && service.category?.toLowerCase().includes("oil")),
+    );
+    const wasteOilFee = allowFluidFees && hasOilService && feeSettings?.waste_oil_fee_enabled
+      ? (feeSettings.waste_oil_fee || 0)
+      : 0;
 
     let shopFee = 0;
     if (feeSettings?.shop_fee_enabled) {
@@ -209,7 +212,7 @@ export function useBookingPricing(deps: PricingDeps) {
     }
 
     return { wasteOilFee, shopFee, surcharge };
-  }, [totalPrice, paymentChoice, feeSettings, allowFluidFees]);
+  }, [totalPrice, paymentChoice, feeSettings, allowFluidFees, activeServicesForPricing]);
 
   /** Pre-tax total (subtotal + fees). */
   const preTaxTotal = useMemo(
@@ -239,8 +242,14 @@ export function useBookingPricing(deps: PricingDeps) {
   const getOilPriceAdjustment = useCallback(() => oilPriceAdjustment, [oilPriceAdjustment]);
   const getOilPriceBreakdown = useCallback(() => oilPriceBreakdown, [oilPriceBreakdown]);
   const getFeeBreakdown = useCallback((base: number) => {
-    // Re-derive with arbitrary base for backward compat (used by CheckoutOptionsStep)
-    const wasteOilFee = allowFluidFees && feeSettings?.waste_oil_fee_enabled ? (feeSettings.waste_oil_fee || 0) : 0;
+    // Re-derive with arbitrary base for backward compat (used by CheckoutOptionsStep).
+    const hasOilService = activeServicesForPricing.some((service) =>
+      service.name.toLowerCase().includes("oil") ||
+      (isCategorizedService(service) && service.category?.toLowerCase().includes("oil")),
+    );
+    const wasteOilFee = allowFluidFees && hasOilService && feeSettings?.waste_oil_fee_enabled
+      ? (feeSettings.waste_oil_fee || 0)
+      : 0;
     let shopFee = 0;
     if (feeSettings?.shop_fee_enabled) {
       shopFee = (feeSettings.shop_fee_type || "fixed") === "percentage"
@@ -255,7 +264,7 @@ export function useBookingPricing(deps: PricingDeps) {
         : feeSettings.surcharge_value || 0;
     }
     return { wasteOilFee, shopFee, surcharge };
-  }, [paymentChoice, feeSettings, allowFluidFees]);
+  }, [paymentChoice, feeSettings, allowFluidFees, activeServicesForPricing]);
   const getPreTaxTotal = useCallback(() => preTaxTotal, [preTaxTotal]);
   const getGrandTotal = useCallback(() => grandTotal, [grandTotal]);
   const getTotalDuration = useCallback(() => totalDuration, [totalDuration]);

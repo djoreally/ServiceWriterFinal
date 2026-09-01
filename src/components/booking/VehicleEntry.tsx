@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { fetchVehiclePhoto } from "@/application/queries/booking-vehicle.query";
 import { decodeVinNumber } from "@/application/commands/vin.command";
@@ -9,10 +9,10 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/sonner";
-import { Car, Search, Loader2, Plus, Trash2, Droplet, Info, Sparkles, Edit } from "lucide-react";
+import { Car, Search, Loader2, Plus, Trash2, Droplet, Info, Edit } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { useVehicleSpecs, useAIVehicleSpecLookup } from "@/hooks/useVehicleSpecs";
+import { useVehicleSpecs } from "@/hooks/useVehicleSpecs";
 import { WheelTireConfigurator } from "@/components/vehicles/WheelTireConfigurator";
 import type { BookingRequirement, VehicleSelectorKind } from "@/lib/service-category-policy";
 import { TireInventorySelector } from "@/components/booking/TireInventorySelector";
@@ -36,12 +36,14 @@ export interface VehicleData {
   /**
    * Provenance of the oilCapacity value. Only "db" capacities (matched against
    * the vehicle_specifications table) are used for billing extra-quart oil
-   * usage in the booking pricing engine. AI lookups and manual fallback entry
-   * are displayed for the technician but never priced.
+   * usage in the booking pricing engine. VIN-decoded and manual values are
+   * displayed for review but never priced until the vehicle database confirms them.
    */
   oilCapacitySource?: "db" | "ai" | "manual";
   transmissionFluid?: string;
   additionalSpecs?: Record<string, string | null>;
+  /** Filters returned by the VIN decoder after vehicle identity is confirmed. */
+  filterMatches?: Array<{ filterType: string; brand: string; partNumber: string }>;
   // Tire vertical (wheel_tire selector)
   tireSize?: string;
   rearTireSize?: string;
@@ -111,7 +113,7 @@ const createEmptyVehicle = (): VehicleData => ({
   oilCapacity: "",
 });
 
-type FallbackMode = "none" | "ai" | "manual";
+type FallbackMode = "none" | "manual";
 const TIRE_SERVICE_OPTIONS: Array<{field:"tireMountAndBalance"|"tireTpms"|"tireDisposal";label:string;fallback:boolean}> = [
   { field:"tireMountAndBalance",label:"Mount & balance",fallback:true },
   { field:"tireTpms",label:"TPMS service",fallback:false },
@@ -139,11 +141,6 @@ export function VehicleEntry({
   const [vinLoading, setVinLoading] = useState(false);
   const [fallbackMode, setFallbackMode] = useState<FallbackMode>("none");
   
-  // Track processed AI results to prevent duplicate toasts
-  const processedAiResultRef = useRef<string | null>(null);
-  
-  // AI lookup hook
-  const { lookup: aiLookup, loading: aiLoading, result: aiResult, error: aiError, reset: resetAI } = useAIVehicleSpecLookup();
 
   const activeVehicle = vehicles.find(v => v.id === activeVehicleId) || vehicles[0];
   const activeDetailingRule = activeVehicle ? resolveDetailingRule(detailingRules, activeVehicle) : null;
@@ -250,54 +247,6 @@ export function VehicleEntry({
     }
   }, [matchedSpec, activeVehicle, updateVehicle, needsOil]);
 
-  // Reset fallback mode when year changes
-  useEffect(() => {
-    if (activeVehicle?.year) {
-      void Promise.resolve().then(() => setFallbackMode("none"));
-      processedAiResultRef.current = null;
-      void Promise.resolve().then(() => resetAI());
-    }
-  }, [activeVehicle?.year, resetAI]);
-
-  // Apply AI results to vehicle
-  useEffect(() => {
-    if (!aiResult || !activeVehicle || fallbackMode !== "ai") return;
-    
-    // Create a unique key for this AI result to prevent duplicate processing
-    const resultKey = `${aiResult.year}-${aiResult.make}-${aiResult.model}`;
-    if (processedAiResultRef.current === resultKey) return;
-    
-    // Mark as processed before updating to prevent race conditions
-    processedAiResultRef.current = resultKey;
-    
-    // If AI found engines, populate them
-    if (aiResult.engines.length > 0) {
-      const firstEngine = aiResult.engines[0];
-      const spec = aiResult.specs[firstEngine];
-      if (spec) {
-        updateVehicle(activeVehicle.id, {
-          engine: firstEngine,
-          oilType: spec.oil_type || "",
-          oilCapacity: spec.oil_capacity || "",
-          oilCapacitySource: spec.oil_capacity ? "ai" : undefined,
-          transmissionFluid: spec.transmission_fluid || "",
-        });
-        toast.success("Vehicle specs found via AI lookup");
-      }
-    } else if (Object.keys(aiResult.specs).length > 0) {
-      // Use default spec if no engines listed
-      const defaultSpec = aiResult.specs["default"] || Object.values(aiResult.specs)[0];
-      if (defaultSpec) {
-        updateVehicle(activeVehicle.id, {
-          oilType: defaultSpec.oil_type || "",
-          oilCapacity: defaultSpec.oil_capacity || "",
-          oilCapacitySource: defaultSpec.oil_capacity ? "ai" : undefined,
-          transmissionFluid: defaultSpec.transmission_fluid || "",
-        });
-        toast.success("Vehicle specs found via AI lookup");
-      }
-    }
-  }, [aiResult, activeVehicle.id, fallbackMode, updateVehicle, activeVehicle]);
 
   const addVehicle = () => {
     const newVehicle = createEmptyVehicle();
@@ -328,8 +277,6 @@ export function VehicleEntry({
       oilCapacity: "",
     });
     setFallbackMode("none");
-    processedAiResultRef.current = null;
-    resetAI();
   };
 
   const handleMakeChange = (make: string) => {
@@ -361,37 +308,6 @@ export function VehicleEntry({
     }
   };
 
-  // Handle AI lookup for fallback mode
-  const handleAILookup = async () => {
-    if (!activeVehicle?.year || !activeVehicle?.make || !activeVehicle?.model) {
-      toast.error("Please enter year, make, and model first");
-      return;
-    }
-    
-    try {
-      await aiLookup(
-        parseInt(activeVehicle.year),
-        activeVehicle.make,
-        activeVehicle.model
-      );
-    } catch {
-      toast.error("AI lookup failed. Try manual entry instead.");
-    }
-  };
-
-  // Handle AI engine selection
-  const handleAIEngineChange = (engine: string) => {
-    if (aiResult && aiResult.specs[engine]) {
-      const spec = aiResult.specs[engine];
-      updateVehicle(activeVehicle.id, {
-        engine,
-        oilType: spec.oil_type || "",
-        oilCapacity: spec.oil_capacity || "",
-        oilCapacitySource: spec.oil_capacity ? "ai" : undefined,
-        transmissionFluid: spec.transmission_fluid || "",
-      });
-    }
-  };
 
   const handleVinLookup = async () => {
     if (!activeVehicle?.vin || activeVehicle.vin.length !== 17) {
@@ -418,10 +334,13 @@ export function VehicleEntry({
           ...(engine ? { engine } : {}),
           ...(decoded.oilSpecs?.oilType ? { oilType: decoded.oilSpecs.oilType } : {}),
           ...(decoded.oilSpecs?.oilCapacity
-            ? { oilCapacity: decoded.oilSpecs.oilCapacity, oilCapacitySource: "ai" as const }
+            ? { oilCapacity: decoded.oilSpecs.oilCapacity, oilCapacitySource: "manual" as const }
             : {}),
           ...(decoded.vehicleSpecs?.transmissionFluid
             ? { transmissionFluid: decoded.vehicleSpecs.transmissionFluid }
+            : {}),
+          ...(decoded.filters?.length
+            ? { filterMatches: decoded.filters.map(({ filterType, brand, partNumber }) => ({ filterType, brand, partNumber })) }
             : {}),
         });
         toast.success("Vehicle information found!");
@@ -445,7 +364,7 @@ export function VehicleEntry({
   };
 
   // Always use the full range of years (1990-2026) for customer selection
-  // The specs lookup will handle fallback to AI/manual for years not in database
+  // The database lookup supplies available makes, models, engines, and oil specs.
   const yearOptions = generateYears();
 
   // Show fallback banner when:
@@ -579,27 +498,16 @@ export function VehicleEntry({
                 <Info className="h-4 w-4 text-amber-600" />
                 <AlertDescription className="text-amber-800 dark:text-amber-200">
                   <p className="font-medium mb-2">Limited data for {activeVehicle.year} vehicles</p>
-                  <p className="text-sm mb-3">Choose how to enter your vehicle details:</p>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="default"
-                      onClick={() => setFallbackMode("ai")}
-                      className="gap-2"
-                    >
-                      <Sparkles className="h-4 w-4" />
-                      AI Lookup
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setFallbackMode("manual")}
-                      className="gap-2"
-                    >
-                      <Edit className="h-4 w-4" />
-                      Manual Entry
-                    </Button>
-                  </div>
+                  <p className="text-sm mb-3">Enter the year, make, model, and engine manually, or use the VIN tab to decode the vehicle.</p>
+                  <Button
+                    size="sm"
+                    variant="default"
+                    onClick={() => setFallbackMode("manual")}
+                    className="gap-2"
+                  >
+                    <Edit className="h-4 w-4" />
+                    Enter vehicle details
+                  </Button>
                 </AlertDescription>
               </Alert>
             )}
@@ -668,106 +576,12 @@ export function VehicleEntry({
               </>
             )}
 
-            {/* AI Lookup Mode - shown when fallback is needed */}
-            {fallbackMode === "ai" && needsFallbackOrLoading && (
-              <div className="space-y-4 p-4 border rounded-lg bg-gradient-to-br from-primary/5 to-transparent">
-                <div className="flex items-center gap-2 text-sm font-medium text-primary">
-                  <Sparkles className="h-4 w-4" />
-                  AI-Assisted Vehicle Lookup
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label>Make *</Label>
-                    <Input
-                      value={activeVehicle?.make || ""}
-                      onChange={(e) => updateVehicle(activeVehicle.id, { make: e.target.value })}
-                      placeholder="e.g., Toyota"
-                      className="mt-1"
-                    />
-                  </div>
-                  <div>
-                    <Label>Model *</Label>
-                    <Input
-                      value={activeVehicle?.model || ""}
-                      onChange={(e) => updateVehicle(activeVehicle.id, { model: e.target.value })}
-                      placeholder="e.g., Camry"
-                      className="mt-1"
-                    />
-                  </div>
-                </div>
-
-                <Button
-                  onClick={handleAILookup}
-                  disabled={aiLoading || !activeVehicle?.make || !activeVehicle?.model}
-                  className="w-full gap-2"
-                >
-                  {aiLoading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Looking up specs...
-                    </>
-                  ) : (
-                    <>
-                      <Search className="h-4 w-4" />
-                      Find Vehicle Specs
-                    </>
-                  )}
-                </Button>
-
-                {aiError && (
-                  <p className="text-sm text-destructive">{aiError}</p>
-                )}
-
-                {/* AI Results - Engine Selection */}
-                {aiResult && aiResult.engines.length > 1 && (
-                  <div>
-                    <Label>Engine Options</Label>
-                    <Select 
-                      value={activeVehicle?.engine || ""} 
-                      onValueChange={handleAIEngineChange}
-                    >
-                      <SelectTrigger className="mt-1">
-                        <SelectValue placeholder="Select engine" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {aiResult.engines.map(engine => {
-                          const spec = aiResult.specs[engine];
-                          return (
-                            <SelectItem key={engine} value={engine}>
-                              {engine} {showFluids && spec?.oil_capacity ? `(${spec.oil_capacity})` : ""}
-                            </SelectItem>
-                          );
-                        })}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-
-                {aiResult && aiResult.confidence_score !== undefined && (
-                  <p className="text-xs text-muted-foreground">
-                    Confidence: {Math.round(aiResult.confidence_score * 100)}% 
-                    {aiResult.source === "cache" ? " (cached)" : " (AI lookup)"}
-                  </p>
-                )}
-
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setFallbackMode("manual")}
-                  className="text-muted-foreground"
-                >
-                  Switch to manual entry
-                </Button>
-              </div>
-            )}
-
             {/* Manual Entry Mode */}
             {fallbackMode === "manual" && needsFallbackOrLoading && (
               <div className="space-y-4 p-4 border rounded-lg bg-muted/30">
                 <div className="flex items-center gap-2 text-sm font-medium">
                   <Edit className="h-4 w-4" />
-                  Manual Vehicle Entry
+                  Vehicle details
                 </div>
                 
                 <div className="grid grid-cols-2 gap-4">
@@ -837,16 +651,21 @@ export function VehicleEntry({
                   Your provider will verify these specifications
                 </p>
 
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setFallbackMode("ai")}
-                  className="text-muted-foreground"
-                >
-                  Try AI lookup instead
-                </Button>
               </div>
             )}
+
+            {activeVehicle?.filterMatches?.length ? (
+              <div className="rounded-lg border bg-muted/30 p-3">
+                <p className="text-sm font-medium">Matched filters</p>
+                <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+                  {activeVehicle.filterMatches.map((filter) => (
+                    <li key={`${filter.filterType}-${filter.brand}-${filter.partNumber}`}>
+                      {filter.filterType}: {filter.brand} {filter.partNumber}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
 
             {/* Oil Capacity Display — suppressed for tire/detailing categories */}
             {showFluids && activeVehicle?.oilCapacity && (
