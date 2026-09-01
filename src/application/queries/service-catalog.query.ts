@@ -63,6 +63,9 @@ export async function fetchCatalogItems(): Promise<CatalogItem[]> {
 export async function fetchServiceCategories(): Promise<ServiceCategory[]> {
   const context = await resolveCurrentWorkspace(); if (!context) return [];
   const { data, error } = await db.from('service_catalog').select('category').eq('workspace_id', context.workspaceId); if (error) throw error;
-  const names = [...new Set((data ?? []).map((row: any) => row.category).filter((value: unknown): value is string => typeof value === "string" && Boolean(value)))].sort();
-  return names.map((name) => ({ id: name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''), name }));
+  const categoryNames = (data ?? [])
+    .map((row: any) => row.category)
+    .filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0);
+  const names: string[] = Array.from(new Set<string>(categoryNames)).sort((a, b) => a.localeCompare(b));
+  return names.map((name: string) => ({ id: name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''), name }));
 }
