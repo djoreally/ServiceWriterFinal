@@ -39,8 +39,8 @@ export function isBackendConfigurationFailure(error: SignInError): boolean {
 
 export function getSafeSignInError(error: SignInError): string {
   const message = (error.message || "").toLowerCase();
-  if (error.status === 429 || message.includes("rate limit")) {
-    return "Too many sign-in attempts. Wait a few minutes, then try again.";
+  if (error.status === 429 || message.includes("rate limit") || message.includes("over_email_send_rate_limit")) {
+    return "Too many attempts. Please wait a few minutes before trying again or try signing in with your email and password.";
   }
   if (isBackendConfigurationFailure(error)) {
     return "This app build cannot reach its backend (the application API key was rejected). This is a configuration problem, not your password — please report it.";
@@ -51,15 +51,20 @@ export function getSafeSignInError(error: SignInError): string {
   if (error.code === "email_provider_disabled") {
     return "Email sign-in is disabled for this app environment. Use Continue with Google, or enable Email sign-in for the same environment you are testing.";
   }
-  // Keep invalid credentials, unknown accounts, and confirmation state
-  // indistinguishable so the login form cannot be used to enumerate users.
-  return "Unable to sign in with those credentials.";
+  if (message.includes("invalid login credentials") || message.includes("invalid_credentials")) {
+    return "Invalid email or password. Please check your credentials and try again.";
+  }
+  if (message.includes("email not confirmed")) {
+    return "Email address not confirmed. Please check your inbox for the confirmation link.";
+  }
+  return error.message || "Unable to sign in with those credentials.";
 }
 
 export async function signUpWithEmail(email: string, password: string): Promise<{ error?: string }> {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const normalizedEmail = email.trim().toLowerCase();
   const { error } = await authSupabase.auth.signUp({
-    email,
+    email: normalizedEmail,
     password,
     options: { emailRedirectTo: `${origin}/dashboard` },
   });
@@ -71,9 +76,10 @@ export async function signInWithPassword(email: string, password: string): Promi
   // Never retry a timed-out promise that cannot be cancelled: the first call
   // may still complete and race the retry. The shared client transport owns
   // the single request deadline and abort signal.
+  const normalizedEmail = email.trim().toLowerCase();
   let error: SignInError | null;
   try {
-    const result = await authSupabase.auth.signInWithPassword({ email, password }) as PasswordSignInResponse;
+    const result = await authSupabase.auth.signInWithPassword({ email: normalizedEmail, password }) as PasswordSignInResponse;
     error = result.error;
   } catch (requestError) {
     error = {

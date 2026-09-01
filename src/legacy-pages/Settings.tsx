@@ -421,7 +421,8 @@ const Settings = () => {
         toast.error("This booking link is already taken. Please choose another.");
         setSlugAvailable(false);
       } else {
-        toast.error("Could not save your changes. Check required fields and try again.");
+        console.error("[Settings] Profile save error:", error);
+        toast.error(`Could not save changes: ${error.message || "Check required fields and try again."}`);
       }
     } else {
       setProfile(prev => ({ ...prev, booking_slug: slugInput || prev.booking_slug }));

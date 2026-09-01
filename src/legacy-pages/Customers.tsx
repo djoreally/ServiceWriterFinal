@@ -30,7 +30,7 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { ImportDialog, FieldMapping } from "@/components/import/ImportDialog";
 import { customerFieldMappings, vehicleFieldMappings } from "@/lib/importParser";
 import { useCustomerImport } from "@/hooks/useDataImport";
-import { format } from "date-fns";
+import { formatDateLabel } from "@/lib/datetime";
 import { fetchCustomerOverview } from "@/application/queries";
 import { createCustomer, updateCustomer, deleteCustomer } from "@/application/commands";
 import { fetchCustomerOverviewFromNextApi, fetchCustomerOverviewFromOffline } from "@/application/queries/customers.query";
@@ -409,7 +409,7 @@ const Customers = () => {
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {lastServiceDates[customer.id]
-                          ? format(new Date(`${lastServiceDates[customer.id]}T00:00:00`), "MMM dd, yyyy")
+                          ? formatDateLabel(lastServiceDates[customer.id], "MMM dd, yyyy")
                           : "—"}
                       </TableCell>
                       <TableCell>
