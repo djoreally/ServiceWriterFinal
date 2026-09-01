@@ -1,4 +1,4 @@
-import { EnginemailerEmailAdapter } from "@/server/messaging/enginemailer";
+import { ResendEmailAdapter } from "@/server/messaging/resend";
 import type { ProviderSendResult } from "@/server/messaging/types";
 import { createSupabaseAdminClient } from "@/lib/supabase";
 import { LIFECYCLE_EVENT_KEYS } from "@/server/messaging/lifecycle-events";
@@ -30,7 +30,7 @@ export async function sendInvitationEmail(input: {
     "email.recipient_role": "staff",
     "email.primary_action_url": url.toString(),
   });
-  return new EnginemailerEmailAdapter().send({
+  return new ResendEmailAdapter().send({
     workspaceId: input.workspaceId,
     recipient: { email: input.recipientEmail },
     purpose: "authentication",
