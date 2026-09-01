@@ -59,21 +59,23 @@ const DEFAULT_PROFILE: Omit<BusinessProfileSettings, "user_id"> = {
 export type WorkspaceContext = { workspaceId: string; userId: string };
 type WorkspaceSettingsRow = Database["public"]["Tables"]["workspace_settings"]["Row"];
 
-export async function resolveCurrentWorkspace(): Promise<WorkspaceContext | null> {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) return null;
+type CachedWorkspaceContext = {
+  key: string;
+  value: WorkspaceContext | null;
+  expiresAt: number;
+};
 
-  const selectedWorkspaceId = getSelectedWorkspaceId();
+const WORKSPACE_CONTEXT_TTL_MS = 5 * 60 * 1000;
+let workspaceContextCache: CachedWorkspaceContext | null = null;
+let workspaceContextInFlight: { key: string; promise: Promise<WorkspaceContext | null> } | null = null;
+
+async function resolveWorkspaceFromDatabase(userId: string, selectedWorkspaceId: string | null): Promise<WorkspaceContext | null> {
   let membershipQuery = productionSupabase
     .from("workspace_members")
     .select("workspace_id")
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .eq("is_active", true);
 
-  // Every workspace-scoped surface must honor the workspace selected in the
-  // application shell. Previously this resolver used an unordered limit(1),
-  // so users with multiple memberships could see the dashboard for one shop
-  // while the appointments API and calendar loaded another.
   if (selectedWorkspaceId) {
     membershipQuery = membershipQuery.eq("workspace_id", selectedWorkspaceId);
   }
@@ -82,11 +84,12 @@ export async function resolveCurrentWorkspace(): Promise<WorkspaceContext | null
     .limit(1)
     .maybeSingle();
   if (membershipError) throw membershipError;
+
   if (!membership && selectedWorkspaceId) {
     const fallback = await productionSupabase
       .from("workspace_members")
       .select("workspace_id")
-      .eq("user_id", user.id)
+      .eq("user_id", userId)
       .eq("is_active", true)
       .limit(1)
       .maybeSingle();
@@ -94,17 +97,64 @@ export async function resolveCurrentWorkspace(): Promise<WorkspaceContext | null
     membershipError = fallback.error;
     if (membershipError) throw membershipError;
   }
-  if (membership?.workspace_id) return { workspaceId: membership.workspace_id, userId: user.id };
+
+  if (membership?.workspace_id) {
+    return { workspaceId: membership.workspace_id, userId };
+  }
 
   const { data: owned, error: ownedError } = await productionSupabase
     .from("workspaces")
     .select("id")
-    .eq("created_by", user.id)
+    .eq("created_by", userId)
     .eq("is_active", true)
     .limit(1)
     .maybeSingle();
   if (ownedError) throw ownedError;
-  return owned?.id ? { workspaceId: owned.id, userId: user.id } : null;
+  return owned?.id ? { workspaceId: owned.id, userId } : null;
+}
+
+/**
+ * Resolve the active workspace once per user/selection and share the same
+ * in-flight request across concurrent page loaders. The selected workspace id
+ * is part of the cache key, so changing workspaces bypasses the old entry
+ * immediately without requiring a full application reload.
+ */
+export async function resolveCurrentWorkspace(): Promise<WorkspaceContext | null> {
+  const { data: { user } } = await getCurrentAuthUser();
+  if (!user) return null;
+
+  const selectedWorkspaceId = getSelectedWorkspaceId();
+  const key = `${user.id}:${selectedWorkspaceId ?? "default"}`;
+  const now = Date.now();
+
+  if (workspaceContextCache?.key === key && workspaceContextCache.expiresAt > now) {
+    return workspaceContextCache.value;
+  }
+
+  if (workspaceContextInFlight?.key === key) {
+    return workspaceContextInFlight.promise;
+  }
+
+  const promise = resolveWorkspaceFromDatabase(user.id, selectedWorkspaceId)
+    .then((value) => {
+      workspaceContextCache = {
+        key,
+        value,
+        expiresAt: Date.now() + WORKSPACE_CONTEXT_TTL_MS,
+      };
+      return value;
+    })
+    .finally(() => {
+      if (workspaceContextInFlight?.key === key) workspaceContextInFlight = null;
+    });
+
+  workspaceContextInFlight = { key, promise };
+  return promise;
+}
+
+export function resetCurrentWorkspaceCache(): void {
+  workspaceContextCache = null;
+  workspaceContextInFlight = null;
 }
 
 function parseTerminology(value: unknown): Terminology {
