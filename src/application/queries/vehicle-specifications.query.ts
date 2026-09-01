@@ -1,9 +1,11 @@
 /**
  * Vehicle Specifications Query
- * Fetches vehicle spec data from the vehicle_specifications table.
+ *
+ * Compatibility adapter for consumers that still request exact YMM specs.
+ * Public booking no longer reads the removed vehicle_specifications table.
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { fetchVehicleSpecEngines } from "@/application/queries/vehicle-specs.query";
 
 export interface VehicleSpec {
   id: string;
@@ -25,36 +27,47 @@ export interface VehicleSpec {
 }
 
 export async function fetchVehicleSpecifications(year: number, make: string, model: string): Promise<VehicleSpec[]> {
-  const { data, error } = await supabase
-    .from("vehicle_specifications")
-    .select("*")
-    .eq("year", year)
-    .ilike("make", `%${make}%`)
-    .ilike("model", `%${model}%`)
-    .limit(5);
-
-  if (error || !data) return [];
-  return data as VehicleSpec[];
+  const { data } = await fetchVehicleSpecEngines(year, make, model);
+  return (data ?? []).map((row) => ({
+    id: row.id ?? `${year}-${make}-${model}-${row.engine ?? "generic"}`,
+    year,
+    make,
+    model,
+    engine: row.engine ?? null,
+    oil_type: row.oil_type ?? null,
+    oil_capacity: row.oil_capacity ?? null,
+    air_filter: null,
+    oil_filter: row.oil_filter ?? null,
+    cabin_filter: null,
+    fuel_filter: null,
+    wiper_blade_driver: null,
+    wiper_blade_passenger: null,
+    transmission_fluid: row.transmission_fluid ?? null,
+    coolant_type: null,
+    tire_size: row.tire_size ?? null,
+  }));
 }
 
-/**
- * Exact-match spec lookup (no wildcard) used by the VehicleDetail page.
- * Returns every spec variant for the YMM so an admin can disambiguate engine/oil.
- */
 export async function fetchExactVehicleSpecifications(
   year: number,
   make: string,
   model: string,
   columns: string = "engine,oil_type,oil_capacity,tire_size,additional_specs",
 ): Promise<Array<Record<string, unknown>>> {
-  const { data, error } = await supabase
-    .from("vehicle_specifications")
-    .select(columns)
-    .eq("year", year)
-    .ilike("make", make)
-    .ilike("model", model);
-  if (error || !data) return [];
-  return data as unknown as Array<Record<string, unknown>>;
+  const { data } = await fetchVehicleSpecEngines(year, make, model);
+  const requested = new Set(columns.split(",").map((column) => column.trim()).filter(Boolean));
+  return (data ?? []).map((row) => {
+    const source: Record<string, unknown> = {
+      engine: row.engine,
+      oil_type: row.oil_type,
+      oil_capacity: row.oil_capacity,
+      oil_filter: row.oil_filter ?? null,
+      tire_size: row.tire_size ?? null,
+      rear_tire_size: row.rear_tire_size ?? null,
+      transmission_fluid: row.transmission_fluid,
+      additional_specs: row.additional_specs,
+    };
+    if (requested.size === 0 || columns === "*") return source;
+    return Object.fromEntries(Object.entries(source).filter(([key]) => requested.has(key)));
+  });
 }
-
-

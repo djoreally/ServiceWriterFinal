@@ -1,15 +1,4 @@
-/**
- * Service Category Policy
- *
- * Single source of truth for category-driven vehicle UX:
- *  - which vehicle selector a category uses (standard YMM+engine vs the wheel/tire configurator)
- *  - whether oil / fluid specifications may be shown at all
- *
- * Tire categories are pre-wired to the wheel/tire configurator and never display
- * oil or fluid information. Detailing categories keep the YMM selector but also
- * suppress fluid specs.
- */
-
+/** Service-category policy for public booking fitment and provider context. */
 export type VehicleSelectorKind = "ymm_engine" | "wheel_tire" | "none";
 export type BookingRequirement = "basic_vehicle" | "oil_fitment" | "tire_fitment" | "tire_quantity" | "detailing_assessment";
 
@@ -25,115 +14,87 @@ export interface ServiceCategoryPolicyRow {
 export interface ResolvedCategoryPolicy {
   vehicleSelector: VehicleSelectorKind;
   showsFluidSpecs: boolean;
-  /** True when at least one selected category resolved against a known row. */
   matched: boolean;
   requirements: BookingRequirement[];
 }
 
 export const DEFAULT_CATEGORY_POLICY: ResolvedCategoryPolicy = {
   vehicleSelector: "ymm_engine",
-  showsFluidSpecs: true,
+  showsFluidSpecs: false,
   matched: false,
   requirements: ["basic_vehicle"],
 };
 
+const OIL_KEYWORDS = /\b(oil|lube|lubrication|fluids?|oil[_ -]?fluids?)\b/i;
 const TIRE_KEYWORDS = /\b(tire|tires|tyre|wheel|wheels|tpms|rotation)\b/i;
-const NO_FLUID_KEYWORDS = /\b(detail|detailing|wash|ceramic|coating|wax|polish|interior|exterior|tint)\b/i;
+const DETAILING_KEYWORDS = /\b(detail|detailing|wash|ceramic|coating|wax|polish|interior|exterior|tint)\b/i;
 
-function normalize(value: string): string {
-  return value.trim().toLowerCase();
-}
+function normalize(value: string): string { return value.trim().toLowerCase().replaceAll("_", " "); }
 
-/**
- * Resolve the policy for a set of selected category keys.
- * Keys may be category ids (`tires_service`) or display names (`Tire Service`).
- */
-export function resolveCategoryPolicy(
-  rows: ServiceCategoryPolicyRow[],
-  categoryKeys: Array<string | null | undefined>,
-): ResolvedCategoryPolicy {
-  const keys = categoryKeys
-    .map((key) => (key ? normalize(key) : ""))
-    .filter((key) => key.length > 0);
-
+export function resolveCategoryPolicy(rows: ServiceCategoryPolicyRow[], categoryKeys: Array<string | null | undefined>): ResolvedCategoryPolicy {
+  const keys = categoryKeys.map((key) => key ? normalize(key) : "").filter(Boolean);
   if (keys.length === 0) return DEFAULT_CATEGORY_POLICY;
 
   const byKey = new Map<string, ServiceCategoryPolicyRow>();
-  for (const row of rows) {
-    byKey.set(normalize(row.id), row);
-    byKey.set(normalize(row.name), row);
-  }
+  for (const row of rows) { byKey.set(normalize(row.id), row); byKey.set(normalize(row.name), row); }
 
   const matchedRows: ServiceCategoryPolicyRow[] = [];
   const unmatched: string[] = [];
-  for (const key of keys) {
-    const row = byKey.get(key);
-    if (row) matchedRows.push(row);
-    else unmatched.push(key);
+  for (const key of keys) { const row = byKey.get(key); if (row) matchedRows.push(row); else unmatched.push(key); }
+
+  const inferredOil = unmatched.some((key) => OIL_KEYWORDS.test(key));
+  const inferredTire = unmatched.some((key) => TIRE_KEYWORDS.test(key));
+  const inferredDetailing = unmatched.some((key) => DETAILING_KEYWORDS.test(key));
+
+  const requirements = new Set<BookingRequirement>();
+  let matchedOil = false;
+  let matchedTire = false;
+  let matchedDetailing = false;
+  for (const row of matchedRows) {
+    const rowRequirements = row.booking_requirements ?? [];
+    rowRequirements.forEach((requirement) => requirements.add(requirement));
+    if (row.shows_fluid_specs || rowRequirements.includes("oil_fitment")) matchedOil = true;
+    if (row.vehicle_selector === "wheel_tire" || rowRequirements.includes("tire_fitment")) matchedTire = true;
+    if (rowRequirements.includes("detailing_assessment")) matchedDetailing = true;
+    if (rowRequirements.length === 0) requirements.add("basic_vehicle");
   }
 
-  if (matchedRows.length > 0) {
-    return {
-      vehicleSelector: matchedRows.some((r) => r.vehicle_selector === "wheel_tire")
-        ? "wheel_tire"
-        : matchedRows.every((r) => r.vehicle_selector === "none")
-          ? "none"
-          : "ymm_engine",
-      // Fluid specs stay hidden unless at least one selected category allows them.
-      showsFluidSpecs: matchedRows.some((r) => r.shows_fluid_specs),
-      matched: true,
-      requirements: Array.from(new Set(matchedRows.flatMap((row) => row.booking_requirements ?? [row.vehicle_selector === "wheel_tire" ? "tire_fitment" : "basic_vehicle"]))) as BookingRequirement[],
-    };
-  }
+  if (inferredOil) { requirements.add("basic_vehicle"); requirements.add("oil_fitment"); }
+  if (inferredTire) { requirements.add("basic_vehicle"); requirements.add("tire_fitment"); }
+  if (inferredDetailing) { requirements.add("basic_vehicle"); requirements.add("detailing_assessment"); }
+  if (requirements.size === 0) requirements.add("basic_vehicle");
 
-  // Keyword fallback for free-text categories that predate the category table.
-  const isTire = unmatched.some((key) => TIRE_KEYWORDS.test(key));
-  const noFluid = isTire || unmatched.some((key) => NO_FLUID_KEYWORDS.test(key));
-
-  if (isTire || noFluid) {
-    return {
-      vehicleSelector: isTire ? "wheel_tire" : "ymm_engine",
-      showsFluidSpecs: !noFluid,
-      matched: false,
-      requirements: isTire ? ["tire_fitment"] : ["basic_vehicle", "detailing_assessment"],
-    };
-  }
-
-  return DEFAULT_CATEGORY_POLICY;
-}
-
-/** Convenience guard used by spec/fluid UI surfaces. */
-export function shouldShowFluidSpecs(policy: ResolvedCategoryPolicy | undefined): boolean {
-  return policy?.showsFluidSpecs ?? true;
-}
-
-/**
- * Provider-vertical default.
- *
- * When a shop declares its verticals during onboarding (`business_profiles.service_verticals`),
- * the public booking flow should already behave correctly BEFORE any service is
- * selected: a tire-only shop opens with the wheel/tire configurator, and a
- * tire/detailing-only shop never shows oil or fluid information.
- *
- * A category match always wins — this only fills in the unmatched default.
- */
-export function applyProviderVerticalDefault(
-  policy: ResolvedCategoryPolicy,
-  verticals: string[] | null | undefined,
-): ResolvedCategoryPolicy {
-  if (policy.matched) return policy;
-  const list = (verticals ?? []).map((v) => normalize(v)).filter(Boolean);
-  if (list.length === 0) return policy;
-
-  const hasFluidVertical = list.some((v) => v === "oil_change" || v === "mechanical");
-  const hasTires = list.includes("tires");
+  const needsOil = matchedOil || inferredOil;
+  const needsTire = matchedTire || inferredTire;
+  const needsDetailing = matchedDetailing || inferredDetailing;
 
   return {
-    vehicleSelector: !hasFluidVertical && hasTires ? "wheel_tire" : policy.vehicleSelector,
-    showsFluidSpecs: hasFluidVertical ? policy.showsFluidSpecs : false,
-    matched: policy.matched,
-    requirements: !hasFluidVertical && hasTires
-      ? Array.from(new Set([...policy.requirements, "tire_fitment" as BookingRequirement]))
-      : policy.requirements,
+    // Combined oil+tire bookings keep the authoritative YMM+engine selector and
+    // append tire fitment. Pure tire bookings use the wheel/tire selector.
+    vehicleSelector: needsTire && !needsOil ? "wheel_tire" : "ymm_engine",
+    showsFluidSpecs: needsOil,
+    matched: matchedRows.length > 0,
+    requirements: Array.from(requirements),
+  };
+}
+
+export function shouldShowFluidSpecs(policy: ResolvedCategoryPolicy | undefined): boolean { return policy?.showsFluidSpecs ?? false; }
+
+export function applyProviderVerticalDefault(policy: ResolvedCategoryPolicy, verticals: string[] | null | undefined): ResolvedCategoryPolicy {
+  if (policy.matched || policy.requirements.some((requirement) => requirement !== "basic_vehicle")) return policy;
+  const list = (verticals ?? []).map(normalize).filter(Boolean);
+  if (list.length === 0) return policy;
+  const hasOil = list.some((value) => value === "oil change" || value === "oil_change" || value === "mechanical");
+  const hasTires = list.includes("tires") || list.includes("tire");
+  const hasDetailing = list.includes("detailing") || list.includes("detail");
+  const requirements = new Set<BookingRequirement>(policy.requirements);
+  if (hasOil) requirements.add("oil_fitment");
+  if (hasTires) requirements.add("tire_fitment");
+  if (hasDetailing) requirements.add("detailing_assessment");
+  return {
+    vehicleSelector: hasTires && !hasOil ? "wheel_tire" : "ymm_engine",
+    showsFluidSpecs: hasOil,
+    matched: false,
+    requirements: Array.from(requirements),
   };
 }
