@@ -1,93 +1,70 @@
-/**
- * Packages Query - Read operations for service packages.
- */
-
+/** Service package read operations backed by canonical workspace tables. */
 import { supabase } from "@/integrations/supabase/client";
-import { requireWorkspaceOwnerUserId } from "@/application/tenant-workspace";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 export interface PackageServiceItem {
-  id: string;
-  name: string;
-  description: string | null;
-  default_price: number;
-  estimated_duration: number | null;
-  category: string | null;
+  id: string; name: string; description: string | null; default_price: number; estimated_duration: number | null; category: string | null;
 }
-
-export interface PackageItem {
-  id?: string;
-  service_catalog_id: string;
-  quantity: number;
-  override_price: number | null;
-  service?: PackageServiceItem;
-}
-
+export interface PackageItem { id?: string; service_catalog_id: string; quantity: number; override_price: number | null; service?: PackageServiceItem; }
 export interface ServicePackageRow {
-  id: string;
-  name: string;
-  description: string | null;
-  package_price: number;
-  discount_type: string;
-  discount_value: number;
-  is_active: boolean;
-  estimated_duration: number | null;
-  items: PackageItem[];
+  id: string; name: string; description: string | null; package_price: number; discount_type: string; discount_value: number;
+  is_active: boolean; estimated_duration: number | null; items: PackageItem[];
 }
 
-/** Fetch all service packages with their line items for the authenticated user. */
+function one<T>(value: T | T[] | null | undefined): T | null { return Array.isArray(value) ? value[0] ?? null : value ?? null; }
+
 export async function fetchServicePackages(): Promise<ServicePackageRow[]> {
-  const ownerUserId = await requireWorkspaceOwnerUserId();
-
-  const { data: packagesData, error: packagesError } = await supabase
-    .from("service_packages")
-    .select("*")
-    .eq("user_id", ownerUserId)
-    .order("created_at", { ascending: false });
-
+  const context = await resolveCurrentWorkspace();
+  if (!context) return [];
+  const { data: packagesData, error: packagesError } = await (supabase as any)
+    .from("service_packages").select("id,name,description,package_price,discount_type,discount_value,is_active,estimated_duration,created_at")
+    .eq("workspace_id", context.workspaceId).order("created_at", { ascending: false });
   if (packagesError) throw packagesError;
 
-  // Fetch items for each package
-  const packagesWithItems: ServicePackageRow[] = [];
-  for (const pkg of packagesData || []) {
-    const { data: items } = await supabase
-      .from("service_package_items")
-      .select(`
-        id,
-        service_catalog_id,
-        quantity,
-        override_price,
-        service_catalog (
-          id, name, description, default_price, estimated_duration, category
-        )
-      `)
-      .eq("package_id", pkg.id);
-
-    packagesWithItems.push({
+  const result: ServicePackageRow[] = [];
+  for (const pkg of packagesData ?? []) {
+    const { data: items, error } = await (supabase as any).from("service_package_items").select(`
+      id,service_catalog_id,quantity,override_price,
+      service_catalog(id,name,description,labor_price,estimated_minutes,category)
+    `).eq("package_id", pkg.id);
+    if (error) throw error;
+    result.push({
       ...pkg,
-      items: (items || []).map((item) => ({
-        id: item.id,
-        service_catalog_id: item.service_catalog_id,
-        quantity: item.quantity,
-        override_price: item.override_price,
-        service: item.service_catalog as unknown as PackageServiceItem,
-      })),
+      package_price: Number(pkg.package_price ?? 0),
+      discount_value: Number(pkg.discount_value ?? 0),
+      estimated_duration: pkg.estimated_duration == null ? null : Number(pkg.estimated_duration),
+      items: (items ?? []).map((item: any) => {
+        const service = one<Record<string, any>>(item.service_catalog);
+        return {
+          id: item.id,
+          service_catalog_id: item.service_catalog_id,
+          quantity: Number(item.quantity ?? 1),
+          override_price: item.override_price == null ? null : Number(item.override_price),
+          service: service ? {
+            id: service.id,
+            name: service.name,
+            description: service.description,
+            default_price: Number(service.labor_price ?? 0),
+            estimated_duration: service.estimated_minutes == null ? null : Number(service.estimated_minutes),
+            category: service.category,
+          } : undefined,
+        };
+      }),
     });
   }
-
-  return packagesWithItems;
+  return result;
 }
 
-/** Fetch active service catalog items for the authenticated user (used in package builder). */
 export async function fetchPackageServiceCatalog(): Promise<PackageServiceItem[]> {
-  const ownerUserId = await requireWorkspaceOwnerUserId();
-
-  const { data, error } = await supabase
-    .from("service_catalog")
-    .select("id, name, description, default_price, estimated_duration, category")
-    .eq("user_id", ownerUserId)
-    .eq("is_active", true)
-    .order("name");
-
+  const context = await resolveCurrentWorkspace();
+  if (!context) return [];
+  const { data, error } = await supabase.from("service_catalog")
+    .select("id,name,description,labor_price,estimated_minutes,category")
+    .eq("workspace_id", context.workspaceId).eq("is_active", true).order("name");
   if (error) throw error;
-  return (data || []) as PackageServiceItem[];
+  return (data ?? []).map((row) => ({
+    id: row.id, name: row.name, description: row.description,
+    default_price: Number(row.labor_price ?? 0),
+    estimated_duration: row.estimated_minutes == null ? null : Number(row.estimated_minutes), category: row.category,
+  }));
 }
