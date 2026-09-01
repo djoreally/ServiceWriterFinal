@@ -9,6 +9,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { hardDelete } from "@/lib/soft-delete";
 import { nextApi } from "@/lib/nextApiClient";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
+import { invalidateVehicleOverview } from "@/application/queries/vehicles.query";
+import { invalidateCustomerOverview } from "@/application/queries/customers.query";
 
 export interface VehicleWritePayload {
   customer_id: string | null;
@@ -36,20 +38,33 @@ function vehiclePayload(workspace_id: string, payload: VehicleWritePayload): Rec
   return { workspace_id, ...payload };
 }
 
+function invalidateVehicleRelatedCaches(workspaceId: string): void {
+  invalidateVehicleOverview(workspaceId);
+  invalidateCustomerOverview(workspaceId);
+}
+
 export async function createVehicle(payload: VehicleWritePayload): Promise<void> {
-  await nextApi.vehicles.create(vehiclePayload(requireSelectedWorkspaceId(), payload));
+  const workspaceId = requireSelectedWorkspaceId();
+  await nextApi.vehicles.create(vehiclePayload(workspaceId, payload));
+  invalidateVehicleRelatedCaches(workspaceId);
 }
 
 export async function updateVehicle(id: string, payload: VehicleWritePayload): Promise<void> {
-  await nextApi.vehicles.update(id, vehiclePayload(requireSelectedWorkspaceId(), payload));
+  const workspaceId = requireSelectedWorkspaceId();
+  await nextApi.vehicles.update(id, vehiclePayload(workspaceId, payload));
+  invalidateVehicleRelatedCaches(workspaceId);
 }
 
 export async function updateVehicleOilType(id: string, oilType: string): Promise<void> {
-  await nextApi.vehicles.update(id, { workspace_id: requireSelectedWorkspaceId(), oil_type: oilType });
+  const workspaceId = requireSelectedWorkspaceId();
+  await nextApi.vehicles.update(id, { workspace_id: workspaceId, oil_type: oilType });
+  invalidateVehicleOverview(workspaceId);
 }
 
 export async function deleteVehicle(id: string): Promise<void> {
-  await nextApi.vehicles.remove(requireSelectedWorkspaceId(), id);
+  const workspaceId = requireSelectedWorkspaceId();
+  await nextApi.vehicles.remove(workspaceId, id);
+  invalidateVehicleRelatedCaches(workspaceId);
 }
 
 /**
@@ -57,6 +72,8 @@ export async function deleteVehicle(id: string): Promise<void> {
  * ⚠️ WARNING: This permanently removes vehicle data
  */
 export async function hardDeleteVehicle(id: string): Promise<void> {
+  const workspaceId = requireSelectedWorkspaceId();
   const { error } = await hardDelete(supabase, "vehicles", id);
   if (error) throw error;
+  invalidateVehicleRelatedCaches(workspaceId);
 }
