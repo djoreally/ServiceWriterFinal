@@ -17,10 +17,10 @@ export interface VehicleSpec {
   engine: string | null;
   oil_type: string | null;
   oil_capacity: string | null;
-  oil_filter: string | null;
+  oil_filter?: string | null;
   oil_plug_torque: string | null;
-  tire_size: string | null;
-  rear_tire_size: string | null;
+  tire_size?: string | null;
+  rear_tire_size?: string | null;
   transmission_fluid: string | null;
   additional_specs?: Record<string, string | null> | null;
 }
@@ -134,8 +134,6 @@ export function useVehicleSpecs(options: UseVehicleSpecsOptions = {}) {
   }, [options.year, options.make, options.model]);
 
   return {
-    // Kept for legacy consumers that only need initial-catalog loading. Granular
-    // states drive the cascade and no longer trigger any AI/manual fallback UI.
     loading: yearsLoading,
     yearsLoading, makesLoading, modelsLoading, specsLoading,
     years, makes, models, engines, matchedSpec,
