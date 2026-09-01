@@ -24,8 +24,35 @@ export async function uploadCoverImage(userId: string, file: File) {
   return publicUrl;
 }
 
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+
 /** Upsert (insert or update) business profile. */
 export async function upsertBusinessProfile(userId: string, data: Record<string, unknown>) {
+  // Sync to canonical workspace_settings when workspace context is present
+  const context = await resolveCurrentWorkspace();
+  if (context?.workspaceId) {
+    const wsSettingsPatch: Record<string, unknown> = {};
+    if (data.business_name) wsSettingsPatch.owner_name = data.owner_name ?? data.business_name;
+    if (data.phone) wsSettingsPatch.phone = data.phone;
+    if (data.email) wsSettingsPatch.email = data.email;
+    if (data.address) wsSettingsPatch.address_line1 = data.address;
+    if (data.logo_url) wsSettingsPatch.logo_url = data.logo_url;
+    if (data.timezone) wsSettingsPatch.timezone = data.timezone;
+    if (data.opening_time) wsSettingsPatch.opening_time = data.opening_time;
+    if (data.closing_time) wsSettingsPatch.closing_time = data.closing_time;
+    if (data.working_days) wsSettingsPatch.working_days = data.working_days;
+    if (data.booking_slug) wsSettingsPatch.booking_slug = data.booking_slug;
+    if (data.service_radius_miles) wsSettingsPatch.service_radius_miles = data.service_radius_miles;
+    if (data.service_address) wsSettingsPatch.service_address = data.service_address;
+
+    if (Object.keys(wsSettingsPatch).length > 0) {
+      await (supabase as any)
+        .from("workspace_settings")
+        .update(wsSettingsPatch as never)
+        .eq("workspace_id", context.workspaceId);
+    }
+  }
+
   const { data: existing } = await supabase
     .from("business_profiles")
     .select("id")
