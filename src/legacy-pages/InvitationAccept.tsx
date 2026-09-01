@@ -12,8 +12,15 @@ import { signInWithPassword, signUpWithEmail } from "@/application/commands/auth
 import { supabase } from "@/integrations/supabase/client";
 import { nextApi, type InvitationRecord } from "@/lib/nextApiClient";
 
-const emailSchema = z.string().trim().toLowerCase().email("Enter a valid email address.");
 const passwordSchema = z.string().min(8, "Use at least 8 characters.");
+
+type InvitationPreview = {
+  id: string;
+  invited_email: string;
+  invited_role: string;
+  expires_at: string;
+  workspace_name: string;
+};
 
 function roleLanding(role: string): string {
   if (role === "customer") return "/customer/dashboard";
@@ -28,8 +35,8 @@ export default function InvitationAccept() {
   const [params] = useSearchParams();
   const invitationId = params.get("invitation_id") ?? "";
   const token = params.get("token") ?? "";
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
-  const [email, setEmail] = useState("");
+  const [mode, setMode] = useState<"signin" | "signup">("signup");
+  const [preview, setPreview] = useState<InvitationPreview | null>(null);
   const [password, setPassword] = useState("");
   const [invitation, setInvitation] = useState<InvitationRecord | null>(null);
   const [loading, setLoading] = useState(true);
@@ -38,39 +45,56 @@ export default function InvitationAccept() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!invitationId || !token) { void Promise.resolve().then(() => setError("This invitation link is incomplete.")); void Promise.resolve().then(() => setLoading(false)); return; }
+    if (!invitationId || !token) {
+      setError("This invitation link is incomplete.");
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
     void (async () => {
       try {
+        const response = await fetch(`/api/v1/invitations/${encodeURIComponent(invitationId)}?token=${encodeURIComponent(token)}`, {
+          headers: { Accept: "application/json" },
+        });
+        const payload = await response.json().catch(() => null) as { data?: InvitationPreview; error?: { message?: string } } | null;
+        if (!response.ok || !payload?.data) throw new Error(payload?.error?.message || "This invitation link is invalid or expired.");
+        if (cancelled) return;
+        setPreview(payload.data);
+
         const session = (await supabase.auth.getSession()).data.session;
-        if (session?.user.email) setEmail(session.user.email);
-        // The API intentionally does not expose token metadata before acceptance.
-        // A lightweight identity check keeps the acceptance surface tenant-safe.
-        const identity = session ? await nextApi.identity.get() : null;
-        const linked = identity?.data.memberships?.find((membership) => typeof membership === "object" && membership !== null && "workspace_id" in membership) as { workspace_id?: string } | undefined;
-        void linked;
-      } catch { /* The submit path returns the authoritative invitation error. */ }
-      finally { setLoading(false); }
+        if (session?.user.email?.toLowerCase() === payload.data.invited_email.toLowerCase()) setMode("signin");
+      } catch (cause) {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : "This invitation link is invalid or expired.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     })();
+    return () => { cancelled = true; };
   }, [invitationId, token]);
 
   async function authenticateAndAccept(event: React.FormEvent) {
     event.preventDefault();
     setError("");
-    const parsedEmail = emailSchema.safeParse(email);
+    if (!preview) return;
     const parsedPassword = passwordSchema.safeParse(password);
-    if (!parsedEmail.success) { setError(parsedEmail.error.issues[0].message); return; }
     if (!parsedPassword.success) { setError(parsedPassword.error.issues[0].message); return; }
+
     setSubmitting(true);
     try {
       if (mode === "signup") {
-        const result = await signUpWithEmail(parsedEmail.data, parsedPassword.data);
+        const result = await signUpWithEmail(preview.invited_email, parsedPassword.data);
         if (result.error) throw new Error(result.error);
         const session = (await supabase.auth.getSession()).data.session;
-        if (!session) { toast.success("Account created. Confirm your email, then reopen this invitation link."); return; }
+        if (!session) {
+          toast.success("Account created. Confirm your email, then reopen this invitation link.");
+          return;
+        }
       } else {
-        const result = await signInWithPassword(parsedEmail.data, parsedPassword.data);
+        const result = await signInWithPassword(preview.invited_email, parsedPassword.data);
         if (result.error) throw new Error(result.error);
       }
+
       const response = await nextApi.invitations.accept(invitationId, token);
       setInvitation(response.data);
       setAccepted(true);
@@ -78,15 +102,62 @@ export default function InvitationAccept() {
       window.setTimeout(() => navigate(roleLanding(response.data.invited_role), { replace: true }), 900);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "This invitation could not be accepted.";
-      setError(message);
-    } finally { setSubmitting(false); }
+      if (mode === "signup" && /already|registered|exists/i.test(message)) {
+        setMode("signin");
+        setError("This email already has an account. Enter its password to accept the invitation.");
+      } else {
+        setError(message);
+      }
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   if (loading) return <div className="flex min-h-screen items-center justify-center bg-muted/30"><Loader2 className="h-7 w-7 animate-spin text-primary" /></div>;
-  if (error && !invitation && (!invitationId || !token)) return <StateCard icon={<Link2 className="h-7 w-7" />} title="Invalid invitation link" message={error} />;
+  if (error && !preview) return <StateCard icon={<Link2 className="h-7 w-7" />} title="Invalid invitation link" message={error} />;
   if (accepted) return <StateCard icon={<CheckCircle2 className="h-8 w-8 text-emerald-600" />} title="You're in" message={`Your ${invitation?.invited_role.replaceAll("_", " ")} access is ready. Redirecting to your workspace…`} />;
+  if (!preview) return <StateCard icon={<Link2 className="h-7 w-7" />} title="Invalid invitation link" message="This invitation could not be loaded." />;
 
-  return <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4"><Card className="w-full max-w-md shadow-sm"><CardHeader className="space-y-4 text-center"><div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10"><Users className="h-7 w-7 text-primary" /></div><div><CardTitle className="text-2xl">Join your Service Writer workspace</CardTitle><CardDescription className="mt-2">Use the email address that received this invitation. Your access is limited to the workspace and role assigned by the inviter.</CardDescription></div></CardHeader><CardContent><form onSubmit={authenticateAndAccept} className="space-y-4"><Tabs value={mode} onValueChange={(value) => setMode(value as "signin" | "signup")}><TabsList className="grid w-full grid-cols-2"><TabsTrigger value="signin">Sign in</TabsTrigger><TabsTrigger value="signup">Create account</TabsTrigger></TabsList><TabsContent value="signin" className="mt-4 space-y-4"><p className="text-sm text-muted-foreground">Already have a Service Writer account? Sign in to accept the invitation.</p></TabsContent><TabsContent value="signup" className="mt-4 space-y-4"><p className="text-sm text-muted-foreground">Create an account with this email, then your invitation will be attached automatically.</p></TabsContent></Tabs><div className="space-y-2"><Label htmlFor="accept-email">Email</Label><Input id="accept-email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></div><div className="space-y-2"><Label htmlFor="accept-password">Password</Label><Input id="accept-password" type="password" autoComplete={mode === "signin" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} required /><p className="text-xs text-muted-foreground">Minimum 8 characters.</p></div>{error && <div role="alert" className="flex gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"><XCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}<Button type="submit" className="w-full gap-2" disabled={submitting}><ShieldCheck className="h-4 w-4" />{submitting ? "Securing access…" : mode === "signin" ? "Sign in & accept" : "Create account & accept"}</Button></form></CardContent></Card></main>;
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
+      <Card className="w-full max-w-md shadow-sm">
+        <CardHeader className="space-y-4 text-center">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10"><Users className="h-7 w-7 text-primary" /></div>
+          <div>
+            <CardTitle className="text-2xl">Join {preview.workspace_name}</CardTitle>
+            <CardDescription className="mt-2">Your email and assigned role are locked to this invitation. Set your password to finish account access.</CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={authenticateAndAccept} className="space-y-4">
+            <div className="rounded-lg border bg-muted/40 p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Invited email</p>
+              <p className="mt-1 font-medium">{preview.invited_email}</p>
+              <p className="mt-1 text-xs text-muted-foreground">Role: {preview.invited_role.replaceAll("_", " ")}</p>
+            </div>
+
+            <Tabs value={mode} onValueChange={(value) => setMode(value as "signin" | "signup")}>
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="signup">Set password</TabsTrigger>
+                <TabsTrigger value="signin">Existing account</TabsTrigger>
+              </TabsList>
+              <TabsContent value="signup" className="mt-3 text-sm text-muted-foreground">Create your Service Writer login for the invited email.</TabsContent>
+              <TabsContent value="signin" className="mt-3 text-sm text-muted-foreground">If this email already has a Service Writer account, enter its current password.</TabsContent>
+            </Tabs>
+
+            <div className="space-y-2">
+              <Label htmlFor="accept-password">{mode === "signup" ? "Create password" : "Password"}</Label>
+              <Input id="accept-password" type="password" autoComplete={mode === "signin" ? "current-password" : "new-password"} value={password} onChange={(event) => setPassword(event.target.value)} required autoFocus />
+              <p className="text-xs text-muted-foreground">Minimum 8 characters.</p>
+            </div>
+
+            {error && <div role="alert" className="flex gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"><XCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
+            <Button type="submit" className="w-full gap-2" disabled={submitting}><ShieldCheck className="h-4 w-4" />{submitting ? "Securing access…" : mode === "signin" ? "Sign in & accept" : "Set password & accept"}</Button>
+          </form>
+        </CardContent>
+      </Card>
+    </main>
+  );
 }
 
 function StateCard({ icon, title, message }: { icon: React.ReactNode; title: string; message: string }) {

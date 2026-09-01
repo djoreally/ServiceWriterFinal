@@ -143,18 +143,25 @@ export function useVehicleSpecs(options: UseVehicleSpecsOptions = {}) {
     return () => { cancelled = true; };
   }, [options.year, options.make, options.model]);
 
-  const loading = yearsLoading || makesLoading || modelsLoading || specsLoading;
+  // VehicleEntry historically treated this aggregate flag as a signal to show
+  // an AI/manual fallback. Normal make/model/spec fetches therefore flashed the
+  // retired AI UI during every cascade. Only the initial year catalog load is
+  // exposed as the legacy aggregate loading flag; granular states remain
+  // available for actual loading indicators.
+  const loading = yearsLoading;
 
   return {
     loading,
+    yearsLoading,
+    makesLoading,
+    modelsLoading,
+    specsLoading,
     years,
     makes,
     models,
     engines,
     matchedSpec,
     allSpecs: [] as VehicleSpec[],
-    // AI/manual fallback has been removed from public booking. A failed catalog
-    // request stays a vehicle-data error instead of switching providers.
     needsFallback: false,
   };
 }
