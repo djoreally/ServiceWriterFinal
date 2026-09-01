@@ -38,7 +38,7 @@ export interface AIVehicleSpecResult {
   confidence_score?: number;
 }
 
-export async function lookupVehicleSpecsWithAI(): Promise<AIVehicleSpecResult> {
+export async function lookupVehicleSpecsWithAI(_year?: number, _make?: string, _model?: string): Promise<AIVehicleSpecResult> {
   throw new Error("AI vehicle lookup has been retired. Vehicle data comes from the vehicle catalog.");
 }
 
@@ -162,7 +162,7 @@ export function useVehicleSpecs(options: UseVehicleSpecsOptions = {}) {
 /** Legacy hook retained so stale imports compile; it never calls an AI provider. */
 export function useAIVehicleSpecLookup() {
   const [error, setError] = useState<string | null>(null);
-  const lookup = useCallback(async () => {
+  const lookup = useCallback(async (_year?: number, _make?: string, _model?: string) => {
     const message = "AI vehicle lookup has been retired. Use the vehicle catalog.";
     setError(message);
     throw new Error(message);
