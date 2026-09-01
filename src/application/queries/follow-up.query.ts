@@ -1,99 +1,49 @@
-/**
- * Follow-Up Automation Query — Read operations for follow-up rules and scheduled follow-ups.
- */
-import { supabase } from "@/integrations/supabase/client";
+/** Follow-Up Automation Query — canonical workspace reads. */
+import { productionSupabase } from "@/integrations/supabase/client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+const db = productionSupabase as any;
 
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface FollowUpRule {
-  id: string;
-  name: string;
-  description: string | null;
-  trigger_type: string;
-  trigger_days: number;
-  segment_filter: string[] | null;
-  service_type_filter: string[] | null;
-  churn_risk_filter: string[] | null;
-  action_type: string;
-  email_subject: string | null;
-  email_content: string | null;
-  sms_content: string | null;
-  task_title: string | null;
-  task_description: string | null;
-  task_assignee_id: string | null;
-  min_value_filter: number | null;
-  max_value_filter: number | null;
-  preset_key: string | null;
-  is_active: boolean;
-  times_triggered: number;
-  conversions: number;
-  last_triggered_at: string | null;
+  id: string; name: string; description: string | null; trigger_type: string; trigger_days: number;
+  segment_filter: string[] | null; service_type_filter: string[] | null; churn_risk_filter: string[] | null;
+  action_type: string; email_subject: string | null; email_content: string | null; sms_content: string | null;
+  task_title: string | null; task_description: string | null; task_assignee_id: string | null;
+  min_value_filter: number | null; max_value_filter: number | null; preset_key: string | null; is_active: boolean;
+  times_triggered: number; conversions: number; last_triggered_at: string | null;
 }
-
 export interface ScheduledFollowUp {
-  id: string;
-  customer_name?: string;
-  trigger_type: string;
-  trigger_data?: Record<string, unknown> | null;
-  scheduled_for: string;
-  status: string;
-  executed_at: string | null;
-  converted: boolean;
-  rule_name?: string;
+  id: string; customer_name?: string; trigger_type: string; trigger_data?: Record<string, unknown> | null;
+  scheduled_for: string; status: string; executed_at: string | null; converted: boolean; rule_name?: string;
 }
+export interface FollowUpAutomationData { rules: FollowUpRule[]; scheduledFollowUps: ScheduledFollowUp[]; segments: string[]; }
 
-export interface FollowUpAutomationData {
-  rules: FollowUpRule[];
-  scheduledFollowUps: ScheduledFollowUp[];
-  segments: string[];
-}
+function one<T>(value: T | T[] | null | undefined): T | null { return Array.isArray(value) ? value[0] ?? null : value ?? null; }
 
-type ScheduledFollowUpRow = ScheduledFollowUp & {
-  customers?: { name: string | null } | null;
-  follow_up_rules?: { name: string | null } | null;
-};
-
-type CustomerSegmentNameRow = { name: string | null };
-
-/**
- * Fetch all follow-up automation data for the current user.
- */
 export async function fetchFollowUpAutomationData(): Promise<FollowUpAutomationData> {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) throw new Error("Not authenticated");
-
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("No active workspace is available.");
   const [rulesRes, scheduledRes, segmentRes] = await Promise.all([
-    supabase
-      .from("follow_up_rules")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false }),
-    supabase
-      .from("scheduled_follow_ups")
-      .select(`*, customers(name), follow_up_rules(name)`)
-      .eq("user_id", user.id)
-      .order("scheduled_for", { ascending: true })
-      .limit(100),
-    supabase
-      .from("customer_segments")
-      .select("name")
-      .eq("user_id", user.id),
+    db.from("follow_up_rules").select("*").eq("workspace_id", context.workspaceId).order("created_at", { ascending: false }),
+    db.from("scheduled_follow_ups")
+      .select("*,customers(first_name,last_name,company_name),follow_up_rules(name)")
+      .eq("workspace_id", context.workspaceId).order("scheduled_for", { ascending: true }).limit(100),
+    db.from("customer_segments").select("name").eq("workspace_id", context.workspaceId).eq("is_active", true),
   ]);
-
   if (rulesRes.error) throw rulesRes.error;
   if (scheduledRes.error) throw scheduledRes.error;
-
-  const scheduledRows = (scheduledRes.data || []) as ScheduledFollowUpRow[];
-  const segmentRows = (segmentRes.data || []) as CustomerSegmentNameRow[];
-
-  const scheduledFollowUps = scheduledRows.map((scheduled) => ({
-    ...scheduled,
-    customer_name: scheduled.customers?.name || "Unknown",
-    rule_name: scheduled.follow_up_rules?.name || "Manual",
-  }));
-
+  if (segmentRes.error) throw segmentRes.error;
+  const scheduledFollowUps = (scheduledRes.data ?? []).map((row: any) => {
+    const customer = one<any>(row.customers);
+    const rule = one<any>(row.follow_up_rules);
+    return {
+      ...row,
+      customer_name: customer ? ([customer.first_name, customer.last_name].filter(Boolean).join(" ") || customer.company_name || "Unknown") : "Unknown",
+      rule_name: rule?.name || "Manual",
+    } as ScheduledFollowUp;
+  });
   return {
-    rules: rulesRes.data as FollowUpRule[],
+    rules: (rulesRes.data ?? []) as FollowUpRule[],
     scheduledFollowUps,
-    segments: segmentRows.flatMap((segment) => (segment.name ? [segment.name] : [])),
+    segments: (segmentRes.data ?? []).flatMap((row: any) => row.name ? [String(row.name)] : []),
   };
 }

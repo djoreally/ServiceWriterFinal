@@ -1,5 +1,5 @@
 /** Customer segmentation/report demographic queries. */
-import { productionSupabase, supabase } from "@/integrations/supabase/client";
+import { productionSupabase } from "@/integrations/supabase/client";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 const db = productionSupabase as any;
@@ -17,10 +17,10 @@ export interface LocationDemographicCustomer { id: string; name: string; address
 function metadataObject(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 export async function getCurrentUserId(): Promise<string | null> { const { data: { user } } = await getCurrentAuthUser(); return user?.id ?? null; }
 
-/** Preserve the legacy segment feature independently while Reports uses canonical customer data. */
-export async function fetchSegments(userId: string) {
-  const { data, error } = await supabase.from("customer_segments").select("*").eq("user_id", userId).order("priority", { ascending: false });
-  if (error?.code === "42P01" || error?.code === "PGRST205") return [];
+export async function fetchSegments(_userId: string): Promise<SegmentRow[]> {
+  const context = await resolveCurrentWorkspace();
+  if (!context) return [];
+  const { data, error } = await db.from("customer_segments").select("*").eq("workspace_id", context.workspaceId).order("priority", { ascending: false });
   if (error) throw error;
   return (data ?? []) as SegmentRow[];
 }

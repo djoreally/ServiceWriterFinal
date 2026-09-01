@@ -1,54 +1,34 @@
-/**
- * Phone Coupons Query Layer — reads customer phone list and per-customer
- * override rows used by the `validate_phone_coupon` RPC at booking time.
- */
-import { supabase } from "@/integrations/supabase/client";
-
+/** Phone Coupons Query Layer — canonical workspace-backed reads. */
+import { productionSupabase } from "@/integrations/supabase/client";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+const db = productionSupabase as any;
+
 export interface PhoneCouponOverride {
-  id: string;
-  customer_id: string;
-  disabled: boolean;
+  id: string; customer_id: string; disabled: boolean;
   custom_discount_type: "percentage" | "fixed" | null;
-  custom_discount_value: number | null;
-  custom_min_order_amount: number | null;
-  custom_description: string | null;
-  notes: string | null;
+  custom_discount_value: number | null; custom_min_order_amount: number | null;
+  custom_description: string | null; notes: string | null;
 }
-
-export interface PhoneCouponCustomer {
-  id: string;
-  name: string | null;
-  email: string | null;
-  phone: string | null;
-}
-
-export interface PhoneCouponData {
-  userId: string;
-  customers: PhoneCouponCustomer[];
-  overrides: PhoneCouponOverride[];
-}
+export interface PhoneCouponCustomer { id: string; name: string | null; email: string | null; phone: string | null; }
+export interface PhoneCouponData { userId: string; customers: PhoneCouponCustomer[]; overrides: PhoneCouponOverride[]; }
 
 export async function fetchPhoneCouponData(): Promise<PhoneCouponData | null> {
   const { data: auth } = await getCurrentAuthUser();
   if (!auth.user) return null;
-  const [{ data: customers, error: cErr }, { data: overrides, error: oErr }] = await Promise.all([
-    supabase
-      .from("customers")
-      .select("id, name, email, phone")
-      .eq("user_id", auth.user.id)
-      .not("phone", "is", null)
-      .order("name", { ascending: true }),
-    supabase
-      .from("phone_coupon_overrides")
-      .select("*")
-      .eq("user_id", auth.user.id),
+  const context = await resolveCurrentWorkspace();
+  if (!context) return null;
+  const [customerRes, overrideRes] = await Promise.all([
+    db.from("customers").select("id,first_name,last_name,company_name,email,phone").eq("workspace_id", context.workspaceId).not("phone", "is", null),
+    db.from("phone_coupon_overrides").select("*").eq("workspace_id", context.workspaceId),
   ]);
-  if (cErr) throw cErr;
-  if (oErr) throw oErr;
-  return {
-    userId: auth.user.id,
-    customers: (customers ?? []) as PhoneCouponCustomer[],
-    overrides: (overrides ?? []) as unknown as PhoneCouponOverride[],
-  };
+  if (customerRes.error) throw customerRes.error;
+  if (overrideRes.error) throw overrideRes.error;
+  const customers = (customerRes.data ?? []).map((row: any) => ({
+    id: row.id,
+    name: [row.first_name, row.last_name].filter(Boolean).join(" ") || row.company_name || "Customer",
+    email: row.email ?? null,
+    phone: row.phone ?? null,
+  })).sort((a: PhoneCouponCustomer, b: PhoneCouponCustomer) => (a.name || "").localeCompare(b.name || ""));
+  return { userId: auth.user.id, customers, overrides: (overrideRes.data ?? []) as PhoneCouponOverride[] };
 }
