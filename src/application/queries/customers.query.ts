@@ -54,7 +54,11 @@ function offlineRaw(record: { _raw: unknown }): OfflineRawFields {
   return record._raw as OfflineRawFields;
 }
 
-export async function fetchCustomerOverviewFromNextApi(workspaceId: string): Promise<CustomerOverviewResult> {
+const CUSTOMER_OVERVIEW_TTL_MS = 5 * 60 * 1000;
+const customerOverviewCache = new Map<string, { value: CustomerOverviewResult; expiresAt: number }>();
+const customerOverviewInFlight = new Map<string, Promise<CustomerOverviewResult>>();
+
+async function loadCustomerOverviewFromNextApi(workspaceId: string): Promise<CustomerOverviewResult> {
   const { nextApi } = await import("@/lib/nextApiClient");
   const [customerResponse, vehicleResponse, serviceResponse] = await Promise.all([
     nextApi.customers.list(workspaceId),
@@ -96,6 +100,40 @@ export async function fetchCustomerOverviewFromNextApi(workspaceId: string): Pro
   }
 
   return { customers, vehicleCounts, lastServiceDates };
+}
+
+export async function fetchCustomerOverviewFromNextApi(workspaceId: string): Promise<CustomerOverviewResult> {
+  const now = Date.now();
+  const cached = customerOverviewCache.get(workspaceId);
+  if (cached && cached.expiresAt > now) return cached.value;
+
+  const existingRequest = customerOverviewInFlight.get(workspaceId);
+  if (existingRequest) return existingRequest;
+
+  const request = loadCustomerOverviewFromNextApi(workspaceId)
+    .then((value) => {
+      customerOverviewCache.set(workspaceId, {
+        value,
+        expiresAt: Date.now() + CUSTOMER_OVERVIEW_TTL_MS,
+      });
+      return value;
+    })
+    .finally(() => {
+      customerOverviewInFlight.delete(workspaceId);
+    });
+
+  customerOverviewInFlight.set(workspaceId, request);
+  return request;
+}
+
+export function invalidateCustomerOverview(workspaceId?: string): void {
+  if (workspaceId) {
+    customerOverviewCache.delete(workspaceId);
+    customerOverviewInFlight.delete(workspaceId);
+    return;
+  }
+  customerOverviewCache.clear();
+  customerOverviewInFlight.clear();
 }
 
 export async function fetchCustomerOverviewFromOffline(): Promise<CustomerOverviewResult | null> {
