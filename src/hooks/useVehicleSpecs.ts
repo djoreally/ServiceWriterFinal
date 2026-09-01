@@ -1,11 +1,10 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   fetchVehicleSpecYears,
   fetchVehicleSpecMakes,
   fetchVehicleSpecModels,
   fetchVehicleSpecEngines,
   fetchVehicleSpecSingle,
-  invokeAIVehicleSpecs,
   type VehicleSpecRow,
 } from "@/application/queries/vehicle-specs.query";
 import type { Json } from "@/integrations/supabase/types";
@@ -23,7 +22,7 @@ export interface VehicleSpec {
   additional_specs?: Record<string, string | null> | null;
 }
 
-// AI lookup result interface
+/** Retained only for stale imports. Public booking no longer performs AI lookups. */
 export interface AIVehicleSpecResult {
   year: number;
   make: string;
@@ -39,19 +38,8 @@ export interface AIVehicleSpecResult {
   confidence_score?: number;
 }
 
-// AI lookup function - calls edge function
-export async function lookupVehicleSpecsWithAI(
-  year: number,
-  make: string,
-  model: string
-): Promise<AIVehicleSpecResult> {
-  const { data, error } = await invokeAIVehicleSpecs(year, make, model);
-
-  if (error) {
-    throw new Error(error.message || "AI lookup failed");
-  }
-
-  return data as AIVehicleSpecResult;
+export async function lookupVehicleSpecsWithAI(_year?: number, _make?: string, _model?: string): Promise<AIVehicleSpecResult> {
+  throw new Error("AI vehicle lookup has been retired. Vehicle data comes from the vehicle catalog.");
 }
 
 interface UseVehicleSpecsOptions {
@@ -60,9 +48,6 @@ interface UseVehicleSpecsOptions {
   model?: string;
 }
 
-type VehicleSpecYearOption = { year: number };
-type VehicleSpecMakeOption = { make: string };
-type VehicleSpecModelOption = { model: string };
 type JsonRecord = { [key: string]: Json | undefined };
 
 function isJsonRecord(value: Json | null): value is JsonRecord {
@@ -71,31 +56,17 @@ function isJsonRecord(value: Json | null): value is JsonRecord {
 
 function toAdditionalSpecs(value: Json | null): Record<string, string | null> | null {
   if (!isJsonRecord(value)) return null;
-
   const result: Record<string, string | null> = {};
-
   for (const [key, entry] of Object.entries(value)) {
-    if (entry === null) {
-      result[key] = null;
-      continue;
-    }
-
-    if (typeof entry === "string") {
-      result[key] = entry;
-      continue;
-    }
-
-    if (typeof entry === "number" || typeof entry === "boolean") {
-      result[key] = String(entry);
-    }
+    if (entry === null) result[key] = null;
+    else if (typeof entry === "string") result[key] = entry;
+    else if (typeof entry === "number" || typeof entry === "boolean") result[key] = String(entry);
   }
-
   return Object.keys(result).length > 0 ? result : null;
 }
 
 function mapSpec(item: VehicleSpecRow): VehicleSpec {
   const additionalSpecs = toAdditionalSpecs(item.additional_specs);
-
   return {
     id: item.id,
     year: item.year,
@@ -110,93 +81,69 @@ function mapSpec(item: VehicleSpecRow): VehicleSpec {
   };
 }
 
-/**
- * ⚡ Performance: Queries the database directly instead of fetching large JSON files.
- * This avoids CORS issues in preview and reduces initial page load by ~7MB.
- */
 export function useVehicleSpecs(options: UseVehicleSpecsOptions = {}) {
   const [years, setYears] = useState<number[]>([]);
   const [makes, setMakes] = useState<string[]>([]);
   const [models, setModels] = useState<string[]>([]);
   const [engines, setEngines] = useState<{ engine: string; spec: VehicleSpec }[]>([]);
   const [matchedSpec, setMatchedSpec] = useState<VehicleSpec | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [allSpecs, setAllSpecs] = useState<VehicleSpec[]>([]);
+  const [yearsLoading, setYearsLoading] = useState(true);
+  const [makesLoading, setMakesLoading] = useState(false);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [specsLoading, setSpecsLoading] = useState(false);
 
-  // ⚡ Load distinct years via RPC — returns ~26 rows instead of 14k+
   useEffect(() => {
-    const loadYears = async () => {
-      setLoading(true);
-      const { data, error } = await fetchVehicleSpecYears();
-      if (!error && data) {
-        setYears((data as VehicleSpecYearOption[]).map((d) => d.year));
-      }
-      setLoading(false);
-    };
-    loadYears();
+    let cancelled = false;
+    setYearsLoading(true);
+    void fetchVehicleSpecYears().then(({ data }) => {
+      if (!cancelled) setYears((data ?? []).map((row) => row.year));
+    }).finally(() => { if (!cancelled) setYearsLoading(false); });
+    return () => { cancelled = true; };
   }, []);
 
-  // ⚡ Load distinct makes via RPC — returns only unique makes for selected year
   useEffect(() => {
-    if (!options.year) {
-      void Promise.resolve().then(() => setMakes([]));
-      return;
-    }
-    const loadMakes = async () => {
-      const { data, error } = await fetchVehicleSpecMakes(parseInt(options.year!));
-      if (!error && data) {
-        setMakes((data as VehicleSpecMakeOption[]).map((d) => d.make));
-      }
-    };
-    void Promise.resolve().then(() => loadMakes());
+    let cancelled = false;
+    setMakes([]);
+    setModels([]);
+    setEngines([]);
+    setMatchedSpec(null);
+    if (!options.year) return () => { cancelled = true; };
+    setMakesLoading(true);
+    void fetchVehicleSpecMakes(Number(options.year)).then(({ data }) => {
+      if (!cancelled) setMakes((data ?? []).map((row) => row.make));
+    }).finally(() => { if (!cancelled) setMakesLoading(false); });
+    return () => { cancelled = true; };
   }, [options.year]);
 
-  // ⚡ Load distinct models via RPC — returns only unique models for year+make
   useEffect(() => {
-    if (!options.year || !options.make) {
-      void Promise.resolve().then(() => setModels([]));
-      return;
-    }
-    const loadModels = async () => {
-      const { data, error } = await fetchVehicleSpecModels(parseInt(options.year!), options.make!);
-      if (!error && data) {
-        setModels((data as VehicleSpecModelOption[]).map((d) => d.model));
-      }
-    };
-    void Promise.resolve().then(() => loadModels());
+    let cancelled = false;
+    setModels([]);
+    setEngines([]);
+    setMatchedSpec(null);
+    if (!options.year || !options.make) return () => { cancelled = true; };
+    setModelsLoading(true);
+    void fetchVehicleSpecModels(Number(options.year), options.make).then(({ data }) => {
+      if (!cancelled) setModels((data ?? []).map((row) => row.model));
+    }).finally(() => { if (!cancelled) setModelsLoading(false); });
+    return () => { cancelled = true; };
   }, [options.year, options.make]);
 
-  // Load engines + matched spec when model changes
   useEffect(() => {
-    if (!options.year || !options.make || !options.model) {
-      void Promise.resolve().then(() => setEngines([]));
-      void Promise.resolve().then(() => setMatchedSpec(null));
-      return;
-    }
-    const loadEngines = async () => {
-      const { data, error } = await fetchVehicleSpecEngines(
-        parseInt(options.year!),
-        options.make!,
-        options.model!
-      );
-
-      if (!error && data) {
-        const specs: VehicleSpec[] = data.map(mapSpec);
-        const engineList = specs
-          .filter(s => s.engine)
-          .map(s => ({ engine: s.engine!, spec: s }));
-        setEngines(engineList);
-        setMatchedSpec(specs[0] || null);
-      }
-    };
-    void Promise.resolve().then(() => loadEngines());
+    let cancelled = false;
+    setEngines([]);
+    setMatchedSpec(null);
+    if (!options.year || !options.make || !options.model) return () => { cancelled = true; };
+    setSpecsLoading(true);
+    void fetchVehicleSpecEngines(Number(options.year), options.make, options.model).then(({ data }) => {
+      if (cancelled) return;
+      const specs = (data ?? []).map(mapSpec);
+      setEngines(specs.filter((spec) => spec.engine).map((spec) => ({ engine: spec.engine!, spec })));
+      setMatchedSpec(specs[0] ?? null);
+    }).finally(() => { if (!cancelled) setSpecsLoading(false); });
+    return () => { cancelled = true; };
   }, [options.year, options.make, options.model]);
 
-  // Check if we need fallback for selected year
-  const needsFallback = useMemo(() => {
-    if (!options.year || loading) return false;
-    return makes.length === 0;
-  }, [options.year, makes, loading]);
+  const loading = yearsLoading || makesLoading || modelsLoading || specsLoading;
 
   return {
     loading,
@@ -205,41 +152,23 @@ export function useVehicleSpecs(options: UseVehicleSpecsOptions = {}) {
     models,
     engines,
     matchedSpec,
-    allSpecs,
-    needsFallback,
+    allSpecs: [] as VehicleSpec[],
+    // AI/manual fallback has been removed from public booking. A failed catalog
+    // request stays a vehicle-data error instead of switching providers.
+    needsFallback: false,
   };
 }
 
-// Hook for AI-assisted vehicle spec lookup
+/** Legacy hook retained so stale imports compile; it never calls an AI provider. */
 export function useAIVehicleSpecLookup() {
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<AIVehicleSpecResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  const lookup = useCallback(async (year: number, make: string, model: string) => {
-    setLoading(true);
-    setError(null);
-    setResult(null);
-
-    try {
-      const data = await lookupVehicleSpecsWithAI(year, make, model);
-      setResult(data);
-      return data;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "AI lookup failed";
-      setError(message);
-      throw err;
-    } finally {
-      setLoading(false);
-    }
+  const lookup = useCallback(async (_year?: number, _make?: string, _model?: string) => {
+    const message = "AI vehicle lookup has been retired. Use the vehicle catalog.";
+    setError(message);
+    throw new Error(message);
   }, []);
-
-  const reset = useCallback(() => {
-    setResult(null);
-    setError(null);
-  }, []);
-
-  return { lookup, loading, result, error, reset };
+  const reset = useCallback(() => setError(null), []);
+  return { lookup, loading: false, result: null as AIVehicleSpecResult | null, error, reset };
 }
 
 export function useVehicleSpecLookup(year?: string, make?: string, model?: string, engine?: string) {
@@ -247,31 +176,17 @@ export function useVehicleSpecLookup(year?: string, make?: string, model?: strin
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     if (!year || !make || !model) {
-      void Promise.resolve().then(() => setSpec(null));
-      return;
+      setSpec(null);
+      return () => { cancelled = true; };
     }
-
-    void Promise.resolve().then(() => setLoading(true));
-
-    const lookup = async () => {
-      const { data, error } = await fetchVehicleSpecSingle(
-        parseInt(year),
-        make,
-        model,
-        engine
-      );
-
-      if (!error && data && data.length > 0) {
-        setSpec(mapSpec(data[0]));
-      } else {
-        setSpec(null);
-      }
-      setLoading(false);
-    };
-
-    void Promise.resolve().then(() => lookup());
+    setLoading(true);
+    void fetchVehicleSpecSingle(Number(year), make, model, engine).then(({ data }) => {
+      if (!cancelled) setSpec(data?.[0] ? mapSpec(data[0]) : null);
+    }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [year, make, model, engine]);
 
-  return { spec, loading };
+  return useMemo(() => ({ spec, loading }), [spec, loading]);
 }
