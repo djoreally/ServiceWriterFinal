@@ -20,14 +20,14 @@ import { getSafeSignInError, requestMagicLink, signInWithPassword } from "@/appl
 describe("getSafeSignInError", () => {
   it("does not reveal whether credentials or account state caused rejection", () => {
     expect(getSafeSignInError({ status: 400, message: "Invalid login credentials" }))
-      .toBe("Unable to sign in with those credentials.");
+      .toBe("Invalid email or password. Please check your credentials and try again.");
     expect(getSafeSignInError({ status: 400, message: "Email not confirmed" }))
-      .toBe("Unable to sign in with those credentials.");
+      .toBe("Email address not confirmed. Please check your inbox for the confirmation link.");
   });
 
   it("gives actionable messages for service and rate-limit failures", () => {
     expect(getSafeSignInError({ status: 429, message: "rate limit exceeded" }))
-      .toBe("Too many sign-in attempts. Wait a few minutes, then try again.");
+      .toBe("Too many attempts. Please wait a few minutes before trying again or try signing in with your email and password.");
     expect(getSafeSignInError({ status: 503, message: "service unavailable" }))
       .toBe("The authentication service is temporarily unavailable. Please try again in a moment.");
     expect(getSafeSignInError({ status: 400, code: "email_provider_disabled" }))
