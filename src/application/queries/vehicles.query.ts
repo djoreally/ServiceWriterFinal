@@ -70,6 +70,20 @@ interface OfflineVehicleRecord {
   };
 }
 
+const VEHICLE_OVERVIEW_TTL_MS = 5 * 60 * 1000;
+const vehicleOverviewCache = new Map<string, { value: VehicleOverviewResult; expiresAt: number }>();
+const vehicleOverviewInFlight = new Map<string, Promise<VehicleOverviewResult>>();
+
+export function invalidateVehicleOverview(workspaceId?: string): void {
+  if (workspaceId) {
+    vehicleOverviewCache.delete(workspaceId);
+    vehicleOverviewInFlight.delete(workspaceId);
+    return;
+  }
+  vehicleOverviewCache.clear();
+  vehicleOverviewInFlight.clear();
+}
+
 export async function fetchVehicleOverviewFromOffline(): Promise<VehicleOverviewResult | null> {
   const database = getOfflineDatabase();
   if (!database) return null;
@@ -124,71 +138,94 @@ export async function fetchVehicleOverviewFromOffline(): Promise<VehicleOverview
   return { vehicles, customers, customerNames, lastServiceDates: {} };
 }
 
+async function loadVehicleOverview(workspaceId: string): Promise<VehicleOverviewResult> {
+  const { nextApi } = await import("@/lib/nextApiClient");
+  const [vehicleResponse, customerResponse, serviceResponse] = await Promise.all([
+    nextApi.vehicles.list(workspaceId),
+    nextApi.customers.list(workspaceId),
+    nextApi.serviceRecords.list(workspaceId),
+  ]);
+
+  const apiVehicles = z.array(apiVehicleSchema).parse(vehicleResponse.data);
+  const apiCustomers = z.array(apiCustomerSchema).parse(customerResponse.data);
+  const serviceRecords = z.array(apiServiceRecordSchema).parse(serviceResponse.data);
+
+  const customers = apiCustomers.map((customer) => ({
+    id: customer.id,
+    name: [customer.first_name, customer.last_name].filter(Boolean).join(" "),
+    email: customer.email ?? null,
+    phone: customer.phone ?? null,
+    notes: customer.notes ?? null,
+    created_at: customer.created_at,
+    updated_at: customer.updated_at,
+    user_id: "",
+  })) as Customer[];
+
+  const vehicles = apiVehicles.map((vehicle) => ({
+    id: vehicle.id,
+    customer_id: vehicle.customer_id ?? null,
+    make: vehicle.make || "Unknown",
+    model: vehicle.model || "Unknown",
+    year: vehicle.year ?? new Date().getFullYear(),
+    vin: vehicle.vin ?? null,
+    color: vehicle.color ?? null,
+    license_plate: vehicle.license_plate ?? null,
+    plate_state: vehicle.plate_region ?? null,
+    mileage: vehicle.mileage ?? null,
+    notes: vehicle.notes ?? null,
+    created_at: vehicle.created_at,
+    updated_at: vehicle.updated_at,
+    user_id: "",
+    engine: null,
+    image_url: null,
+    odometer_measure: null,
+    oil_capacity: null,
+    oil_type: null,
+  })) as Vehicle[];
+
+  const customerNames: Record<string, string> = {};
+  for (const customer of customers) customerNames[customer.id] = customer.name;
+
+  const lastServiceDates: Record<string, string> = {};
+  const ordered = [...serviceRecords].sort((a, b) => {
+    const aDate = Date.parse(a.completed_at || a.created_at || "1970-01-01");
+    const bDate = Date.parse(b.completed_at || b.created_at || "1970-01-01");
+    return bDate - aDate;
+  });
+  for (const record of ordered) {
+    if (!record.vehicle_id || lastServiceDates[record.vehicle_id]) continue;
+    const date = record.completed_at || record.created_at;
+    if (date) lastServiceDates[record.vehicle_id] = date;
+  }
+
+  return { vehicles, customers, customerNames, lastServiceDates };
+}
+
 export async function fetchVehicleOverview(): Promise<VehicleOverviewResult> {
   try {
     const context = await resolveCurrentWorkspace();
     if (!context) throw new Error("No active workspace");
 
-    const { nextApi } = await import("@/lib/nextApiClient");
-    const [vehicleResponse, customerResponse, serviceResponse] = await Promise.all([
-      nextApi.vehicles.list(context.workspaceId),
-      nextApi.customers.list(context.workspaceId),
-      nextApi.serviceRecords.list(context.workspaceId),
-    ]);
+    const cached = vehicleOverviewCache.get(context.workspaceId);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
 
-    const apiVehicles = z.array(apiVehicleSchema).parse(vehicleResponse.data);
-    const apiCustomers = z.array(apiCustomerSchema).parse(customerResponse.data);
-    const serviceRecords = z.array(apiServiceRecordSchema).parse(serviceResponse.data);
+    const existingRequest = vehicleOverviewInFlight.get(context.workspaceId);
+    if (existingRequest) return existingRequest;
 
-    const customers = apiCustomers.map((customer) => ({
-      id: customer.id,
-      name: [customer.first_name, customer.last_name].filter(Boolean).join(" "),
-      email: customer.email ?? null,
-      phone: customer.phone ?? null,
-      notes: customer.notes ?? null,
-      created_at: customer.created_at,
-      updated_at: customer.updated_at,
-      user_id: "",
-    })) as Customer[];
+    const request = loadVehicleOverview(context.workspaceId)
+      .then((value) => {
+        vehicleOverviewCache.set(context.workspaceId, {
+          value,
+          expiresAt: Date.now() + VEHICLE_OVERVIEW_TTL_MS,
+        });
+        return value;
+      })
+      .finally(() => {
+        vehicleOverviewInFlight.delete(context.workspaceId);
+      });
 
-    const vehicles = apiVehicles.map((vehicle) => ({
-      id: vehicle.id,
-      customer_id: vehicle.customer_id ?? null,
-      make: vehicle.make || "Unknown",
-      model: vehicle.model || "Unknown",
-      year: vehicle.year ?? new Date().getFullYear(),
-      vin: vehicle.vin ?? null,
-      color: vehicle.color ?? null,
-      license_plate: vehicle.license_plate ?? null,
-      plate_state: vehicle.plate_region ?? null,
-      mileage: vehicle.mileage ?? null,
-      notes: vehicle.notes ?? null,
-      created_at: vehicle.created_at,
-      updated_at: vehicle.updated_at,
-      user_id: "",
-      engine: null,
-      image_url: null,
-      odometer_measure: null,
-      oil_capacity: null,
-      oil_type: null,
-    })) as Vehicle[];
-
-    const customerNames: Record<string, string> = {};
-    for (const customer of customers) customerNames[customer.id] = customer.name;
-
-    const lastServiceDates: Record<string, string> = {};
-    const ordered = [...serviceRecords].sort((a, b) => {
-      const aDate = Date.parse(a.completed_at || a.created_at || "1970-01-01");
-      const bDate = Date.parse(b.completed_at || b.created_at || "1970-01-01");
-      return bDate - aDate;
-    });
-    for (const record of ordered) {
-      if (!record.vehicle_id || lastServiceDates[record.vehicle_id]) continue;
-      const date = record.completed_at || record.created_at;
-      if (date) lastServiceDates[record.vehicle_id] = date;
-    }
-
-    return { vehicles, customers, customerNames, lastServiceDates };
+    vehicleOverviewInFlight.set(context.workspaceId, request);
+    return await request;
   } catch (error) {
     if (await isOfflineEligibleForCurrentUser()) {
       const offlineResult = await fetchVehicleOverviewFromOffline();
