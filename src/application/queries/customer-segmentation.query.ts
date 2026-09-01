@@ -1,7 +1,8 @@
 /** Customer segmentation/report demographic queries. */
-import { supabase } from "@/integrations/supabase/client";
+import { productionSupabase, supabase } from "@/integrations/supabase/client";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+const db = productionSupabase as any;
 
 export interface SegmentRow {
   id: string; name: string; description: string | null; color: string; icon: string;
@@ -11,22 +12,12 @@ export interface SegmentRow {
   last_calculated_at: string | null; calculation_status: "stale" | "calculating" | "current" | "failed";
   calculation_started_at: string | null; calculation_error: string | null; geo_center_lat: number | null; geo_center_lng: number | null; geo_radius_miles: number | null;
 }
+export interface LocationDemographicCustomer { id: string; name: string; address: string | null; postal_code: string | null; latitude: number | null; longitude: number | null; lifetime_value: number | null; total_services: number | null; }
 
-export interface LocationDemographicCustomer {
-  id: string; name: string; address: string | null; postal_code: string | null;
-  latitude: number | null; longitude: number | null; lifetime_value: number | null; total_services: number | null;
-}
+function metadataObject(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
+export async function getCurrentUserId(): Promise<string | null> { const { data: { user } } = await getCurrentAuthUser(); return user?.id ?? null; }
 
-function metadataObject(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
-export async function getCurrentUserId(): Promise<string | null> {
-  const { data: { user } } = await getCurrentAuthUser();
-  return user?.id ?? null;
-}
-
-/** Legacy segment management remains optional; fail closed when the retired table is absent. */
+/** Preserve the legacy segment feature independently while Reports uses canonical customer data. */
 export async function fetchSegments(userId: string) {
   const { data, error } = await supabase.from("customer_segments").select("*").eq("user_id", userId).order("priority", { ascending: false });
   if (error?.code === "42P01" || error?.code === "PGRST205") return [];
@@ -38,26 +29,20 @@ export async function fetchLocationDemographicCustomers(_userId: string): Promis
   const context = await resolveCurrentWorkspace();
   if (!context) return [];
   const [customerResult, serviceResult] = await Promise.all([
-    supabase.from("customers").select("id,first_name,last_name,company_name,address_line1,address_line2,city,region,postal_code,metadata").eq("workspace_id", context.workspaceId),
-    supabase.from("service_records").select("customer_id,total_amount").eq("workspace_id", context.workspaceId),
+    db.from("customers").select("id,first_name,last_name,company_name,address_line1,address_line2,city,region,postal_code,metadata").eq("workspace_id", context.workspaceId),
+    db.from("service_records").select("customer_id,total_amount").eq("workspace_id", context.workspaceId),
   ]);
   if (customerResult.error) throw customerResult.error;
   if (serviceResult.error) throw serviceResult.error;
-
   const totals = new Map<string, { value: number; count: number }>();
   for (const service of serviceResult.data ?? []) {
     if (!service.customer_id) continue;
     const current = totals.get(service.customer_id) ?? { value: 0, count: 0 };
-    current.value += Number(service.total_amount ?? 0);
-    current.count += 1;
-    totals.set(service.customer_id, current);
+    current.value += Number(service.total_amount ?? 0); current.count += 1; totals.set(service.customer_id, current);
   }
-
-  return (customerResult.data ?? []).map((row) => {
-    const metadata = metadataObject(row.metadata);
-    const summary = totals.get(row.id) ?? { value: 0, count: 0 };
-    const latitude = Number(metadata.latitude ?? metadata.lat);
-    const longitude = Number(metadata.longitude ?? metadata.lng);
+  return (customerResult.data ?? []).map((row: any) => {
+    const metadata = metadataObject(row.metadata); const summary = totals.get(row.id) ?? { value: 0, count: 0 };
+    const latitude = Number(metadata.latitude ?? metadata.lat); const longitude = Number(metadata.longitude ?? metadata.lng);
     return {
       id: row.id,
       name: [row.first_name, row.last_name].filter(Boolean).join(" ") || row.company_name || "Customer",
