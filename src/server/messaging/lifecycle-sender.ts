@@ -35,12 +35,11 @@ function assertEmail(email: string): string {
 }
 
 export function lifecycleAdapterForPurpose(purpose: LifecyclePurpose): MessagingAdapter {
-  void purpose;
-  return new EnginemailerEmailAdapter();
+  return purpose === "marketing" ? new EnginemailerEmailAdapter() : new ResendEmailAdapter();
 }
 
-function resendFallbackConfigured(): boolean {
-  return Boolean(process.env.RESEND_API_KEY?.trim() && process.env.RESEND_FROM_EMAIL?.trim());
+function enginemailerFallbackConfigured(): boolean {
+  return Boolean(process.env.ENGINEMAILER_API_KEY?.trim());
 }
 
 function providerFailureMessage(provider: string, error: unknown): string {
@@ -168,7 +167,8 @@ export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ p
   try {
     sent = await adapter.send(sendRequest);
   } catch (primaryError) {
-    if (!resendFallbackConfigured() || adapter.providerName === "resend") {
+    const canFallbackToEnginemailer = rendered.purpose !== "marketing" && adapter.providerName === "resend" && enginemailerFallbackConfigured();
+    if (!canFallbackToEnginemailer) {
       await supabase.from("message_logs").update({
         status: "failed",
         failed_at: new Date().toISOString(),
@@ -178,9 +178,9 @@ export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ p
     }
 
     try {
-      sent = await new ResendEmailAdapter().send(sendRequest);
+      sent = await new EnginemailerEmailAdapter().send(sendRequest);
     } catch (fallbackError) {
-      const failureReason = `${providerFailureMessage(adapter.providerName, primaryError)}; ${providerFailureMessage("resend", fallbackError)}`.slice(0, 500);
+      const failureReason = `${providerFailureMessage(adapter.providerName, primaryError)}; ${providerFailureMessage("enginemailer", fallbackError)}`.slice(0, 500);
       await supabase.from("message_logs").update({
         status: "failed",
         failed_at: new Date().toISOString(),
@@ -200,11 +200,9 @@ export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ p
     failed_at: null,
   }).eq("id", queued.data.id);
   if (updated.error) {
-    // Provider acceptance is the irreversible boundary. A bookkeeping failure
-    // after that point must not turn into a retry and duplicate the email.
     console.error("[Lifecycle] provider accepted email but message log update failed", {
       messageLogId: queued.data.id,
-      provider: adapter.providerName,
+      provider: sent.providerName,
     });
   }
   return sent;
