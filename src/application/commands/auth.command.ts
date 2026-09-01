@@ -1,8 +1,14 @@
 /**
  * Auth commands - sign in, sign up, sign out
  */
-import { AUTH_SUPABASE_PROJECT_ID_RESOLVED, authSupabase, supabase } from "@/integrations/supabase/client";
+import {
+  AUTH_SUPABASE_PROJECT_ID_RESOLVED,
+  authSupabase,
+  productionSupabase,
+  supabase,
+} from "@/integrations/supabase/client";
 import { isTransientBackendError } from "@/lib/transient-backend";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
 type SignInError = { message?: string; status?: number; code?: string };
 type PasswordSignInResponse = { error: SignInError | null };
@@ -15,7 +21,6 @@ type PasswordSignInResponse = { error: SignInError | null };
 export function isTransientAuthFailure(error: SignInError): boolean {
   return isTransientBackendError(error);
 }
-
 
 export type MagicLinkResult =
   | { sent: true }
@@ -88,7 +93,6 @@ export async function signInWithPassword(email: string, password: string): Promi
     };
   }
 
-
   // Do not disclose whether an email address exists or why authentication failed.
   if (error) {
     console.warn("[auth] Password sign-in failed", {
@@ -106,8 +110,9 @@ export async function signInWithPassword(email: string, password: string): Promi
 
 export async function requestMagicLink(email: string): Promise<MagicLinkResult> {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const normalizedEmail = email.trim().toLowerCase();
   const { error } = await authSupabase.auth.signInWithOtp({
-    email,
+    email: normalizedEmail,
     options: {
       emailRedirectTo: `${origin}/dashboard`,
       // A sign-in form must never create a new business-owner account.
@@ -143,9 +148,12 @@ export async function requestMagicLink(email: string): Promise<MagicLinkResult> 
 
 export async function requestPasswordReset(email: string): Promise<void> {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const normalizedEmail = email.trim().toLowerCase();
   // Supabase applies its server-side recovery rate limits. Callers intentionally
   // receive the same UI response whether or not the email is registered.
-  await authSupabase.auth.resetPasswordForEmail(email, { redirectTo: `${origin}/reset-password` });
+  await authSupabase.auth.resetPasswordForEmail(normalizedEmail, {
+    redirectTo: `${origin}/reset-password`,
+  });
 }
 
 export async function updatePassword(password: string): Promise<{ error?: string }> {
@@ -157,11 +165,53 @@ export async function updatePassword(password: string): Promise<{ error?: string
 
 export async function fetchOwnerDisplayName(): Promise<string | null> {
   try {
-    const { data: profile } = await supabase
-      .from("business_profiles")
-      .select("owner_name, business_name")
-      .maybeSingle();
-    return profile?.owner_name || profile?.business_name || null;
+    const { data: { user } } = await authSupabase.auth.getUser();
+    if (!user) return null;
+
+    const selectedWorkspaceId = getSelectedWorkspaceId();
+    let membershipQuery = productionSupabase
+      .from("workspace_members")
+      .select("workspace_id")
+      .eq("user_id", user.id)
+      .eq("is_active", true);
+
+    if (selectedWorkspaceId) {
+      membershipQuery = membershipQuery.eq("workspace_id", selectedWorkspaceId);
+    }
+
+    let { data: membership, error: membershipError } = await membershipQuery.limit(1).maybeSingle();
+    if (membershipError) throw membershipError;
+
+    if (!membership && selectedWorkspaceId) {
+      const fallback = await productionSupabase
+        .from("workspace_members")
+        .select("workspace_id")
+        .eq("user_id", user.id)
+        .eq("is_active", true)
+        .limit(1)
+        .maybeSingle();
+      if (fallback.error) throw fallback.error;
+      membership = fallback.data;
+    }
+
+    if (!membership?.workspace_id) return null;
+
+    const [{ data: settings, error: settingsError }, { data: workspace, error: workspaceError }] = await Promise.all([
+      productionSupabase
+        .from("workspace_settings")
+        .select("owner_name")
+        .eq("workspace_id", membership.workspace_id)
+        .maybeSingle(),
+      productionSupabase
+        .from("workspaces")
+        .select("name")
+        .eq("id", membership.workspace_id)
+        .maybeSingle(),
+    ]);
+
+    if (settingsError) throw settingsError;
+    if (workspaceError) throw workspaceError;
+    return settings?.owner_name || workspace?.name || null;
   } catch {
     return null;
   }
