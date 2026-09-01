@@ -9,6 +9,11 @@ export interface TaxBreakdownItem {
   tax_type: string;
 }
 
+/**
+ * PaymentRecord is the legacy Payments-screen contract and is intentionally
+ * expressed in integer cents. The canonical `payments.amount` column is stored
+ * in dollars, so the adapter below performs the unit conversion exactly once.
+ */
 export interface PaymentRecord {
   id: string;
   amount: number;
@@ -67,7 +72,30 @@ function workspaceId(): string {
 }
 
 function object(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function dollarsToIntegerCents(value: unknown): number {
+  const dollars = Number(value ?? 0);
+  return Number.isFinite(dollars) ? Math.round(dollars * 100) : 0;
+}
+
+function metadataCents(
+  metadata: Record<string, unknown>,
+  centsKey: string,
+  dollarsKey: string,
+): number | null {
+  const cents = metadata[centsKey];
+  if (cents != null && Number.isFinite(Number(cents))) return Math.round(Number(cents));
+  const dollars = metadata[dollarsKey];
+  if (dollars != null && Number.isFinite(Number(dollars))) return dollarsToIntegerCents(dollars);
+  return null;
+}
+
+function metadataBoolean(value: unknown): boolean {
+  return value === true || value === "true" || value === 1 || value === "1";
 }
 
 interface PaymentCustomer {
@@ -78,7 +106,7 @@ interface PaymentCustomer {
 
 interface PaymentApiRow {
   id: string;
-  amount: number | null;
+  amount: number | string | null;
   currency_code: string | null;
   status: string;
   provider: string | null;
@@ -96,31 +124,38 @@ function customerName(customer: PaymentCustomer | null | undefined): string | nu
   return name || null;
 }
 
-/** Canonical payments are stored in dollars. No cents conversion belongs here. */
+/**
+ * Adapt canonical payment rows (dollar columns + cent metadata) into the
+ * existing cents-based Payments UI and payment-action contract.
+ */
 export async function fetchPaymentRecords(): Promise<PaymentRecord[]> {
   const response = await nextApi.payments.list(workspaceId());
   return ((response.data ?? []) as unknown as PaymentApiRow[]).map((payment) => {
     const metadata = object(payment.metadata);
-    const refundedAmount = payment.status === "refunded"
-      ? Number(payment.amount ?? 0)
-      : Number(metadata.refunded_amount ?? 0);
+    const amountCents = dollarsToIntegerCents(payment.amount);
+    const subtotalCents = metadataCents(metadata, "subtotal_cents", "subtotal");
+    const taxAmountCents = metadataCents(metadata, "tax_amount_cents", "tax_amount")
+      ?? metadataCents(metadata, "tax_cents", "tax_amount");
+    const refundedAmountCents = payment.status === "refunded"
+      ? amountCents
+      : metadataCents(metadata, "refund_cents", "refunded_amount") ?? 0;
 
     return {
       id: payment.id,
-      amount: Number(payment.amount ?? 0),
-      subtotal: metadata.subtotal != null ? Number(metadata.subtotal) : null,
-      tax_amount: metadata.tax_amount != null ? Number(metadata.tax_amount) : null,
+      amount: amountCents,
+      subtotal: subtotalCents,
+      tax_amount: taxAmountCents,
       tax_rate: metadata.tax_rate != null ? Number(metadata.tax_rate) : null,
       tax_breakdown: Array.isArray(metadata.tax_breakdown) ? metadata.tax_breakdown as TaxBreakdownItem[] : null,
       currency: payment.currency_code || "USD",
       status: payment.status,
-      payment_type: String(metadata.payment_method ?? payment.provider ?? "other"),
+      payment_type: String(metadata.payment_type ?? metadata.payment_method ?? payment.provider ?? "other"),
       customer_name: customerName(payment.customers) ?? (metadata.customer_name == null ? null : String(metadata.customer_name)),
       customer_email: payment.customers?.email ?? (metadata.customer_email == null ? null : String(metadata.customer_email)),
       stripe_payment_intent_id: payment.provider === "stripe" ? payment.provider_payment_id ?? null : null,
       created_at: payment.created_at,
       metadata: payment.metadata ?? {},
-      refund_amount: refundedAmount,
+      refund_amount: refundedAmountCents,
       invoice_sent_at: metadata.invoice_sent_at == null ? null : String(metadata.invoice_sent_at),
       invoice_id: payment.invoice_id ?? null,
       customer_id: payment.customer_id ?? null,
@@ -129,13 +164,25 @@ export async function fetchPaymentRecords(): Promise<PaymentRecord[]> {
   });
 }
 
-/** Final currently has no Stripe provider runtime configured. */
+/** Read the persisted Connect state for the selected workspace. */
 export async function fetchStripeAccountStatus(): Promise<StripeAccountStatus | null> {
+  const id = workspaceId();
+  const { data, error } = await supabase
+    .from("workspace_settings")
+    .select("operational_settings")
+    .eq("workspace_id", id)
+    .maybeSingle();
+  if (error) throw error;
+
+  const operational = object(data?.operational_settings);
+  const accountId = operational.stripe_account_id;
+  const connected = typeof accountId === "string" && accountId.trim().length > 0;
+
   return {
-    connected: false,
-    chargesEnabled: false,
-    payoutsEnabled: false,
-    detailsSubmitted: false,
+    connected,
+    chargesEnabled: metadataBoolean(operational.stripe_charges_enabled),
+    payoutsEnabled: metadataBoolean(operational.stripe_payouts_enabled),
+    detailsSubmitted: metadataBoolean(operational.stripe_onboarding_complete),
   };
 }
 
@@ -148,7 +195,7 @@ export async function fetchPaymentSuccessBookingDetails(
 ): Promise<PaymentSuccessBookingDetails | null> {
   const matchColumn = sessionId.startsWith("cs_") ? "provider_payment_id" : "id";
   const { data: paymentRecord, error } = await (supabase.from("payments") as any)
-    .select("id,workspace_id,customer_id,provider_payment_id,amount,currency_code,status,created_by,metadata,customers(first_name,last_name,email),workspaces(name)")
+    .select("id,workspace_id,customer_id,provider,provider_payment_id,amount,currency_code,status,created_by,metadata,customers(first_name,last_name,email),workspaces(name)")
     .eq(matchColumn, sessionId)
     .maybeSingle();
   if (error) throw error;
