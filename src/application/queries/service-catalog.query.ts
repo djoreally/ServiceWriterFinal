@@ -1,14 +1,12 @@
 /**
- * Service Catalog Query - Read operations for the service catalog page
- *
- * Replaces direct supabase.from() calls in ServiceCatalog.tsx
+ * Service Catalog Query — canonical workspace adapter for the preserved catalog UI.
  */
-
 import { supabase } from '@/integrations/supabase/client';
 import { getOfflineDatabase } from '@/offline/database';
 import { isOfflineEligibleForCurrentUser } from '@/offline/rollout';
-
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+
 export interface CatalogItem {
   id: string;
   name: string;
@@ -36,15 +34,16 @@ export interface CatalogItem {
   sort_order: number;
 }
 
-export interface ServiceCategory {
-  id: string;
-  name: string;
-}
+export interface ServiceCategory { id: string; name: string; }
 
 type CatalogBehavior = Pick<CatalogItem, "requires_tire_quantity" | "service_vertical" | "pricing_mode" | "service_intent" | "requires_fitment_lookup" | "requires_inventory_selection" | "allows_manual_fitment" | "configuration_schema_version">;
 
 const isPricingMode = (value: unknown): value is CatalogItem["pricing_mode"] => ["flat", "labor_parts", "detailing_assessment", "tire_inventory", "quote_required"].includes(value as string);
 const isServiceIntent = (value: unknown): value is NonNullable<CatalogItem["service_intent"]> => ["replacement", "rotation", "repair", "balance", "tpms", "alignment", "wheel_service"].includes(value as string);
+
+function metadataObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
 
 function normalizeCatalogBehavior(row: Record<string, unknown>): CatalogBehavior {
   const vertical = row.service_vertical === "tires" || row.service_vertical === "detailing" ? row.service_vertical : "general";
@@ -60,66 +59,72 @@ function normalizeCatalogBehavior(row: Record<string, unknown>): CatalogBehavior
   };
 }
 
+function mapCatalogRow(row: Record<string, any>): CatalogItem {
+  const metadata = metadataObject(row.metadata);
+  const category = typeof row.category === "string" ? row.category : null;
+  const categoryId = typeof metadata.category_id === "string" && metadata.category_id
+    ? metadata.category_id
+    : (category || "service").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  return {
+    id: String(row.id),
+    name: String(row.name || "Service"),
+    description: row.description ?? null,
+    category,
+    category_id: categoryId || null,
+    default_price: Number(row.labor_price ?? 0),
+    labor_rate: metadata.labor_rate == null ? null : Number(metadata.labor_rate),
+    estimated_duration: row.estimated_minutes == null ? null : Number(row.estimated_minutes),
+    skill_level: typeof metadata.skill_level === "string" ? metadata.skill_level : null,
+    parts_required: typeof metadata.parts_required === "string" ? metadata.parts_required : null,
+    notes: typeof metadata.notes === "string" ? metadata.notes : null,
+    is_active: row.is_active !== false,
+    is_upsell: metadata.is_upsell === true,
+    created_at: String(row.created_at || new Date().toISOString()),
+    template_id: typeof metadata.template_id === "string" ? metadata.template_id : null,
+    sort_order: Number(metadata.sort_order ?? 0),
+    ...normalizeCatalogBehavior(metadata),
+  };
+}
+
 async function fetchCatalogItemsFromOffline(): Promise<CatalogItem[]> {
   const database = getOfflineDatabase();
   if (!database) return [];
-
   const rows = await database.get('offline_service_catalog').query().fetch();
-
-  return rows
-    .map((row: { _raw: Record<string, unknown> }) => ({
-      id: String(row._raw.server_id || ""),
-      name: String(row._raw.name || "Service"),
-      description: null as string | null,
-      category: typeof row._raw.category === "string" ? row._raw.category : null,
-      category_id: null as string | null,
-      default_price: Number(row._raw.default_price || 0),
-      labor_rate: null as number | null,
-      estimated_duration: null as number | null,
-      skill_level: null as string | null,
-      parts_required: null as string | null,
-      notes: null as string | null,
-      is_active: Boolean(row._raw.is_active),
-      is_upsell: false,
-      created_at: new Date(String(row._raw.updated_at_local || new Date().toISOString())).toISOString(),
-      template_id: null as string | null,
-      sort_order: Number(row._raw.sort_order || 0),
-      ...normalizeCatalogBehavior(row._raw as Record<string, unknown>),
-    }))
-    .filter((row) => !!row.id)
-    .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+  return rows.map((row: { _raw: Record<string, unknown> }) => ({
+    id: String(row._raw.server_id || ""), name: String(row._raw.name || "Service"), description: null,
+    category: typeof row._raw.category === "string" ? row._raw.category : null, category_id: null,
+    default_price: Number(row._raw.default_price || 0), labor_rate: null, estimated_duration: null,
+    skill_level: null, parts_required: null, notes: null, is_active: Boolean(row._raw.is_active), is_upsell: false,
+    created_at: new Date(String(row._raw.updated_at_local || new Date().toISOString())).toISOString(), template_id: null,
+    sort_order: Number(row._raw.sort_order || 0), ...normalizeCatalogBehavior(row._raw),
+  })).filter((row) => !!row.id).sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
 }
 
-/** Fetch all catalog items for the authenticated user, ordered by sort_order */
 export async function fetchCatalogItems(): Promise<CatalogItem[]> {
-  const {
-    data: { user },
-  } = await getCurrentAuthUser();
+  const { data: { user } } = await getCurrentAuthUser();
   if (!user) return [];
+  const context = await resolveCurrentWorkspace();
+  if (!context) return [];
 
   const { data, error } = await supabase
     .from('service_catalog')
-    .select('*')
-    .order('sort_order', { ascending: true })
+    .select('id,workspace_id,name,description,category,estimated_minutes,labor_price,is_active,created_at,metadata')
+    .eq('workspace_id', context.workspaceId)
     .order('name');
-
   if (error) {
-    if (await isOfflineEligibleForCurrentUser()) {
-      return fetchCatalogItemsFromOffline();
-    }
+    if (await isOfflineEligibleForCurrentUser()) return fetchCatalogItemsFromOffline();
     throw error;
   }
-
-  return (data ?? []).map((row) => ({ ...row, ...normalizeCatalogBehavior(row as unknown as Record<string, unknown>) })) as unknown as CatalogItem[];
+  return (data ?? []).map((row) => mapCatalogRow(row as unknown as Record<string, any>))
+    .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
 }
 
-/** Fetch all service categories */
+/** Categories are derived from canonical catalog rows; no separate legacy table is required. */
 export async function fetchServiceCategories(): Promise<ServiceCategory[]> {
-  const { data, error } = await supabase
-    .from('service_categories')
-    .select('id, name')
-    .order('sort_order');
-
+  const context = await resolveCurrentWorkspace();
+  if (!context) return [];
+  const { data, error } = await supabase.from('service_catalog').select('category').eq('workspace_id', context.workspaceId);
   if (error) throw error;
-  return (data ?? []) as ServiceCategory[];
+  const names = [...new Set((data ?? []).map((row) => row.category).filter((value): value is string => Boolean(value)))].sort();
+  return names.map((name) => ({ id: name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''), name }));
 }
