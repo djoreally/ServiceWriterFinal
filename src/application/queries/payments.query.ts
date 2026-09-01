@@ -1,5 +1,7 @@
-import { supabase } from "@/integrations/supabase/client";
+import { productionSupabase, supabase } from "@/integrations/supabase/client";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
+
+const productionDb = productionSupabase as any;
 
 export interface TaxBreakdownItem {
   jurisdiction: string;
@@ -188,7 +190,7 @@ export async function fetchPaymentRecords(): Promise<PaymentRecord[]> {
 /** Read the persisted Connect state for the selected workspace. */
 export async function fetchStripeAccountStatus(): Promise<StripeAccountStatus | null> {
   const id = workspaceId();
-  const { data, error } = await supabase
+  const { data, error } = await productionDb
     .from("workspace_settings")
     .select("operational_settings")
     .eq("workspace_id", id)
