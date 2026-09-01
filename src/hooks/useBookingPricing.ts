@@ -1,21 +1,12 @@
 /**
- * useBookingPricing — Encapsulates all pricing/fee/tax calculations
- * for the public booking flow.
- *
- * Extracted from PublicBooking.tsx to keep the page container as a
- * coordinator only. All monetary logic lives here.
+ * useBookingPricing — Encapsulates public-booking pricing, fees and tax math.
  */
-
 import { useMemo, useCallback } from "react";
 import type { BookingState } from "@/hooks/useBookingState";
 import { calculateCouponDiscount, type AppliedCoupon } from "@/components/booking/CouponRedemption";
 import { formatMoney } from "@/lib/financialMath";
 import { calculateExtraOilQuarts, parseOilCapacityToQuarts } from "@/lib/oilCapacity";
 import { calculateDetailingQuote, type DetailingPricingRule } from "@/lib/detailing-pricing";
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
 
 export interface FeeSettings {
   waste_oil_fee_enabled: boolean;
@@ -31,34 +22,18 @@ export interface FeeSettings {
 }
 
 export interface PricingDeps {
-  /** Currently selected services from booking state */
   selectedServices: BookingState["selectedServices"];
-  /** Currently selected package (if any) */
   selectedPackage: BookingState["selectedPackage"];
-  /** Vehicle list (needed for oil capacity adjustments) */
   vehicles: BookingState["vehicles"];
-  /** Optional per-vehicle services/packages. */
   vehicleServiceSelections?: BookingState["vehicleServiceSelections"];
-  /** Payment choice affects surcharge calculation */
   paymentChoice: BookingState["paymentChoice"];
-  /** Tax data from edge function */
   taxData: BookingState["taxData"];
-  /** Business-level fee settings */
   feeSettings: FeeSettings | null;
-  /** Oil price per extra quart (from business settings) */
   oilPricePerQuart: number;
-  /** Currency code for formatting */
   currency: string;
-  /**
-   * Category-driven gate for fluid-related fees. Tire and detailing services
-   * must never be charged a waste-oil disposal fee. Defaults to true.
-   */
   allowFluidFees?: boolean;
-  /** Applied coupon (drives discountAmount). */
   appliedCoupon?: AppliedCoupon | null;
-  /** Detailing pricing rules loaded for this business. */
   detailingRules?: DetailingPricingRule[];
-  /** Service ids that resolve to a detailing category. */
   detailingServiceIds?: string[];
 }
 
@@ -66,20 +41,21 @@ type PricedService =
   | BookingState["selectedServices"][number]
   | NonNullable<BookingState["selectedPackage"]>["services"][number];
 
-// ---------------------------------------------------------------------------
-// Pure helpers (no hooks, testable)
-// ---------------------------------------------------------------------------
-
 function isCategorizedService(service: PricedService): service is BookingState["selectedServices"][number] {
   return "category" in service;
 }
 
-/** Parse oil capacity from string (e.g., "5.7 qts" -> 5.7) */
+function isOilService(service: PricedService): boolean {
+  if (service.name.toLowerCase().includes("oil")) return true;
+  return isCategorizedService(service)
+    && typeof service.category === "string"
+    && service.category.toLowerCase().includes("oil");
+}
+
 export function parseOilCapacity(capacity: string | undefined): number {
   return parseOilCapacityToQuarts(capacity) ?? 0;
 }
 
-/** Format an amount with the correct currency symbol. */
 export function buildFormatCurrency(currency: string) {
   const symbol =
     currency === "GHS" ? "₵" :
@@ -88,10 +64,6 @@ export function buildFormatCurrency(currency: string) {
     currency === "GBP" ? "£" : "$";
   return (amount: number) => `${symbol}${formatMoney(amount)}`;
 }
-
-// ---------------------------------------------------------------------------
-// Hook
-// ---------------------------------------------------------------------------
 
 export function useBookingPricing(deps: PricingDeps) {
   const {
@@ -110,37 +82,38 @@ export function useBookingPricing(deps: PricingDeps) {
     detailingServiceIds = [],
   } = deps;
 
-
   const formatCurrency = useMemo(() => buildFormatCurrency(currency), [currency]);
 
-  /** Get every service line represented by every vehicle selection. */
-  const vehicleSelections = useMemo<BookingState["vehicleServiceSelections"][string][]>(() => Object.values(vehicleServiceSelections).filter((selection) => selection.services.length > 0 || selection.package), [vehicleServiceSelections]);
+  const vehicleSelections = useMemo<BookingState["vehicleServiceSelections"][string][]>(
+    () => Object.values(vehicleServiceSelections).filter((selection) => selection.services.length > 0 || selection.package),
+    [vehicleServiceSelections],
+  );
+
   const activeServicesForPricing = useMemo<PricedService[]>(() => {
     if (vehicleSelections.length > 0) {
-      return vehicleSelections.flatMap((selection): PricedService[] => selection.package?.services?.length ? selection.package.services : selection.services);
+      return vehicleSelections.flatMap((selection): PricedService[] =>
+        selection.package?.services?.length ? selection.package.services : selection.services,
+      );
     }
     if (selectedPackage?.services?.length) return selectedPackage.services;
     return selectedServices;
   }, [vehicleSelections, selectedPackage, selectedServices]);
-  const packageSubtotal = useMemo(() => vehicleSelections.reduce((sum, selection) => sum + (selection.package?.package_price || 0), 0), [vehicleSelections]);
 
-  /**
-   * Oil price breakdown — structured to make per-quart math visible end-to-end.
-   * Always whole-quart rounding (Math.ceil) × full per-quart price. No division.
-   *
-   * IMPORTANT: bill only resolved vehicle-spec capacities. Liter values are
-   * converted to quarts before whole-quart rounding.
-   */
+  // Waste-oil disposal is a service-scoped fee, not a provider-entry fee.
+  // A shop may be an oil-change provider and still offer non-oil services, so
+  // the fee must stay zero until the customer's actual selection contains oil.
+  const hasOilService = useMemo(
+    () => activeServicesForPricing.some(isOilService),
+    [activeServicesForPricing],
+  );
+
+  const packageSubtotal = useMemo(
+    () => vehicleSelections.reduce((sum, selection) => sum + (selection.package?.package_price || 0), 0),
+    [vehicleSelections],
+  );
+
   const oilPriceBreakdown = useMemo(() => {
-    const hasOilService = activeServicesForPricing.some((s) =>
-      s.name.toLowerCase().includes("oil") ||
-      (isCategorizedService(s) &&
-        typeof s.category === "string" &&
-        s.category.toLowerCase().includes("oil"))
-    );
-    if (!hasOilService) {
-      return { extraQuarts: 0, pricePerQuart: oilPricePerQuart, total: 0 };
-    }
+    if (!hasOilService) return { extraQuarts: 0, pricePerQuart: oilPricePerQuart, total: 0 };
 
     const extraQuarts = vehicles.reduce((sum, vehicle) => {
       const hasBillableCapacity =
@@ -151,14 +124,9 @@ export function useBookingPricing(deps: PricingDeps) {
       return sum + calculateExtraOilQuarts(vehicle.oilCapacity);
     }, 0);
 
-    return {
-      extraQuarts,
-      pricePerQuart: oilPricePerQuart,
-      total: extraQuarts * oilPricePerQuart,
-    };
-  }, [activeServicesForPricing, vehicles, oilPricePerQuart]);
+    return { extraQuarts, pricePerQuart: oilPricePerQuart, total: extraQuarts * oilPricePerQuart };
+  }, [hasOilService, vehicles, oilPricePerQuart]);
 
-  /** Backward-compatible dollar total (sum). */
   const oilPriceAdjustment = oilPriceBreakdown.total;
 
   const tireInventoryTotal = useMemo(() => vehicles.reduce((sum, vehicle) => {
@@ -170,18 +138,35 @@ export function useBookingPricing(deps: PricingDeps) {
     if (!detailingServiceIds.includes(service.id)) return quote;
     const servicePrice = "default_price" in service ? service.default_price : service.price || 0;
     const serviceDuration = "estimated_duration" in service ? service.estimated_duration || 60 : 60;
-    const next=calculateDetailingQuote(Number(servicePrice),Number(serviceDuration),vehicles,detailingRules,service.id);
-    quote.adjustment+=next.adjustment;quote.durationAdjustment+=next.durationAdjustment;quote.photoRequired||=next.photoRequired;quote.quoteRequired||=next.quoteRequired;quote.requirements.water||=next.requirements.water;quote.requirements.power||=next.requirements.power;quote.requirements.coveredArea||=next.requirements.coveredArea;quote.estimateLabel=quote.quoteRequired?"Quote required":"Starting estimate";return quote;
-  }, {adjustment:0,durationAdjustment:0,photoRequired:false,quoteRequired:false,requirements:{water:false,power:false,coveredArea:false},estimateLabel:"Starting estimate" as "Starting estimate"|"Quote required"}), [activeServicesForPricing,detailingRules,detailingServiceIds,vehicles]);
+    const next = calculateDetailingQuote(Number(servicePrice), Number(serviceDuration), vehicles, detailingRules, service.id);
+    quote.adjustment += next.adjustment;
+    quote.durationAdjustment += next.durationAdjustment;
+    quote.photoRequired ||= next.photoRequired;
+    quote.quoteRequired ||= next.quoteRequired;
+    quote.requirements.water ||= next.requirements.water;
+    quote.requirements.power ||= next.requirements.power;
+    quote.requirements.coveredArea ||= next.requirements.coveredArea;
+    quote.estimateLabel = quote.quoteRequired ? "Quote required" : "Starting estimate";
+    return quote;
+  }, {
+    adjustment: 0,
+    durationAdjustment: 0,
+    photoRequired: false,
+    quoteRequired: false,
+    requirements: { water: false, power: false, coveredArea: false },
+    estimateLabel: "Starting estimate" as "Starting estimate" | "Quote required",
+  }), [activeServicesForPricing, detailingRules, detailingServiceIds, vehicles]);
 
-  /** Subtotal before fees and tax. */
   const totalPrice = useMemo(() => {
     if (vehicleSelections.length > 0) {
-      const individualSubtotal = vehicleSelections.reduce((sum, selection) => sum + selection.services.reduce((serviceSum, service) => serviceSum + service.default_price, 0), 0);
+      const individualSubtotal = vehicleSelections.reduce(
+        (sum, selection) => sum + selection.services.reduce((serviceSum, service) => serviceSum + service.default_price, 0),
+        0,
+      );
       return packageSubtotal + individualSubtotal + oilPriceAdjustment + tireInventoryTotal + detailingQuote.adjustment;
     }
     if (selectedPackage) return Number(selectedPackage.package_price) + oilPriceAdjustment + tireInventoryTotal + detailingQuote.adjustment;
-    return selectedServices.reduce((sum, s) => sum + s.default_price, 0) + oilPriceAdjustment + tireInventoryTotal + detailingQuote.adjustment;
+    return selectedServices.reduce((sum, service) => sum + service.default_price, 0) + oilPriceAdjustment + tireInventoryTotal + detailingQuote.adjustment;
   }, [vehicleSelections, packageSubtotal, selectedPackage, selectedServices, oilPriceAdjustment, tireInventoryTotal, detailingQuote.adjustment]);
 
   const discountAmount = useMemo(
@@ -189,9 +174,10 @@ export function useBookingPricing(deps: PricingDeps) {
     [appliedCoupon, totalPrice],
   );
 
-  /** Fee breakdown (waste oil, shop fee, surcharge). */
   const feeBreakdown = useMemo(() => {
-    const wasteOilFee = allowFluidFees && feeSettings?.waste_oil_fee_enabled ? (feeSettings.waste_oil_fee || 0) : 0;
+    const wasteOilFee = allowFluidFees && hasOilService && feeSettings?.waste_oil_fee_enabled
+      ? (feeSettings.waste_oil_fee || 0)
+      : 0;
 
     let shopFee = 0;
     if (feeSettings?.shop_fee_enabled) {
@@ -209,38 +195,45 @@ export function useBookingPricing(deps: PricingDeps) {
     }
 
     return { wasteOilFee, shopFee, surcharge };
-  }, [totalPrice, paymentChoice, feeSettings, allowFluidFees]);
+  }, [totalPrice, paymentChoice, feeSettings, allowFluidFees, hasOilService]);
 
-  /** Pre-tax total (subtotal + fees). */
   const preTaxTotal = useMemo(
     () => totalPrice - discountAmount + feeBreakdown.wasteOilFee + feeBreakdown.shopFee + feeBreakdown.surcharge,
     [totalPrice, discountAmount, feeBreakdown],
   );
 
-  /** Grand total (after tax if available). */
   const grandTotal = useMemo(
     () => (taxData ? taxData.total : preTaxTotal),
     [taxData, preTaxTotal],
   );
 
-  /** Total estimated duration in minutes. */
   const totalDuration = useMemo(() => {
     const serviceDuration = vehicleSelections.length > 0
-      ? vehicleSelections.reduce((sum, selection) => sum + (selection.package ? (selection.package.estimated_duration || 60) : selection.services.reduce((serviceSum, service) => serviceSum + (service.estimated_duration || 60), 0)), 0)
-      : selectedPackage ? selectedPackage.estimated_duration || 60 : selectedServices.reduce((sum, s) => sum + (s.estimated_duration || 60), 0);
-    // Tire fulfillment consumes lift/balancer capacity per wheel. Preserve configured
-    // service time, but never expose a slot shorter than the physical tire workload.
-    const tireCapacityMinutes = vehicles.reduce((sum,vehicle)=>sum+((vehicle.tireInventoryItemId ? (vehicle.tireFrontQuantity||0)+(vehicle.tireRearQuantity||0) : 0)*20),0);
-    return Math.max(serviceDuration+detailingQuote.durationAdjustment,tireCapacityMinutes);
+      ? vehicleSelections.reduce(
+          (sum, selection) => sum + (selection.package
+            ? (selection.package.estimated_duration || 60)
+            : selection.services.reduce((serviceSum, service) => serviceSum + (service.estimated_duration || 60), 0)),
+          0,
+        )
+      : selectedPackage
+        ? selectedPackage.estimated_duration || 60
+        : selectedServices.reduce((sum, service) => sum + (service.estimated_duration || 60), 0);
+    const tireCapacityMinutes = vehicles.reduce(
+      (sum, vehicle) => sum + ((vehicle.tireInventoryItemId
+        ? (vehicle.tireFrontQuantity || 0) + (vehicle.tireRearQuantity || 0)
+        : 0) * 20),
+      0,
+    );
+    return Math.max(serviceDuration + detailingQuote.durationAdjustment, tireCapacityMinutes);
   }, [vehicleSelections, selectedPackage, selectedServices, vehicles, detailingQuote.durationAdjustment]);
 
-  // Stable callback versions for child components that expect functions
   const getTotalPrice = useCallback(() => totalPrice, [totalPrice]);
   const getOilPriceAdjustment = useCallback(() => oilPriceAdjustment, [oilPriceAdjustment]);
   const getOilPriceBreakdown = useCallback(() => oilPriceBreakdown, [oilPriceBreakdown]);
   const getFeeBreakdown = useCallback((base: number) => {
-    // Re-derive with arbitrary base for backward compat (used by CheckoutOptionsStep)
-    const wasteOilFee = allowFluidFees && feeSettings?.waste_oil_fee_enabled ? (feeSettings.waste_oil_fee || 0) : 0;
+    const wasteOilFee = allowFluidFees && hasOilService && feeSettings?.waste_oil_fee_enabled
+      ? (feeSettings.waste_oil_fee || 0)
+      : 0;
     let shopFee = 0;
     if (feeSettings?.shop_fee_enabled) {
       shopFee = (feeSettings.shop_fee_type || "fixed") === "percentage"
@@ -255,7 +248,8 @@ export function useBookingPricing(deps: PricingDeps) {
         : feeSettings.surcharge_value || 0;
     }
     return { wasteOilFee, shopFee, surcharge };
-  }, [paymentChoice, feeSettings, allowFluidFees]);
+  }, [paymentChoice, feeSettings, allowFluidFees, hasOilService]);
+
   const getPreTaxTotal = useCallback(() => preTaxTotal, [preTaxTotal]);
   const getGrandTotal = useCallback(() => grandTotal, [grandTotal]);
   const getTotalDuration = useCallback(() => totalDuration, [totalDuration]);
@@ -272,7 +266,6 @@ export function useBookingPricing(deps: PricingDeps) {
     preTaxTotal,
     grandTotal,
     totalDuration,
-    // Stable callback versions for prop-drilling to step components
     getTotalPrice,
     getOilPriceAdjustment,
     getOilPriceBreakdown,
