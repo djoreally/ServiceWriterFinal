@@ -53,19 +53,45 @@ async function fetchCatalogItemsFromOffline(): Promise<CatalogItem[]> {
     template_id: null, sort_order: Number(row._raw.sort_order || 0), ...normalizeCatalogBehavior(row._raw),
   })).filter((row) => !!row.id).sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
 }
-export async function fetchCatalogItems(): Promise<CatalogItem[]> {
-  const { data: { user } } = await getCurrentAuthUser(); if (!user) return [];
-  const context = await resolveCurrentWorkspace(); if (!context) return [];
-  const { data, error } = await db.from('service_catalog').select('id,workspace_id,name,description,category,estimated_minutes,labor_price,is_active,created_at,metadata').eq('workspace_id', context.workspaceId).order('name');
+
+const CATALOG_TTL_MS = 5 * 60 * 1000;
+const catalogCache = new Map<string, { value: CatalogItem[]; expiresAt: number }>();
+const catalogInFlight = new Map<string, Promise<CatalogItem[]>>();
+
+export function invalidateCatalogItems(workspaceId?: string): void {
+  if (workspaceId) {
+    catalogCache.delete(workspaceId);
+    catalogInFlight.delete(workspaceId);
+    return;
+  }
+  catalogCache.clear();
+  catalogInFlight.clear();
+}
+
+async function loadCatalogItems(workspaceId: string): Promise<CatalogItem[]> {
+  const { data, error } = await db.from('service_catalog').select('id,workspace_id,name,description,category,estimated_minutes,labor_price,is_active,created_at,metadata').eq('workspace_id', workspaceId).order('name');
   if (error) { if (await isOfflineEligibleForCurrentUser()) return fetchCatalogItemsFromOffline(); throw error; }
   return (data ?? []).map((row: any) => mapCatalogRow(row)).sort((a: CatalogItem, b: CatalogItem) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
 }
-export async function fetchServiceCategories(): Promise<ServiceCategory[]> {
+
+export async function fetchCatalogItems(): Promise<CatalogItem[]> {
+  const { data: { user } } = await getCurrentAuthUser(); if (!user) return [];
   const context = await resolveCurrentWorkspace(); if (!context) return [];
-  const { data, error } = await db.from('service_catalog').select('category').eq('workspace_id', context.workspaceId); if (error) throw error;
-  const categoryNames = (data ?? [])
-    .map((row: any) => row.category)
-    .filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0);
-  const names: string[] = Array.from(new Set<string>(categoryNames)).sort((a, b) => a.localeCompare(b));
+  const cached = catalogCache.get(context.workspaceId);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  const existingRequest = catalogInFlight.get(context.workspaceId);
+  if (existingRequest) return existingRequest;
+  const request = loadCatalogItems(context.workspaceId)
+    .then((value) => {
+      catalogCache.set(context.workspaceId, { value, expiresAt: Date.now() + CATALOG_TTL_MS });
+      return value;
+    })
+    .finally(() => catalogInFlight.delete(context.workspaceId));
+  catalogInFlight.set(context.workspaceId, request);
+  return request;
+}
+export async function fetchServiceCategories(): Promise<ServiceCategory[]> {
+  const items = await fetchCatalogItems();
+  const names = Array.from(new Set(items.map((item) => item.category).filter((value): value is string => Boolean(value)))).sort((a, b) => a.localeCompare(b));
   return names.map((name: string) => ({ id: name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''), name }));
 }
