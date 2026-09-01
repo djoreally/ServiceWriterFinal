@@ -111,6 +111,64 @@ describe("lifecycle sender policy", () => {
     expect(lifecycleAdapterForPurpose("transactional")).not.toBeInstanceOf(ResendEmailAdapter);
   });
 
+  it("falls back to Resend when Enginemailer rejects before acceptance", async () => {
+    const previousApiKey = process.env.RESEND_API_KEY;
+    const previousFromEmail = process.env.RESEND_FROM_EMAIL;
+    process.env.RESEND_API_KEY = "test-resend-key";
+    process.env.RESEND_FROM_EMAIL = "noreply@example.com";
+    try {
+      const existingQuery = {
+        select: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
+        maybeSingle: jest.fn().mockResolvedValue({ data: null, error: null }),
+      };
+      const update = jest.fn().mockReturnValue({
+        eq: jest.fn().mockResolvedValue({ data: null, error: null }),
+      });
+      const queuedQuery = {
+        upsert: jest.fn().mockReturnValue({
+          select: jest.fn().mockReturnValue({
+            single: jest.fn().mockResolvedValue({ data: { id: "log-1" }, error: null }),
+          }),
+        }),
+        update,
+      };
+      const messageLogCalls = [existingQuery, queuedQuery, queuedQuery];
+      (createSupabaseAdminClient as jest.Mock).mockReturnValue({
+        rpc: jest.fn().mockResolvedValue({ data: false, error: null }),
+        from: jest.fn((table: string) => {
+          if (table !== "message_logs") throw new Error(`Unexpected table ${table}`);
+          const next = messageLogCalls.shift();
+          if (!next) throw new Error("Unexpected message_logs call");
+          return next;
+        }),
+      });
+      jest.spyOn(EnginemailerEmailAdapter.prototype, "send").mockRejectedValue(new Error("Enginemailer unavailable"));
+      jest.spyOn(ResendEmailAdapter.prototype, "send").mockResolvedValue({
+        providerMessageId: "re_123",
+        providerName: "resend",
+        status: "accepted",
+        acceptedAt: "2026-08-31T15:00:00.000Z",
+      });
+
+      const result = await sendLifecycleEmail({
+        workspaceId: "00000000-0000-4000-8000-000000000001",
+        recipientEmail: "customer@example.com",
+        templateKey: "appointment_booking_sequence.booking_confirmation",
+        idempotencyKey: "booking:ABC12345:customer@example.com",
+        variables: bookingVariables,
+      });
+
+      expect(result).toEqual({ providerMessageId: "re_123", providerName: "resend", status: "accepted", acceptedAt: "2026-08-31T15:00:00.000Z" });
+      expect(update).toHaveBeenCalledWith(expect.objectContaining({ provider: "resend", provider_message_id: "re_123", status: "accepted" }));
+    } finally {
+      if (previousApiKey === undefined) delete process.env.RESEND_API_KEY;
+      else process.env.RESEND_API_KEY = previousApiKey;
+      if (previousFromEmail === undefined) delete process.env.RESEND_FROM_EMAIL;
+      else process.env.RESEND_FROM_EMAIL = previousFromEmail;
+    }
+  });
+
   it("does not retry an email accepted by the provider when post-send bookkeeping fails", async () => {
     const existingQuery = {
       select: jest.fn().mockReturnThis(),
