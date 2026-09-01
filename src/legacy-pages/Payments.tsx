@@ -315,7 +315,7 @@ const Payments = () => {
                         </TableBody>
                       </Table>
                     </div>
-                    <ListPagination page={page} pageSize={pageSize} totalItems={filteredPayments.length} onPageChange={setPage} onPageSizeChange={setPageSize} />
+                    <ListPagination page={page} pageSize={pageSize} totalCount={filteredPayments.length} onPageChange={setPage} onPageSizeChange={setPageSize} itemLabel="transactions" />
                   </>
                 )}
               </CardContent>
