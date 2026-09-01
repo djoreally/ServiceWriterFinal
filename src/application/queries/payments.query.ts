@@ -1,5 +1,4 @@
 import { supabase } from "@/integrations/supabase/client";
-import { nextApi } from "@/lib/nextApiClient";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
 export interface TaxBreakdownItem {
@@ -115,7 +114,11 @@ interface PaymentApiRow {
   metadata: unknown;
   invoice_id?: string | null;
   customer_id?: string | null;
-  customers?: PaymentCustomer | null;
+  customers?: PaymentCustomer | PaymentCustomer[] | null;
+}
+
+function relatedCustomer(value: PaymentApiRow["customers"]): PaymentCustomer | null {
+  return Array.isArray(value) ? value[0] ?? null : value ?? null;
 }
 
 function customerName(customer: PaymentCustomer | null | undefined): string | null {
@@ -124,44 +127,62 @@ function customerName(customer: PaymentCustomer | null | undefined): string | nu
   return name || null;
 }
 
+function mapPayment(payment: PaymentApiRow): PaymentRecord {
+  const metadata = object(payment.metadata);
+  const customer = relatedCustomer(payment.customers);
+  const amountCents = dollarsToIntegerCents(payment.amount);
+  const subtotalCents = metadataCents(metadata, "subtotal_cents", "subtotal");
+  const taxAmountCents = metadataCents(metadata, "tax_amount_cents", "tax_amount")
+    ?? metadataCents(metadata, "tax_cents", "tax_amount");
+  const refundedAmountCents = payment.status === "refunded"
+    ? amountCents
+    : metadataCents(metadata, "refund_cents", "refunded_amount") ?? 0;
+
+  return {
+    id: payment.id,
+    amount: amountCents,
+    subtotal: subtotalCents,
+    tax_amount: taxAmountCents,
+    tax_rate: metadata.tax_rate != null ? Number(metadata.tax_rate) : null,
+    tax_breakdown: Array.isArray(metadata.tax_breakdown) ? metadata.tax_breakdown as TaxBreakdownItem[] : null,
+    currency: payment.currency_code || "USD",
+    status: payment.status,
+    payment_type: String(metadata.payment_type ?? metadata.payment_method ?? payment.provider ?? "other"),
+    customer_name: customerName(customer) ?? (metadata.customer_name == null ? null : String(metadata.customer_name)),
+    customer_email: customer?.email ?? (metadata.customer_email == null ? null : String(metadata.customer_email)),
+    stripe_payment_intent_id: payment.provider === "stripe" ? payment.provider_payment_id ?? null : null,
+    created_at: payment.created_at,
+    metadata: payment.metadata ?? {},
+    refund_amount: refundedAmountCents,
+    invoice_sent_at: metadata.invoice_sent_at == null ? null : String(metadata.invoice_sent_at),
+    invoice_id: payment.invoice_id ?? null,
+    customer_id: payment.customer_id ?? null,
+    appointments: null,
+  };
+}
+
 /**
- * Adapt canonical payment rows (dollar columns + cent metadata) into the
- * existing cents-based Payments UI and payment-action contract.
+ * Load the complete ledger in bounded database pages so KPI totals/export never
+ * silently become "first 25 rows only" as the account grows.
  */
 export async function fetchPaymentRecords(): Promise<PaymentRecord[]> {
-  const response = await nextApi.payments.list(workspaceId());
-  return ((response.data ?? []) as unknown as PaymentApiRow[]).map((payment) => {
-    const metadata = object(payment.metadata);
-    const amountCents = dollarsToIntegerCents(payment.amount);
-    const subtotalCents = metadataCents(metadata, "subtotal_cents", "subtotal");
-    const taxAmountCents = metadataCents(metadata, "tax_amount_cents", "tax_amount")
-      ?? metadataCents(metadata, "tax_cents", "tax_amount");
-    const refundedAmountCents = payment.status === "refunded"
-      ? amountCents
-      : metadataCents(metadata, "refund_cents", "refunded_amount") ?? 0;
+  const id = workspaceId();
+  const pageSize = 250;
+  const rows: PaymentApiRow[] = [];
 
-    return {
-      id: payment.id,
-      amount: amountCents,
-      subtotal: subtotalCents,
-      tax_amount: taxAmountCents,
-      tax_rate: metadata.tax_rate != null ? Number(metadata.tax_rate) : null,
-      tax_breakdown: Array.isArray(metadata.tax_breakdown) ? metadata.tax_breakdown as TaxBreakdownItem[] : null,
-      currency: payment.currency_code || "USD",
-      status: payment.status,
-      payment_type: String(metadata.payment_type ?? metadata.payment_method ?? payment.provider ?? "other"),
-      customer_name: customerName(payment.customers) ?? (metadata.customer_name == null ? null : String(metadata.customer_name)),
-      customer_email: payment.customers?.email ?? (metadata.customer_email == null ? null : String(metadata.customer_email)),
-      stripe_payment_intent_id: payment.provider === "stripe" ? payment.provider_payment_id ?? null : null,
-      created_at: payment.created_at,
-      metadata: payment.metadata ?? {},
-      refund_amount: refundedAmountCents,
-      invoice_sent_at: metadata.invoice_sent_at == null ? null : String(metadata.invoice_sent_at),
-      invoice_id: payment.invoice_id ?? null,
-      customer_id: payment.customer_id ?? null,
-      appointments: null,
-    };
-  });
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await (supabase.from("payments") as any)
+      .select("id,amount,currency_code,status,provider,provider_payment_id,created_at,metadata,invoice_id,customer_id,customers(first_name,last_name,email)")
+      .eq("workspace_id", id)
+      .order("created_at", { ascending: false })
+      .range(offset, offset + pageSize - 1);
+    if (error) throw error;
+    const page = (data ?? []) as PaymentApiRow[];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+
+  return rows.map(mapPayment);
 }
 
 /** Read the persisted Connect state for the selected workspace. */
