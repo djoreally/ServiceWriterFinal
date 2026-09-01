@@ -1,6 +1,6 @@
 /** Dashboard query adapters for Final's canonical workspace schema. */
 import { productionSupabase, supabase } from "@/integrations/supabase/client";
-import { format, subDays } from "date-fns";
+import { format, subDays, startOfDay } from "date-fns";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 export interface DashboardStats {
@@ -205,7 +205,7 @@ export async function fetchDashboardOverview(): Promise<DashboardOverviewResult>
     return { stats: { vehicles: 0, pendingServices: 0, lowStockItems: 0 }, activeServices: [], upcomingAppointments: [] };
   }
 
-  const nowIso = new Date().toISOString();
+  const todayStartIso = format(startOfDay(new Date()), "yyyy-MM-dd'T'HH:mm:ss");
   const [vehiclesRes, pendingRes, activeRes, upcomingRes] = await Promise.all([
     productionSupabase.from("vehicles").select("id", { count: "exact", head: true }).eq("workspace_id", context.workspaceId).eq("status", "active"),
     productionSupabase.from("service_records").select("id", { count: "exact", head: true }).eq("workspace_id", context.workspaceId).eq("status", "in_progress"),
@@ -218,10 +218,10 @@ export async function fetchDashboardOverview(): Promise<DashboardOverviewResult>
       .select("id,status,starts_at,metadata,vehicles(year,make,model)")
       .eq("workspace_id", context.workspaceId)
       .neq("source", "fleet_work_order")
-      .gte("starts_at", nowIso)
-      .in("status", ["confirmed", "requested"])
+      .gte("starts_at", todayStartIso)
+      .neq("status", "cancelled")
       .order("starts_at", { ascending: true })
-      .limit(5),
+      .limit(20),
   ]);
 
   if (vehiclesRes.error) throw vehiclesRes.error;
