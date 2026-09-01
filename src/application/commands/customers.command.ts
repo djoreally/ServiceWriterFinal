@@ -11,6 +11,7 @@ import { hardDelete } from "@/lib/soft-delete";
 import { nextApi } from "@/lib/nextApiClient";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 import { invalidateCustomerOverview } from "@/application/queries/customers.query";
+import { invalidateVehicleOverview } from "@/application/queries/vehicles.query";
 
 export interface CustomerWritePayload {
   name: string;
@@ -31,6 +32,11 @@ function splitCustomerName(name: string): { first_name: string; last_name: strin
   const first_name = parts.shift() || "Customer";
   const last_name = parts.join(" ") || "Record";
   return { first_name, last_name };
+}
+
+function invalidateCustomerRelatedCaches(workspaceId: string): void {
+  invalidateCustomerOverview(workspaceId);
+  invalidateVehicleOverview(workspaceId);
 }
 
 const customerResponseSchema = z.object({
@@ -59,7 +65,7 @@ export async function createCustomerAndReturn(
     address: payload.address || undefined,
     notes: payload.notes || undefined,
   });
-  invalidateCustomerOverview(workspace_id);
+  invalidateCustomerRelatedCaches(workspace_id);
   const customer = customerResponseSchema.parse(response.data);
   return {
     id: customer.id,
@@ -79,13 +85,13 @@ export async function updateCustomer(id: string, payload: CustomerWritePayload):
     address: payload.address,
     notes: payload.notes,
   });
-  invalidateCustomerOverview(workspace_id);
+  invalidateCustomerRelatedCaches(workspace_id);
 }
 
 export async function deleteCustomer(id: string): Promise<void> {
   const workspace_id = requireSelectedWorkspaceId();
   await nextApi.customers.remove(workspace_id, id);
-  invalidateCustomerOverview(workspace_id);
+  invalidateCustomerRelatedCaches(workspace_id);
 }
 
 /**
@@ -100,5 +106,5 @@ export async function hardDeleteCustomer(id: string): Promise<void> {
   const workspace_id = requireSelectedWorkspaceId();
   const { error } = await hardDelete(supabase, "customers", id);
   if (error) throw error;
-  invalidateCustomerOverview(workspace_id);
+  invalidateCustomerRelatedCaches(workspace_id);
 }
