@@ -16,6 +16,13 @@ const VEHICLE_SPEC_FILE = path.join(
   "data/vehicle-catalog-staging/vehicle_specifications_import_eligible_verified.csv",
 );
 
+const SELECTOR_SOURCE_MARKERS = [
+  "autolubespecsymm.xlsx",
+  "autolube_ymm_workbook",
+  "release_2022_2027_final_audit",
+  "release_audit_workbook",
+] as const;
+
 interface VehicleCatalogRow {
   record_id: string;
   year: number;
@@ -104,6 +111,16 @@ function parseAdditionalSpecs(value: string | undefined): Record<string, unknown
   }
 }
 
+function isCustomerSelectorSource(source: string, additionalSpecs: Record<string, unknown>): boolean {
+  // Vehicle identity is intentionally narrower than the consolidated reference
+  // catalog. Auto Lube YMM and the reviewed 2022-2027 oil audit define the
+  // customer-facing passenger/light-duty selector. FRAM/full filter catalogs,
+  // generic YMM lists and filter cross references may enrich a selected vehicle,
+  // but they must never create a Make/Model option by themselves.
+  const provenance = `${source} ${JSON.stringify(additionalSpecs.source_files ?? "")}`.toLowerCase();
+  return SELECTOR_SOURCE_MARKERS.some((marker) => provenance.includes(marker));
+}
+
 async function loadCatalog(): Promise<VehicleCatalogIndex> {
   const text = await readFile(VEHICLE_SPEC_FILE, "utf8");
   const parsed = parseCsv(text);
@@ -123,6 +140,10 @@ async function loadCatalog(): Promise<VehicleCatalogIndex> {
     const model = values[column.get("model")!]?.trim() ?? "";
     if (!Number.isInteger(year) || !make || !model) continue;
 
+    const source = values[column.get("source")!]?.trim() ?? "consolidated";
+    const additionalSpecs = parseAdditionalSpecs(values[column.get("additional_specs")!]);
+    if (!isCustomerSelectorSource(source, additionalSpecs)) continue;
+
     rows.push({
       record_id: values[column.get("record_id")!]?.trim() ?? "",
       year,
@@ -133,10 +154,12 @@ async function loadCatalog(): Promise<VehicleCatalogIndex> {
       oil_capacity: nullable(values[column.get("oil_capacity")!]),
       oil_filter: nullable(values[column.get("oil_filter")!]),
       transmission_fluid: nullable(values[column.get("transmission_fluid")!]),
-      source: values[column.get("source")!]?.trim() ?? "consolidated",
-      additional_specs: parseAdditionalSpecs(values[column.get("additional_specs")!]),
+      source,
+      additional_specs: additionalSpecs,
     });
   }
+
+  if (rows.length === 0) throw new Error("Vehicle selector catalog has no eligible oil-service rows");
 
   const years = Array.from(new Set(rows.map((row) => row.year))).sort((a, b) => b - a);
   const makes = new Map<number, Set<string>>();
