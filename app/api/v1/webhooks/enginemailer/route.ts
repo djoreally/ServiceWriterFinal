@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, accepted: result.count, duplicate: result.duplicate });
   } catch (error) {
     const details = error instanceof Error
-      ? { name: error.name, message: error.message, stack: error.stack?.split("\\n").slice(0, 4).join("\\n") }
+      ? { name: error.name, message: error.message, stack: error.stack?.split("\n").slice(0, 4).join("\n") }
       : { name: typeof error, message: "Non-Error exception thrown" };
     console.error("enginemailer_webhook_failed", {
       requestId,
