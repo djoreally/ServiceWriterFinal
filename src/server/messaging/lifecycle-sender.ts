@@ -1,5 +1,6 @@
 import { createSupabaseAdminClient } from "@/lib/supabase";
 import { EnginemailerEmailAdapter } from "@/server/messaging/enginemailer";
+import { ResendEmailAdapter } from "@/server/messaging/resend";
 import { renderLifecycleEmail, type LifecycleVariables } from "@/server/messaging/lifecycle-templates";
 import type { LifecyclePurpose } from "@/server/messaging/lifecycle-templates";
 import type { MessagingAdapter, ProviderSendResult } from "@/server/messaging/types";
@@ -36,6 +37,15 @@ function assertEmail(email: string): string {
 export function lifecycleAdapterForPurpose(purpose: LifecyclePurpose): MessagingAdapter {
   void purpose;
   return new EnginemailerEmailAdapter();
+}
+
+function resendFallbackConfigured(): boolean {
+  return Boolean(process.env.RESEND_API_KEY?.trim() && process.env.RESEND_FROM_EMAIL?.trim());
+}
+
+function providerFailureMessage(provider: string, error: unknown): string {
+  const detail = error instanceof Error ? error.message : "Unknown provider failure";
+  return `${provider}: ${detail}`.slice(0, 500);
 }
 
 export async function enqueueLifecycleEmail(input: LifecycleSendInput & {
@@ -140,31 +150,48 @@ export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ p
 
   if (queued.error) throw queued.error;
 
+  const sendRequest = {
+    workspaceId: input.workspaceId,
+    recipient: { email: recipientEmail },
+    purpose: rendered.purpose,
+    templateKey: rendered.templateKey,
+    subject: rendered.subject,
+    body: rendered.text,
+    html: rendered.html,
+    fromName: typeof input.variables["business.name"] === "string" ? String(input.variables["business.name"]) : "Service Writer",
+    replyTo: typeof input.variables["business.email"] === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(input.variables["business.email"])) ? String(input.variables["business.email"]) : undefined,
+    idempotencyKey: input.idempotencyKey,
+    metadata: input.metadata ?? {},
+  } satisfies Parameters<MessagingAdapter["send"]>[0];
+
   let sent: ProviderSendResult;
   try {
-    sent = await adapter.send({
-      workspaceId: input.workspaceId,
-      recipient: { email: recipientEmail },
-      purpose: rendered.purpose,
-      templateKey: rendered.templateKey,
-      subject: rendered.subject,
-      body: rendered.text,
-      html: rendered.html,
-      fromName: typeof input.variables["business.name"] === "string" ? String(input.variables["business.name"]) : "Service Writer",
-      replyTo: typeof input.variables["business.email"] === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(input.variables["business.email"])) ? String(input.variables["business.email"]) : undefined,
-      idempotencyKey: input.idempotencyKey,
-      metadata: input.metadata ?? {},
-    });
-  } catch (error) {
-    await supabase.from("message_logs").update({
-      status: "failed",
-      failed_at: new Date().toISOString(),
-      failure_reason: error instanceof Error ? error.message.slice(0, 500) : "Email provider failed",
-    }).eq("id", queued.data.id);
-    throw error;
+    sent = await adapter.send(sendRequest);
+  } catch (primaryError) {
+    if (!resendFallbackConfigured() || adapter.providerName === "resend") {
+      await supabase.from("message_logs").update({
+        status: "failed",
+        failed_at: new Date().toISOString(),
+        failure_reason: providerFailureMessage(adapter.providerName, primaryError),
+      }).eq("id", queued.data.id);
+      throw primaryError;
+    }
+
+    try {
+      sent = await new ResendEmailAdapter().send(sendRequest);
+    } catch (fallbackError) {
+      const failureReason = `${providerFailureMessage(adapter.providerName, primaryError)}; ${providerFailureMessage("resend", fallbackError)}`.slice(0, 500);
+      await supabase.from("message_logs").update({
+        status: "failed",
+        failed_at: new Date().toISOString(),
+        failure_reason: failureReason,
+      }).eq("id", queued.data.id);
+      throw new Error(failureReason, { cause: fallbackError });
+    }
   }
 
   const updated = await supabase.from("message_logs").update({
+    provider: sent.providerName,
     provider_message_id: sent.providerMessageId,
     status: sent.status,
     sent_at: sent.acceptedAt,
