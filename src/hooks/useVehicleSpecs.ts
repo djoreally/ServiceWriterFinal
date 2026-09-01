@@ -17,7 +17,10 @@ export interface VehicleSpec {
   engine: string | null;
   oil_type: string | null;
   oil_capacity: string | null;
+  oil_filter: string | null;
   oil_plug_torque: string | null;
+  tire_size: string | null;
+  rear_tire_size: string | null;
   transmission_fluid: string | null;
   additional_specs?: Record<string, string | null> | null;
 }
@@ -28,12 +31,7 @@ export interface AIVehicleSpecResult {
   make: string;
   model: string;
   engines: string[];
-  specs: Record<string, {
-    oil_type: string | null;
-    oil_capacity: string | null;
-    transmission_fluid: string | null;
-    oil_plug_torque: string | null;
-  }>;
+  specs: Record<string, { oil_type: string | null; oil_capacity: string | null; transmission_fluid: string | null; oil_plug_torque: string | null }>;
   source: "cache" | "ai";
   confidence_score?: number;
 }
@@ -42,12 +40,7 @@ export async function lookupVehicleSpecsWithAI(_year?: number, _make?: string, _
   throw new Error("AI vehicle lookup has been retired. Vehicle data comes from the vehicle catalog.");
 }
 
-interface UseVehicleSpecsOptions {
-  year?: string;
-  make?: string;
-  model?: string;
-}
-
+interface UseVehicleSpecsOptions { year?: string; make?: string; model?: string }
 type JsonRecord = { [key: string]: Json | undefined };
 
 function isJsonRecord(value: Json | null): value is JsonRecord {
@@ -66,7 +59,10 @@ function toAdditionalSpecs(value: Json | null): Record<string, string | null> | 
 }
 
 function mapSpec(item: VehicleSpecRow): VehicleSpec {
-  const additionalSpecs = toAdditionalSpecs(item.additional_specs);
+  const additionalSpecs = toAdditionalSpecs(item.additional_specs) ?? {};
+  if (item.oil_filter) additionalSpecs.oil_filter = item.oil_filter;
+  if (item.tire_size) additionalSpecs.tire_size = item.tire_size;
+  if (item.rear_tire_size) additionalSpecs.rear_tire_size = item.rear_tire_size;
   return {
     id: item.id,
     year: item.year,
@@ -75,9 +71,12 @@ function mapSpec(item: VehicleSpecRow): VehicleSpec {
     engine: item.engine,
     oil_type: item.oil_type,
     oil_capacity: item.oil_capacity,
-    oil_plug_torque: additionalSpecs?.oil_plug_torque || null,
+    oil_filter: item.oil_filter ?? null,
+    oil_plug_torque: additionalSpecs.oil_plug_torque || null,
+    tire_size: item.tire_size ?? null,
+    rear_tire_size: item.rear_tire_size ?? null,
     transmission_fluid: item.transmission_fluid,
-    additional_specs: additionalSpecs,
+    additional_specs: Object.keys(additionalSpecs).length ? additionalSpecs : null,
   };
 }
 
@@ -95,43 +94,34 @@ export function useVehicleSpecs(options: UseVehicleSpecsOptions = {}) {
   useEffect(() => {
     let cancelled = false;
     setYearsLoading(true);
-    void fetchVehicleSpecYears().then(({ data }) => {
-      if (!cancelled) setYears((data ?? []).map((row) => row.year));
-    }).finally(() => { if (!cancelled) setYearsLoading(false); });
+    void fetchVehicleSpecYears().then(({ data }) => { if (!cancelled) setYears((data ?? []).map((row) => row.year)); })
+      .finally(() => { if (!cancelled) setYearsLoading(false); });
     return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
     let cancelled = false;
-    setMakes([]);
-    setModels([]);
-    setEngines([]);
-    setMatchedSpec(null);
+    setMakes([]); setModels([]); setEngines([]); setMatchedSpec(null);
     if (!options.year) return () => { cancelled = true; };
     setMakesLoading(true);
-    void fetchVehicleSpecMakes(Number(options.year)).then(({ data }) => {
-      if (!cancelled) setMakes((data ?? []).map((row) => row.make));
-    }).finally(() => { if (!cancelled) setMakesLoading(false); });
+    void fetchVehicleSpecMakes(Number(options.year)).then(({ data }) => { if (!cancelled) setMakes((data ?? []).map((row) => row.make)); })
+      .finally(() => { if (!cancelled) setMakesLoading(false); });
     return () => { cancelled = true; };
   }, [options.year]);
 
   useEffect(() => {
     let cancelled = false;
-    setModels([]);
-    setEngines([]);
-    setMatchedSpec(null);
+    setModels([]); setEngines([]); setMatchedSpec(null);
     if (!options.year || !options.make) return () => { cancelled = true; };
     setModelsLoading(true);
-    void fetchVehicleSpecModels(Number(options.year), options.make).then(({ data }) => {
-      if (!cancelled) setModels((data ?? []).map((row) => row.model));
-    }).finally(() => { if (!cancelled) setModelsLoading(false); });
+    void fetchVehicleSpecModels(Number(options.year), options.make).then(({ data }) => { if (!cancelled) setModels((data ?? []).map((row) => row.model)); })
+      .finally(() => { if (!cancelled) setModelsLoading(false); });
     return () => { cancelled = true; };
   }, [options.year, options.make]);
 
   useEffect(() => {
     let cancelled = false;
-    setEngines([]);
-    setMatchedSpec(null);
+    setEngines([]); setMatchedSpec(null);
     if (!options.year || !options.make || !options.model) return () => { cancelled = true; };
     setSpecsLoading(true);
     void fetchVehicleSpecEngines(Number(options.year), options.make, options.model).then(({ data }) => {
@@ -143,24 +133,12 @@ export function useVehicleSpecs(options: UseVehicleSpecsOptions = {}) {
     return () => { cancelled = true; };
   }, [options.year, options.make, options.model]);
 
-  // VehicleEntry historically treated this aggregate flag as a signal to show
-  // an AI/manual fallback. Normal make/model/spec fetches therefore flashed the
-  // retired AI UI during every cascade. Only the initial year catalog load is
-  // exposed as the legacy aggregate loading flag; granular states remain
-  // available for actual loading indicators.
-  const loading = yearsLoading;
-
   return {
-    loading,
-    yearsLoading,
-    makesLoading,
-    modelsLoading,
-    specsLoading,
-    years,
-    makes,
-    models,
-    engines,
-    matchedSpec,
+    // Kept for legacy consumers that only need initial-catalog loading. Granular
+    // states drive the cascade and no longer trigger any AI/manual fallback UI.
+    loading: yearsLoading,
+    yearsLoading, makesLoading, modelsLoading, specsLoading,
+    years, makes, models, engines, matchedSpec,
     allSpecs: [] as VehicleSpec[],
     needsFallback: false,
   };
@@ -181,19 +159,13 @@ export function useAIVehicleSpecLookup() {
 export function useVehicleSpecLookup(year?: string, make?: string, model?: string, engine?: string) {
   const [spec, setSpec] = useState<VehicleSpec | null>(null);
   const [loading, setLoading] = useState(false);
-
   useEffect(() => {
     let cancelled = false;
-    if (!year || !make || !model) {
-      setSpec(null);
-      return () => { cancelled = true; };
-    }
+    if (!year || !make || !model) { setSpec(null); return () => { cancelled = true; }; }
     setLoading(true);
-    void fetchVehicleSpecSingle(Number(year), make, model, engine).then(({ data }) => {
-      if (!cancelled) setSpec(data?.[0] ? mapSpec(data[0]) : null);
-    }).finally(() => { if (!cancelled) setLoading(false); });
+    void fetchVehicleSpecSingle(Number(year), make, model, engine).then(({ data }) => { if (!cancelled) setSpec(data?.[0] ? mapSpec(data[0]) : null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [year, make, model, engine]);
-
   return useMemo(() => ({ spec, loading }), [spec, loading]);
 }
