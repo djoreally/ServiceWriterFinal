@@ -220,7 +220,9 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
 
     if (fetchError || !data) {
       setAppointment(null);
-      setError("We couldn't load this appointment. It may have been deleted or you may not have access.");
+      setError(fetchError instanceof Error
+        ? fetchError.message
+        : "We couldn't load this appointment. It may have been deleted or you may not have access.");
       setLoading(false);
       return;
     }

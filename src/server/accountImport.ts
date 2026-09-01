@@ -117,13 +117,28 @@ export async function createImportBatch(args: { supabase: SupabaseClient; user: 
 }
 
 async function importAppointment(ctx: ImportContext, row: Record<string, unknown>) {
-  const customer = ctx.mappings.get(sourceId("customers", { id: row.customer_id }));
-  if (!customer) throw new ApiError(422, "Appointment references a customer that was not imported", "orphan_customer");
+  // Historical entries without a linked customer or vehicle are valid records,
+  // not demo data. Preserve them as unlinked appointments instead of dropping
+  // the entire row during import.
+  const customer = row.customer_id ? ctx.mappings.get(sourceId("customers", { id: row.customer_id })) : null;
+  if (row.customer_id && !customer) throw new ApiError(422, "Appointment references a customer that was not imported", "orphan_customer");
   const vehicle = row.vehicle_id ? ctx.mappings.get(sourceId("vehicles", { id: row.vehicle_id })) : null;
+  if (row.vehicle_id && !vehicle) throw new ApiError(422, "Appointment references a vehicle that was not imported", "orphan_vehicle");
   const startsAt = sourceDate(row);
   const duration = Math.max(15, number(row, "duration_minutes", 60));
   const endsAt = new Date(Date.parse(startsAt) + duration * 60000).toISOString();
-  return insertMapped(ctx, "appointments", row, "appointments", { customer_id: customer.targetId, vehicle_id: vehicle?.targetId ?? null, location_id: null, assigned_user_id: null, status: mapAppointmentStatus(text(row, "status")), starts_at: startsAt, ends_at: endsAt, source: "import", confirmation_code: nullable(text(row, "confirmation_code")), notes: nullable(text(row, "notes") || text(row, "description")), created_by: ctx.user.id, created_at: safeDate(row.created_at, now()), updated_at: safeDate(row.updated_at, now()) });
+  const metadata = {
+    title: nullable(text(row, "title")),
+    description: nullable(text(row, "description")),
+    guest_name: nullable(text(row, "guest_name")),
+    guest_email: normalizeEmail(row),
+    guest_phone: normalizePhone(row),
+    location_address: nullable(text(row, "location_address")),
+    legacy_payment_status: nullable(text(row, "payment_status")),
+    legacy_dispatch_status: nullable(text(row, "dispatch_status")),
+    legacy_source_id: String(row.id ?? ""),
+  };
+  return insertMapped(ctx, "appointments", row, "appointments", { customer_id: customer?.targetId ?? null, vehicle_id: vehicle?.targetId ?? null, location_id: null, assigned_user_id: null, status: mapAppointmentStatus(text(row, "status")), starts_at: startsAt, ends_at: endsAt, source: "import", confirmation_code: nullable(text(row, "confirmation_code")), notes: nullable(text(row, "notes") || text(row, "description")), metadata, created_by: ctx.user.id, created_at: safeDate(row.created_at, now()), updated_at: safeDate(row.updated_at, now()) });
 }
 
 async function importServiceRecord(ctx: ImportContext, row: Record<string, unknown>) {
