@@ -8,6 +8,40 @@ const acceptSchema = z.object({ token: z.string().trim().min(20).max(200) });
 const invitationSelect = "id,workspace_id,customer_id,invited_email,invited_role,expires_at,accepted_at,accepted_by,revoked_at,created_by,created_at,updated_at";
 const digest = (token: string) => createHash("sha256").update(token, "utf8").digest("hex");
 
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
+  try {
+    const id = idSchema.parse((await context.params).id);
+    const token = new URL(request.url).searchParams.get("token") ?? "";
+    const parsed = acceptSchema.safeParse({ token });
+    if (!parsed.success) throw new ApiError(404, "Invitation not found or token is invalid", "invalid_invitation");
+
+    const admin = createSupabaseAdminClient();
+    const { data: invitation, error } = await admin
+      .from("invitations")
+      .select("id,workspace_id,invited_email,invited_role,expires_at,accepted_at,revoked_at")
+      .eq("id", id)
+      .eq("token_hash", digest(parsed.data.token))
+      .maybeSingle();
+    if (error) throw error;
+    if (!invitation) throw new ApiError(404, "Invitation not found or token is invalid", "invalid_invitation");
+    if (invitation.accepted_at) throw new ApiError(409, "Invitation has already been accepted", "invitation_used");
+    if (invitation.revoked_at || new Date(invitation.expires_at).getTime() <= Date.now()) throw new ApiError(410, "Invitation is no longer valid", "invitation_expired");
+
+    const { data: workspace } = await admin.from("workspaces").select("name").eq("id", invitation.workspace_id).maybeSingle();
+    return json({
+      data: {
+        id: invitation.id,
+        invited_email: invitation.invited_email,
+        invited_role: invitation.invited_role,
+        expires_at: invitation.expires_at,
+        workspace_name: workspace?.name ?? "Service Writer",
+      },
+    });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
 export async function DELETE(_request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const id = idSchema.parse((await context.params).id);
