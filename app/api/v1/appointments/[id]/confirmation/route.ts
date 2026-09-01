@@ -18,18 +18,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     const { data: appointment, error } = await supabase
       .from("appointments")
-      .select("id,workspace_id,customer_id,starts_at,ends_at,status,notes,metadata,customers(id,first_name,last_name,email),vehicles(id,year,make,model)")
+      .select("id,workspace_id,customer_id,starts_at,ends_at,status,notes,metadata,updated_at,customers(id,first_name,last_name,email),vehicles(id,year,make,model)")
       .eq("workspace_id", workspace_id)
       .eq("id", appointmentId)
       .single();
     if (error || !appointment) throw error ?? new Error("Appointment not found.");
 
-    const { data: workspace } = await supabase
-      .from("workspaces")
-      .select("name,timezone")
-      .eq("id", workspace_id)
-      .single();
-
+    const { data: workspace } = await supabase.from("workspaces").select("name,timezone").eq("id", workspace_id).single();
     const result = await dispatchAppointmentLifecycle({
       eventKey: LIFECYCLE_EVENT_KEYS.bookingCreated,
       eventId: `${appointmentId}:staff-confirmation:${appointment.updated_at ?? appointment.starts_at}`,
