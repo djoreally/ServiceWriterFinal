@@ -1,4 +1,4 @@
-import { json, errorResponse, requireWorkspaceMember } from "@/server/api";
+import { ApiError, json, errorResponse, requireWorkspaceMember } from "@/server/api";
 import { z } from "zod";
 
 const patchSchema = z.object({
@@ -17,6 +17,22 @@ const patchSchema = z.object({
   completed_at: z.string().datetime().nullable().optional(),
   updated_at: z.string().datetime().optional(),
 });
+
+const TECHNICIAN_FIELDS = new Set([
+  "workspace_id",
+  "status",
+  "technician_notes",
+  "tech_notes",
+  "diagnosis",
+  "signature_url",
+  "vin_captured",
+  "mileage_captured",
+  "started_at",
+  "completed_at",
+  "updated_at",
+]);
+
+const TECHNICIAN_STATUSES = new Set(["in_progress", "waiting_for_parts", "awaiting_approval", "completed"]);
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -41,7 +57,36 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   try {
     const { id } = await params;
     const body = patchSchema.parse(await request.json());
-    const { supabase } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician"], request);
+    const { supabase, user, membership } = await requireWorkspaceMember(
+      body.workspace_id,
+      ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician"],
+      request,
+    );
+
+    if (membership.role === "technician") {
+      const requestedFields = Object.keys(body);
+      const forbiddenField = requestedFields.find((field) => !TECHNICIAN_FIELDS.has(field));
+      if (forbiddenField) {
+        throw new ApiError(403, `Technicians cannot change ${forbiddenField}`, "technician_field_forbidden");
+      }
+      if (body.status && !TECHNICIAN_STATUSES.has(body.status)) {
+        throw new ApiError(403, "Technicians cannot set this work order status", "technician_status_forbidden");
+      }
+
+      const { data: assignment, error: assignmentError } = await supabase
+        .from("work_order_assignments")
+        .select("work_order_id")
+        .eq("workspace_id", body.workspace_id)
+        .eq("work_order_id", id)
+        .eq("user_id", user.id)
+        .is("unassigned_at", null)
+        .maybeSingle();
+      if (assignmentError) throw assignmentError;
+      if (!assignment) {
+        throw new ApiError(403, "Technicians may only update work orders actively assigned to them", "technician_assignment_required");
+      }
+    }
+
     const { workspace_id, updated_at: _ignoredOptimisticHint, ...patch } = body;
 
     const { error } = await (supabase as any).rpc("patch_work_order_v1", {
