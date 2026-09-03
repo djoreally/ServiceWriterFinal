@@ -2,16 +2,20 @@ import type { ProviderSendResult } from "@/server/messaging/types";
 import { ResendEmailAdapter } from "@/server/messaging/resend";
 import { createSupabaseAdminClient } from "@/lib/supabase";
 
+const CANONICAL_PRODUCTION_APP_URL = "https://servicewriter.xyz";
+
 function requiredAppUrl(): string {
-  const value = process.env.NEXT_PUBLIC_APP_URL?.trim();
-  if (!value) throw new Error("Missing required environment variable: NEXT_PUBLIC_APP_URL");
+  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const vercelUrl = process.env.VERCEL_URL?.trim();
+  const value = configured
+    || (process.env.VERCEL_ENV === "production" ? CANONICAL_PRODUCTION_APP_URL : vercelUrl ? `https://${vercelUrl}` : CANONICAL_PRODUCTION_APP_URL);
 
   const url = new URL(value);
-  if (process.env.NODE_ENV === "production" && url.protocol !== "https:") {
-    throw new Error("NEXT_PUBLIC_APP_URL must use HTTPS in production");
+  if ((process.env.NODE_ENV === "production" || process.env.VERCEL_ENV) && url.protocol !== "https:") {
+    throw new Error("Invitation app URL must use HTTPS outside local development");
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw new Error("NEXT_PUBLIC_APP_URL must use HTTP or HTTPS");
+    throw new Error("Invitation app URL must use HTTP or HTTPS");
   }
 
   return url.toString().replace(/\/$/, "");
