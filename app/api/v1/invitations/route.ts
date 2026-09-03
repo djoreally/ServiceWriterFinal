@@ -102,11 +102,11 @@ export async function POST(request: Request) {
     } catch (deliveryError) {
       const message = deliveryError instanceof Error ? deliveryError.message : "Invitation delivery failed";
       try {
-        await recordDeliveryAttempt({ workspaceId: data.workspace_id, invitationId: data.id, email: data.invited_email, actorUserId: user.id, provider: "resend", status: "failed" });
+        await recordDeliveryAttempt({ workspaceId: data.workspace_id, invitationId: data.id, email: data.invited_email, actorUserId: user.id, provider: "supabase_auth", status: "failed" });
       } catch (auditError) {
         console.error("invitation_delivery_audit_failed", auditError instanceof Error ? auditError.message : "unknown error");
       }
-      delivery = { status: "failed", provider: "resend", error: message };
+      delivery = { status: "failed", provider: "supabase_auth", error: message };
     }
     return json({ data, delivery, ...(exposeToken ? { token } : {}) }, { status: 201 });
   } catch (error) {
