@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
 
 export type AppRole = "admin" | "moderator" | "user";
 export type Action = "create" | "read" | "update" | "delete" | "manage";
@@ -67,8 +68,6 @@ export function AuthProvider({
     if (authStateSource?.getSession) {
       void authStateSource.getSession().then(({ data }) => {
         if (!active) return;
-        // An auth event that arrives while getSession is in flight is newer
-        // than the snapshot and must win (notably SIGNED_IN after submit).
         if (!receivedAuthEvent) setSession(data.session);
         setLoading(false);
       }).catch(() => {
@@ -97,12 +96,50 @@ export function useAuth(): AuthContextValue {
   return useContext(AuthContext);
 }
 
+/**
+ * Platform RBAC is global and intentionally separate from workspace membership.
+ * Workspace roles (owner/manager/dispatcher/technician) are resolved by
+ * useTeamRole; platform roles live in public.user_roles and gate /admin.
+ */
 export function useRBAC() {
   const { user } = useAuth();
-  const hasRole = useCallback((_role: AppRole) => false, []);
-  const isAdmin = useCallback(() => false, []);
+  const [roles, setRoles] = useState<AppRole[]>([]);
+  const [loading, setLoading] = useState(Boolean(user));
+
+  useEffect(() => {
+    let active = true;
+    if (!user?.id) {
+      setRoles([]);
+      setLoading(false);
+      return () => { active = false; };
+    }
+
+    setLoading(true);
+    void supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", user.id)
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          console.warn("[rbac] Failed to load platform roles", { code: error.code });
+          setRoles([]);
+        } else {
+          const nextRoles = (data ?? [])
+            .map((row) => String(row.role))
+            .filter((role): role is AppRole => role === "admin" || role === "moderator" || role === "user");
+          setRoles([...new Set(nextRoles)]);
+        }
+        setLoading(false);
+      });
+
+    return () => { active = false; };
+  }, [user?.id]);
+
+  const hasRole = useCallback((role: AppRole) => roles.includes(role), [roles]);
+  const isAdmin = useCallback(() => roles.includes("admin"), [roles]);
   const can = useCallback((_action: Action, _resource: Resource, _attributes?: Record<string, unknown>) => Boolean(user), [user]);
-  return { roles: [] as AppRole[], loading: false, hasRole, isAdmin, can };
+  return { roles, loading, hasRole, isAdmin, can };
 }
 
 export function useSessionSecurity(options: {
@@ -123,12 +160,18 @@ export function useSessionSecurity(options: {
   }, [session, signOut, options.idleTimeoutMs, options]);
 }
 
-export function hasRole(_userId: string, _role: AppRole): Promise<boolean> {
-  return Promise.resolve(false);
+export async function hasRole(userId: string, role: AppRole): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", userId)
+    .eq("role", role)
+    .maybeSingle();
+  return !error && Boolean(data);
 }
 
-export function isAdmin(_userId: string): Promise<boolean> {
-  return Promise.resolve(false);
+export function isAdmin(userId: string): Promise<boolean> {
+  return hasRole(userId, "admin");
 }
 
 export function isResourceOwner(resourceUserId: string, currentUserId: string): boolean {
