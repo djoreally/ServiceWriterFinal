@@ -1,32 +1,68 @@
 /**
- * Availability Settings Query — Read-only data access for availability & policies.
- * All write operations have been moved to availability-settings.command.ts.
+ * Availability Settings Query — canonical workspace-scoped scheduling reads.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { productionSupabase as supabase } from "@/integrations/supabase/client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+
+export interface AvailabilityBlockedDateRow { id: string; blocked_date: string; reason: string | null; }
+export interface AvailabilityIntakeQuestionRow {
+  id: string;
+  question_text: string;
+  question_type: "text" | "textarea" | "select" | "checkbox";
+  options: string[] | null;
+  is_required: boolean;
+  sort_order: number;
+  is_active: boolean;
+}
 
 export async function getSessionUserId(): Promise<string | null> {
   const { data: { session } } = await supabase.auth.getSession();
   return session?.user?.id ?? null;
 }
 
-export async function fetchAvailabilityPageData(userId: string) {
-  const [{ data: profile }, { data: blocked }, { data: questions }] = await Promise.all([
+export async function fetchAvailabilityPageData(_userId?: string) {
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("Select a workspace before managing availability.");
+  // These two tables were introduced by the scheduling migration in this release.
+  // Keep the temporary untyped boundary here until generated production types are refreshed.
+  const db = supabase as any;
+
+  const [settingsResult, workspaceResult, blockedResult, questionsResult] = await Promise.all([
     supabase
-      .from("business_profiles")
-      .select("day_hours, timezone, buffer_time_before, buffer_time_after, min_lead_time_hours, max_advance_days, allow_multi_day_bookings, slot_duration_minutes, require_approval, cancellation_window_hours, allow_cancellation, allow_rescheduling, reschedule_window_hours, terms_and_conditions, require_terms_acceptance")
-      .eq("user_id", userId)
-      .single(),
+      .from("workspace_settings")
+      .select("day_hours, buffer_time_before, buffer_time_after, min_lead_time_hours, max_advance_days, allow_multi_day_bookings, slot_duration_minutes, require_approval, cancellation_window_hours, allow_cancellation, allow_rescheduling, reschedule_window_hours, terms_and_conditions, require_terms_acceptance")
+      .eq("workspace_id", context.workspaceId)
+      .maybeSingle(),
     supabase
-      .from("blocked_dates")
-      .select("*")
-      .eq("user_id", userId)
+      .from("workspaces")
+      .select("timezone")
+      .eq("id", context.workspaceId)
+      .maybeSingle(),
+    db
+      .from("workspace_blackout_dates")
+      .select("id, blocked_date, reason")
+      .eq("workspace_id", context.workspaceId)
       .order("blocked_date", { ascending: true }),
-    supabase
-      .from("intake_questions")
-      .select("*")
-      .eq("user_id", userId)
-      .order("sort_order", { ascending: true }),
+    db
+      .from("workspace_intake_questions")
+      .select("id, question_text, question_type, options, is_required, sort_order, is_active")
+      .eq("workspace_id", context.workspaceId)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true }),
   ]);
 
-  return { profile, blocked: blocked ?? [], questions: questions ?? [] };
+  if (settingsResult.error) throw settingsResult.error;
+  if (workspaceResult.error) throw workspaceResult.error;
+  if (blockedResult.error) throw blockedResult.error;
+  if (questionsResult.error) throw questionsResult.error;
+
+  const profile = settingsResult.data
+    ? { ...settingsResult.data, timezone: workspaceResult.data?.timezone ?? "UTC" }
+    : null;
+
+  return {
+    profile,
+    blocked: (blockedResult.data ?? []) as AvailabilityBlockedDateRow[],
+    questions: (questionsResult.data ?? []) as AvailabilityIntakeQuestionRow[],
+  };
 }
