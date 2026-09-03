@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "scope": "ServiceWriter runtime code",
   "canonical": {
     "tenant_key": "workspace_id",
@@ -7,6 +7,8 @@
       "workspaces",
       "workspace_members",
       "workspace_settings",
+      "workspace_blackout_dates",
+      "workspace_intake_questions",
       "customers",
       "customer_users",
       "vehicles",
@@ -17,6 +19,15 @@
       "service_records",
       "invitations"
     ],
+    "scheduling": {
+      "settings": "workspace_settings",
+      "timezone": "workspaces.timezone",
+      "day_hours": "workspace_settings.day_hours",
+      "blackout_dates": "workspace_blackout_dates",
+      "intake_questions": "workspace_intake_questions",
+      "appointment_time": "workspace-local input converted to starts_at/ends_at UTC",
+      "conflicts": "workspace-scoped appointments in workspace timezone"
+    },
     "appointments": {
       "time_columns": ["starts_at", "ends_at"],
       "tenant_column": "workspace_id",
@@ -37,6 +48,8 @@
   "retired": {
     "tables": {
       "business_profiles": "workspace_settings + workspaces",
+      "blocked_dates": "workspace_blackout_dates",
+      "intake_questions": "workspace_intake_questions",
       "client_error_events": "server observability/logging",
       "customer_accounts": "customers + customer_users",
       "services": "service_catalog",
