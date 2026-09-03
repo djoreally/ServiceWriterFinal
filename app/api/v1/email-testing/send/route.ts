@@ -44,7 +44,7 @@ export async function POST(request: Request) {
     const sent = await new EnginemailerEmailAdapter().send({
       workspaceId: body.workspace_id,
       recipient: { email: body.to.trim().toLowerCase() },
-      purpose: "marketing",
+      purpose: "transactional",
       templateKey: `email_testing.${body.type}`,
       subject,
       body: text,
