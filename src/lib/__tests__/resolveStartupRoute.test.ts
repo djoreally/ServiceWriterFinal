@@ -120,6 +120,18 @@ describe("resolveStartupRoute", () => {
     ).toBe("/dispatch");
   });
 
+  it("routes fleet managers to Fleet OS instead of the owner dashboard", () => {
+    expect(
+      resolveStartupRoute({
+        currentPath: "/",
+        isAuthenticated: true,
+        persistedIntendedPath: null,
+        role: "fleet_manager",
+        requiresPlan: true,
+      }),
+    ).toBe("/fleet-os");
+  });
+
   it("preserves dispatcher deep links instead of forcing the board", () => {
     expect(
       resolveStartupRoute({
@@ -142,8 +154,6 @@ describe("isStartupDecisionPath", () => {
   });
 
   it("leaves workforce login portals to WorkforceAuth", () => {
-    // The app shell must never redirect away from these paths — the login
-    // page itself is the routing authority there (portal-variant aware).
     expect(isStartupDecisionPath("/login/business")).toBe(false);
     expect(isStartupDecisionPath("/login/dispatch")).toBe(false);
     expect(isStartupDecisionPath("/login/technician")).toBe(false);
