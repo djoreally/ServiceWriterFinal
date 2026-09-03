@@ -43,6 +43,15 @@ export default function InvitationAccept() {
   const [submitting, setSubmitting] = useState(false);
   const [accepted, setAccepted] = useState(false);
   const [error, setError] = useState("");
+  const [matchingSession, setMatchingSession] = useState(false);
+
+  async function finishAcceptance(previewData: InvitationPreview) {
+    const response = await nextApi.invitations.accept(invitationId, token);
+    setInvitation(response.data);
+    setAccepted(true);
+    toast.success("Invitation accepted.");
+    window.setTimeout(() => navigate(roleLanding(response.data.invited_role), { replace: true }), 900);
+  }
 
   useEffect(() => {
     if (!invitationId || !token) {
@@ -63,7 +72,20 @@ export default function InvitationAccept() {
         setPreview(payload.data);
 
         const session = (await supabase.auth.getSession()).data.session;
-        if (session?.user.email?.toLowerCase() === payload.data.invited_email.toLowerCase()) setMode("signin");
+        const sessionEmail = session?.user.email?.trim().toLowerCase();
+        const invitedEmail = payload.data.invited_email.trim().toLowerCase();
+        if (session && sessionEmail === invitedEmail) {
+          setMatchingSession(true);
+          setSubmitting(true);
+          try {
+            await finishAcceptance(payload.data);
+          } finally {
+            if (!cancelled) setSubmitting(false);
+          }
+        } else if (session) {
+          setMode("signin");
+          setError(`You are currently signed in as ${session.user.email ?? "another account"}. Sign in with ${payload.data.invited_email} to accept this invitation.`);
+        }
       } catch (cause) {
         if (!cancelled) setError(cause instanceof Error ? cause.message : "This invitation link is invalid or expired.");
       } finally {
@@ -71,6 +93,8 @@ export default function InvitationAccept() {
       }
     })();
     return () => { cancelled = true; };
+  // finishAcceptance intentionally uses the immutable invitation URL parameters.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [invitationId, token]);
 
   async function authenticateAndAccept(event: React.FormEvent) {
@@ -87,7 +111,7 @@ export default function InvitationAccept() {
         if (result.error) throw new Error(result.error);
         const session = (await supabase.auth.getSession()).data.session;
         if (!session) {
-          toast.success("Account created. Confirm your email, then reopen this invitation link.");
+          toast.success("Account created. Confirm your email; this invitation will finish automatically when you return.");
           return;
         }
       } else {
@@ -95,11 +119,7 @@ export default function InvitationAccept() {
         if (result.error) throw new Error(result.error);
       }
 
-      const response = await nextApi.invitations.accept(invitationId, token);
-      setInvitation(response.data);
-      setAccepted(true);
-      toast.success("Invitation accepted.");
-      window.setTimeout(() => navigate(roleLanding(response.data.invited_role), { replace: true }), 900);
+      await finishAcceptance(preview);
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "This invitation could not be accepted.";
       if (mode === "signup" && /already|registered|exists/i.test(message)) {
@@ -113,7 +133,7 @@ export default function InvitationAccept() {
     }
   }
 
-  if (loading) return <div className="flex min-h-screen items-center justify-center bg-muted/30"><Loader2 className="h-7 w-7 animate-spin text-primary" /></div>;
+  if (loading || (matchingSession && submitting)) return <div className="flex min-h-screen items-center justify-center bg-muted/30"><div className="text-center"><Loader2 className="mx-auto h-7 w-7 animate-spin text-primary" /><p className="mt-3 text-sm text-muted-foreground">Finishing your invitation…</p></div></div>;
   if (error && !preview) return <StateCard icon={<Link2 className="h-7 w-7" />} title="Invalid invitation link" message={error} />;
   if (accepted) return <StateCard icon={<CheckCircle2 className="h-8 w-8 text-emerald-600" />} title="You're in" message={`Your ${invitation?.invited_role.replaceAll("_", " ")} access is ready. Redirecting to your workspace…`} />;
   if (!preview) return <StateCard icon={<Link2 className="h-7 w-7" />} title="Invalid invitation link" message="This invitation could not be loaded." />;
@@ -125,7 +145,7 @@ export default function InvitationAccept() {
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10"><Users className="h-7 w-7 text-primary" /></div>
           <div>
             <CardTitle className="text-2xl">Join {preview.workspace_name}</CardTitle>
-            <CardDescription className="mt-2">Your email and assigned role are locked to this invitation. Set your password to finish account access.</CardDescription>
+            <CardDescription className="mt-2">Your email and assigned role are locked to this invitation.</CardDescription>
           </div>
         </CardHeader>
         <CardContent>
@@ -138,7 +158,7 @@ export default function InvitationAccept() {
 
             <Tabs value={mode} onValueChange={(value) => setMode(value as "signin" | "signup")}>
               <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="signup">Set password</TabsTrigger>
+                <TabsTrigger value="signup">Create account</TabsTrigger>
                 <TabsTrigger value="signin">Existing account</TabsTrigger>
               </TabsList>
               <TabsContent value="signup" className="mt-3 text-sm text-muted-foreground">Create your Service Writer login for the invited email.</TabsContent>
@@ -152,7 +172,7 @@ export default function InvitationAccept() {
             </div>
 
             {error && <div role="alert" className="flex gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"><XCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
-            <Button type="submit" className="w-full gap-2" disabled={submitting}><ShieldCheck className="h-4 w-4" />{submitting ? "Securing access…" : mode === "signin" ? "Sign in & accept" : "Set password & accept"}</Button>
+            <Button type="submit" className="w-full gap-2" disabled={submitting}><ShieldCheck className="h-4 w-4" />{submitting ? "Securing access…" : mode === "signin" ? "Sign in & accept" : "Create account & accept"}</Button>
           </form>
         </CardContent>
       </Card>

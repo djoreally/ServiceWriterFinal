@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
+import { createSupabaseAdminClient } from "@/lib/supabase";
 import { sendInvitationEmail } from "@/server/invitations/mailer";
 import { ApiError, errorResponse, json, requireWorkspaceMember } from "@/server/api";
 
@@ -7,6 +8,28 @@ const idSchema = z.string().uuid();
 const digest = (token: string) => createHash("sha256").update(token, "utf8").digest("hex");
 const invitationSelect = "id,workspace_id,customer_id,invited_email,invited_role,expires_at,accepted_at,accepted_by,revoked_at,created_by,created_at,updated_at";
 const exposeToken = process.env.INVITATION_EXPOSE_RAW_TOKEN === "true" && process.env.NODE_ENV !== "production";
+
+async function recordDeliveryAttempt(input: {
+  workspaceId: string;
+  invitationId: string;
+  email: string;
+  actorUserId: string;
+  provider: string;
+  providerMessageId?: string;
+  status: "accepted" | "failed";
+}) {
+  const admin = createSupabaseAdminClient();
+  const { error } = await admin.from("invitation_delivery_attempts").insert({
+    workspace_id: input.workspaceId,
+    invitation_id: input.invitationId,
+    invited_email: input.email,
+    actor_user_id: input.actorUserId,
+    provider: input.provider,
+    provider_message_id: input.providerMessageId ?? null,
+    status: input.status,
+  });
+  if (error) throw error;
+}
 
 export async function POST(_request: Request, context: { params: Promise<{ id: string }> }) {
   try {
@@ -29,12 +52,16 @@ export async function POST(_request: Request, context: { params: Promise<{ id: s
     if (eventError) throw eventError;
     try {
       const result = await sendInvitationEmail({ invitationId: id, workspaceId: data.workspace_id, recipientEmail: data.invited_email, role: data.invited_role, token, expiresAt });
-      await supabase.from("invitation_delivery_attempts").insert({ workspace_id: data.workspace_id, invitation_id: id, invited_email: data.invited_email, actor_user_id: user.id, provider: result.providerName, provider_message_id: result.providerMessageId, status: "accepted" });
+      await recordDeliveryAttempt({ workspaceId: data.workspace_id, invitationId: id, email: data.invited_email, actorUserId: user.id, provider: result.providerName, providerMessageId: result.providerMessageId, status: "accepted" });
       return json({ data, delivery: { status: "accepted", provider: result.providerName, provider_message_id: result.providerMessageId }, ...(exposeToken ? { token } : {}) });
     } catch (deliveryError) {
       const message = deliveryError instanceof Error ? deliveryError.message : "Invitation delivery failed";
-      await supabase.from("invitation_delivery_attempts").insert({ workspace_id: data.workspace_id, invitation_id: id, invited_email: data.invited_email, actor_user_id: user.id, provider: "enginemailer", status: "failed" });
-      return json({ data, delivery: { status: "failed", error: message } }, { status: 502 });
+      try {
+        await recordDeliveryAttempt({ workspaceId: data.workspace_id, invitationId: id, email: data.invited_email, actorUserId: user.id, provider: "resend", status: "failed" });
+      } catch (auditError) {
+        console.error("invitation_delivery_audit_failed", auditError instanceof Error ? auditError.message : "unknown error");
+      }
+      return json({ data, delivery: { status: "failed", provider: "resend", error: message } }, { status: 502 });
     }
   } catch (error) {
     return errorResponse(error);
