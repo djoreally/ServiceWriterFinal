@@ -4,6 +4,17 @@
 import { productionSupabase as supabase } from "@/integrations/supabase/client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
+export interface AvailabilityBlockedDateRow { id: string; blocked_date: string; reason: string | null; }
+export interface AvailabilityIntakeQuestionRow {
+  id: string;
+  question_text: string;
+  question_type: "text" | "textarea" | "select" | "checkbox";
+  options: string[] | null;
+  is_required: boolean;
+  sort_order: number;
+  is_active: boolean;
+}
+
 export async function getSessionUserId(): Promise<string | null> {
   const { data: { session } } = await supabase.auth.getSession();
   return session?.user?.id ?? null;
@@ -12,6 +23,9 @@ export async function getSessionUserId(): Promise<string | null> {
 export async function fetchAvailabilityPageData(_userId?: string) {
   const context = await resolveCurrentWorkspace();
   if (!context) throw new Error("Select a workspace before managing availability.");
+  // These two tables were introduced by the scheduling migration in this release.
+  // Keep the temporary untyped boundary here until generated production types are refreshed.
+  const db = supabase as any;
 
   const [settingsResult, workspaceResult, blockedResult, questionsResult] = await Promise.all([
     supabase
@@ -24,12 +38,12 @@ export async function fetchAvailabilityPageData(_userId?: string) {
       .select("timezone")
       .eq("id", context.workspaceId)
       .maybeSingle(),
-    supabase
+    db
       .from("workspace_blackout_dates")
       .select("id, blocked_date, reason")
       .eq("workspace_id", context.workspaceId)
       .order("blocked_date", { ascending: true }),
-    supabase
+    db
       .from("workspace_intake_questions")
       .select("id, question_text, question_type, options, is_required, sort_order, is_active")
       .eq("workspace_id", context.workspaceId)
@@ -48,7 +62,7 @@ export async function fetchAvailabilityPageData(_userId?: string) {
 
   return {
     profile,
-    blocked: blockedResult.data ?? [],
-    questions: questionsResult.data ?? [],
+    blocked: (blockedResult.data ?? []) as AvailabilityBlockedDateRow[],
+    questions: (questionsResult.data ?? []) as AvailabilityIntakeQuestionRow[],
   };
 }
