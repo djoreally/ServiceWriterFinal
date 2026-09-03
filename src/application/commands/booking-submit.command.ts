@@ -98,8 +98,21 @@ export async function saveAppointmentBookingConfiguration(
   });
 }
 
-export async function reserveTireInventoryForAppointment(appointmentId:string,businessUserId:string,inventoryItemId:string,quantity:number){
-  return supabase.rpc("reserve_tire_inventory_for_appointment" as never,{p_appointment_id:appointmentId,p_business_user_id:businessUserId,p_inventory_item_id:inventoryItemId,p_quantity:quantity} as never);
+export async function reserveTireInventoryForAppointment(
+  appointmentId: string,
+  businessUserId: string,
+  inventoryItemId: string,
+  quantity: number,
+) {
+  return supabase.rpc(
+    "reserve_tire_inventory_for_appointment" as never,
+    {
+      p_appointment_id: appointmentId,
+      p_business_user_id: businessUserId,
+      p_inventory_item_id: inventoryItemId,
+      p_quantity: quantity,
+    } as never,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -170,7 +183,6 @@ export async function insertBookingPaymentRecord(record: BookingPaymentRecordInp
   return { data: data ? { id: data as string } : null, error: null as null };
 }
 
-
 // ---------------------------------------------------------------------------
 // Auth — booking-specific sign-up (redirects to /customer/dashboard)
 // ---------------------------------------------------------------------------
@@ -200,8 +212,15 @@ export interface CreateCustomerAccountParams {
   p_provider_id: string;
 }
 
-export async function createCustomerAccount(params: CreateCustomerAccountParams) {
-  return supabase.rpc("create_customer_account", params);
+/**
+ * Link a booking signup to canonical customer records only after Supabase has
+ * issued an authenticated session. Email-confirmation signups have no session
+ * yet; CustomerDashboard performs the same idempotent link after confirmation.
+ */
+export async function createCustomerAccount(_params: CreateCustomerAccountParams) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return { data: null, error: null };
+  return (supabase as any).rpc("link_customer_portal_account_v1");
 }
 
 // ---------------------------------------------------------------------------
@@ -223,11 +242,6 @@ export interface BookingConsentInput {
   };
   source?: string;
   signature?: string;
-  /**
-   * Guest auth mode: the just-created appointment this consent belongs to. The
-   * edge function verifies (service-role) that the appointment exists, belongs
-   * to `userId`, matches `email`, and was created moments ago.
-   */
   appointmentId?: string | null;
 }
 
