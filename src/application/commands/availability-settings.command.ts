@@ -29,7 +29,8 @@ export async function saveAvailabilitySettings(_userId: string, payload: Record<
     require_terms_acceptance: payload.require_terms_acceptance,
     updated_at: new Date().toISOString(),
   };
-  const { error } = await supabase.from("workspace_settings").update(allowed).eq("workspace_id", id);
+  const db = supabase as any;
+  const { error } = await db.from("workspace_settings").update(allowed).eq("workspace_id", id);
   if (error) throw error;
 }
 
