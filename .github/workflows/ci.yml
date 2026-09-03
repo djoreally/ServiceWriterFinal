@@ -39,9 +39,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      # Public client configuration required by the consolidated Next.js bundle.
-      # Repository variables/secrets should point to the canonical project only
-      # in protected deployment contexts; CI uses safe placeholders by default.
       NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL || 'https://example.supabase.co' }}
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || 'ci-placeholder-publishable-key' }}
       NEXT_PUBLIC_SUPABASE_PROJECT_ID: ${{ vars.NEXT_PUBLIC_SUPABASE_PROJECT_ID || 'servicewriterfinal-ci' }}
@@ -93,9 +90,6 @@ jobs:
     name: Next.js API typecheck and build
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    defaults:
-      run:
-        working-directory: .
     env:
       NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL || 'https://example.supabase.co' }}
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || 'ci-placeholder-publishable-key' }}
@@ -131,7 +125,7 @@ jobs:
           retention-days: 7
 
   migration-sanity:
-    name: Migration safety and verification-script checks
+    name: Migration and schema-contract safety
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -147,6 +141,11 @@ jobs:
 
       - name: Compile repository Python scripts
         run: python -m compileall -q scripts
+
+      - name: Reject runtime schema drift
+        env:
+          BASE_SHA: ${{ github.event.before || github.event.pull_request.base.sha || 'HEAD^' }}
+        run: python scripts/check_schema_contract.py
 
       - name: Verify migration filenames are ordered and unique
         run: |
@@ -184,13 +183,15 @@ jobs:
           grep -q 'workspace_id' "$migration"
           test -s scripts/verify_quote_conversion_migration.py
 
-      - name: Upload migration sources
+      - name: Upload migration and schema-contract sources
         uses: actions/upload-artifact@v4
         with:
-          name: supabase-migrations-${{ github.sha }}
+          name: schema-safety-${{ github.sha }}
           path: |
             supabase/migrations/
             scripts/verify_quote_conversion_migration.py
+            scripts/check_schema_contract.py
+            scripts/schema-contract.json
           retention-days: 14
 
   supabase-lint:
