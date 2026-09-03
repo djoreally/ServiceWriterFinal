@@ -21,6 +21,8 @@ SKIP_PARTS = ("/__tests__/", "/test/", "/tests/", "/fixtures/", "/generated/")
 
 RULES: list[tuple[str, re.Pattern[str], str]] = [
     ("retired table business_profiles", re.compile(r"\.from\(\s*['\"]business_profiles['\"]\s*\)"), "use workspaces/workspace_settings"),
+    ("retired table blocked_dates", re.compile(r"\.from\(\s*['\"]blocked_dates['\"]\s*\)"), "use workspace_blackout_dates"),
+    ("retired table intake_questions", re.compile(r"\.from\(\s*['\"]intake_questions['\"]\s*\)"), "use workspace_intake_questions"),
     ("retired table client_error_events", re.compile(r"(?:\.from\(\s*['\"]client_error_events['\"]\s*\)|/rest/v1/client_error_events)"), "use server observability/logging"),
     ("retired table customer_accounts", re.compile(r"\.from\(\s*['\"]customer_accounts['\"]\s*\)"), "use customers + customer_users"),
     ("retired customer account RPC", re.compile(r"\.rpc\(\s*['\"]create_customer_account['\"]"), "use link_customer_portal_account_v1"),
