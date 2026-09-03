@@ -42,17 +42,36 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   }
 }
 
-export async function DELETE(_request: Request, context: { params: Promise<{ id: string }> }) {
+export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const id = idSchema.parse((await context.params).id);
-    const { supabase, user } = await requireUser();
-    const { data: invitation, error: readError } = await supabase.from("invitations").select("id,workspace_id,accepted_at,revoked_at").eq("id", id).single();
+    const { user } = await requireUser(request);
+    const admin = createSupabaseAdminClient();
+    const { data: invitation, error: readError } = await admin
+      .from("invitations")
+      .select("id,workspace_id,accepted_at,revoked_at")
+      .eq("id", id)
+      .single();
     if (readError || !invitation) throw new ApiError(404, "Invitation not found", "not_found");
-    await requireWorkspaceMember(invitation.workspace_id, ["owner", "admin"]);
+
+    await requireWorkspaceMember(invitation.workspace_id, ["owner", "admin"], request);
     if (invitation.accepted_at || invitation.revoked_at) return json({ data: invitation });
-    const { data, error } = await supabase.from("invitations").update({ revoked_at: new Date().toISOString() }).eq("id", id).select(invitationSelect).single();
+
+    const { data, error } = await admin
+      .from("invitations")
+      .update({ revoked_at: new Date().toISOString() })
+      .eq("id", id)
+      .select(invitationSelect)
+      .single();
     if (error) throw error;
-    const { error: eventError } = await supabase.from("invitation_events").insert({ invitation_id: id, workspace_id: invitation.workspace_id, event_type: "revoked", actor_user_id: user.id, metadata: {} });
+
+    const { error: eventError } = await admin.from("invitation_events").insert({
+      invitation_id: id,
+      workspace_id: invitation.workspace_id,
+      event_type: "revoked",
+      actor_user_id: user.id,
+      metadata: {},
+    });
     if (eventError) throw eventError;
     return json({ data });
   } catch (error) {
