@@ -1,15 +1,16 @@
 /**
  * Customer Appointments Query - Fetch appointments for customer portal.
  *
- * Uses the get_customer_portal_appointments RPC, which resolves every linkage
- * path for the signed-in customer (account id, customer record id by account
- * link or matching email, and guest_email case-insensitively). This avoids
- * PostgREST `.or()` quirks with dots/@ in emails and guarantees that any
- * appointment ever booked under this customer's email shows up in the portal.
+ * Uses the canonical workspace-scoped RPC. The database links the signed-in
+ * Supabase user to matching customers by verified email and prefers the name
+ * captured on each appointment over a shared customer-record name.
  */
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
-
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
+
+const canonicalSupabase = supabase as unknown as SupabaseClient;
+
 export interface CustomerAppointmentRow {
   id: string;
   title: string;
@@ -31,7 +32,7 @@ export interface CustomerAppointmentRow {
   actual_end_time: string | null;
 }
 
-/** Fetch appointments for a customer account. */
+/** Fetch appointments visible to the current authenticated customer. */
 export async function fetchCustomerAppointments(
   _accountId: string,
 ): Promise<CustomerAppointmentRow[]> {
@@ -40,11 +41,11 @@ export async function fetchCustomerAppointments(
   } = await getCurrentAuthUser();
   if (!user) return [];
 
-  const { data, error } = await supabase.rpc("get_customer_portal_appointments");
+  const { data, error } = await canonicalSupabase.rpc("get_customer_portal_appointments_v1");
 
   if (error) {
     console.error("[fetchCustomerAppointments] rpc error", error);
-    return [];
+    throw new Error("Appointments are temporarily unavailable.");
   }
 
   type Row = {
@@ -82,9 +83,7 @@ export async function fetchCustomerAppointments(
     notes: r.notes,
     description: r.description,
     payment_status: r.payment_status,
-    service_catalog: r.service_catalog_name
-      ? { name: r.service_catalog_name }
-      : null,
+    service_catalog: r.service_catalog_name ? { name: r.service_catalog_name } : null,
     created_at: r.created_at,
     assigned_at: r.assigned_at,
     actual_start_time: r.actual_start_time,

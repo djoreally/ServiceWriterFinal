@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { CheckCircle2, Link2, Loader2, ShieldCheck, Users, XCircle } from "lucide-react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { z } from "zod";
 import { toast } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
@@ -31,7 +31,6 @@ function roleLanding(role: string): string {
 }
 
 export default function InvitationAccept() {
-  const navigate = useNavigate();
   const [params] = useSearchParams();
   const invitationId = params.get("invitation_id") ?? "";
   const token = params.get("token") ?? "";
@@ -45,12 +44,17 @@ export default function InvitationAccept() {
   const [error, setError] = useState("");
   const [matchingSession, setMatchingSession] = useState(false);
 
-  async function finishAcceptance(previewData: InvitationPreview) {
+  async function finishAcceptance(_previewData: InvitationPreview) {
     const response = await nextApi.invitations.accept(invitationId, token);
     setInvitation(response.data);
     setAccepted(true);
     toast.success("Invitation accepted.");
-    window.setTimeout(() => navigate(roleLanding(response.data.invited_role), { replace: true }), 900);
+
+    // Force a fresh app bootstrap after the atomic membership write. This
+    // prevents cached/stale role state from routing a newly accepted technician,
+    // manager, dispatcher, fleet manager, admin, or customer into onboarding.
+    const destination = roleLanding(response.data.invited_role);
+    window.setTimeout(() => window.location.replace(destination), 350);
   }
 
   useEffect(() => {
@@ -93,7 +97,7 @@ export default function InvitationAccept() {
       }
     })();
     return () => { cancelled = true; };
-  // finishAcceptance intentionally uses the immutable invitation URL parameters.
+  // finishAcceptance intentionally uses immutable invitation URL parameters.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [invitationId, token]);
 

@@ -8,18 +8,7 @@ import { useStartupRoutingStore } from "@/stores/startupRoutingStore";
 import { useTeamRole } from "@/hooks/useTeamRole";
 import { useAppAccessGate } from "@/hooks/useAppAccessGate";
 
-/**
- * Single source of truth for the post-login redirect decision.
- *
- * Bug history: previously this hook reset `isProfileComplete=false` on every
- * session reference change (including silent token refreshes), and any
- * profile-fetch error also collapsed to `false`. The combination randomly
- * forced already-onboarded users to /onboarding. We now:
- *   - Only reset when the user identity actually changes (login / logout /
- *     account switch) — NOT on token refreshes for the same user.
- *   - Track whether the profile lookup truly resolved; transient errors keep
- *     the prior decision instead of bouncing the user.
- */
+/** Single source of truth for post-login startup routing. */
 interface UseStartupNavigationOptions {
   enabled?: boolean;
 }
@@ -34,12 +23,13 @@ export function useStartupNavigation({ enabled = true }: UseStartupNavigationOpt
   const { hasHydrated, intendedPath, clearIntendedPath } = useStartupRoutingStore();
 
   const isAuthenticated = Boolean(session);
+  const customerPortalMarker = session?.user?.user_metadata?.servicewriter_portal === "customer";
+  // A real workforce role always wins if the same email also has customer history.
+  const isCustomerPortalUser = !roleLoading && !role && customerPortalMarker;
   const requiresPlan = Boolean(
     subscription && !subscription.subscribed && subscription.status === "requires_plan",
   );
   const requiresOnboarding = decision?.reason === "onboarding_required";
-  // A pending `?next=` return path (OAuth consent resume) is owned by the page
-  // that received it; the shell must not redirect away from it.
   const hasPendingNext = Boolean(safeNextPath(location.search));
   const onStartupDecisionPath = isStartupDecisionPath(location.pathname) && !hasPendingNext;
 
@@ -50,7 +40,7 @@ export function useStartupNavigation({ enabled = true }: UseStartupNavigationOpt
       if (!isAuthenticated) return true;
       if (!onStartupDecisionPath) return true;
       if (roleLoading) return false;
-      if (role === "technician") return true;
+      if (role === "technician" || isCustomerPortalUser) return true;
 
       return !gateLoading && !subscriptionLoading && Boolean(decision) && Boolean(subscription);
     },
@@ -62,6 +52,7 @@ export function useStartupNavigation({ enabled = true }: UseStartupNavigationOpt
       onStartupDecisionPath,
       roleLoading,
       role,
+      isCustomerPortalUser,
       gateLoading,
       subscriptionLoading,
       decision,
@@ -72,18 +63,18 @@ export function useStartupNavigation({ enabled = true }: UseStartupNavigationOpt
   const shouldBlockRender = enabled && isAuthenticated && !isReady;
 
   useEffect(() => {
-    if (!enabled || !isReady) return;
-    if (!isAuthenticated) return;
-    if (!onStartupDecisionPath) return;
+    if (!enabled || !isReady || !isAuthenticated || !onStartupDecisionPath) return;
 
-    const destination = resolveStartupRoute({
-      currentPath: location.pathname,
-      isAuthenticated,
-      requiresOnboarding,
-      requiresPlan,
-      persistedIntendedPath: intendedPath,
-      role,
-    });
+    const destination = isCustomerPortalUser
+      ? "/customer/dashboard"
+      : resolveStartupRoute({
+          currentPath: location.pathname,
+          isAuthenticated,
+          requiresOnboarding,
+          requiresPlan,
+          persistedIntendedPath: intendedPath,
+          role,
+        });
 
     if (destination !== location.pathname) {
       navigate(destination, { replace: true });
@@ -98,6 +89,7 @@ export function useStartupNavigation({ enabled = true }: UseStartupNavigationOpt
     location.pathname,
     isAuthenticated,
     onStartupDecisionPath,
+    isCustomerPortalUser,
     requiresOnboarding,
     requiresPlan,
     intendedPath,
