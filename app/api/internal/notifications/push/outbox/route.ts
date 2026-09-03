@@ -20,6 +20,23 @@ function authorized(request: Request, secret: string): boolean {
   return expectedBuffer.length === suppliedBuffer.length && timingSafeEqual(expectedBuffer, suppliedBuffer);
 }
 
+function safeErrorDetails(error: unknown): { errorCode: string; errorMessage: string } {
+  if (error instanceof Error) {
+    return {
+      errorCode: error.name || "Error",
+      errorMessage: error.message.slice(0, 300),
+    };
+  }
+  if (error && typeof error === "object") {
+    const candidate = error as { code?: unknown; message?: unknown };
+    return {
+      errorCode: typeof candidate.code === "string" ? candidate.code.slice(0, 80) : "worker_error",
+      errorMessage: typeof candidate.message === "string" ? candidate.message.slice(0, 300) : "Unknown worker error",
+    };
+  }
+  return { errorCode: "worker_error", errorMessage: "Unknown worker error" };
+}
+
 async function processPushOutboxRequest(request: Request) {
   const secret = process.env.CRON_SECRET?.trim();
   if (!secret) {
@@ -37,9 +54,7 @@ async function processPushOutboxRequest(request: Request) {
     const result = await processInAppNotificationPushOutbox(limit);
     return NextResponse.json({ ok: true, ...result, durationMs: Date.now() - startedAt });
   } catch (error) {
-    console.error("[Push] outbox worker failed", {
-      errorCode: error instanceof Error ? error.name : "worker_error",
-    });
+    console.error("[Push] outbox worker failed", safeErrorDetails(error));
     return NextResponse.json({ ok: false, error: "worker_failed" }, { status: 500 });
   }
 }
