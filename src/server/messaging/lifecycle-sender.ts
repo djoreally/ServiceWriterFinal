@@ -210,6 +210,13 @@ export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ p
 
 export async function processLifecycleEventOutbox(limit = 50, workerId = `vercel:${crypto.randomUUID()}`) {
   const supabase = createSupabaseAdminClient();
+  const { count, error: countError } = await supabase
+    .from("lifecycle_event_outbox")
+    .select("id", { count: "exact", head: true })
+    .in("status", ["pending", "failed", "processing"]);
+  if (countError) throw countError;
+  if (!count) return { claimed: 0, sent: 0, failed: 0, deadLettered: 0 };
+
   const { data: claimed, error } = await supabase.rpc("claim_lifecycle_events", {
     p_limit: Math.max(1, Math.min(limit, 200)),
     p_worker_id: workerId,
