@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "scope": "ServiceWriter runtime code",
   "canonical": {
     "tenant_key": "workspace_id",
@@ -8,6 +8,7 @@
       "workspace_members",
       "workspace_settings",
       "customers",
+      "customer_users",
       "vehicles",
       "appointments",
       "appointment_items",
@@ -21,8 +22,15 @@
       "tenant_column": "workspace_id",
       "display_fields": "derive from appointment_items, customer/vehicle joins, notes, or metadata; appointments.title does not exist"
     },
+    "customer_portal": {
+      "identity_link": "customer_users",
+      "link_rpc": "link_customer_portal_account_v1",
+      "appointments_rpc": "get_customer_portal_appointments_v1",
+      "appointment_name": "appointment metadata.guest_name first, canonical customer name second"
+    },
     "authentication": "Supabase Auth",
-    "staff_invitation_delivery": "Supabase Auth",
+    "staff_invitation_auth": "Supabase Auth secure action links",
+    "staff_invitation_delivery": "Resend transactional delivery",
     "transactional_email": "Resend",
     "growth_email": "Enginemailer"
   },
@@ -30,6 +38,7 @@
     "tables": {
       "business_profiles": "workspace_settings + workspaces",
       "client_error_events": "server observability/logging",
+      "customer_accounts": "customers + customer_users",
       "services": "service_catalog",
       "appointment_services": "appointment_items",
       "fleet_work_orders": "work_orders / fleet_service_requests",
