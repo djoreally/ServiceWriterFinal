@@ -3,6 +3,7 @@ import path from "node:path";
 
 const publicMapboxToken = process.env.NEXT_PUBLIC_MAPBOX_PUBLIC_TOKEN || process.env.VITE_MAPBOX_PUBLIC_TOKEN || "";
 const publicSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://rjfbrfognxqkyhdrpibx.supabase.co";
+const publicSupabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || "sb_publishable_-TAyW6MChnKyB_0yICU79g_miXrX3xy";
 
 const nextConfig: NextConfig = {
   outputFileTracingRoot: path.join(__dirname),
@@ -17,6 +18,7 @@ const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_MAPBOX_PUBLIC_TOKEN: publicMapboxToken,
     NEXT_PUBLIC_SUPABASE_URL: publicSupabaseUrl,
+    NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: publicSupabaseKey,
   },
 };
 
