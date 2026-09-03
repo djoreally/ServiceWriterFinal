@@ -1,9 +1,12 @@
 /**
  * Customer Dashboard Query - Fetch customer account and handle auth state for customer portal.
  */
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
-
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
+
+const canonicalSupabase = supabase as unknown as SupabaseClient;
+
 export interface CustomerAccountData {
   id: string;
   email: string;
@@ -11,21 +14,53 @@ export interface CustomerAccountData {
   phone: string | null;
   user_id: string;
   provider_id: string | null;
+  workspace_id?: string | null;
 }
 
-/** Fetch the current customer account. Returns null if not found. */
+/**
+ * Fetch the current canonical customer identity. The legacy customer_accounts
+ * table has been retired; customer_users is the authenticated linkage table.
+ */
 export async function fetchCustomerAccount(): Promise<CustomerAccountData | null> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return null;
 
-  const { data, error } = await supabase
-    .from("customer_accounts")
-    .select("*")
-    .eq("user_id", user.id)
+  const linked = await canonicalSupabase.rpc("link_customer_portal_account_v1");
+  if (linked.error) {
+    console.error("[fetchCustomerAccount] link rpc error", linked.error);
+    return null;
+  }
+
+  const links = (linked.data ?? []) as Array<{ customer_id: string; workspace_id: string }>;
+  const link = links[0];
+  if (!link) return null;
+
+  const { data: customer, error } = await canonicalSupabase
+    .from("customers")
+    .select("id,workspace_id,first_name,last_name,email,phone")
+    .eq("id", link.customer_id)
+    .eq("workspace_id", link.workspace_id)
     .maybeSingle();
 
-  if (error || !data) return null;
-  return data as CustomerAccountData;
+  if (error || !customer) return null;
+  const row = customer as {
+    id: string;
+    workspace_id: string;
+    first_name: string;
+    last_name: string;
+    email: string | null;
+    phone: string | null;
+  };
+
+  return {
+    id: row.id,
+    email: row.email ?? user.email ?? "",
+    full_name: [row.first_name, row.last_name].filter(Boolean).join(" ") || user.user_metadata?.full_name || null,
+    phone: row.phone ?? (typeof user.user_metadata?.phone === "string" ? user.user_metadata.phone : null),
+    user_id: user.id,
+    provider_id: null,
+    workspace_id: row.workspace_id,
+  };
 }
 
 /** Subscribe to auth state changes. Returns unsubscribe function. */
@@ -40,7 +75,6 @@ export function onAuthStateChange(callback: (event: string) => void) {
 export async function customerSignOut(): Promise<void> {
   await supabase.auth.signOut();
 }
-
 
 export interface CustomerPortalCoupon {
   id: string;
@@ -122,9 +156,8 @@ export interface CustomerPortalExperience {
 }
 
 /**
- * Fetch customer-facing rewards and offers for the portal. This is intentionally
- * best-effort so the dashboard still loads even if a provider has not enabled
- * loyalty programs or coupons yet.
+ * Rewards are kept failure-isolated while their legacy provider-id contract is
+ * migrated. Core customer identity and appointments must never depend on it.
  */
 export async function fetchCustomerPortalExperience(account: CustomerAccountData): Promise<CustomerPortalExperience> {
   const providerId = account.provider_id;
@@ -141,13 +174,12 @@ export async function fetchCustomerPortalExperience(account: CustomerAccountData
       rewards: [],
       coupons: [],
       phoneCouponHint: null,
-      dashboardStatus: "no_provider",
+      dashboardStatus: "rewards_migration_pending",
     };
   }
 
   const today = new Date().toISOString();
-
-  const [dashboardRes, couponsRes, profileRes] = await Promise.all([
+  const [dashboardRes, couponsRes] = await Promise.all([
     supabase.rpc("get_customer_rewards_dashboard", { p_customer_account_id: account.id }),
     supabase
       .from("coupon_codes")
@@ -157,16 +189,9 @@ export async function fetchCustomerPortalExperience(account: CustomerAccountData
       .or(`valid_until.is.null,valid_until.gte.${today}`)
       .order("created_at", { ascending: false })
       .limit(6),
-    supabase
-      .from("business_profiles")
-      .select("phone_as_coupon_enabled, phone_coupon_description")
-      .eq("user_id", providerId)
-      .maybeSingle(),
   ]);
 
-  if (dashboardRes.error) {
-    throw new Error(dashboardRes.error.message);
-  }
+  if (dashboardRes.error) throw new Error(dashboardRes.error.message);
 
   const dashboard = (dashboardRes.data || {}) as {
     status?: string;
@@ -202,10 +227,8 @@ export async function fetchCustomerPortalExperience(account: CustomerAccountData
     ledger: dashboard.ledger || [],
     nextReward: rewards.find((reward) => reward.points_required > rewardPoints) ?? rewards[0] ?? null,
     rewards,
-    coupons: ((couponsRes.data || []) as CustomerPortalCoupon[]),
-    phoneCouponHint: profileRes.data?.phone_as_coupon_enabled
-      ? profileRes.data.phone_coupon_description || "Use your phone number as a loyalty coupon at checkout."
-      : null,
+    coupons: (couponsRes.data || []) as CustomerPortalCoupon[],
+    phoneCouponHint: null,
     dashboardStatus: dashboard.status || "ok",
   };
 }
