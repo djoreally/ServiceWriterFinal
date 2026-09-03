@@ -20,21 +20,44 @@ export async function fetchBusinessPreferences(): Promise<BusinessPreferencesDat
   if (cached?.userId === userId && cached.expiresAt > Date.now()) return cached.data;
   if (inFlight) return inFlight;
 
-  const request = supabase
-    .from("business_profiles")
-    .select("date_format, timezone, currency, terminology")
-    .eq("user_id", userId)
-    .maybeSingle();
+  inFlight = (async () => {
+    const { data: membership, error: membershipError } = await supabase
+      .from("workspace_members")
+      .select("workspace_id")
+      .eq("user_id", userId)
+      .eq("is_active", true)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (membershipError) throw membershipError;
+    if (!membership?.workspace_id) return null;
 
-  inFlight = Promise.resolve(request).then(({ data, error }) => {
-      if (error) throw error;
-      const result = data as BusinessPreferencesData | null;
-      cached = { userId, expiresAt: Date.now() + CACHE_TTL_MS, data: result };
-      return result;
-    })
-    .finally(() => {
-      inFlight = null;
-    });
+    const [{ data: workspace, error: workspaceError }, { data: settings, error: settingsError }] = await Promise.all([
+      supabase
+        .from("workspaces")
+        .select("timezone,currency_code")
+        .eq("id", membership.workspace_id)
+        .maybeSingle(),
+      supabase
+        .from("workspace_settings")
+        .select("terminology")
+        .eq("workspace_id", membership.workspace_id)
+        .maybeSingle(),
+    ]);
+    if (workspaceError) throw workspaceError;
+    if (settingsError) throw settingsError;
+
+    const result: BusinessPreferencesData = {
+      date_format: null,
+      timezone: workspace?.timezone ?? null,
+      currency: workspace?.currency_code?.trim?.() ?? workspace?.currency_code ?? null,
+      terminology: settings?.terminology ?? null,
+    };
+    cached = { userId, expiresAt: Date.now() + CACHE_TTL_MS, data: result };
+    return result;
+  })().finally(() => {
+    inFlight = null;
+  });
 
   return inFlight;
 }
