@@ -1,14 +1,14 @@
 /**
- * useAppAccessGate — lightweight authenticated-session gate.
+ * useAppAccessGate — canonical authenticated/workspace access decision.
  *
  * The retired `gate-app-access` Edge Function is no longer part of the live
- * Supabase project. Workspace membership, role authorization, onboarding and
- * subscription state are enforced by their canonical app/server boundaries.
- * This hook therefore answers only the question it can own safely: whether an
- * authenticated application session exists.
+ * Supabase project. The browser therefore derives the startup decision from the
+ * authenticated Supabase session plus canonical workspace ownership/membership.
+ * Route-level RBAC remains enforced independently by server/application guards.
  */
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@packages/auth";
+import { productionSupabase } from "@/integrations/supabase/client";
 
 export type GateReason =
   | "ok"
@@ -27,14 +27,44 @@ interface State {
   loading: boolean;
 }
 
-function decisionForSession(hasSession: boolean): AccessGateDecision {
-  return hasSession
-    ? { allowed: true, reason: "ok", redirectTo: null }
-    : { allowed: false, reason: "unauthenticated", redirectTo: "/login" };
+async function decisionForUser(userId: string): Promise<AccessGateDecision> {
+  try {
+    const membership = await productionSupabase
+      .from("workspace_members")
+      .select("workspace_id")
+      .eq("user_id", userId)
+      .eq("is_active", true)
+      .limit(1)
+      .maybeSingle();
+    if (membership.error) throw membership.error;
+    if (membership.data?.workspace_id) {
+      return { allowed: true, reason: "ok", redirectTo: null };
+    }
+
+    const ownedWorkspace = await productionSupabase
+      .from("workspaces")
+      .select("id")
+      .eq("created_by", userId)
+      .eq("is_active", true)
+      .limit(1)
+      .maybeSingle();
+    if (ownedWorkspace.error) throw ownedWorkspace.error;
+    if (ownedWorkspace.data?.id) {
+      return { allowed: true, reason: "ok", redirectTo: null };
+    }
+
+    return { allowed: false, reason: "onboarding_required", redirectTo: "/onboarding" };
+  } catch (error) {
+    console.warn("[useAppAccessGate] canonical workspace check failed:", error);
+    // A transient workspace read must not lock an already-authenticated user out
+    // of the application; route-level authorization remains authoritative.
+    return { allowed: true, reason: "error", redirectTo: null };
+  }
 }
 
 export function useAppAccessGate(): State & { refresh: () => Promise<void> } {
   const { session, loading: authLoading } = useAuth();
+  const userId = session?.user?.id ?? null;
   const [state, setState] = useState<State>({ decision: null, loading: true });
 
   const run = useCallback(async () => {
@@ -42,8 +72,14 @@ export function useAppAccessGate(): State & { refresh: () => Promise<void> } {
       setState((current) => ({ ...current, loading: true }));
       return;
     }
-    setState({ decision: decisionForSession(Boolean(session?.user?.id)), loading: false });
-  }, [authLoading, session?.user?.id]);
+    if (!userId) {
+      setState({ decision: { allowed: false, reason: "unauthenticated", redirectTo: "/login" }, loading: false });
+      return;
+    }
+
+    const decision = await decisionForUser(userId);
+    setState({ decision, loading: false });
+  }, [authLoading, userId]);
 
   useEffect(() => {
     void run();
