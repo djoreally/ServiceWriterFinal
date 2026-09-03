@@ -62,6 +62,12 @@ export function resolveStartupRoute({
     return "/dispatch";
   }
 
+  // Fleet managers land in Fleet OS, which is their canonical authorized home.
+  if (role === "fleet_manager") {
+    if (!isStartupDecisionPath(currentPath)) return currentPath;
+    return "/fleet-os";
+  }
+
   // 3) Owner gates (admin / unresolved owner identity).
   if (requiresOnboarding) {
     return currentPath === "/onboarding" ? currentPath : "/onboarding";
