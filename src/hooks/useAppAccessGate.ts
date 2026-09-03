@@ -6,7 +6,8 @@
  * authenticated Supabase session plus canonical workspace ownership/membership.
  * Route-level RBAC remains enforced independently by server/application guards.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@packages/auth";
 import { productionSupabase } from "@/integrations/supabase/client";
 
@@ -65,25 +66,34 @@ async function decisionForUser(userId: string): Promise<AccessGateDecision> {
 export function useAppAccessGate(): State & { refresh: () => Promise<void> } {
   const { session, loading: authLoading } = useAuth();
   const userId = session?.user?.id ?? null;
-  const [state, setState] = useState<State>({ decision: null, loading: true });
 
-  const run = useCallback(async () => {
-    if (authLoading) {
-      setState((current) => ({ ...current, loading: true }));
-      return;
-    }
-    if (!userId) {
-      setState({ decision: { allowed: false, reason: "unauthenticated", redirectTo: "/login" }, loading: false });
-      return;
-    }
+  const query = useQuery({
+    queryKey: ["app-access-gate", userId],
+    queryFn: () => decisionForUser(userId as string),
+    enabled: !authLoading && Boolean(userId),
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
 
-    const decision = await decisionForUser(userId);
-    setState({ decision, loading: false });
-  }, [authLoading, userId]);
+  const refresh = useCallback(async () => {
+    if (!userId || authLoading) return;
+    await query.refetch();
+  }, [authLoading, query, userId]);
 
-  useEffect(() => {
-    void run();
-  }, [run]);
+  if (authLoading) return { decision: null, loading: true, refresh };
+  if (!userId) {
+    return {
+      decision: { allowed: false, reason: "unauthenticated", redirectTo: "/login" },
+      loading: false,
+      refresh,
+    };
+  }
 
-  return { ...state, refresh: run };
+  return {
+    decision: query.data ?? null,
+    loading: query.isLoading || query.isFetching,
+    refresh,
+  };
 }
