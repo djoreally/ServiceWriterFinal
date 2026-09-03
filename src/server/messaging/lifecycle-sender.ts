@@ -208,8 +208,28 @@ export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ p
   return sent;
 }
 
+async function reconcileCrmProjection(): Promise<number> {
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase.rpc("reconcile_crm_profiles_v1", {
+    p_workspace_id: null,
+  });
+  if (error) throw error;
+  return Number(data ?? 0);
+}
+
 export async function processLifecycleEventOutbox(limit = 50, workerId = `vercel:${crypto.randomUUID()}`) {
   const supabase = createSupabaseAdminClient();
+
+  // CRM is a failure-isolated projection of canonical customers. Reconcile it
+  // best-effort in the existing background cadence; never block lifecycle mail
+  // processing if the projection is temporarily unavailable.
+  try {
+    const inserted = await reconcileCrmProjection();
+    if (inserted > 0) console.info("[CRM] reconciled missing customer profiles", { inserted });
+  } catch (crmError) {
+    console.error("[CRM] projection reconciliation failed", crmError);
+  }
+
   const { data: claimed, error } = await supabase.rpc("claim_lifecycle_events", {
     p_limit: Math.max(1, Math.min(limit, 200)),
     p_worker_id: workerId,
