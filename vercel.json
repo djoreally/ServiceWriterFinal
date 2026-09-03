@@ -6,11 +6,11 @@
   "crons": [
     {
       "path": "/api/internal/lifecycle/outbox",
-      "schedule": "* * * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/internal/notifications/push/outbox",
-      "schedule": "* * * * *"
+      "schedule": "*/5 * * * *"
     }
   ]
 }
