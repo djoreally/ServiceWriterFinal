@@ -21,13 +21,13 @@ SKIP_PARTS = ("/__tests__/", "/test/", "/tests/", "/fixtures/", "/generated/")
 
 RULES: list[tuple[str, re.Pattern[str], str]] = [
     ("retired table business_profiles", re.compile(r"\.from\(\s*['\"]business_profiles['\"]\s*\)"), "use workspaces/workspace_settings"),
-    ("retired table client_error_events", re.compile(r"client_error_events"), "use server observability/logging"),
+    ("retired table client_error_events", re.compile(r"(?:\.from\(\s*['\"]client_error_events['\"]\s*\)|/rest/v1/client_error_events)"), "use server observability/logging"),
     ("retired table services", re.compile(r"\.from\(\s*['\"]services['\"]\s*\)"), "use service_catalog"),
     ("retired table appointment_services", re.compile(r"\.from\(\s*['\"]appointment_services['\"]\s*\)"), "use appointment_items"),
     ("retired table fleet_work_orders", re.compile(r"\.from\(\s*['\"]fleet_work_orders['\"]\s*\)"), "use work_orders/fleet_service_requests"),
     ("retired table fleet_vehicles", re.compile(r"\.from\(\s*['\"]fleet_vehicles['\"]\s*\)"), "use vehicles"),
     ("retired table technicians", re.compile(r"\.from\(\s*['\"]technicians['\"]\s*\)"), "use profiles + workspace membership/assignments"),
-    ("retired cash collection view", re.compile(r"cash_collection_receipts_v1"), "use canonical payments/invoices APIs"),
+    ("retired cash collection view", re.compile(r"\.from\(\s*['\"]cash_collection_receipts_v1['\"]\s*\)"), "use canonical payments/invoices APIs"),
     ("retired access edge function", re.compile(r"functions\.invoke\(\s*['\"]gate-app-access['\"]"), "use canonical Supabase session/workspace RBAC"),
     ("legacy appointments.user_id scope", re.compile(r"\.from\(\s*['\"]appointments['\"]\s*\)[\s\S]{0,1400}?\.eq\(\s*['\"]user_id['\"]"), "scope appointments by workspace_id"),
     ("legacy appointment title column", re.compile(r"\.from\(\s*['\"]appointments['\"]\s*\)[\s\S]{0,900}?\.select\([^)]*\btitle\b"), "appointments.title does not exist; derive display text"),
