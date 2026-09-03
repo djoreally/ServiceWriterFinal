@@ -77,4 +77,5 @@ end;
 $$;
 
 revoke all on function public.accept_invitation_v1(uuid, text) from public;
+revoke execute on function public.accept_invitation_v1(uuid, text) from anon;
 grant execute on function public.accept_invitation_v1(uuid, text) to authenticated;
