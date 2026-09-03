@@ -22,6 +22,9 @@ SKIP_PARTS = ("/__tests__/", "/test/", "/tests/", "/fixtures/", "/generated/")
 RULES: list[tuple[str, re.Pattern[str], str]] = [
     ("retired table business_profiles", re.compile(r"\.from\(\s*['\"]business_profiles['\"]\s*\)"), "use workspaces/workspace_settings"),
     ("retired table client_error_events", re.compile(r"(?:\.from\(\s*['\"]client_error_events['\"]\s*\)|/rest/v1/client_error_events)"), "use server observability/logging"),
+    ("retired table customer_accounts", re.compile(r"\.from\(\s*['\"]customer_accounts['\"]\s*\)"), "use customers + customer_users"),
+    ("retired customer account RPC", re.compile(r"\.rpc\(\s*['\"]create_customer_account['\"]"), "use link_customer_portal_account_v1"),
+    ("retired customer appointments RPC", re.compile(r"\.rpc\(\s*['\"]get_customer_portal_appointments['\"]"), "use get_customer_portal_appointments_v1"),
     ("retired table services", re.compile(r"\.from\(\s*['\"]services['\"]\s*\)"), "use service_catalog"),
     ("retired table appointment_services", re.compile(r"\.from\(\s*['\"]appointment_services['\"]\s*\)"), "use appointment_items"),
     ("retired table fleet_work_orders", re.compile(r"\.from\(\s*['\"]fleet_work_orders['\"]\s*\)"), "use work_orders/fleet_service_requests"),
