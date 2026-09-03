@@ -27,6 +27,30 @@ interface CrmActivity {
   occurred_at: string;
 }
 
+async function fetchAllProfiles(workspaceId: string): Promise<CrmProfile[]> {
+  const pageSize = 100;
+  const all: CrmProfile[] = [];
+  let offset = 0;
+  let total = Number.POSITIVE_INFINITY;
+
+  while (offset < total) {
+    const response = await nextApi.crm.profiles.list(workspaceId, { limit: pageSize, offset });
+    const rows = response.data as CrmProfile[];
+    all.push(...rows);
+    total = response.meta.total;
+    if (rows.length === 0) break;
+    offset += rows.length;
+  }
+
+  return all;
+}
+
+function followUpLabel(profile: CrmProfile): string {
+  if (profile.lifecycle_stage === "at_risk" || profile.lifecycle_stage === "due") return "Needs attention";
+  if (!profile.next_action_at) return "No follow-up scheduled";
+  return Date.parse(profile.next_action_at) <= Date.now() ? "Needs attention" : "Follow-up scheduled";
+}
+
 export default function CRM() {
   const { selectedWorkspace, selectedWorkspaceId, loading: workspaceLoading } = useWorkspaceSelection();
   const [profiles, setProfiles] = useState<CrmProfile[]>([]);
@@ -53,13 +77,13 @@ export default function CRM() {
       setError(null);
       try {
         await nextApi.crm.access(selectedWorkspaceId);
-        const [profileResponse, campaignResponse, activityResponse] = await Promise.all([
-          nextApi.crm.profiles.list(selectedWorkspaceId, { limit: 8 }),
+        const [allProfiles, campaignResponse, activityResponse] = await Promise.all([
+          fetchAllProfiles(selectedWorkspaceId),
           nextApi.crm.campaigns.list(selectedWorkspaceId),
           nextApi.crm.activities.list(selectedWorkspaceId),
         ]);
         if (!active) return;
-        setProfiles(profileResponse.data as CrmProfile[]);
+        setProfiles(allProfiles);
         setCampaigns(campaignResponse.data as CrmCampaign[]);
         setActivities(activityResponse.data.slice(0, 6) as CrmActivity[]);
       } catch (cause) {
@@ -122,15 +146,15 @@ export default function CRM() {
         ) : (
           <>
             <section className="grid gap-3 sm:grid-cols-3" aria-label="CRM summary">
-              <SummaryCard icon={UsersRound} label="Profiles in view" value={String(profiles.length)} detail={`${stageCounts.active ?? 0} active · ${stageCounts.at_risk ?? 0} at risk`} />
+              <SummaryCard icon={UsersRound} label="CRM profiles" value={String(profiles.length)} detail={`${stageCounts.active ?? 0} active · ${stageCounts.at_risk ?? 0} at risk`} />
               <SummaryCard icon={Activity} label="Recent activities" value={String(activities.length)} detail="Customer timeline events" />
               <SummaryCard icon={Megaphone} label="Campaigns" value={String(campaigns.length)} detail={`${campaigns.filter((campaign) => campaign.approval_state === "draft").length} drafts awaiting review`} />
             </section>
 
             <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
               <section className="rounded-xl border bg-card">
-                <div className="flex items-center justify-between border-b p-4"><div><h2 className="font-semibold">Customer follow-up queue</h2><p className="text-xs text-muted-foreground">Shared customer identity, CRM-owned relationship context.</p></div><Link className="text-sm font-semibold text-primary" to="/customers">Operations customers</Link></div>
-                <div className="divide-y">{profiles.length === 0 ? <p className="p-4 text-sm text-muted-foreground">No CRM profiles have been created yet.</p> : profiles.map((profile) => <div className="flex min-w-0 items-center justify-between gap-3 p-4" key={profile.id}><div className="min-w-0"><p className="truncate text-sm font-semibold">{customerName(profile)}</p><p className="mt-1 text-xs text-muted-foreground">{profile.lifecycle_stage} · {profile.lead_source || "Source not recorded"}</p></div><span className="shrink-0 rounded-full bg-muted px-2 py-1 text-[11px] font-medium">{profile.next_action_at ? "Follow-up set" : "Needs next action"}</span></div>)}</div>
+                <div className="flex items-center justify-between border-b p-4"><div><h2 className="font-semibold">Customer follow-up queue</h2><p className="text-xs text-muted-foreground">All canonical customers projected into CRM; attention reflects due or at-risk follow-up only.</p></div><Link className="text-sm font-semibold text-primary" to="/customers">Operations customers</Link></div>
+                <div className="divide-y">{profiles.length === 0 ? <p className="p-4 text-sm text-muted-foreground">No CRM profiles have been created yet.</p> : profiles.map((profile) => <div className="flex min-w-0 items-center justify-between gap-3 p-4" key={profile.id}><div className="min-w-0"><p className="truncate text-sm font-semibold">{customerName(profile)}</p><p className="mt-1 text-xs text-muted-foreground">{profile.lifecycle_stage} · {profile.lead_source || "Source not recorded"}</p></div><span className="shrink-0 rounded-full bg-muted px-2 py-1 text-[11px] font-medium">{followUpLabel(profile)}</span></div>)}</div>
               </section>
 
               <section className="rounded-xl border bg-card">

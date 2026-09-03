@@ -33,6 +33,10 @@ function lifecycleDetail(invitation: InvitationRecord): string {
   return `Expires ${new Date(invitation.expires_at).toLocaleString()}`;
 }
 
+function deliveryFailureMessage(error?: string): string {
+  return error ? `Invitation created, but delivery failed: ${error}` : "Invitation created, but delivery failed.";
+}
+
 export default function InvitationCenter() {
   const { role } = useTeamRole();
   const [memberships, setMemberships] = useState<WorkspaceMembership[]>([]);
@@ -73,8 +77,13 @@ export default function InvitationCenter() {
     try {
       const response = await nextApi.invitations.create({ workspace_id: workspaceId, invited_email: email.trim().toLowerCase(), invited_role: inviteRole, customer_id: customerId.trim() || undefined });
       setInvitations((current) => [response.data, ...current]);
-      setEmail(""); setCustomerId("");
-      toast[response.delivery.status === "accepted" ? "success" : "warning"](response.delivery.status === "accepted" ? "Invitation sent." : "Invitation created, but delivery needs attention.");
+      if (response.delivery.status === "accepted") {
+        setEmail("");
+        setCustomerId("");
+        toast.success("Invitation sent.");
+      } else {
+        toast.error(deliveryFailureMessage(response.delivery.error));
+      }
     } catch (error) {
       toast.error(error instanceof ApiClientError ? error.message : "Could not create invitation");
     } finally { setSaving(false); }
@@ -86,7 +95,8 @@ export default function InvitationCenter() {
       if (action === "resend") {
         const response = await nextApi.invitations.resend(invitation.id);
         setInvitations((current) => current.map((item) => item.id === invitation.id ? response.data : item));
-        toast[response.delivery.status === "accepted" ? "success" : "warning"](response.delivery.status === "accepted" ? "Invitation resent." : "Resend failed; review provider configuration.");
+        if (response.delivery.status === "accepted") toast.success("Invitation resent.");
+        else toast.error(response.delivery.error ? `Invitation resend failed: ${response.delivery.error}` : "Invitation resend failed.");
       } else {
         const response = await nextApi.invitations.revoke(invitation.id);
         setInvitations((current) => current.map((item) => item.id === invitation.id ? response.data : item));
@@ -104,7 +114,7 @@ export default function InvitationCenter() {
       </header>
       {memberships.length > 1 && <div className="max-w-full"><Label htmlFor="workspace-select">Workspace</Label><select id="workspace-select" value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)} className="mt-2 h-10 w-full rounded-md border bg-background px-3 text-sm sm:max-w-md">{memberships.map((item) => <option key={item.workspace_id} value={item.workspace_id}>{item.workspaces?.name ?? item.workspace_id}</option>)}</select></div>}
       {!canManage && <Card><CardContent className="p-5 text-sm text-muted-foreground">Only workspace owners and administrators can manage invitations.</CardContent></Card>}
-      {canManage && <Card><CardHeader><CardTitle className="flex items-center gap-2"><UserRoundPlus className="h-5 w-5" /> New invitation</CardTitle><CardDescription>The recipient must use the invited email address. Existing signed-in users with that email are accepted without another password prompt.</CardDescription></CardHeader><CardContent><form onSubmit={createInvitation} className="grid gap-4 sm:grid-cols-[1fr_180px_auto] sm:items-end"><div className="space-y-2"><Label htmlFor="invite-email">Email address</Label><Input id="invite-email" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@company.com" /></div><div className="space-y-2"><Label htmlFor="invite-role">Role</Label><select id="invite-role" value={inviteRole} onChange={(event) => setInviteRole(event.target.value as InvitationCreatePayloadRole)} className="h-10 w-full rounded-md border bg-background px-3 text-sm">{ROLE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div><Button type="submit" disabled={saving || !workspaceId} className="gap-2"><MailPlus className="h-4 w-4" />{saving ? "Sending…" : "Send invite"}</Button>{inviteRole === "customer" && <div className="sm:col-span-2 space-y-2"><Label htmlFor="customer-id">Customer ID</Label><Input id="customer-id" value={customerId} onChange={(event) => setCustomerId(event.target.value)} placeholder="UUID from the customer record" /></div>}</form></CardContent></Card>}
+      {canManage && <Card><CardHeader><CardTitle className="flex items-center gap-2"><UserRoundPlus className="h-5 w-5" /> New invitation</CardTitle><CardDescription>Supabase Auth generates the secure sign-in link and Resend delivers the transactional invitation. Existing signed-in users with the invited email can join without creating another password.</CardDescription></CardHeader><CardContent><form onSubmit={createInvitation} className="grid gap-4 sm:grid-cols-[1fr_180px_auto] sm:items-end"><div className="space-y-2"><Label htmlFor="invite-email">Email address</Label><Input id="invite-email" type="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@company.com" /></div><div className="space-y-2"><Label htmlFor="invite-role">Role</Label><select id="invite-role" value={inviteRole} onChange={(event) => setInviteRole(event.target.value as InvitationCreatePayloadRole)} className="h-10 w-full rounded-md border bg-background px-3 text-sm">{ROLE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div><Button type="submit" disabled={saving || !workspaceId} className="gap-2"><MailPlus className="h-4 w-4" />{saving ? "Sending…" : "Send invite"}</Button>{inviteRole === "customer" && <div className="sm:col-span-2 space-y-2"><Label htmlFor="customer-id">Customer ID</Label><Input id="customer-id" value={customerId} onChange={(event) => setCustomerId(event.target.value)} placeholder="UUID from the customer record" /></div>}</form></CardContent></Card>}
       <section className="space-y-3"><div className="flex items-center justify-between"><h2 className="text-lg font-semibold">Invitation history</h2><span className="text-sm text-muted-foreground">{invitations.length} records</span></div>{loading ? <Card><CardContent className="p-6 text-sm text-muted-foreground">Loading invitations…</CardContent></Card> : invitations.length === 0 ? <Card><CardContent className="p-6 text-sm text-muted-foreground">No invitations yet. Start by inviting a technician, dispatcher, fleet manager, or customer.</CardContent></Card> : <div className="grid gap-3">{invitations.map((invitation) => { const current = status(invitation); const active = current.label === "Pending"; return <Card key={invitation.id}><CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate font-medium">{invitation.invited_email}</p><span className={`rounded-full px-2 py-0.5 text-xs font-medium ${current.tone}`}>{current.label}</span></div><p className="mt-1 text-sm capitalize text-muted-foreground">{invitation.invited_role.replaceAll("_", " ")} · {lifecycleDetail(invitation)}</p>{invitation.accepted_at && invitation.accepted_by && <p className="mt-1 text-xs text-muted-foreground">Accepted user: {invitation.accepted_by}</p>}</div>{active && <div className="flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" disabled={busyId === invitation.id} onClick={() => void runAction(invitation, "resend")} className="gap-2"><RefreshCw className="h-4 w-4" />Resend</Button><Button type="button" size="sm" variant="ghost" disabled={busyId === invitation.id} onClick={() => void runAction(invitation, "revoke")} className="gap-2 text-destructive"><XCircle className="h-4 w-4" />Revoke</Button></div>}</CardContent></Card>; })}</div>}</section>
     </div>
   </AppLayout>;
