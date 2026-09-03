@@ -4,6 +4,7 @@ import type { CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
 const CANONICAL_SUPABASE_URL = "https://rjfbrfognxqkyhdrpibx.supabase.co";
+const CANONICAL_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_-TAyW6MChnKyB_0yICU79g_miXrX3xy";
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
@@ -19,10 +20,14 @@ function browserSupabaseUrl(): string {
   return process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || CANONICAL_SUPABASE_URL;
 }
 
+function publishableSupabaseKey(): string {
+  return process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim() || CANONICAL_SUPABASE_PUBLISHABLE_KEY;
+}
+
 export function createSupabaseBrowserClient() {
   return createBrowserClient(
     browserSupabaseUrl(),
-    required("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"),
+    publishableSupabaseKey(),
   );
 }
 
@@ -30,7 +35,7 @@ export async function createSupabaseServerClient() {
   const cookieStore = await cookies();
   return createServerClient(
     serverSupabaseUrl(),
-    required("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"),
+    publishableSupabaseKey(),
     {
       cookies: {
         getAll() { return cookieStore.getAll(); },
@@ -49,9 +54,10 @@ export async function createSupabaseServerClient() {
 export function createSupabaseRequestClient(accessToken: string) {
   // Server-only request client. The bearer token remains the effective user
   // identity for Auth/PostgREST; the service-role key is used only as the
-  // server-side apikey when the Vercel publishable key is stale or mismatched.
+  // server-side apikey when available. Otherwise the canonical public key is
+  // sufficient because the user bearer token remains the effective identity.
   const url = serverSupabaseUrl();
-  const apiKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || required("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
+  const apiKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || publishableSupabaseKey();
   return createClient(url, apiKey, {
     auth: { autoRefreshToken: false, persistSession: false },
     global: { headers: { Authorization: `Bearer ${accessToken}` } },
