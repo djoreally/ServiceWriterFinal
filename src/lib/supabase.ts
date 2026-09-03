@@ -3,6 +3,8 @@ import { createClient } from "@supabase/supabase-js";
 import type { CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
+const CANONICAL_SUPABASE_URL = "https://rjfbrfognxqkyhdrpibx.supabase.co";
+
 function required(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`Missing required environment variable: ${name}`);
@@ -10,12 +12,16 @@ function required(name: string): string {
 }
 
 function serverSupabaseUrl(): string {
-  return process.env.SUPABASE_URL?.trim() || required("NEXT_PUBLIC_SUPABASE_URL");
+  return process.env.SUPABASE_URL?.trim() || process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || CANONICAL_SUPABASE_URL;
+}
+
+function browserSupabaseUrl(): string {
+  return process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || CANONICAL_SUPABASE_URL;
 }
 
 export function createSupabaseBrowserClient() {
   return createBrowserClient(
-    required("NEXT_PUBLIC_SUPABASE_URL"),
+    browserSupabaseUrl(),
     required("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"),
   );
 }
