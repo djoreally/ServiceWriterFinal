@@ -4,9 +4,13 @@ import type { CookieOptions } from "@supabase/ssr";
 import { cookies } from "next/headers";
 
 function required(name: string): string {
-  const value = process.env[name];
+  const value = process.env[name]?.trim();
   if (!value) throw new Error(`Missing required environment variable: ${name}`);
   return value;
+}
+
+function serverSupabaseUrl(): string {
+  return process.env.SUPABASE_URL?.trim() || required("NEXT_PUBLIC_SUPABASE_URL");
 }
 
 export function createSupabaseBrowserClient() {
@@ -19,7 +23,7 @@ export function createSupabaseBrowserClient() {
 export async function createSupabaseServerClient() {
   const cookieStore = await cookies();
   return createServerClient(
-    required("NEXT_PUBLIC_SUPABASE_URL"),
+    serverSupabaseUrl(),
     required("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"),
     {
       cookies: {
@@ -40,8 +44,8 @@ export function createSupabaseRequestClient(accessToken: string) {
   // Server-only request client. The bearer token remains the effective user
   // identity for Auth/PostgREST; the service-role key is used only as the
   // server-side apikey when the Vercel publishable key is stale or mismatched.
-  const url = required("NEXT_PUBLIC_SUPABASE_URL");
-  const apiKey = process.env.SUPABASE_SERVICE_ROLE_KEY || required("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
+  const url = serverSupabaseUrl();
+  const apiKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || required("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
   return createClient(url, apiKey, {
     auth: { autoRefreshToken: false, persistSession: false },
     global: { headers: { Authorization: `Bearer ${accessToken}` } },
@@ -50,7 +54,7 @@ export function createSupabaseRequestClient(accessToken: string) {
 
 export function createSupabaseAdminClient() {
   // Use only in trusted server jobs/webhooks. Never expose this client to the browser.
-  return createClient(required("NEXT_PUBLIC_SUPABASE_URL"), required("SUPABASE_SERVICE_ROLE_KEY"), {
+  return createClient(serverSupabaseUrl(), required("SUPABASE_SERVICE_ROLE_KEY"), {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 }

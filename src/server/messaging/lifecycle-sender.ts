@@ -210,21 +210,17 @@ export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ p
 
 export async function processLifecycleEventOutbox(limit = 50, workerId = `vercel:${crypto.randomUUID()}`) {
   const supabase = createSupabaseAdminClient();
-  const { count, error: countError } = await supabase
-    .from("lifecycle_event_outbox")
-    .select("id", { count: "exact", head: true })
-    .in("status", ["pending", "failed", "processing"]);
-  if (countError) throw countError;
-  if (!count) return { claimed: 0, sent: 0, failed: 0, deadLettered: 0 };
-
   const { data: claimed, error } = await supabase.rpc("claim_lifecycle_events", {
     p_limit: Math.max(1, Math.min(limit, 200)),
     p_worker_id: workerId,
   });
   if (error) throw error;
 
-  const results = { claimed: (claimed ?? []).length, sent: 0, failed: 0, deadLettered: 0 };
-  for (const row of (claimed ?? []) as OutboxRow[]) {
+  const rows = (claimed ?? []) as OutboxRow[];
+  if (!rows.length) return { claimed: 0, sent: 0, failed: 0, deadLettered: 0 };
+
+  const results = { claimed: rows.length, sent: 0, failed: 0, deadLettered: 0 };
+  for (const row of rows) {
     try {
       if (!row.recipient_email) throw new Error("Lifecycle outbox row has no customer recipient");
       const payload = row.payload ?? {};
