@@ -91,7 +91,8 @@ export async function POST(request: Request) {
 
     const { error: eventError } = await supabase.from("invitation_events").insert({ invitation_id: data.id, workspace_id: data.workspace_id, event_type: "created", actor_user_id: user.id, metadata: { invited_role: data.invited_role } });
     if (eventError) throw eventError;
-    await recordOperationalAudit({ supabase, request, workspaceId: data.workspace_id, actorUserId: user.id, action: "invitation.created", entityType: "invitation", entityId: data.id, metadata: { invited_role: data.invited_role } });
+    const admin = createSupabaseAdminClient();
+    await recordOperationalAudit({ supabase: admin, request, workspaceId: data.workspace_id, actorUserId: user.id, action: "invitation.created", entityType: "invitation", entityId: data.id, metadata: { invited_role: data.invited_role } });
 
     let delivery: { status: "accepted" | "failed"; provider?: string; provider_message_id?: string; error?: string };
     try {
