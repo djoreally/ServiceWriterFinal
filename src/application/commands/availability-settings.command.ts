@@ -10,27 +10,31 @@ async function workspaceId(): Promise<string> {
   return context.workspaceId;
 }
 
+function integer(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.trunc(parsed) : fallback;
+}
+
 export async function saveAvailabilitySettings(_userId: string, payload: Record<string, unknown>): Promise<void> {
   const id = await workspaceId();
-  const allowed = {
-    day_hours: payload.day_hours,
-    buffer_time_before: payload.buffer_time_before,
-    buffer_time_after: payload.buffer_time_after,
-    min_lead_time_hours: payload.min_lead_time_hours,
-    max_advance_days: payload.max_advance_days,
-    allow_multi_day_bookings: payload.allow_multi_day_bookings,
-    slot_duration_minutes: payload.slot_duration_minutes,
-    require_approval: payload.require_approval,
-    cancellation_window_hours: payload.cancellation_window_hours,
-    allow_cancellation: payload.allow_cancellation,
-    allow_rescheduling: payload.allow_rescheduling,
-    reschedule_window_hours: payload.reschedule_window_hours,
-    terms_and_conditions: payload.terms_and_conditions,
-    require_terms_acceptance: payload.require_terms_acceptance,
-    updated_at: new Date().toISOString(),
-  };
   const db = supabase as any;
-  const { error } = await db.from("workspace_settings").update(allowed).eq("workspace_id", id);
+  const { error } = await db.rpc("update_workspace_scheduling_settings_v1", {
+    p_workspace_id: id,
+    p_day_hours: payload.day_hours ?? {},
+    p_buffer_time_before: integer(payload.buffer_time_before, 0),
+    p_buffer_time_after: integer(payload.buffer_time_after, 0),
+    p_min_lead_time_hours: integer(payload.min_lead_time_hours, 2),
+    p_max_advance_days: integer(payload.max_advance_days, 30),
+    p_allow_multi_day_bookings: payload.allow_multi_day_bookings === true,
+    p_slot_duration_minutes: integer(payload.slot_duration_minutes, 30),
+    p_require_approval: payload.require_approval === true,
+    p_cancellation_window_hours: integer(payload.cancellation_window_hours, 24),
+    p_allow_cancellation: payload.allow_cancellation !== false,
+    p_allow_rescheduling: payload.allow_rescheduling !== false,
+    p_reschedule_window_hours: integer(payload.reschedule_window_hours, 24),
+    p_terms_and_conditions: typeof payload.terms_and_conditions === "string" ? payload.terms_and_conditions : "",
+    p_require_terms_acceptance: payload.require_terms_acceptance === true,
+  });
   if (error) throw error;
 }
 
