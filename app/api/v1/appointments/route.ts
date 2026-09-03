@@ -12,8 +12,6 @@ const appointmentSchema = z.object({
   source: z.string().trim().max(40).default("staff"),
   status: z.string().trim().max(40).default("confirmed"),
   notes: z.string().max(5000).nullable().optional(),
-  // Compatibility fields from the preserved frontend. They are intentionally
-  // stored in metadata rather than reintroducing legacy appointment columns.
   title: z.string().trim().max(200).optional(),
   description: z.string().max(5000).nullable().optional(),
   guest_name: z.string().max(200).nullable().optional(),
@@ -73,6 +71,20 @@ export async function POST(request: Request) {
   try {
     const body = appointmentSchema.parse(await request.json());
     const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher"], request);
+
+    if (body.assigned_user_id) {
+      const { data: assignedMember, error: assignedMemberError } = await supabase
+        .from("workspace_members")
+        .select("user_id,is_active")
+        .eq("workspace_id", body.workspace_id)
+        .eq("user_id", body.assigned_user_id)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (assignedMemberError) throw assignedMemberError;
+      if (!assignedMember) {
+        return json({ error: { code: "invalid_assignment", message: "The assigned user is not an active member of this workspace." } }, { status: 400 });
+      }
+    }
 
     const { data: conflicts, error: conflictError } = await supabase
       .from("appointments")
