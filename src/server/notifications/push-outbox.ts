@@ -36,8 +36,15 @@ export async function processInAppNotificationPushOutbox(
   limit = 50,
   workerId = `vercel:push:${crypto.randomUUID()}`,
 ) {
-  configureVapid();
   const supabase = createSupabaseAdminClient();
+  const { count, error: countError } = await supabase
+    .from("in_app_notification_push_outbox")
+    .select("id", { count: "exact", head: true })
+    .in("status", ["pending", "failed", "processing"]);
+  if (countError) throw countError;
+  if (!count) return { claimed: 0, sent: 0, failed: 0, staleSubscriptions: 0 };
+
+  configureVapid();
   const { data: claimed, error } = await supabase.rpc("claim_in_app_push_outbox", {
     p_limit: Math.max(1, Math.min(limit, 200)),
     p_worker_id: workerId,
