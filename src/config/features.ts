@@ -15,9 +15,11 @@ export const features = {
 
   get 'offline-engine'() {
     const value = getEnvValue('VITE_FF_OFFLINE_ENGINE').toLowerCase();
-    // Offline support is now enabled by default for every authenticated plan.
-    // Set VITE_FF_OFFLINE_ENGINE=false or VITE_FF_OFFLINE_KILL_SWITCH=true to disable it.
-    return value === '' ? true : value === 'true';
+    // Offline sync still targets the pre-workspace schema in several pull paths.
+    // Keep it opt-in until those paths are migrated and certified against the
+    // canonical workspace-scoped production schema. This prevents legacy
+    // background queries from generating 400/404 noise in normal online use.
+    return value === 'true';
   },
 
   get 'offline-engine-allowlist'() {
