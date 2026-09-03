@@ -70,7 +70,8 @@ export async function GET(request: Request, context: { params: Promise<{ slug: s
     }
 
     if (query.section === "blocked_dates") {
-      const { data, error } = await supabase.rpc("get_public_blocked_dates", { p_business_user_id: businessUserId, p_customer_account_id: null });
+      const db = supabase as any;
+      const { data, error } = await db.rpc("get_public_blocked_dates_v2", { p_booking_slug: slug });
       if (error || !Array.isArray(data)) throw unavailable();
       return json({ data }, { headers: { "Cache-Control": "no-store" } });
     }
