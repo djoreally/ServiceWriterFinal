@@ -5,7 +5,6 @@ import { ApiError, errorResponse, json, requireUser, requireWorkspaceMember } fr
 
 const idSchema = z.string().uuid();
 const acceptSchema = z.object({ token: z.string().trim().min(20).max(200) });
-const invitationSelect = "id,workspace_id,customer_id,invited_email,invited_role,expires_at,accepted_at,accepted_by,revoked_at,created_by,created_at,updated_at";
 const digest = (token: string) => createHash("sha256").update(token, "utf8").digest("hex");
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
@@ -55,24 +54,18 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
     if (readError || !invitation) throw new ApiError(404, "Invitation not found", "not_found");
 
     await requireWorkspaceMember(invitation.workspace_id, ["owner", "admin"], request);
-    if (invitation.accepted_at || invitation.revoked_at) return json({ data: invitation });
 
-    const { data, error } = await admin
-      .from("invitations")
-      .update({ revoked_at: new Date().toISOString() })
-      .eq("id", id)
-      .select(invitationSelect)
-      .single();
-    if (error) throw error;
-
-    const { error: eventError } = await admin.from("invitation_events").insert({
-      invitation_id: id,
-      workspace_id: invitation.workspace_id,
-      event_type: "revoked",
-      actor_user_id: user.id,
-      metadata: {},
+    const { data, error } = await admin.rpc("revoke_invitation_v1", {
+      p_invitation_id: id,
+      p_workspace_id: invitation.workspace_id,
+      p_actor_user_id: user.id,
     });
-    if (eventError) throw eventError;
+    if (error) {
+      if (/not found/i.test(error.message ?? "")) throw new ApiError(404, "Invitation not found", "not_found");
+      if (/state changed/i.test(error.message ?? "")) throw new ApiError(409, "Invitation state changed", "invitation_conflict");
+      throw error;
+    }
+
     return json({ data });
   } catch (error) {
     return errorResponse(error);
