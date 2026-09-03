@@ -12,7 +12,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "build": "next build && node scripts/enginemailer-release-probe.mjs",
+    "build": "next build",
     "typecheck": "tsc --noEmit",
     "test": "jest --runInBand",
     "test:e2e": "playwright test --config=e2e/playwright.config.ts",
