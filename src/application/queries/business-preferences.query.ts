@@ -1,4 +1,5 @@
 import { productionSupabase } from "@/integrations/supabase/client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 export interface BusinessPreferencesData {
   date_format: string | null;
@@ -8,51 +9,33 @@ export interface BusinessPreferencesData {
 }
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
-let cached: { userId: string; workspaceId: string; expiresAt: number; data: BusinessPreferencesData | null } | null = null;
-let inFlight: Promise<BusinessPreferencesData | null> | null = null;
+let cached: { key: string; expiresAt: number; data: BusinessPreferencesData | null } | null = null;
+let inFlight: { key: string; promise: Promise<BusinessPreferencesData | null> } | null = null;
 
 /**
  * Shared startup read for regional settings and terminology.
- *
- * Final is workspace-scoped. Resolve an active workspace membership first, then
- * read the canonical workspaces/workspace_settings rows. Never fall back to the
- * retired user-scoped business_profiles table.
+ * Uses the same selected-workspace resolver as appointments, settings, and the
+ * rest of the canonical application data layer.
  */
 export async function fetchBusinessPreferences(): Promise<BusinessPreferencesData | null> {
-  const { data: { session } } = await productionSupabase.auth.getSession();
-  const userId = session?.user?.id ?? null;
-  if (!userId) return null;
+  const context = await resolveCurrentWorkspace();
+  if (!context) return null;
 
-  if (cached?.userId === userId && cached.expiresAt > Date.now()) return cached.data;
-  if (inFlight) return inFlight;
+  const key = `${context.userId}:${context.workspaceId}`;
+  if (cached?.key === key && cached.expiresAt > Date.now()) return cached.data;
+  if (inFlight?.key === key) return inFlight.promise;
 
-  inFlight = (async () => {
-    const { data: membership, error: membershipError } = await productionSupabase
-      .from("workspace_members")
-      .select("workspace_id")
-      .eq("user_id", userId)
-      .eq("is_active", true)
-      .order("created_at", { ascending: true })
-      .limit(1)
-      .maybeSingle();
-    if (membershipError) throw membershipError;
-    if (!membership?.workspace_id) return null;
-
-    const workspaceId = membership.workspace_id;
-    if (cached?.userId === userId && cached.workspaceId === workspaceId && cached.expiresAt > Date.now()) {
-      return cached.data;
-    }
-
+  const promise = (async () => {
     const [{ data: workspace, error: workspaceError }, { data: settings, error: settingsError }] = await Promise.all([
       productionSupabase
         .from("workspaces")
         .select("timezone,currency_code")
-        .eq("id", workspaceId)
+        .eq("id", context.workspaceId)
         .maybeSingle(),
       productionSupabase
         .from("workspace_settings")
         .select("terminology,operational_settings")
-        .eq("workspace_id", workspaceId)
+        .eq("workspace_id", context.workspaceId)
         .maybeSingle(),
     ]);
     if (workspaceError) throw workspaceError;
@@ -68,13 +51,14 @@ export async function fetchBusinessPreferences(): Promise<BusinessPreferencesDat
       currency: workspace?.currency_code?.trim?.() ?? workspace?.currency_code ?? null,
       terminology: settings?.terminology ?? null,
     };
-    cached = { userId, workspaceId, expiresAt: Date.now() + CACHE_TTL_MS, data: result };
+    cached = { key, expiresAt: Date.now() + CACHE_TTL_MS, data: result };
     return result;
   })().finally(() => {
-    inFlight = null;
+    if (inFlight?.key === key) inFlight = null;
   });
 
-  return inFlight;
+  inFlight = { key, promise };
+  return promise;
 }
 
 export function resetBusinessPreferencesCache(): void {
