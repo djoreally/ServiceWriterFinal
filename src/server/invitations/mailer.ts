@@ -4,7 +4,16 @@ import { createSupabaseAdminClient } from "@/lib/supabase";
 function requiredAppUrl(): string {
   const value = process.env.NEXT_PUBLIC_APP_URL?.trim();
   if (!value) throw new Error("Missing required environment variable: NEXT_PUBLIC_APP_URL");
-  return value.replace(/\/$/, "");
+
+  const url = new URL(value);
+  if (process.env.NODE_ENV === "production" && url.protocol !== "https:") {
+    throw new Error("NEXT_PUBLIC_APP_URL must use HTTPS in production");
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error("NEXT_PUBLIC_APP_URL must use HTTP or HTTPS");
+  }
+
+  return url.toString().replace(/\/$/, "");
 }
 
 export async function sendInvitationEmail(input: {
