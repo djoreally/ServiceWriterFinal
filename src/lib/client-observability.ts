@@ -1,10 +1,4 @@
 const SENSITIVE_KEYWORDS = ["email", "phone", "name", "address", "token", "authorization", "password", "secret"];
-const TELEMETRY_FAILURE_THRESHOLD = 2;
-const TELEMETRY_COOLDOWN_MS = 60_000;
-
-let consecutiveTelemetryFailures = 0;
-let telemetryDisabledUntil = 0;
-let telemetryRequestInFlight = false;
 
 function isSensitiveKey(key: string): boolean {
   const lower = key.toLowerCase();
@@ -36,6 +30,12 @@ export function generateCorrelationId(prefix = "corr"): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+/**
+ * The legacy `client_error_events` table is not part of the canonical
+ * workspace-scoped production schema. Until client telemetry is reintroduced
+ * through a supported server endpoint, this reporter is intentionally a no-op
+ * so a primary request failure cannot generate a second failing REST request.
+ */
 export async function reportClientError(input: {
   supabaseUrl: string;
   publishableKey: string;
@@ -48,53 +48,6 @@ export async function reportClientError(input: {
   severity?: "info" | "warning" | "error" | "critical";
   context?: Record<string, unknown>;
 }): Promise<void> {
-  if (!input.supabaseUrl || !input.publishableKey || !input.errorMessage) return;
-  // Telemetry must not amplify a backend outage. Only one report may be in
-  // flight, and repeated telemetry failures open a short circuit.
-  if (Date.now() < telemetryDisabledUntil || telemetryRequestInFlight) return;
-  telemetryRequestInFlight = true;
-
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    apikey: input.publishableKey,
-  };
-  if (input.accessToken) {
-    headers.Authorization = `Bearer ${input.accessToken}`;
-  }
-
-  const payload = {
-    user_id: input.userId || null,
-    source: "web_app",
-    correlation_id: input.correlationId || null,
-    endpoint: input.endpoint || null,
-    status_code: input.statusCode || null,
-    severity: input.severity || "error",
-    error_message: input.errorMessage.slice(0, 1000),
-    context: sanitizeContext(input.context || {}),
-  };
-
-  try {
-    const response = await fetch(`${input.supabaseUrl}/rest/v1/client_error_events`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload),
-      keepalive: true,
-    });
-    if (!response.ok) {
-      consecutiveTelemetryFailures += 1;
-      if (consecutiveTelemetryFailures >= TELEMETRY_FAILURE_THRESHOLD) {
-        telemetryDisabledUntil = Date.now() + TELEMETRY_COOLDOWN_MS;
-      }
-      return;
-    }
-    consecutiveTelemetryFailures = 0;
-  } catch {
-    consecutiveTelemetryFailures += 1;
-    if (consecutiveTelemetryFailures >= TELEMETRY_FAILURE_THRESHOLD) {
-      telemetryDisabledUntil = Date.now() + TELEMETRY_COOLDOWN_MS;
-    }
-    // Swallow intentionally: observability must never break primary flows.
-  } finally {
-    telemetryRequestInFlight = false;
-  }
+  // Retain sanitization code and signature for callers; do not emit network IO.
+  void sanitizeContext(input.context || {});
 }

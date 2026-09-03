@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "scope": "ServiceWriter runtime code",
+  "canonical": {
+    "tenant_key": "workspace_id",
+    "workspace_tables": [
+      "workspaces",
+      "workspace_members",
+      "workspace_settings",
+      "customers",
+      "vehicles",
+      "appointments",
+      "appointment_items",
+      "service_catalog",
+      "work_orders",
+      "service_records",
+      "invitations"
+    ],
+    "appointments": {
+      "time_columns": ["starts_at", "ends_at"],
+      "tenant_column": "workspace_id",
+      "display_fields": "derive from appointment_items, customer/vehicle joins, notes, or metadata; appointments.title does not exist"
+    },
+    "authentication": "Supabase Auth",
+    "staff_invitation_delivery": "Supabase Auth",
+    "transactional_email": "Resend",
+    "growth_email": "Enginemailer"
+  },
+  "retired": {
+    "tables": {
+      "business_profiles": "workspace_settings + workspaces",
+      "client_error_events": "server observability/logging",
+      "services": "service_catalog",
+      "appointment_services": "appointment_items",
+      "fleet_work_orders": "work_orders / fleet_service_requests",
+      "fleet_vehicles": "vehicles",
+      "technicians": "profiles + workspace_members/work_order_assignments",
+      "cash_collection_receipts_v1": "canonical payment/invoice APIs"
+    },
+    "edge_functions": {
+      "gate-app-access": "Supabase session + workspace membership/RBAC in canonical application auth layer"
+    },
+    "appointment_columns": {
+      "user_id": "workspace_id",
+      "title": "derived presentation field",
+      "scheduled_date": "starts_at",
+      "scheduled_time": "starts_at"
+    }
+  }
+}

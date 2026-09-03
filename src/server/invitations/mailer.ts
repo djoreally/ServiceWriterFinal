@@ -1,13 +1,19 @@
-import { ResendEmailAdapter } from "@/server/messaging/resend";
 import type { ProviderSendResult } from "@/server/messaging/types";
 import { createSupabaseAdminClient } from "@/lib/supabase";
-import { LIFECYCLE_EVENT_KEYS } from "@/server/messaging/lifecycle-events";
-import { renderLifecycleEmail } from "@/server/messaging/lifecycle-templates";
 
 function requiredAppUrl(): string {
   const value = process.env.NEXT_PUBLIC_APP_URL?.trim();
   if (!value) throw new Error("Missing required environment variable: NEXT_PUBLIC_APP_URL");
-  return value.replace(/\/$/, "");
+
+  const url = new URL(value);
+  if (process.env.NODE_ENV === "production" && url.protocol !== "https:") {
+    throw new Error("NEXT_PUBLIC_APP_URL must use HTTPS in production");
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error("NEXT_PUBLIC_APP_URL must use HTTP or HTTPS");
+  }
+
+  return url.toString().replace(/\/$/, "");
 }
 
 export async function sendInvitationEmail(input: {
@@ -18,28 +24,55 @@ export async function sendInvitationEmail(input: {
   token: string;
   expiresAt: string;
 }): Promise<ProviderSendResult> {
-  const url = new URL(`/team/join?invitation_id=${encodeURIComponent(input.invitationId)}&token=${encodeURIComponent(input.token)}`, `${requiredAppUrl()}/`);
+  const redirectTo = new URL(
+    `/team/join?invitation_id=${encodeURIComponent(input.invitationId)}&token=${encodeURIComponent(input.token)}`,
+    `${requiredAppUrl()}/`,
+  ).toString();
+
   const admin = createSupabaseAdminClient();
-  const { data: workspace } = await admin.from("workspaces").select("name").eq("id", input.workspaceId).single();
-  const workspaceName = workspace?.name ?? "Service Writer";
-  const rendered = renderLifecycleEmail(LIFECYCLE_EVENT_KEYS.staffInvited, {
-    "business.name": workspaceName,
-    "workspace.name": workspaceName,
-    "staff.role": input.role.replaceAll("_", " "),
-    "invitation.expires_at": new Date(input.expiresAt).toLocaleString("en-US", { timeZone: "UTC", dateStyle: "medium", timeStyle: "short" }),
-    "email.recipient_role": "staff",
-    "email.primary_action_url": url.toString(),
+  const metadata = {
+    servicewriter_invitation_id: input.invitationId,
+    servicewriter_workspace_id: input.workspaceId,
+    servicewriter_role: input.role,
+    servicewriter_invitation_expires_at: input.expiresAt,
+  };
+
+  const invited = await admin.auth.admin.inviteUserByEmail(input.recipientEmail, {
+    redirectTo,
+    data: metadata,
   });
-  return new ResendEmailAdapter().send({
-    workspaceId: input.workspaceId,
-    recipient: { email: input.recipientEmail },
-    purpose: "authentication",
-    templateKey: rendered.templateKey,
-    subject: rendered.subject,
-    body: rendered.text,
-    html: rendered.html,
-    fromName: workspaceName,
-    idempotencyKey: `invitation:${input.invitationId}:${input.token.slice(0, 16)}`,
-    metadata: { invitationId: input.invitationId, role: input.role },
+
+  if (!invited.error) {
+    return {
+      providerName: "supabase_auth",
+      providerMessageId: invited.data.user?.id ? `supabase-auth-user:${invited.data.user.id}` : `supabase-auth-invite:${input.invitationId}`,
+      status: "accepted",
+      acceptedAt: new Date().toISOString(),
+    };
+  }
+
+  const existingUser = /already|registered|exists/i.test(invited.error.message);
+  if (!existingUser) {
+    throw new Error(`Supabase Auth invitation failed: ${invited.error.message}`);
+  }
+
+  const magicLink = await admin.auth.signInWithOtp({
+    email: input.recipientEmail,
+    options: {
+      emailRedirectTo: redirectTo,
+      shouldCreateUser: false,
+      data: metadata,
+    },
   });
+
+  if (magicLink.error) {
+    throw new Error(`Supabase Auth invitation failed: ${magicLink.error.message}`);
+  }
+
+  return {
+    providerName: "supabase_auth",
+    providerMessageId: `supabase-auth-magic-link:${input.invitationId}`,
+    status: "accepted",
+    acceptedAt: new Date().toISOString(),
+  };
 }
