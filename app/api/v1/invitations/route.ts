@@ -74,7 +74,10 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = createInvitationSchema.parse(await request.json());
-    const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin"], request);
+    const { supabase, user, membership } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin"], request);
+    if (body.invited_role === "owner" && membership.role !== "owner") {
+      throw new ApiError(403, "Only a workspace owner can invite another owner.", "owner_role_required");
+    }
     if (body.invited_role === "customer" && !body.customer_id) return json({ error: { code: "customer_required", message: "customer_id is required for customer invitations" } }, { status: 400 });
     await assertSendRateLimit(supabase, body.workspace_id, body.invited_email);
     const { data: existing, error: existingError } = await supabase.from("invitations").select("id").eq("workspace_id", body.workspace_id).ilike("invited_email", body.invited_email).is("accepted_at", null).is("revoked_at", null).gt("expires_at", new Date().toISOString()).limit(1);

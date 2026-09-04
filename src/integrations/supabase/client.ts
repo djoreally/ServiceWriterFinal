@@ -8,26 +8,19 @@ import { generateCorrelationId, reportClientError } from '@/lib/client-observabi
 // Single canonical backend
 // ─────────────────────────────────────────────────────────────────────────────
 // Auth, operational data, functions, storage and realtime MUST resolve to the
-// same Supabase project. Previously auth was pinned to one project while REST
-// pointed at another, so every data call carried a token the data project could
-// not verify -> `401 PGRST301 "No suitable key was found to decode the JWT"`.
-//
-// The project is resolved exclusively from the build environment (Next.js injects
-// NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY / NEXT_PUBLIC_SUPABASE_PROJECT_ID).
-// No publishable key is ever embedded in this file: a stale hard-coded key is
-// how production once shipped an invalid anon JWT, and rewriting this source at
-// build time is how it once shipped a malformed client bundle.
-// These direct references are intentional: Next.js statically inlines
-// `NEXT_PUBLIC_*` variables into the browser bundle. Reading `process.env`
-// through a dynamically typed object leaves the client with undefined values
-// in production and silently routes auth to disconnected development mode.
+// same Supabase project. Production may receive NEXT_PUBLIC_* values from the
+// deployment environment, but it must never fall back to a disconnected local
+// Supabase instance when those variables are absent from a build.
+const CANONICAL_SUPABASE_PROJECT_ID = 'rjfbrfognxqkyhdrpibx';
+const CANONICAL_SUPABASE_URL = `https://${CANONICAL_SUPABASE_PROJECT_ID}.supabase.co`;
+const CANONICAL_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_-TAyW6MChnKyB_0yICU79g_miXrX3xy';
+
 const NEXT_PUBLIC_SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || '';
 const NEXT_PUBLIC_SUPABASE_PROJECT_ID = process.env.NEXT_PUBLIC_SUPABASE_PROJECT_ID || '';
-const FALLBACK_PROJECT_ID = NEXT_PUBLIC_SUPABASE_PROJECT_ID;
 
 function projectRefFromAnonKey(key: string | undefined): string | null {
-  if (!key) return null;
+  if (!key || key.startsWith('sb_publishable_')) return null;
   try {
     const body = key.split('.')[1];
     if (!body) return null;
@@ -40,55 +33,33 @@ function projectRefFromAnonKey(key: string | undefined): string | null {
   }
 }
 
-const RAW_SUPABASE_URL = NEXT_PUBLIC_SUPABASE_URL.trim();
-const SUPABASE_URL = (
-  RAW_SUPABASE_URL || (FALLBACK_PROJECT_ID ? `https://${FALLBACK_PROJECT_ID}.supabase.co` : '')
-).replace(/\/$/, '');
-const SUPABASE_PUBLISHABLE_KEY = NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY.trim();
-const SUPABASE_CONFIGURED = Boolean(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY);
-const CLIENT_SUPABASE_URL = SUPABASE_URL || 'http://127.0.0.1:54321';
-const CLIENT_SUPABASE_KEY = SUPABASE_PUBLISHABLE_KEY || 'local-development-key';
+const SUPABASE_URL = (NEXT_PUBLIC_SUPABASE_URL.trim() || CANONICAL_SUPABASE_URL).replace(/\/$/, '');
+const SUPABASE_PUBLISHABLE_KEY = NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY.trim() || CANONICAL_SUPABASE_PUBLISHABLE_KEY;
+const SUPABASE_PROJECT_ID = NEXT_PUBLIC_SUPABASE_PROJECT_ID.trim() || CANONICAL_SUPABASE_PROJECT_ID;
+const CLIENT_SUPABASE_URL = SUPABASE_URL;
+const CLIENT_SUPABASE_KEY = SUPABASE_PUBLISHABLE_KEY;
 
-if (!SUPABASE_CONFIGURED) {
-  console.warn('[supabase] Backend is not configured. UI is running in disconnected development mode; configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY before using authenticated data flows.');
-}
-
-const SUPABASE_PROJECT_ID =
-  projectRefFromAnonKey(SUPABASE_PUBLISHABLE_KEY) ||
-  NEXT_PUBLIC_SUPABASE_PROJECT_ID ||
-  FALLBACK_PROJECT_ID;
-
-// Guard: the URL host and the publishable key must belong to the same project.
-// This is the exact class of misconfiguration that caused the auth/data split.
+// Guard: the resolved URL must be the canonical production project. Publishable
+// keys are opaque and do not encode their project ref, so the URL/project-id
+// invariant is the reliable browser-side project guard for modern keys.
 {
   const urlRef = CLIENT_SUPABASE_URL.replace(/^https?:\/\//, '').split('.')[0];
-  const keyRef = projectRefFromAnonKey(SUPABASE_PUBLISHABLE_KEY);
-  if (keyRef && urlRef && keyRef !== urlRef) {
+  const legacyKeyRef = projectRefFromAnonKey(SUPABASE_PUBLISHABLE_KEY);
+  if (urlRef !== CANONICAL_SUPABASE_PROJECT_ID || SUPABASE_PROJECT_ID !== CANONICAL_SUPABASE_PROJECT_ID) {
     throw new Error(
-      `[supabase] Backend misconfiguration: URL points at project "${urlRef}" but the publishable key ` +
-        `belongs to project "${keyRef}". Auth and data must use the same project.`,
+      `[supabase] Backend misconfiguration: expected canonical project "${CANONICAL_SUPABASE_PROJECT_ID}" but resolved URL/project "${urlRef}/${SUPABASE_PROJECT_ID}".`,
+    );
+  }
+  if (legacyKeyRef && legacyKeyRef !== urlRef) {
+    throw new Error(
+      `[supabase] Backend misconfiguration: URL points at project "${urlRef}" but the legacy publishable key belongs to project "${legacyKeyRef}".`,
     );
   }
 }
 
-
-// Import the supabase client like this:
-// import { supabase } from "@/integrations/supabase/client";
-
 const isBrowser = typeof window !== "undefined" && typeof window.localStorage !== "undefined";
-// The command layer (`signInWithPassword` → `withOperationTimeout`) owns the
-// user-facing sign-in deadline. This transport abort is only a last-resort
-// backstop, so it must sit ABOVE that budget — otherwise it fires first and the
-// clearer "request timed out" path never runs.
 const INTERACTIVE_AUTH_REQUEST_TIMEOUT_MS = 45_000;
 
-/**
- * Only *interactive* credential submissions may be hard-aborted. Aborting the
- * background token refresh (`grant_type=refresh_token`) or the boot-time
- * session/user check makes the SDK treat the session as unrecoverable: it drops
- * the stored session, the auth gate never resolves, and every RLS-scoped query
- * returns nothing. That regression is what this predicate prevents.
- */
 function isInteractiveAuthRequest(url: string): boolean {
   if (!url.includes('/auth/v1/')) return false;
   if (/grant_type=refresh_token/.test(url)) return false;
@@ -112,13 +83,10 @@ const tracedFetch: typeof fetch = async (input: RequestInfo | URL, init: Request
   const inputHeaders = typeof input === 'object' && 'headers' in input ? input.headers : undefined;
   const headers = new Headers(init.headers ?? inputHeaders);
 
-  // Single-project client: supabase-js already attaches the session token.
-  // We only read it here for observability/error reporting.
   const authHeader = headers.get('Authorization');
   if (authHeader?.toLowerCase().startsWith('bearer ')) {
     accessToken = authHeader.slice('bearer '.length).trim();
   }
-
 
   if (accessToken) {
     try {
@@ -127,13 +95,11 @@ const tracedFetch: typeof fetch = async (input: RequestInfo | URL, init: Request
         const decode = typeof globalThis.atob === 'function' ? globalThis.atob : null;
         if (decode) {
           const payload = JSON.parse(decode(tokenBody.replace(/-/g, '+').replace(/_/g, '/')));
-          if (payload?.sub && typeof payload.sub === 'string') {
-            userId = payload.sub;
-          }
+          if (payload?.sub && typeof payload.sub === 'string') userId = payload.sub;
         }
       }
     } catch {
-      // best-effort only
+      // best-effort observability only
     }
   }
 
@@ -146,25 +112,15 @@ const tracedFetch: typeof fetch = async (input: RequestInfo | URL, init: Request
   let authAbortController: AbortController | undefined;
 
   try {
-    const requestInit: RequestInit = {
-      ...init,
-      headers,
-    };
+    const requestInit: RequestInit = { ...init, headers };
 
-    // Interactive credential submissions are user-blocking: abort a hung Auth
-    // transport so the form can be re-enabled. Background refresh and session
-    // bootstrap are deliberately NOT bounded here.
     if (isAuthRequest && !init.signal && typeof AbortController !== "undefined") {
       authAbortController = new AbortController();
-      authTimeoutId = setTimeout(
-        () => authAbortController?.abort(),
-        INTERACTIVE_AUTH_REQUEST_TIMEOUT_MS,
-      );
+      authTimeoutId = setTimeout(() => authAbortController?.abort(), INTERACTIVE_AUTH_REQUEST_TIMEOUT_MS);
       requestInit.signal = authAbortController.signal;
     }
 
     const response = await fetch(input, requestInit);
-
     const isTelemetryRequest = requestUrl.includes('/rest/v1/client_error_events');
     if ((isEdgeFunctionRequest || isRestRequest) && !isTelemetryRequest && !response.ok) {
       const endpoint = (() => {
@@ -187,10 +143,7 @@ const tracedFetch: typeof fetch = async (input: RequestInfo | URL, init: Request
         statusCode: response.status,
         severity: response.status >= 500 ? 'critical' : 'warning',
         errorMessage: `${isEdgeFunctionRequest ? 'Edge function' : 'REST'} call failed with HTTP ${response.status}`,
-        context: {
-          method: init.method || 'GET',
-          statusText: response.statusText,
-        },
+        context: { method: init.method || 'GET', statusText: response.statusText },
       });
     }
 
@@ -217,9 +170,7 @@ const tracedFetch: typeof fetch = async (input: RequestInfo | URL, init: Request
         endpoint,
         severity: 'error',
         errorMessage: error instanceof Error ? error.message : 'Network failure',
-        context: {
-          method: init.method || 'GET',
-        },
+        context: { method: init.method || 'GET' },
       });
     }
     throw error;
@@ -228,47 +179,21 @@ const tracedFetch: typeof fetch = async (input: RequestInfo | URL, init: Request
   }
 };
 
-// One runtime client, with two explicit compile-time schema views. New canonical
-// workspace code uses the schema generated from production; legacy modules keep
-// their checked-in compatibility schema while they are migrated or retired.
 export const productionSupabase = createClient<ProductionDatabase>(CLIENT_SUPABASE_URL, CLIENT_SUPABASE_KEY, {
   auth: {
     storage: isBrowser ? localStorage : undefined,
     persistSession: true,
     autoRefreshToken: true,
-    // Serializes token refreshes across tabs. Without it two tabs refresh at
-    // once, the second presents an already-rotated refresh token, and the SDK
-    // discards the session — the app then looks signed out with empty lists.
     lock: processLock,
   },
-  global: {
-    fetch: tracedFetch,
-  },
+  global: { fetch: tracedFetch },
 });
 
 export const supabase = productionSupabase as unknown as SupabaseClient<LegacyDatabase>;
-
-/**
- * Back-compat alias. Auth used to live on a separate project/client; it is now
- * the exact same client as `supabase`. Kept so existing `authSupabase.auth.*`
- * call sites keep working.
- */
 export const authSupabase = supabase;
-
-/**
- * Canonical Supabase URL for the active build, resolved from the environment.
- * Consumers that construct edge-function URLs must import this instead of
- * reading `process.env.NEXT_PUBLIC_SUPABASE_URL` directly.
- */
 export const SUPABASE_URL_RESOLVED: string = SUPABASE_URL;
-
-/** Canonical publishable key for the active backend client. */
 export const SUPABASE_PUBLISHABLE_KEY_RESOLVED: string = SUPABASE_PUBLISHABLE_KEY;
-
-/** Project ref for the resolved Supabase URL. */
 export const SUPABASE_PROJECT_ID_RESOLVED: string = SUPABASE_PROJECT_ID;
-
-/** Auth now shares the single backend; these aliases exist for back-compat. */
 export const AUTH_SUPABASE_URL_RESOLVED: string = SUPABASE_URL;
 export const AUTH_SUPABASE_PUBLISHABLE_KEY_RESOLVED: string = SUPABASE_PUBLISHABLE_KEY;
 export const AUTH_SUPABASE_PROJECT_ID_RESOLVED: string = SUPABASE_PROJECT_ID;
