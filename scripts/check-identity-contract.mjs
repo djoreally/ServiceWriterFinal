@@ -7,10 +7,13 @@ const exists = (p) => fs.existsSync(path.join(root, p));
 const failures = [];
 const assert = (condition, message) => { if (!condition) failures.push(message); };
 
+const migration = "supabase/migrations/20260904030727_harden_owner_role_escalation.sql";
 for (const file of [
   "src/server/api.ts",
   "app/api/v1/identity/route.ts",
+  "app/api/v1/invitations/route.ts",
   "docs/identity-auth-rbac-baseline.md",
+  migration,
 ]) assert(exists(file), `Missing identity contract surface: ${file}`);
 
 const api = read("src/server/api.ts");
@@ -25,6 +28,16 @@ assert(identity.includes("requireUser(request)"), "Identity endpoint must requir
 assert(identity.includes('.from("workspace_members")'), "Identity endpoint must expose staff memberships from workspace_members.");
 assert(identity.includes('.from("customer_users")'), "Identity endpoint must keep customer identity separate through customer_users.");
 assert(identity.includes('.eq("user_id", user.id)'), "Identity endpoint must scope identity records to the authenticated user.");
+
+const invitations = read("app/api/v1/invitations/route.ts");
+assert(invitations.includes('body.invited_role === "owner" && membership.role !== "owner"'), "Owner invitations must require an existing workspace owner at the API boundary.");
+assert(invitations.includes('owner_role_required'), "Owner invitation escalation must return a stable authorization error code.");
+
+const ownerMigration = read(migration);
+assert(ownerMigration.includes("private.is_workspace_owner"), "Database contract must include a private owner-authority helper.");
+assert(ownerMigration.includes("public.is_workspace_owner"), "RLS must expose a constrained owner-authority wrapper to authenticated policy evaluation.");
+assert(ownerMigration.includes("role <> 'owner'::public.member_role or public.is_workspace_owner(workspace_id)"), "Membership RLS must block non-owner assignment or mutation of owner role.");
+assert(ownerMigration.includes("invited_role <> 'owner'::public.member_role or public.is_workspace_owner(workspace_id)"), "Invitation RLS must block non-owner owner invitations.");
 
 const baseline = read("docs/identity-auth-rbac-baseline.md");
 for (const required of [
@@ -43,4 +56,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log("Identity/RBAC contract passed: Supabase Auth, active workspace membership, separated customer identity, and documented RLS authority are consistent.");
+console.log("Identity/RBAC contract passed: Supabase Auth, active workspace membership, separated customer identity, owner-only owner assignment, and documented RLS authority are consistent.");
