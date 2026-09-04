@@ -1,55 +1,60 @@
-# Phase 0 Release Boundary and Ownership Decision Record
+# Release Boundary and Ownership Decision Record
 
-**Status:** Approved for implementation planning  
+**Status:** Phase A architecture certified  
+**Certification date:** 2026-09-03  
 **Repository:** `djoreally/ServiceWriterFinal`  
-**Primary branch:** `main`  
-**Commit author:** `Djor Eally <djoreally@gmail.com>`
+**Primary branch:** `main`
 
 ## Canonical systems
 
 | System | Canonical target | Role |
 |---|---|---|
-| Source repository | `djoreally/ServiceWriterFinal` | Source of truth for the preserved Vite frontend, Next.js API bridge, migrations, tests, and deployment workflows. |
-| Frontend deployment | Vercel project `service-writer-final` | Canonical frontend production candidate. Repeated successful deployment records were observed for this target. |
-| Secondary deployment | Vercel project `servicewriter.xyx` | Non-canonical until ownership and rollback purpose are confirmed. Repeated failed deployment records were observed. |
-| Database | Supabase project configured by production environment | Must be explicitly confirmed against Vercel Production before launch. |
-| CI | GitHub Actions workflow `.github/workflows/ci.yml` | Required release gate once the GitHub account billing lock is cleared. |
+| Source repository | `djoreally/ServiceWriterFinal` | Application, API routes, migrations, tests, contracts and release workflows. |
+| Production deployment | Vercel project `servicewriter.xyx` (`prj_LwYh6HJuUsB2LZG9eoKs23hDoJuw`) | Single Next.js production application. |
+| Production domains | `servicewriter.xyz`, `www.servicewriter.xyz`, `*.servicewriter.xyz` | Public/custom tenant routing to the canonical Vercel project. |
+| Database/Auth | Supabase `rjfbrfognxqkyhdrpibx` | Auth, Postgres, RLS, Storage, Realtime, RPCs and durable outboxes. |
+| Server API | `app/api/**` in the same Next.js deployment | Authenticated server operations, providers, webhooks and workers. |
+| CI/release contracts | GitHub Actions + build prerequisites | Type/build/tests plus architecture/schema drift enforcement. |
 
 ## Architecture decision
 
-The immediate release architecture is a **coordinated two-surface deployment**: the preserved Vite frontend remains the browser application, and the Next.js application under `apps/web-next` serves the server-side API bridge. The frontend must call the API through an explicit production `VITE_API_BASE_URL`; the API must validate Supabase sessions, workspace membership, and role permissions independently of frontend guards.
+Service Writer uses a **single-surface Next.js deployment**. The preserved UI is client-rendered inside the Next.js shell, with React Router retained only as compatibility navigation. The server API is part of the same application under `app/api/**`.
 
-The long-term architecture may consolidate the browser application into Next.js, but that is not a prerequisite for the first controlled live test. No production launch may assume that a Vite static deployment automatically serves the Next.js API routes.
+A separate Vite frontend, separate `apps/web-next` API, separate `apps/api` authority, or Express production server is retired architecture and may not be reintroduced without a new reviewed architecture decision.
 
-## Initial controlled-release scope
+## Ownership invariants
 
-The first live release may expose authenticated read and low-risk operational workflows after staging certification. The following remain disabled or restricted until their specific acceptance tests pass:
-
-- Broad workspace invitations.
-- Live payment capture, refunds, and payment-link actions.
-- Outbound SMS and email sends outside provider sandbox or approved canary recipients.
-- Destructive deletes and irreversible administrative actions.
-- Unverified offline synchronization for production technicians.
-- Customer self-service actions that alter financial or service state.
-
-## Ownership
-
-| Responsibility | Owner requirement |
+| Responsibility | Canonical owner/boundary |
 |---|---|
-| Release approval | Named product/release owner records go/no-go decision. |
-| Supabase schema and RLS | Named database owner validates migrations, backup, RLS, and restore. |
-| Authentication and invitations | Named security/application owner validates Auth, role resolution, and invitation lifecycle. |
-| Frontend and route access | Named frontend owner validates role navigation, responsive behavior, and API base URL. |
-| Payments and messaging | Named integration owner validates Stripe, Resend, Twilio, webhooks, consent, and reconciliation. |
-| Vercel and GitHub | Named deployment owner validates projects, environments, domain, CI, and rollback. |
-| Incident response | Named on-call owner and escalation channel are recorded before canary. |
+| Identity | Supabase Auth |
+| Tenant ownership | `workspace_id` |
+| Data authorization | Supabase RLS plus server workspace/RBAC checks |
+| Transactional email | Resend |
+| Growth/marketing email | Enginemailer |
+| Transactional fallback | Enginemailer only after pre-acceptance Resend failure |
+| Payments | Server-side Stripe/approved payment adapters and signed webhooks |
+| Scheduled/background work | Vercel cron calling protected `app/api/internal/**` routes; durable state in Supabase |
+| Release deployment | Exact Git SHA deployed by canonical Vercel project |
+
+## Controlled-release constraints
+
+Each domain remains subject to its own module certification. Architecture certification does not by itself certify payments, scheduling, invitations, offline synchronization, destructive operations, or customer self-service mutations. Those workflows move through their later certification phases on top of this fixed architecture.
 
 ## Go/no-go conditions
 
-A production canary cannot begin until the canonical Vercel project and Supabase project are confirmed, environment variables are mapped by surface, the database backup is verified, real staging RLS tests pass, authenticated smoke tests pass, the release commit passes local and remote CI, and rollback ownership is documented.
+A candidate cannot be promoted if any of the following is true:
 
-A release must stop immediately on cross-workspace data exposure, service-role exposure in a browser bundle, authentication bypass, duplicate financial mutation, failed migration verification, unexplained webhook signature failures, or an inability to roll back safely.
+- its Vercel deployment is not tied to the intended Git SHA;
+- a competing application/API runtime has been introduced;
+- the architecture or schema contract fails;
+- Supabase environment variables identify the wrong project;
+- service-role/provider secrets are client-visible;
+- tenant-scoped operations bypass workspace authorization/RLS;
+- provider ownership is ambiguous or bypassed;
+- the candidate fails its required build/type/test/security gates.
 
-## Decision log
+A release stops immediately on cross-workspace exposure, authentication bypass, service-role leakage, duplicate financial mutation, unverified provider webhook mutation, or unreconciled production deployment drift.
 
-This record intentionally does not delete `servicewriter.xyx`. DNS, domain assignment, project ownership, and rollback responsibilities must be confirmed first. The `service-writer-final` target is the operational candidate because its deployment records consistently complete successfully, but final domain ownership remains a release checklist item.
+## Change control
+
+Any future change to deployment topology, tenant ownership, browser/server responsibility, auth authority, or provider ownership must update `docs/application-architecture-baseline.md`, `scripts/architecture-contract.json`, and its enforcement in the same reviewed PR.
