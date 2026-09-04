@@ -11,12 +11,14 @@ const requiredPublic = [
 const requiredServer = [
   "SUPABASE_SERVICE_ROLE_KEY",
   "CRON_SECRET",
+  "RESEND_API_KEY",
+  "RESEND_FROM_EMAIL",
+  "RESEND_WEBHOOK_SIGNING_SECRET",
   "ENGINEMAILER_API_KEY",
   "ENGINEMAILER_FROM_EMAIL",
   "ENGINEMAILER_WEBHOOK_SIGNING_SECRET",
 ];
 const optionalServer = [
-  "RESEND_API_KEY", "RESEND_FROM_EMAIL", "RESEND_WEBHOOK_SIGNING_SECRET",
   "ENGINEMAILER_TRANSACTIONAL_API_KEY", "ENGINEMAILER_TRANSACTIONAL_FROM_EMAIL",
   "ENGINEMAILER_MARKETING_FROM_EMAIL", "ENGINEMAILER_MARKETING_SUBCATEGORY_IDS",
   "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM_NUMBER",
@@ -24,6 +26,7 @@ const optionalServer = [
 ];
 const forbiddenClientPatterns = [
   /^NEXT_PUBLIC_.*(SECRET|PASSWORD|SERVICE_ROLE_KEY|AUTH_TOKEN)$/i,
+  /^VITE_/i,
 ];
 const failures = [];
 
@@ -35,7 +38,7 @@ for (const name of [...requiredPublic, ...requiredServer, ...optionalServer]) {
 }
 for (const name of Object.keys(process.env)) {
   if (forbiddenClientPatterns.some((pattern) => pattern.test(name))) {
-    failures.push(`${name} is a secret-like variable with a client-exposed prefix.`);
+    failures.push(`${name} violates the canonical single-Next.js environment contract.`);
   }
 }
 if (process.env.NEXT_PUBLIC_APP_URL && environment === "production" && !/^https:\/\//i.test(process.env.NEXT_PUBLIC_APP_URL)) {
@@ -43,6 +46,16 @@ if (process.env.NEXT_PUBLIC_APP_URL && environment === "production" && !/^https:
 }
 if (process.env.NEXT_PUBLIC_CORS_ORIGIN && /\/$/.test(process.env.NEXT_PUBLIC_CORS_ORIGIN)) {
   failures.push("NEXT_PUBLIC_CORS_ORIGIN must not have a trailing slash.");
+}
+if (process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_PROJECT_ID) {
+  const expectedHost = `${process.env.NEXT_PUBLIC_SUPABASE_PROJECT_ID}.supabase.co`;
+  try {
+    if (new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname !== expectedHost) {
+      failures.push("NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PROJECT_ID must identify the same project.");
+    }
+  } catch {
+    failures.push("NEXT_PUBLIC_SUPABASE_URL must be a valid URL.");
+  }
 }
 
 if (failures.length) {
