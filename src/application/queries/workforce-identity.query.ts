@@ -4,15 +4,10 @@ import { withTransientRetry } from "@/lib/transient-backend";
 
 const WORKFORCE_IDENTITY_TIMEOUT_MS = 2_500;
 
-export type WorkforceRole = "admin" | "owner" | "manager" | "dispatcher" | "fleet_manager" | "technician";
+export type WorkforceRole = "admin" | "owner" | "manager" | "dispatcher" | "fleet_manager" | "technician" | "service_advisor" | "receptionist" | "viewer";
 export interface WorkforceMembership { workspaceUserId: string; workspaceName: string; role: WorkforceRole; landingPath: string; isDefault: boolean; }
 const map = (row: { workspace_user_id: string; workspace_name?: string; role: string; landing_path: string; is_default?: boolean }): WorkforceMembership => ({ workspaceUserId: row.workspace_user_id, workspaceName: row.workspace_name ?? "Service Writer workspace", role: row.role as WorkforceRole, landingPath: row.landing_path, isDefault: Boolean(row.is_default) });
 export async function fetchWorkforceIdentity() {
-  // A transient backend hiccup (PGRST002 schema cache, 5xx) must not look like a
-  // failed sign-in, so retry it here before the caller ever sees an error.
-  // `useTeamRole` owns the two transient retries for this query. Keep this
-  // operation to one bounded attempt so those retry layers do not multiply the
-  // time a PWA launch spends on the global loading screen.
   return withTransientRetry(async () => {
     const { data, error } = await withOperationTimeout(
       Promise.resolve(supabase.rpc("get_workforce_identity_v1")),

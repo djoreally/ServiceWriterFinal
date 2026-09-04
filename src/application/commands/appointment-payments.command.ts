@@ -3,6 +3,7 @@
  */
 import { nextApi } from "@/lib/nextApiClient";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
+
 /** Create a pending payment record for an appointment. */
 export async function createAppointmentPaymentRecord(params: {
   appointmentId: string;
@@ -15,11 +16,22 @@ export async function createAppointmentPaymentRecord(params: {
 }): Promise<{ id: string; amount: number; currency_code: string; status: string }> {
   const workspace_id = getSelectedWorkspaceId();
   if (!workspace_id) throw new Error("Select a workspace before creating a payment.");
+  const amount = Math.round(params.amountCents) / 100;
   const { data } = await nextApi.payments.create({
     workspace_id,
-    amount: params.amountCents,
+    amount,
     currency_code: "USD",
     status: "pending",
+    metadata: {
+      appointment_id: params.appointmentId,
+      payment_type: "pay_at_service",
+      subtotal_cents: params.subtotalCents,
+      tax_amount_cents: params.taxCents,
+      tax_rate: params.taxRate,
+      customer_email: params.customerEmail ?? null,
+      customer_name: params.customerName,
+      source: "appointment_detail",
+    },
   });
   return data as { id: string; amount: number; currency_code: string; status: string };
 }
