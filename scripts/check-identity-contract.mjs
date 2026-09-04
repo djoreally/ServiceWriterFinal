@@ -12,6 +12,7 @@ for (const file of [
   "src/server/api.ts",
   "app/api/v1/identity/route.ts",
   "app/api/v1/invitations/route.ts",
+  "src/integrations/supabase/client.ts",
   "docs/identity-auth-rbac-baseline.md",
   migration,
 ]) assert(exists(file), `Missing identity contract surface: ${file}`);
@@ -22,6 +23,13 @@ assert(!/user_metadata|raw_user_meta_data/.test(api), "Authorization may not dep
 assert(/\.from\(["']workspace_members["']\)/.test(api), "Workspace authorization must resolve through workspace_members.");
 assert(/\.eq\(["']user_id["'],\s*user\.id\)/.test(api), "Workspace authorization must bind membership to the authenticated user.");
 assert(/\.eq\(["']is_active["'],\s*true\)/.test(api), "Workspace authorization must require active membership.");
+
+const browserClient = read("src/integrations/supabase/client.ts");
+assert(browserClient.includes("CANONICAL_SUPABASE_PROJECT_ID = 'rjfbrfognxqkyhdrpibx'"), "Browser auth must retain the certified production Supabase project fallback.");
+assert(browserClient.includes("CANONICAL_SUPABASE_URL"), "Browser auth must retain a canonical production Supabase URL fallback.");
+assert(browserClient.includes("CANONICAL_SUPABASE_PUBLISHABLE_KEY"), "Browser auth must retain a canonical active publishable-key fallback.");
+assert(!browserClient.includes("http://127.0.0.1:54321"), "Production browser auth may not silently fall back to a disconnected local Supabase endpoint.");
+assert(!browserClient.includes("local-development-key"), "Production browser auth may not silently fall back to a dummy API key.");
 
 const identity = read("app/api/v1/identity/route.ts");
 assert(identity.includes("requireUser(request)"), "Identity endpoint must require an authenticated user.");
@@ -56,4 +64,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log("Identity/RBAC contract passed: Supabase Auth, active workspace membership, separated customer identity, owner-only owner assignment, and documented RLS authority are consistent.");
+console.log("Identity/RBAC contract passed: Supabase Auth, canonical browser backend, active workspace membership, separated customer identity, owner-only owner assignment, and documented RLS authority are consistent.");
