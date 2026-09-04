@@ -20,6 +20,7 @@ assert(contract.provider_ownership?.growth_marketing_email === "Enginemailer", "
 assert(pkg.scripts?.dev === "next dev", "package.json dev runtime must be Next.js.");
 assert(pkg.scripts?.build === "next build", "package.json build runtime must be Next.js.");
 assert(pkg.scripts?.start === "next start", "package.json production runtime must be Next.js.");
+assert(pkg.scripts?.prebuild === "node scripts/check-architecture-contract.mjs", "Every production build must run the architecture contract first.");
 assert(pkg.engines?.node === "24.x", "Node runtime must remain pinned to 24.x.");
 assert(Boolean(pkg.dependencies?.next), "Next.js must be a production dependency.");
 assert(vercel.framework === "nextjs", "vercel.json must declare framework=nextjs.");
@@ -46,11 +47,15 @@ function walk(dir, out = []) {
   return out;
 }
 
-for (const file of [...walk("app"), ...walk("src"), ...walk("packages")]) {
+for (const file of [...walk("app"), ...walk("src"), ...walk("packages"), "next.config.ts"]) {
   const content = read(file);
   if (/\bimport\.meta\.env\b/.test(content)) failures.push(`${file}: import.meta.env is forbidden in canonical runtime code.`);
-  if (/\bVITE_[A-Z0-9_]+\b/.test(content)) failures.push(`${file}: VITE_* variables are forbidden in canonical runtime code.`);
+  if (/\bprocess\.env\.VITE_[A-Z0-9_]+\b/.test(content)) failures.push(`${file}: direct VITE_* environment access is forbidden.`);
 }
+
+const runtimeEnv = read("src/lib/runtime-env.ts");
+assert(runtimeEnv.includes("return key.startsWith('VITE_') ? `NEXT_PUBLIC_${key.slice('VITE_'.length)}` : key;"),
+  "Historical VITE_* call-site aliases must resolve only to NEXT_PUBLIC_* values, never Vite environment values.");
 
 const lifecycle = read("src/server/messaging/lifecycle-sender.ts");
 assert(/purpose\s*===\s*["']marketing["']\s*\?\s*new EnginemailerEmailAdapter\(\)\s*:\s*new ResendEmailAdapter\(\)/.test(lifecycle),
