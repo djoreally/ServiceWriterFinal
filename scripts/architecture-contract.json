@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "certification_date": "2026-09-03",
+  "application": {
+    "repository": "djoreally/ServiceWriterFinal",
+    "runtime": "Next.js App Router",
+    "node": "24.x",
+    "deployment_model": "single Vercel project",
+    "vercel_project": "servicewriter.xyx",
+    "vercel_project_id": "prj_LwYh6HJuUsB2LZG9eoKs23hDoJuw",
+    "production_domains": ["servicewriter.xyz", "www.servicewriter.xyz", "*.servicewriter.xyz"],
+    "server_api": "app/api/**",
+    "browser_shell": ["app/layout.tsx", "src/ClientOnlyShell.tsx", "src/NextClientShell.tsx", "src/App.tsx"],
+    "client_navigation": "React Router compatibility layer inside the single Next.js browser shell"
+  },
+  "data_platform": {
+    "provider": "Supabase",
+    "production_project_ref": "rjfbrfognxqkyhdrpibx",
+    "tenant_key": "workspace_id",
+    "auth": "Supabase Auth",
+    "database": "Supabase Postgres",
+    "storage": "Supabase Storage",
+    "realtime": "Supabase Realtime",
+    "authorization": "workspace membership/RBAC plus database RLS"
+  },
+  "runtime_boundaries": {
+    "browser": "UI, client navigation, session state, low-risk tenant-scoped reads and reviewed realtime subscriptions",
+    "server": "authorization orchestration, privileged writes, provider calls, webhooks, idempotency, background workers and audit-sensitive operations",
+    "database": "canonical business state, workspace tenancy, RLS, transactional RPCs and durable outboxes"
+  },
+  "provider_ownership": {
+    "transactional_email": "Resend",
+    "growth_marketing_email": "Enginemailer",
+    "transactional_email_fallback": "Enginemailer only after Resend rejects/fails before acceptance",
+    "payments": "Stripe adapter/server boundary",
+    "sms": "server-side messaging adapter/approved provider",
+    "calendar": "server-side Google Calendar integration",
+    "vehicle_catalog": "public Supabase Edge Function only for intentionally public catalog reads"
+  },
+  "forbidden_competing_architecture": [
+    "Vite production runtime or Vite deployment",
+    "separate apps/web-next production API",
+    "separate apps/api production API",
+    "Express adapter as a second production authority",
+    "VITE_* environment variables in runtime code",
+    "import.meta.env in runtime code",
+    "direct privileged provider calls from browser code",
+    "service-role credentials in client-visible variables"
+  ]
+}

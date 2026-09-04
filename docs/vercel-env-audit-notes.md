@@ -1,27 +1,35 @@
-# Vercel environment audit notes
+# Vercel environment audit notes — historical snapshot
+
+> **Superseded for current architecture.** This file records an authenticated Vercel audit performed on 2026-08-22 before Service Writer's production architecture was consolidated and re-certified. It must not be used to choose the current Vercel project, runtime topology, or environment-variable contract. Current authority is `docs/application-architecture-baseline.md`, `docs/canonical-vercel-deployment-record.md`, and `docs/environment-and-secrets-manifest.md`.
 
 Audited the authenticated Vercel dashboard on 2026-08-22.
 
-## Canonical project candidate: service-writer-final
+## Historical project candidate: service-writer-final
 
-Dashboard URL: `https://vercel.com/tyreese-burtons-projects/service-writer-final/settings/environment-variables`
+Dashboard URL at the time: `https://vercel.com/tyreese-burtons-projects/service-writer-final/settings/environment-variables`
 
 Visible project variable names included: `VITE_ENABLE_DEMO_LOGIN`, `VITE_DEMO_EMAIL`, `VITE_DEMO_PASSWORD`, `POSTGRES_URL`, `POSTGRES_PRISMA_URL`, `POSTGRES_URL_NON_POOLING`, `POSTGRES_USER`, `POSTGRES_HOST`, `POSTGRES_PASSWORD`, `POSTGRES_DATABASE`, `SUPABASE_URL`, `SUPABASE_JWT_SECRET`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `STRIPE_SECRET_KEY`, and `STRIPE_PUBLISHABLE_KEY`.
 
-The dashboard displayed an `All Environments` filter. Values were not revealed or stored. The visible list did not show the required `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, or `VITE_SUPABASE_PROJECT_ID` names in the first page of results. This requires explicit search/filter verification before the Vite deployment can be considered correctly configured.
+The dashboard displayed an `All Environments` filter. Values were not revealed or stored. The visible list did not show the Vite-prefixed Supabase variable names expected by the then-current repository architecture.
 
-## Secondary project: servicewriter.xyx
+## Historical secondary project: servicewriter.xyx
 
-Dashboard URL: `https://vercel.com/tyreese-burtons-projects/servicewriter.xyx/settings/environment-variables`
+Dashboard URL at the time: `https://vercel.com/tyreese-burtons-projects/servicewriter.xyx/settings/environment-variables`
 
-Visible project variable names included Sentry variables (`SENTRY_VERCEL_LOG_DRAIN_URL`, `SENTRY_ORG`, `SENTRY_PUBLIC_KEY`, `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_AUTH_TOKEN`, `SENTRY_OTLP_TRACES_URL`, `SENTRY_PROJECT`), Postgres variables, `SUPABASE_URL`, `SUPABASE_JWT_SECRET`, and multiple PostHog naming variants including `VITE_POSTHOG_HOST`, `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN`, `NEXT_PUBLIC_POSTHOG_HOST`, `PUBLIC_POSTHOG_PROJECT_TOKEN`, `NUXT_PUBLIC_POSTHOG_PROJECT_TOKEN`, and `NUXT_PUBLIC_POSTHOG_HOST`.
+Visible project variable names included Sentry variables, Postgres variables, `SUPABASE_URL`, `SUPABASE_JWT_SECRET`, and multiple PostHog naming variants including Vite-, Next.js-, and other framework-prefixed names. At that time the mixed configuration was evidence of unresolved deployment drift, not a certified topology.
 
-The secondary project’s variable set appears to contain older/mixed framework configuration and does not establish that it has the current Vite Supabase variables or Next.js API variables. Its deployment records also repeatedly failed for commits that successfully deployed to `service-writer-final`.
+## Historical security finding
 
-## Security finding
+The audit observed sensitive-looking unprefixed Supabase, Postgres, Stripe, and service-role variable names. Values and scopes were not revealed. The durable security rule remains valid: server-only values must never become client-visible configuration.
 
-The canonical project visibly contains sensitive-looking unprefixed Supabase, Postgres, Stripe, and service-role variables. Their values and scopes were not revealed. Vercel must be checked per environment to ensure server-only values exist only in the Next.js/API project and are not present in the Vite frontend project. Public browser variables should use `VITE_` or `NEXT_PUBLIC_` prefixes only when intentionally exposed.
+## What changed after this audit
 
-## Confirmed mismatch from project search
+Phase A architecture certification on 2026-09-03 verified the current production topology directly:
 
-On the canonical `service-writer-final` Vercel project, searching for `VITE_SUPABASE_URL` returned `No Results Found`. The dashboard does show unprefixed `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_PUBLISHABLE_KEY`, and `SUPABASE_SERVICE_ROLE_KEY`, but the exact Vite-prefixed frontend variables required by the repository were not found in the project variable list. This is a concrete production configuration blocker for the Vite bundle unless the variables are configured through another linked/shared environment mechanism.
+- Vercel project `servicewriter.xyx` (`prj_LwYh6HJuUsB2LZG9eoKs23hDoJuw`) is the canonical Next.js project.
+- `servicewriter.xyz`, `www.servicewriter.xyz`, and `*.servicewriter.xyz` are attached to that project.
+- `app/api/**` is the server API in the same deployment.
+- Supabase project `rjfbrfognxqkyhdrpibx` is the production data/auth platform.
+- `NEXT_PUBLIC_*` is the only current browser-visible runtime configuration family; Vite runtime configuration is retired.
+
+Keep this file only as incident/audit history. Do not restore its pre-consolidation project-selection conclusions without a new verified architecture decision.

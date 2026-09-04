@@ -1,163 +1,125 @@
-# ServiceWriterFinal Platform, Database, Integrations, and Enhancement Specification
+# ServiceWriterFinal Platform and Integrations Specification
+
+**Architecture authority:** `docs/application-architecture-baseline.md`  
+**Schema authority:** `scripts/schema-contract.json`
 
 ## 1. Platform architecture
 
-The recommended production architecture is a split deployment. The preserved frontend remains a browser application while the new application is migrated into Next.js App Router. The API is a versioned server-side boundary that can run as Next.js route handlers on Vercel and can share domain services with an Express adapter when a traditional API runtime is needed. Supabase provides Auth, Postgres, Storage, Realtime, and database-level row security.
+Service Writer runs as one Next.js App Router application on Vercel. The preserved interactive product UI is mounted as a client shell inside Next.js; React Router is retained only as an internal compatibility navigation layer. `app/api/**` is the canonical server API. There is no second production frontend or API runtime.
 
 ```mermaid
 flowchart LR
-  Browser[Next.js Web + PWA UI] --> API[Next.js Route Handlers / Express Adapter]
+  Browser[Next.js browser shell] --> API[Next.js app/api route handlers]
   API --> Auth[Supabase Auth]
   API --> DB[(Supabase Postgres + RLS)]
   API --> Storage[Supabase Storage]
-  API --> Realtime[Supabase Realtime]
-  API --> Queue[Durable Jobs / Cron / Queue]
-  Queue --> Email[Email Provider]
-  Queue --> SMS[SMS Provider]
-  Queue --> Payments[Stripe or Square]
-  Queue --> Accounting[QuickBooks]
-  Queue --> Calendar[Google Calendar]
-  Queue --> Vehicle[VIN / Vehicle Data Provider]
-  API --> Observability[Error + Product Telemetry]
+  Browser --> Realtime[Reviewed Supabase Realtime subscriptions]
+  API --> Queue[Durable outboxes / Vercel cron]
+  Queue --> Resend[Resend transactional email]
+  Queue --> Engine[Enginemailer marketing / controlled fallback]
+  API --> Payments[Stripe / approved payment adapters]
+  API --> Calendar[Google Calendar]
+  API --> Vehicle[Vehicle data providers]
+  API --> Observability[Error + product telemetry]
 ```
 
-The browser should call the API for business commands and sensitive reads. Direct browser access to Supabase is acceptable only for carefully reviewed, low-risk, tenant-scoped reads or Realtime subscriptions. The server must own authorization orchestration, idempotency, provider calls, audit events, and high-risk actions.
+The browser may perform carefully reviewed tenant-scoped reads and Realtime subscriptions. Authorization orchestration, privileged writes, provider calls, idempotency, webhook verification, audit-sensitive operations, and background processing belong to the server/database boundary.
 
-## 2. Database diagram
+## 2. Tenancy and database contract
+
+`workspace_id` is the canonical tenant key. Tenant-owned records and server queries must be scoped by workspace. Cross-workspace relationships must be rejected by authorization and database constraints/RLS as appropriate.
+
+Core relationships include:
 
 ```mermaid
 erDiagram
   AUTH_USERS ||--|| PROFILES : owns
   PROFILES ||--o{ WORKSPACE_MEMBERS : joins
   WORKSPACES ||--o{ WORKSPACE_MEMBERS : contains
-  WORKSPACES ||--o{ LOCATIONS : has
   WORKSPACES ||--o{ CUSTOMERS : owns
   CUSTOMERS ||--o{ VEHICLES : owns
   CUSTOMERS ||--o{ CUSTOMER_USERS : links
   WORKSPACES ||--o{ SERVICE_CATALOG : configures
   WORKSPACES ||--o{ APPOINTMENTS : schedules
-  APPOINTMENTS }o--|| CUSTOMERS : for
-  APPOINTMENTS }o--o| VEHICLES : for
-  APPOINTMENTS }o--o| LOCATIONS : at
+  APPOINTMENTS ||--o{ APPOINTMENT_ITEMS : contains
   WORKSPACES ||--o{ WORK_ORDERS : owns
-  WORK_ORDERS }o--|| CUSTOMERS : for
-  WORK_ORDERS }o--o| VEHICLES : for
-  WORK_ORDERS }o--o| APPOINTMENTS : converts
-  WORK_ORDERS ||--o{ WORK_ORDER_ITEMS : contains
-  WORK_ORDERS ||--o{ WORK_ORDER_ASSIGNMENTS : assigned
-  WORK_ORDERS ||--o{ WORK_ORDER_EVENTS : records
-  WORKSPACES ||--o{ QUOTES : creates
-  QUOTES }o--|| CUSTOMERS : for
+  WORKSPACES ||--o{ SERVICE_RECORDS : owns
   WORKSPACES ||--o{ INVOICES : issues
-  INVOICES ||--o{ INVOICE_LINES : contains
   INVOICES ||--o{ PAYMENTS : receives
-  WORKSPACES ||--o{ FLEET_CLIENTS : manages
-  FLEET_CLIENTS ||--o{ FLEET_CLIENT_CONTACTS : has
-  FLEET_CLIENTS ||--o{ FLEET_CONTRACTS : signs
-  FLEET_CLIENTS ||--o{ FLEET_SERVICE_REQUESTS : submits
-  FLEET_SERVICE_REQUESTS ||--o{ FLEET_DISPATCH_ASSIGNMENTS : dispatches
-  WORKSPACES ||--o{ PROVIDER_CONNECTIONS : configures
-  WORKSPACES ||--o{ WEBHOOK_EVENTS : receives
-  WORKSPACES ||--o{ AUDIT_EVENTS : records
 ```
 
-The canonical tenant key is `workspace_id`. Every tenant-owned table must carry it, and every server query must scope by it. Composite foreign keys should be used where a child references a tenant-owned parent so that a record from one workspace cannot be attached to a record from another workspace. The referenced parent must declare `UNIQUE (workspace_id, id)`; this avoids the migration error encountered during the first schema run.
+The live schema—not a retired frontend model—is authoritative. `scripts/check_schema_contract.py` blocks runtime use of known retired tables, columns, RPCs, and Edge Functions.
 
-## 3. Integration catalog
+## 3. Authentication and authorization
 
-The preserved frontend references a larger set of integrations than should be enabled in MVP. The table below separates current product intent from recommended delivery priority.
+Supabase Auth owns identity. Workspace membership and role policy determine staff authorization. Customer identity uses the canonical customer-user linkage rather than treating a customer as a staff member.
 
-| Integration | Current frontend/product signal | MVP disposition | Implementation boundary |
-|---|---|---|---|
-| Supabase Auth | Existing auth commands and auth-aware UI | P0 | Server session validation, workspace membership, invitation flow. |
-| Supabase Postgres/RLS | Existing database client and replacement SQL template | P0 | Server repositories plus reviewed RLS for defense in depth. |
-| Supabase Storage | Logo, assets, attachments, inspection media | P0 | Private buckets, signed URLs, MIME/size validation, scan hook. |
-| Supabase Realtime | Existing realtime patterns | P1 | Work-order and dispatch invalidation/subscription after core commands are stable. |
-| Stripe | Payment, invoice, billing, payout references | P0/P1 | Checkout/payment links and webhook reconciliation first; subscriptions later. |
-| Square | Existing payment-provider concepts | P1 | Adapter interface; enable only after Stripe proves the contract. |
-| QuickBooks Online | Existing accounting commands/settings | P1 | Export/sync invoice and payment summaries with reconciliation UI. |
-| Google Calendar | Existing appointment sync commands | P1 | OAuth connection, event upsert, conflict status, retry queue. |
-| Email provider | Existing email/newsletter/transactional flows | P0 | Resend/Postmark-like provider adapter, templates, suppression, delivery log. |
-| SMS provider | Existing SMS settings and notification flows | P0/P1 | Twilio-like adapter, opt-out enforcement, rate limits, delivery status. |
-| Mapbox/geocoding | Existing maps and geocode references | P1 | Server geocode proxy plus client map token restrictions. |
-| CARFAX / vehicle history | Existing CARFAX commands | P2 | Async lookup, cost guardrail, cached response, user-triggered only. |
-| Vehicle data/MOTOR | Template vocabulary and competitor parity | P2 | Provider adapter, never block job creation on enrichment. |
-| ElevenLabs/voice | Existing voice and AI assistant surface | P2 | Explicit opt-in, transcription redaction, usage limits. |
-| PostHog | Existing analytics integration | P1 | PII-masked product events, workspace-safe identity, opt-out. |
-| Sentry | Existing error instrumentation | P1 | PII scrubbing, release tagging, environment separation. |
-| AI provider | Existing assistant and AI edge-function references | P2 | Server-only gateway, structured tools, confirmation for side effects. |
-| MCP/agent integrations | Existing legacy Lovable MCP surface | Retire for MVP | Rebuild later as a documented API/webhook surface, not as a platform dependency. |
+Frontend guards improve navigation and UX but do not replace server authorization or RLS. Service-role credentials are server-only and must never be exposed through client-visible configuration.
 
-## 4. Third-party implementation plan
+## 4. Integration ownership
 
-All providers must implement the same adapter contract: `connect`, `disconnect`, `healthCheck`, `create`, `update`, `receiveWebhook`, `reconcile`, and `redact`. Provider calls must carry a workspace-scoped correlation ID and idempotency key. Provider credentials are stored outside ordinary client-readable rows; the database stores a secret reference, connection status, scopes, external account identifier, last successful sync, and last error.
-
-Payments begin with hosted payment links and webhook reconciliation. Do not store card data. A payment event is accepted only after signature verification, provider event deduplication, invoice/workspace lookup, and an allowed state transition. The UI must show `pending reconciliation` when the browser does not receive an immediate confirmation.
-
-Email and SMS begin with transactional messages: appointment confirmation, status change, approval request, invoice/payment link, and technician/customer reply. Marketing sends are a separate queue and must enforce consent and suppression immediately before provider submission. Templates are versioned and brand snapshots are immutable per message.
-
-Google Calendar sync is one-way from the product to the calendar for the first release unless conflict rules are explicitly defined. Every event stores the external event ID, etag/version if available, last sync state, and an error message safe for staff display. A failed sync never changes the core appointment truth.
-
-QuickBooks sync begins as an explicit export or controlled invoice/payment synchronization rather than a bidirectional accounting engine. Reconciliation screens must show unmatched, duplicated, and rejected records. Accounting integration must never alter historical invoice totals without an auditable correction.
-
-Maps and vehicle data are enrichment services. They may improve address validation, routing, VIN data, and maintenance recommendations, but they cannot block core shop or fleet operations. Cache responses with provider terms and avoid storing unnecessary raw third-party payloads.
-
-## 5. Privacy and PII marketing model
-
-The platform distinguishes operational PII from marketing eligibility. Customer records may contain name, email, phone, address, vehicle identifiers, notes, and communication history. Marketing eligibility is computed from consent, source, channel, legal basis, suppression, bounce/complaint status, and workspace policy. A marketing campaign stores an audience definition, a materialized send snapshot, and delivery outcomes without copying all customer PII into campaign records.
-
-Every send has these controls:
-
-| Control | Requirement |
-|---|---|
-| Consent | Channel-specific consent or permitted transactional basis. |
-| Suppression | Global, workspace, customer, channel, bounce, complaint, and campaign-level suppression. |
-| Fresh check | Re-evaluate eligibility immediately before provider send. |
-| Unsubscribe | One-click unsubscribe for applicable channels and immediate suppression update. |
-| Audit | Record who created, approved, sent, paused, and exported the campaign. |
-| Redaction | Do not place full email, phone, VIN, or message body in application logs. |
-| Retention | Define deletion/anonymization schedule and legal retention exceptions. |
-
-## 6. Frontend enhancement opportunities
-
-The preserved frontend is broad and visually valuable, but it exposes legacy product complexity. The most important enhancements are not more modules; they are reductions in decision cost.
-
-| Opportunity | Enhancement | Expected effect |
+| Integration | Production role | Boundary |
 |---|---|---|
-| Today-first home | Role-specific Today page with only urgent, next, blocked, and waiting work | Reduces dashboard scanning. |
-| Unified command palette | Search customers, vehicles, jobs, fleet clients, and actions with permission-aware results | Gives Monday.com power without additional navigation. |
-| Context drawer | Open customer/vehicle/job history without losing board position | Reduces context switching. |
-| Exception inbox | Failed payments, missing approval, late technician, sync error, and customer reply in one queue | Converts hidden failures into manageable work. |
-| Progressive forms | Basic fields first; advanced pricing, tax, integration, and custom metadata on demand | Lowers cognitive load. |
-| Saved role views | Owner, dispatcher, technician, and office presets with personal customization | Makes the product feel purpose-built. |
-| Mobile job mode | Large action buttons, offline state, camera-first evidence, minimal typing | Improves technician completion reliability. |
-| Explainable automation | Every automation says what happened, why, and how to undo/disable it | Builds trust. |
-| Brand preview | Preview customer email, invoice, portal, and payment link before publishing branding | Prevents embarrassing output. |
-| Safe bulk actions | Selection summary, dry run, impact count, and undo window | Enables power-user efficiency safely. |
+| Supabase Auth | Identity/session | Browser session + server validation |
+| Supabase Postgres/RLS | Canonical business state and row authorization | Database/server |
+| Supabase Storage | Attachments/assets/media | Signed/private access rules |
+| Supabase Realtime | Reviewed live invalidation/subscriptions | Browser with RLS |
+| Resend | Primary transactional application email | Server messaging adapter |
+| Enginemailer | Growth/marketing; controlled transactional fallback | Server messaging adapter |
+| Stripe | Payments and reconciliation | Server adapter + signed webhooks |
+| Square | Optional payment adapter when enabled | Server adapter + signed webhooks |
+| Google Calendar | Appointment synchronization | Server integration |
+| SMS provider | Transactional SMS when enabled | Server messaging adapter |
+| Mapbox/geocoding | Maps/address enrichment | Restricted browser token + server proxy where sensitive |
+| Vehicle data | VIN/spec enrichment | Server/provider adapter or intentionally public catalog boundary |
+| PostHog | Product analytics | PII-minimized browser/server events |
+| Sentry | Error observability | PII-scrubbed client/server instrumentation |
 
-## 7. Platform documentation requirements
+Integrations are capabilities, not domain authorities. Appointment truth stays in Service Writer even if calendar sync fails; invoice/payment truth follows the canonical ledger/reconciliation rules even if a provider is delayed.
 
-The repository must contain an architecture decision record for tenancy, auth, provider secrets, asynchronous work, and browser/API boundaries. It must contain OpenAPI or generated route contracts, environment variable reference, local setup guide, deployment runbook, incident runbook, data export/delete runbook, provider onboarding checklist, and a migration/import guide.
+## 5. Messaging contract
 
-## References
+Domain services call the internal `MessagingAdapter` contract. Provider-specific response bodies remain inside adapters.
 
-[1]: https://supabase.com/docs/guides/auth — Supabase Auth documentation.
+Transactional lifecycle mail uses Resend first. Enginemailer owns marketing/growth and may be used only as the configured fallback when a transactional Resend attempt fails before acceptance. All sends must be workspace-scoped and idempotent. Marketing additionally requires fresh consent and suppression checks.
 
-[2]: https://supabase.com/docs/guides/database/postgres/row-level-security — Supabase Row Level Security documentation.
+Provider credentials are server-only. Browser code never imports provider credentials or performs privileged provider HTTP calls.
 
-[3]: https://stripe.com/docs/webhooks — Stripe webhook verification and event handling guidance.
+## 6. Payment contract
 
-[4]: https://developers.google.com/calendar/api/guides/overview — Google Calendar API overview.
+Payment events are accepted only after provider-signature verification, event deduplication, workspace/invoice resolution, and a permitted state transition. Browser success screens are not financial truth. Reconciliation must tolerate duplicate and out-of-order webhooks.
 
+Card data is never stored directly by Service Writer.
 
-## Vendor-neutral messaging adapters
+## 7. Calendar and enrichment contract
 
-Email and SMS are platform capabilities, not vendor capabilities. Domain services must call the internal `MessagingAdapter` contract and may not import Resend, Twilio, SendGrid, MessageBird, or another provider SDK directly. The contract validates channel, purpose, recipient, workspace, template key, variables, metadata, and idempotency key with Zod before a send is attempted.
+Google Calendar is an integration projection, not the appointment source of truth. Failed synchronization must never mutate or invalidate the canonical appointment.
 
-Each provider adapter implements the same operations: send a message, report capabilities, perform a health check, verify inbound webhooks, and normalize delivery events. The normalized event model supports queued, accepted, sent, delivered, failed, bounced, complained, undeliverable, and canceled states. Provider-specific response bodies remain inside the adapter boundary and are never exposed to domain workflows.
+Maps and vehicle data are enrichment services. They may improve address validation, routing, VIN decoding, specifications, and recommendations, but nonessential enrichment failures must not corrupt core operational records.
 
-The registry selects a provider by channel and configuration. A workspace may use one email provider and a different SMS provider, and an administrator can change either default without changing appointment, payment, marketing, or reminder code. Provider switching requires a new adapter implementation, credential validation, a health check, webhook registration, delivery-event replay tests, and a controlled configuration change; it does not require a schema rewrite or domain-code migration.
+## 8. Privacy and PII
 
-All sends must be protected by an idempotency key, persisted with workspace and message-purpose context, checked against consent and suppression rules, and retried only for classified transient failures. Marketing messages require channel-specific consent and suppression checks. Transactional messages may use a separate lawful-basis policy, but must still honor hard bounces, invalid destinations, opt-outs, and workspace-level safety controls. Credentials belong only in server-side secret storage; the browser receives status and configuration metadata, never provider keys.
+Operational PII and marketing eligibility are separate concerns. Customer records may contain name, email, phone, address, vehicle identifiers, and service history; marketing use requires the applicable consent/suppression policy.
 
-The repository includes an explicit disconnected adapter for local development. It renders the UI and reports an unhealthy integration rather than silently sending or pretending delivery succeeded. Production adapters should be added in the server package under `apps/api` or the Next.js server boundary, with contract tests shared across every provider.
+Logs and telemetry must avoid full email, phone, VIN, provider payloads, card data, or message bodies unless explicitly required and protected. Provider webhooks are normalized before domain use.
+
+## 9. Environment contract
+
+The canonical runtime uses `NEXT_PUBLIC_*` for browser-visible values and unprefixed names for server secrets. Runtime `VITE_*` variables are retired. See `docs/environment-and-secrets-manifest.md`.
+
+## 10. Operational UX principles
+
+High-value product improvements should reduce decision cost rather than create duplicate operational modules. Preferred patterns include a Today-first home, role-specific saved views, context drawers, exception queues, progressive forms, safe bulk actions, mobile technician mode, and explainable automation.
+
+Dispatch/scheduling, messaging, payments, and other consequential workflows should have one canonical mutation path even when multiple screens expose it.
+
+## 11. Documentation and change control
+
+Any change that alters deployment topology, tenant ownership, server/browser responsibility, auth authority, or provider ownership must update:
+
+1. `docs/application-architecture-baseline.md`;
+2. `scripts/architecture-contract.json`;
+3. `scripts/check-architecture-contract.mjs` when enforcement changes;
+4. the relevant schema/provider contract and tests.
+
+Architecture changes are not complete until CI enforces the new contract and an exact-SHA Vercel preview proves the consolidated application still builds.

@@ -12,11 +12,13 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
+    "prebuild": "node scripts/check-architecture-contract.mjs",
     "build": "next build",
     "typecheck": "tsc --noEmit",
     "test": "jest --runInBand",
     "test:e2e": "playwright test --config=e2e/playwright.config.ts",
     "smoke:vercel": "node scripts/smoke-test-vercel-authenticated.mjs",
+    "verify:architecture": "node scripts/check-architecture-contract.mjs",
     "verify:deployment": "node scripts/verify-deployment.mjs",
     "verify:integrations": "node scripts/verify-production-integrations.mjs",
     "verify:env": "node scripts/verify-env-manifest.mjs",

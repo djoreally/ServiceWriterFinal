@@ -1,47 +1,46 @@
-const viteEnv = ((import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {}) as Record<string, string | undefined>;
 const runtimeEnv = (typeof process !== "undefined" ? process.env : {}) as Record<string, string | undefined>;
 
 function readEnv(key: string): string {
-  return runtimeEnv[`NEXT_PUBLIC_${key}`] ?? runtimeEnv[key] ?? viteEnv[key] ?? '';
+  return runtimeEnv[key] ?? '';
 }
 
 const getEnvValue = (key: string): string => readEnv(key);
 
 export const features = {
-  // Add your feature flags here
   get 'example-feature'() {
-    return getEnvValue('VITE_FF_EXAMPLE_FEATURE') === 'true';
+    return getEnvValue('NEXT_PUBLIC_FF_EXAMPLE_FEATURE') === 'true';
   },
 
   get 'offline-engine'() {
-    const value = getEnvValue('VITE_FF_OFFLINE_ENGINE').toLowerCase();
-    // Offline sync still targets the pre-workspace schema in several pull paths.
-    // Keep it opt-in until those paths are migrated and certified against the
-    // canonical workspace-scoped production schema. This prevents legacy
-    // background queries from generating 400/404 noise in normal online use.
+    const value = getEnvValue('NEXT_PUBLIC_FF_OFFLINE_ENGINE').toLowerCase();
+    // Offline sync remains opt-in until its complete workspace-scoped contract
+    // is certified. This prevents background compatibility paths from becoming
+    // an implicit production authority.
     return value === 'true';
   },
 
   get 'offline-engine-allowlist'() {
-    return getEnvValue('VITE_FF_OFFLINE_ENGINE_ALLOWLIST');
+    return getEnvValue('NEXT_PUBLIC_FF_OFFLINE_ENGINE_ALLOWLIST');
   },
 
   get 'offline-pilot-tenants'() {
-    return getEnvValue('VITE_FF_OFFLINE_PILOT_TENANTS');
+    return getEnvValue('NEXT_PUBLIC_FF_OFFLINE_PILOT_TENANTS');
   },
 
   get 'offline-kill-switch'() {
-    return getEnvValue('VITE_FF_OFFLINE_KILL_SWITCH') === 'true';
+    return getEnvValue('NEXT_PUBLIC_FF_OFFLINE_KILL_SWITCH') === 'true';
   },
 
   get 'offline-alert-outbox-depth'() {
-    const value = Number(getEnvValue('VITE_FF_OFFLINE_ALERT_OUTBOX_DEPTH'));
+    const value = Number(getEnvValue('NEXT_PUBLIC_FF_OFFLINE_ALERT_OUTBOX_DEPTH'));
     return Number.isFinite(value) && value > 0 ? value : 100;
   },
+
   get 'fleet-intake-kill-switch'() {
-    return getEnvValue('VITE_FF_FLEET_INTAKE_KILL_SWITCH') === 'true';
+    return getEnvValue('NEXT_PUBLIC_FF_FLEET_INTAKE_KILL_SWITCH') === 'true';
   },
+
   get 'fleet-resource-scheduler-kill-switch'() {
-    return getEnvValue('VITE_FF_FLEET_RESOURCE_SCHEDULER_KILL_SWITCH') === 'true';
+    return getEnvValue('NEXT_PUBLIC_FF_FLEET_RESOURCE_SCHEDULER_KILL_SWITCH') === 'true';
   },
 };
