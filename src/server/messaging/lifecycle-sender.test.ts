@@ -35,7 +35,7 @@ function messageLogUpsertResult() {
 describe("lifecycle sender policy", () => {
   afterEach(() => jest.restoreAllMocks());
 
-  it("records a suppressed transactional recipient without contacting the provider", async () => {
+  it("records a suppressed transactional recipient without contacting a provider", async () => {
     const messageLogs = messageLogUpsertResult();
     (createSupabaseAdminClient as jest.Mock).mockReturnValue({
       rpc: jest.fn().mockResolvedValue({ data: true, error: null }),
@@ -44,7 +44,8 @@ describe("lifecycle sender policy", () => {
         throw new Error(`Unexpected table ${table}`);
       }),
     });
-    const providerSend = jest.spyOn(EnginemailerEmailAdapter.prototype, "send");
+    const resend = jest.spyOn(ResendEmailAdapter.prototype, "send");
+    const enginemailer = jest.spyOn(EnginemailerEmailAdapter.prototype, "send");
 
     const result = await sendLifecycleEmail({
       workspaceId: "00000000-0000-4000-8000-000000000001",
@@ -55,7 +56,8 @@ describe("lifecycle sender policy", () => {
     });
 
     expect(result.status).toBe("suppressed");
-    expect(providerSend).not.toHaveBeenCalled();
+    expect(resend).not.toHaveBeenCalled();
+    expect(enginemailer).not.toHaveBeenCalled();
     expect(messageLogs.upsert).toHaveBeenCalledWith(expect.objectContaining({
       status: "canceled",
       failure_code: "suppressed",
@@ -79,8 +81,8 @@ describe("lifecycle sender policy", () => {
         throw new Error(`Unexpected table ${table}`);
       }),
     });
-    const providerSend = jest.spyOn(ResendEmailAdapter.prototype, "send");
-    const marketingSend = jest.spyOn(EnginemailerEmailAdapter.prototype, "send");
+    const resend = jest.spyOn(ResendEmailAdapter.prototype, "send");
+    const enginemailer = jest.spyOn(EnginemailerEmailAdapter.prototype, "send");
 
     const result = await sendLifecycleEmail({
       workspaceId: "00000000-0000-4000-8000-000000000001",
@@ -96,26 +98,20 @@ describe("lifecycle sender policy", () => {
     });
 
     expect(result.status).toBe("suppressed");
-    expect(providerSend).not.toHaveBeenCalled();
-    expect(marketingSend).not.toHaveBeenCalled();
-    expect(messageLogs.upsert).toHaveBeenCalledWith(expect.objectContaining({
-      status: "canceled",
-      failure_code: "consent_required",
-    }), { onConflict: "workspace_id,idempotency_key" });
+    expect(resend).not.toHaveBeenCalled();
+    expect(enginemailer).not.toHaveBeenCalled();
   });
 
-  it("routes both transactional and marketing email to Enginemailer", () => {
-    expect(lifecycleAdapterForPurpose("transactional")).toBeInstanceOf(EnginemailerEmailAdapter);
-    expect(lifecycleAdapterForPurpose("appointment_update")).toBeInstanceOf(EnginemailerEmailAdapter);
+  it("routes transactional email to Resend and marketing email to Enginemailer", () => {
+    expect(lifecycleAdapterForPurpose("transactional")).toBeInstanceOf(ResendEmailAdapter);
+    expect(lifecycleAdapterForPurpose("appointment_update")).toBeInstanceOf(ResendEmailAdapter);
     expect(lifecycleAdapterForPurpose("marketing")).toBeInstanceOf(EnginemailerEmailAdapter);
-    expect(lifecycleAdapterForPurpose("transactional")).not.toBeInstanceOf(ResendEmailAdapter);
+    expect(lifecycleAdapterForPurpose("transactional")).not.toBeInstanceOf(EnginemailerEmailAdapter);
   });
 
-  it("falls back to Resend when Enginemailer rejects before acceptance", async () => {
-    const previousApiKey = process.env.RESEND_API_KEY;
-    const previousFromEmail = process.env.RESEND_FROM_EMAIL;
-    process.env.RESEND_API_KEY = "test-resend-key";
-    process.env.RESEND_FROM_EMAIL = "noreply@example.com";
+  it("falls back to Enginemailer when Resend rejects before acceptance", async () => {
+    const previousApiKey = process.env.ENGINEMAILER_API_KEY;
+    process.env.ENGINEMAILER_API_KEY = "test-enginemailer-key";
     try {
       const existingQuery = {
         select: jest.fn().mockReturnThis(),
@@ -143,12 +139,12 @@ describe("lifecycle sender policy", () => {
           return next;
         }),
       });
-      jest.spyOn(EnginemailerEmailAdapter.prototype, "send").mockRejectedValue(new Error("Enginemailer unavailable"));
-      jest.spyOn(ResendEmailAdapter.prototype, "send").mockResolvedValue({
-        providerMessageId: "re_123",
-        providerName: "resend",
+      jest.spyOn(ResendEmailAdapter.prototype, "send").mockRejectedValue(new Error("Resend unavailable"));
+      jest.spyOn(EnginemailerEmailAdapter.prototype, "send").mockResolvedValue({
+        providerMessageId: "tx_123",
+        providerName: "enginemailer",
         status: "accepted",
-        acceptedAt: "2026-08-31T15:00:00.000Z",
+        acceptedAt: "2026-09-03T21:00:00.000Z",
       });
 
       const result = await sendLifecycleEmail({
@@ -159,17 +155,24 @@ describe("lifecycle sender policy", () => {
         variables: bookingVariables,
       });
 
-      expect(result).toEqual({ providerMessageId: "re_123", providerName: "resend", status: "accepted", acceptedAt: "2026-08-31T15:00:00.000Z" });
-      expect(update).toHaveBeenCalledWith(expect.objectContaining({ provider: "resend", provider_message_id: "re_123", status: "accepted" }));
+      expect(result).toEqual({
+        providerMessageId: "tx_123",
+        providerName: "enginemailer",
+        status: "accepted",
+        acceptedAt: "2026-09-03T21:00:00.000Z",
+      });
+      expect(update).toHaveBeenCalledWith(expect.objectContaining({
+        provider: "enginemailer",
+        provider_message_id: "tx_123",
+        status: "accepted",
+      }));
     } finally {
-      if (previousApiKey === undefined) delete process.env.RESEND_API_KEY;
-      else process.env.RESEND_API_KEY = previousApiKey;
-      if (previousFromEmail === undefined) delete process.env.RESEND_FROM_EMAIL;
-      else process.env.RESEND_FROM_EMAIL = previousFromEmail;
+      if (previousApiKey === undefined) delete process.env.ENGINEMAILER_API_KEY;
+      else process.env.ENGINEMAILER_API_KEY = previousApiKey;
     }
   });
 
-  it("does not retry an email accepted by the provider when post-send bookkeeping fails", async () => {
+  it("does not retry an email accepted by Resend when post-send bookkeeping fails", async () => {
     const existingQuery = {
       select: jest.fn().mockReturnThis(),
       eq: jest.fn().mockReturnThis(),
@@ -198,11 +201,11 @@ describe("lifecycle sender policy", () => {
       }),
     });
     jest.spyOn(console, "error").mockImplementation(() => undefined);
-    const providerSend = jest.spyOn(EnginemailerEmailAdapter.prototype, "send").mockResolvedValue({
-      providerMessageId: "tx-accepted",
-      providerName: "enginemailer",
+    const providerSend = jest.spyOn(ResendEmailAdapter.prototype, "send").mockResolvedValue({
+      providerMessageId: "re_accepted",
+      providerName: "resend",
       status: "accepted",
-      acceptedAt: "2026-08-31T15:00:00.000Z",
+      acceptedAt: "2026-09-03T21:00:00.000Z",
     });
 
     await expect(sendLifecycleEmail({
@@ -211,7 +214,7 @@ describe("lifecycle sender policy", () => {
       templateKey: "appointment_booking_sequence.booking_confirmation",
       idempotencyKey: "booking:ABC12345:customer@example.com",
       variables: bookingVariables,
-    })).resolves.toEqual(expect.objectContaining({ status: "accepted", providerMessageId: "tx-accepted" }));
+    })).resolves.toEqual(expect.objectContaining({ status: "accepted", providerMessageId: "re_accepted" }));
     expect(providerSend).toHaveBeenCalledTimes(1);
   });
 });
