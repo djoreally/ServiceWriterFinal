@@ -20,7 +20,8 @@ assert(contract.provider_ownership?.growth_marketing_email === "Enginemailer", "
 assert(pkg.scripts?.dev === "next dev", "package.json dev runtime must be Next.js.");
 assert(pkg.scripts?.build === "next build", "package.json build runtime must be Next.js.");
 assert(pkg.scripts?.start === "next start", "package.json production runtime must be Next.js.");
-assert(pkg.scripts?.prebuild === "node scripts/check-architecture-contract.mjs", "Every production build must run the architecture contract first.");
+const prebuild = pkg.scripts?.prebuild || "";
+assert(prebuild.split("&&").map((part) => part.trim())[0] === "node scripts/check-architecture-contract.mjs", "Every production build must run the architecture contract first.");
 assert(pkg.engines?.node === "24.x", "Node runtime must remain pinned to 24.x.");
 assert(Boolean(pkg.dependencies?.next), "Next.js must be a production dependency.");
 assert(vercel.framework === "nextjs", "vercel.json must declare framework=nextjs.");
