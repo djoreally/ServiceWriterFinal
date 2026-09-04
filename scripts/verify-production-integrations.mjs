@@ -1,32 +1,31 @@
 const mode = process.env.INTEGRATION_ENV || process.env.NODE_ENV || "development";
 const allowMissing = process.env.ALLOW_MISSING_INTEGRATIONS === "true" || mode !== "production";
 const checks = [
-  ["NEXT_PUBLIC_SUPABASE_URL", "API Supabase URL", true],
-  ["NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "API Supabase publishable key", true],
+  ["NEXT_PUBLIC_SUPABASE_URL", "canonical Supabase URL", true],
+  ["NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", "Supabase browser publishable key", true],
+  ["NEXT_PUBLIC_SUPABASE_PROJECT_ID", "canonical Supabase project ref", true],
+  ["NEXT_PUBLIC_API_BASE_URL", "same-origin Next.js API base", true],
   ["NEXT_PUBLIC_APP_URL", "application public URL", true],
   ["NEXT_PUBLIC_CORS_ORIGIN", "API CORS origin", true],
   ["SUPABASE_SERVICE_ROLE_KEY", "server Supabase service role key", true],
-  ["CRON_SECRET", "Vercel lifecycle cron secret", true],
-  ["ENGINEMAILER_API_KEY", "Enginemailer primary API key", true],
+  ["CRON_SECRET", "Vercel background-worker secret", true],
+  ["RESEND_API_KEY", "Resend transactional API key", true],
+  ["RESEND_FROM_EMAIL", "Resend transactional verified sender", true],
+  ["RESEND_WEBHOOK_SIGNING_SECRET", "Resend transactional webhook signing secret", true],
+  ["ENGINEMAILER_API_KEY", "Enginemailer growth/marketing API key and transactional fallback", true],
   ["ENGINEMAILER_FROM_EMAIL", "Enginemailer verified sender", true],
   ["ENGINEMAILER_WEBHOOK_SIGNING_SECRET", "Enginemailer HMAC webhook secret", true],
-  ["ENGINEMAILER_TRANSACTIONAL_API_KEY", "Enginemailer least-privilege transactional API key", false],
-  ["ENGINEMAILER_TRANSACTIONAL_FROM_EMAIL", "Enginemailer transactional sender override", false],
-  ["ENGINEMAILER_MARKETING_FROM_EMAIL", "Enginemailer marketing sender override", false],
-  ["ENGINEMAILER_MARKETING_SUBCATEGORY_IDS", "Enginemailer marketing subscriber categories", false],
-  ["RESEND_API_KEY", "Legacy Resend rollback API key", false],
-  ["RESEND_FROM_EMAIL", "Legacy Resend rollback sender", false],
-  ["RESEND_WEBHOOK_SIGNING_SECRET", "Legacy Resend webhook signing secret", false],
-  ["TWILIO_ACCOUNT_SID", "Twilio account SID", false],
-  ["TWILIO_AUTH_TOKEN", "Twilio auth token", false],
-  ["TWILIO_FROM_NUMBER", "Twilio sender number", false],
+  ["ENGINEMAILER_TRANSACTIONAL_API_KEY", "optional Enginemailer least-privilege fallback key", false],
+  ["ENGINEMAILER_TRANSACTIONAL_FROM_EMAIL", "optional Enginemailer fallback sender override", false],
+  ["ENGINEMAILER_MARKETING_FROM_EMAIL", "optional Enginemailer marketing sender override", false],
+  ["ENGINEMAILER_MARKETING_SUBCATEGORY_IDS", "optional Enginemailer marketing subscriber categories", false],
+  ["TWILIO_ACCOUNT_SID", "SMS provider account SID", false],
+  ["TWILIO_AUTH_TOKEN", "SMS provider auth token", false],
+  ["TWILIO_FROM_NUMBER", "SMS sender number", false],
   ["STRIPE_SECRET_KEY", "Stripe server secret", false],
   ["STRIPE_WEBHOOK_SECRET", "Stripe webhook secret", false],
-  ["VITE_STRIPE_PUBLISHABLE_KEY", "Stripe frontend publishable key", false],
   ["SENTRY_DSN", "Sentry server DSN", false],
-  ["VITE_SENTRY_DSN", "Sentry frontend DSN", false],
-  ["VITE_POSTHOG_KEY", "PostHog browser key", false],
-  ["VITE_POSTHOG_HOST", "PostHog host", false],
+  ["SENTRY_AUTH_TOKEN", "Sentry server auth token", false],
 ];
 
 const missing = checks.filter(([name]) => !process.env[name]);
@@ -37,7 +36,20 @@ const failures = [];
 if (origin && !/^https:\/\//i.test(origin) && mode === "production") failures.push("NEXT_PUBLIC_APP_URL must use HTTPS in production.");
 if (corsOrigin && /\/$/.test(corsOrigin)) failures.push("NEXT_PUBLIC_CORS_ORIGIN must not have a trailing slash.");
 if (origin && corsOrigin && new URL(origin).hostname === new URL(corsOrigin).hostname && origin !== corsOrigin) {
-  console.warn("Warning: application URL and CORS origin differ in scheme or port; verify the browser API origin intentionally.");
+  console.warn("Warning: application URL and CORS origin differ in scheme or port; verify this is intentional.");
+}
+if (process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_PROJECT_ID) {
+  const expectedHost = `${process.env.NEXT_PUBLIC_SUPABASE_PROJECT_ID}.supabase.co`;
+  try {
+    if (new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).hostname !== expectedHost) {
+      failures.push("Supabase URL and project ref do not identify the same project.");
+    }
+  } catch {
+    failures.push("NEXT_PUBLIC_SUPABASE_URL is invalid.");
+  }
+}
+for (const name of Object.keys(process.env)) {
+  if (/^VITE_/i.test(name)) failures.push(`${name} is a retired Vite environment variable and is not allowed in the canonical deployment.`);
 }
 
 for (const [name, label, required] of checks) {
