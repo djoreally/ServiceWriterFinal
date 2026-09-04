@@ -69,16 +69,20 @@ const envExample = read(".env.example");
 assert(envExample.includes("RESEND_API_KEY="), ".env.example must declare Resend transactional credentials.");
 assert(envExample.includes("ENGINEMAILER_API_KEY="), ".env.example must declare Enginemailer marketing credentials.");
 
-const canonicalDocs = [
-  "docs/application-architecture-baseline.md",
-  "docs/environment-and-secrets-manifest.md",
-];
-for (const file of canonicalDocs) {
-  const content = read(file);
-  for (const stale of ["Vite frontend", "split deployment", "apps/web-next", "VITE_SUPABASE_URL"]) {
-    if (content.includes(stale)) failures.push(`${file}: stale architecture phrase remains: ${stale}`);
-  }
-}
+const baseline = read("docs/application-architecture-baseline.md");
+assert(baseline.includes("one Next.js App Router application"), "Architecture baseline must state the single Next.js application topology.");
+assert(baseline.includes("`app/api/**` is the only canonical application server API"), "Architecture baseline must identify app/api/** as the server authority.");
+assert(baseline.includes("The tenant invariant is `workspace_id`"), "Architecture baseline must identify workspace_id as tenant authority.");
+assert(baseline.includes("Transactional application email | Resend"), "Architecture baseline must identify Resend as transactional email owner.");
+
+const deploymentRecord = read("docs/canonical-vercel-deployment-record.md");
+assert(deploymentRecord.includes("`servicewriter.xyx`"), "Canonical Vercel record must identify servicewriter.xyx.");
+assert(deploymentRecord.includes("`prj_LwYh6HJuUsB2LZG9eoKs23hDoJuw`"), "Canonical Vercel record must identify the certified project ID.");
+assert(deploymentRecord.includes("`rjfbrfognxqkyhdrpibx`"), "Canonical Vercel record must identify the certified Supabase project.");
+
+const environmentManifest = read("docs/environment-and-secrets-manifest.md");
+assert(environmentManifest.includes("Resend is the primary transactional email provider"), "Environment manifest must preserve transactional provider ownership.");
+assert(environmentManifest.includes("Runtime `VITE_*` configuration is retired"), "Environment manifest must explicitly retire Vite runtime configuration.");
 
 if (failures.length) {
   console.error("Architecture contract verification failed:");
