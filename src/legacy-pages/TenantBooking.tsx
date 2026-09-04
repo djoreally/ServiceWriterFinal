@@ -1,20 +1,96 @@
 /**
  * TenantBooking - Entry point for subdomain-based tenant booking
- * 
+ *
  * ENTERPRISE REQUIREMENT: Tenant resolution happens exactly ONCE via root TenantProvider.
  * PublicBooking consumes tenant context via useTenant.
  */
 
 import { useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import { useTenant } from "@/contexts/TenantContext";
 import PublicBooking from "./PublicBooking";
 import NotFound from "./NotFound";
+
+const BOOKING_RESIZE_MESSAGE = "servicewriter:booking-resize";
+
+/**
+ * When the booking flow is rendered through /embed/booking, report the live
+ * document height to the parent page so the host iframe can grow with each
+ * booking step instead of forcing customers into a nested scrollbar.
+ */
+function useBookingEmbedAutoResize() {
+  const location = useLocation();
+
+  useEffect(() => {
+    if (location.pathname !== "/embed/booking" || window.parent === window) return;
+
+    let frame = 0;
+
+    const targetOrigin = (() => {
+      try {
+        return document.referrer ? new URL(document.referrer).origin : "*";
+      } catch {
+        return "*";
+      }
+    })();
+
+    const reportHeight = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const body = document.body;
+        const root = document.documentElement;
+        const height = Math.max(
+          body.scrollHeight,
+          body.offsetHeight,
+          root.scrollHeight,
+          root.offsetHeight,
+          root.clientHeight,
+        );
+
+        window.parent.postMessage(
+          {
+            type: BOOKING_RESIZE_MESSAGE,
+            height,
+          },
+          targetOrigin,
+        );
+      });
+    };
+
+    reportHeight();
+
+    const resizeObserver = new ResizeObserver(reportHeight);
+    resizeObserver.observe(document.documentElement);
+    resizeObserver.observe(document.body);
+
+    const mutationObserver = new MutationObserver(reportHeight);
+    mutationObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      characterData: false,
+    });
+
+    window.addEventListener("load", reportHeight);
+    window.addEventListener("resize", reportHeight);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+      window.removeEventListener("load", reportHeight);
+      window.removeEventListener("resize", reportHeight);
+    };
+  }, [location.pathname]);
+}
 
 /**
  * Inner component that consumes tenant context
  */
 function TenantBookingContent() {
   const { loading, isValid, slug, errorKind, retry } = useTenant();
+
+  useBookingEmbedAutoResize();
 
   // Force light theme for public booking pages
   useEffect(() => {
@@ -60,7 +136,6 @@ function TenantBookingContent() {
   // Tenant context is now available via TenantProvider to all children
   return <PublicBooking tenantSlug={slug} />;
 }
-
 
 const TenantBooking = () => {
   return <TenantBookingContent />;
