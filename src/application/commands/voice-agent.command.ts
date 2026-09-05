@@ -1,21 +1,44 @@
 /**
- * Voice Agent Commands — update owner settings + invoke ElevenLabs
- * booking tools / token vending edge functions.
+ * Voice Agent Commands — canonical workspace settings + ElevenLabs provider calls.
  */
 import { supabase } from "@/integrations/supabase/client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
 export async function updateVoiceAgentSettings(params: {
   enabled: boolean;
   agentId: string;
 }): Promise<void> {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) throw new Error("Not authenticated");
-  const nextValue = params.enabled ? (params.agentId || null) : null;
-  const { error } = await supabase
-    .from("business_profiles")
-    .update({ elevenlabs_agent_id: nextValue })
-    .eq("user_id", user.id);
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("Not authenticated");
+
+  const { data: current, error: readError } = await (supabase as any)
+    .from("workspace_settings")
+    .select("operational_settings")
+    .eq("workspace_id", context.workspaceId)
+    .maybeSingle();
+  if (readError) throw readError;
+
+  const operational = object(current?.operational_settings);
+  const voiceAgent = object(operational.voice_agent);
+  const nextOperational = {
+    ...operational,
+    voice_agent: {
+      ...voiceAgent,
+      elevenlabs_agent_id: params.enabled ? (params.agentId || null) : null,
+      enabled: params.enabled,
+    },
+  };
+
+  const { error } = await (supabase as any)
+    .from("workspace_settings")
+    .update({ operational_settings: nextOperational })
+    .eq("workspace_id", context.workspaceId);
   if (error) throw error;
 }
 
@@ -24,7 +47,6 @@ export interface VoiceBookingToolResult {
   error: { message: string } | null;
 }
 
-/** Invoke the elevenlabs-booking-tools edge function for the given tool. */
 export async function invokeVoiceBookingTool(params: {
   slug: string;
   tool: "get_services" | "check_availability" | "book_appointment" | "create_service_request" | "get_shop_info";
@@ -42,7 +64,6 @@ export interface VoiceTokenResponse {
   error?: string;
 }
 
-/** Mint an ElevenLabs WebRTC conversation token for a public booking slug. */
 export async function fetchVoiceConversationToken(slug: string): Promise<VoiceTokenResponse> {
   const { data, error } = await supabase.functions.invoke("elevenlabs-voice-token", {
     body: { slug },
