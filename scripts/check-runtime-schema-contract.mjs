@@ -1,0 +1,71 @@
+import fs from "node:fs";
+import path from "node:path";
+import process from "node:process";
+
+const ROOT = process.cwd();
+const RUNTIME_PREFIXES = ["src", "app", "packages"];
+const RUNTIME_SUFFIXES = [".ts", ".tsx", ".js", ".jsx", ".mjs"];
+const SKIP_PARTS = ["/__tests__/", "/test/", "/tests/", "/fixtures/", "/generated/"];
+
+const RULES = [
+  ["retired table business_profiles", /\.from\(\s*["']business_profiles["']\s*\)/m, "use workspaces/workspace_settings"],
+  ["retired table blocked_dates", /\.from\(\s*["']blocked_dates["']\s*\)/m, "use workspace_blackout_dates"],
+  ["retired table intake_questions", /\.from\(\s*["']intake_questions["']\s*\)/m, "use workspace_intake_questions"],
+  ["retired table client_error_events", /(?:\.from\(\s*["']client_error_events["']\s*\)|\/rest\/v1\/client_error_events)/m, "use server observability/logging"],
+  ["retired table customer_accounts", /\.from\(\s*["']customer_accounts["']\s*\)/m, "use customers + customer_users"],
+  ["retired customer account RPC", /\.rpc\(\s*["']create_customer_account["']/m, "use link_customer_portal_account_v1"],
+  ["retired customer appointments RPC", /\.rpc\(\s*["']get_customer_portal_appointments["']/m, "use get_customer_portal_appointments_v1"],
+  ["retired table services", /\.from\(\s*["']services["']\s*\)/m, "use service_catalog"],
+  ["retired table appointment_services", /\.from\(\s*["']appointment_services["']\s*\)/m, "use appointment_items"],
+  ["retired table fleet_work_orders", /\.from\(\s*["']fleet_work_orders["']\s*\)/m, "use work_orders/fleet_service_requests"],
+  ["retired table fleet_vehicles", /\.from\(\s*["']fleet_vehicles["']\s*\)/m, "use vehicles"],
+  ["retired table technicians", /\.from\(\s*["']technicians["']\s*\)/m, "use profiles + workspace membership/assignments"],
+  ["retired cash collection view", /\.from\(\s*["']cash_collection_receipts_v1["']\s*\)/m, "use canonical payments/invoices APIs"],
+  ["retired access edge function", /functions\.invoke\(\s*["']gate-app-access["']/m, "use canonical Supabase session/workspace RBAC"],
+  ["legacy appointments.user_id scope", /\.from\(\s*["']appointments["']\s*\)[\s\S]{0,1400}?\.eq\(\s*["']user_id["']/m, "scope appointments by workspace_id"],
+  ["legacy appointment title column", /\.from\(\s*["']appointments["']\s*\)[\s\S]{0,900}?\.select\([^)]*\btitle\b/m, "appointments.title does not exist; derive display text"],
+  ["legacy appointment scheduled_date column", /\.from\(\s*["']appointments["']\s*\)[\s\S]{0,900}?\.select\([^)]*\bscheduled_date\b/m, "use starts_at"],
+  ["legacy appointment scheduled_time column", /\.from\(\s*["']appointments["']\s*\)[\s\S]{0,900}?\.select\([^)]*\bscheduled_time\b/m, "use starts_at"],
+];
+
+function isRuntimeFile(file) {
+  const normalized = `/${file.split(path.sep).join("/")}`;
+  return RUNTIME_SUFFIXES.some((suffix) => file.endsWith(suffix)) && !SKIP_PARTS.some((part) => normalized.includes(part));
+}
+
+function walk(dir, out = []) {
+  if (!fs.existsSync(dir)) return out;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) walk(full, out);
+    else if (entry.isFile()) out.push(full);
+  }
+  return out;
+}
+
+const files = RUNTIME_PREFIXES.flatMap((prefix) => walk(path.join(ROOT, prefix)))
+  .map((full) => path.relative(ROOT, full))
+  .filter(isRuntimeFile)
+  .sort();
+
+const violations = [];
+for (const file of files) {
+  const text = fs.readFileSync(path.join(ROOT, file), "utf8");
+  for (const [name, regex, replacement] of RULES) {
+    const match = text.match(regex);
+    if (!match || match.index == null) continue;
+    const line = text.slice(0, match.index).split("\n").length;
+    violations.push(`${file}:${line}: ${name}; ${replacement}`);
+  }
+}
+
+console.log(`runtime-schema-contract: checked ${files.length} runtime file(s)`);
+if (violations.length === 0) {
+  console.log("runtime-schema-contract: PASS");
+  process.exit(0);
+}
+
+console.error(`runtime-schema-contract: ${violations.length} violation(s) detected:`);
+for (const violation of violations) console.error(`- ${violation}`);
+console.error("Canonical replacements are documented in scripts/schema-contract.json.");
+process.exit(1);
