@@ -8,10 +8,18 @@ const querySchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
 
+const bookingSlugAliases: Readonly<Record<string, string>> = {
+  moms: "momsoilchange",
+};
+
 type RpcRow = Record<string, unknown>;
 type Requirement = "basic_vehicle" | "oil_fitment" | "tire_fitment" | "tire_quantity" | "detailing_assessment";
 
 function unavailable() { return new Error("public_booking_unavailable"); }
+
+function canonicalBookingSlug(slug: string): string {
+  return bookingSlugAliases[slug.toLowerCase()] ?? slug;
+}
 
 function normalizedRequirements(row: RpcRow): Requirement[] {
   const requirements = new Set<Requirement>(["basic_vehicle"]);
@@ -39,7 +47,7 @@ async function profileForSlug(supabase: Awaited<ReturnType<typeof createSupabase
 export async function GET(request: Request, context: { params: Promise<{ slug: string }> }) {
   try {
     const { slug: rawSlug } = await context.params;
-    const slug = slugSchema.parse(rawSlug);
+    const slug = canonicalBookingSlug(slugSchema.parse(rawSlug));
     const url = new URL(request.url);
     const query = querySchema.parse({ section: url.searchParams.get("section") ?? undefined, date: url.searchParams.get("date") ?? undefined });
     const supabase = await createSupabaseServerClient();
