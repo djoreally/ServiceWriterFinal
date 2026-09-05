@@ -1,37 +1,49 @@
-/**
- * Tax Settings Commands — Write operations for tax configuration.
- */
+/** Tax Settings Commands — canonical workspace tax configuration. */
 import { supabase } from "@/integrations/supabase/client";
 import type { TaxSettingsData } from "@/application/queries/tax-settings.query";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
-async function getUserId(): Promise<string> {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) throw new Error("Not authenticated");
-  return user.id;
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }
 
 export async function saveTaxSettings(settings: TaxSettingsData): Promise<void> {
-  const userId = await getUserId();
-  const { error } = await supabase
-    .from("business_profiles")
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("Not authenticated");
+
+  const { data: current, error: readError } = await (supabase as any)
+    .from("workspace_settings")
+    .select("operational_settings")
+    .eq("workspace_id", context.workspaceId)
+    .maybeSingle();
+  if (readError) throw readError;
+
+  const operational = {
+    ...object(current?.operational_settings),
+    location_tax_enabled: settings.location_tax_enabled,
+    tax_provider: settings.tax_provider,
+    default_tax_nexus_state: settings.default_tax_nexus_state,
+  };
+
+  const { error } = await (supabase as any)
+    .from("workspace_settings")
     .update({
-      location_tax_enabled: settings.location_tax_enabled,
-      tax_provider: settings.tax_provider,
-      default_tax_nexus_state: settings.default_tax_nexus_state,
       tax_rate: settings.flat_tax_rate,
+      operational_settings: operational,
     })
-    .eq("user_id", userId);
+    .eq("workspace_id", context.workspaceId);
   if (error) throw error;
 }
+
+const LOCATION_TAX_RETIRED = "Per-location tax-rate management is not enabled in the canonical Service Writer schema";
 
 export async function seedDefaultTaxRates(): Promise<void> {
-  const userId = await getUserId();
-  const { error } = await supabase.rpc("seed_default_tax_rates", { p_user_id: userId });
-  if (error) throw error;
+  throw new Error(LOCATION_TAX_RETIRED);
 }
 
-export async function saveTaxRate(rate: {
+export async function saveTaxRate(_rate: {
   state_code: string;
   county: string | null;
   city: string | null;
@@ -41,20 +53,10 @@ export async function saveTaxRate(rate: {
   city_rate: number;
   special_rate: number;
   combined_rate: number;
-}, editingId?: string): Promise<void> {
-  const userId = await getUserId();
-  const rateData = { ...rate, user_id: userId, is_active: true };
-
-  if (editingId) {
-    const { error } = await supabase.from("tax_rates").update(rateData).eq("id", editingId);
-    if (error) throw error;
-  } else {
-    const { error } = await supabase.from("tax_rates").insert(rateData);
-    if (error) throw error;
-  }
+}, _editingId?: string): Promise<void> {
+  throw new Error(LOCATION_TAX_RETIRED);
 }
 
-export async function deleteTaxRate(rateId: string): Promise<void> {
-  const { error } = await supabase.from("tax_rates").delete().eq("id", rateId);
-  if (error) throw error;
+export async function deleteTaxRate(_rateId: string): Promise<void> {
+  throw new Error(LOCATION_TAX_RETIRED);
 }
