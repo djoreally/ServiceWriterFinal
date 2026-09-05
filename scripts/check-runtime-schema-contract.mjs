@@ -5,6 +5,8 @@ import process from "node:process";
 const ROOT = process.cwd();
 const RUNTIME_SUFFIXES = [".ts", ".tsx", ".js", ".jsx", ".mjs"];
 const SKIP_PARTS = ["/__tests__/", "/test/", "/tests/", "/fixtures/", "/generated/"];
+const SAME_CHAIN_1400 = "(?:(?!\\.from\\()[\\s\\S]){0,1400}?";
+const SAME_CHAIN_900 = "(?:(?!\\.from\\()[\\s\\S]){0,900}?";
 
 const RULES = [
   ["retired table business_profiles", /\.from\(\s*["']business_profiles["']\s*\)/m, "use workspaces/workspace_settings"],
@@ -21,10 +23,10 @@ const RULES = [
   ["retired table technicians", /\.from\(\s*["']technicians["']\s*\)/m, "use profiles + workspace membership/assignments"],
   ["retired cash collection view", /\.from\(\s*["']cash_collection_receipts_v1["']\s*\)/m, "use canonical payments/invoices APIs"],
   ["retired access edge function", /functions\.invoke\(\s*["']gate-app-access["']/m, "use canonical Supabase session/workspace RBAC"],
-  ["legacy appointments.user_id scope", /\.from\(\s*["']appointments["']\s*\)[\s\S]{0,1400}?\.eq\(\s*["']user_id["']/m, "scope appointments by workspace_id"],
-  ["legacy appointment title column", /\.from\(\s*["']appointments["']\s*\)[\s\S]{0,900}?\.select\([^)]*\btitle\b/m, "appointments.title does not exist; derive display text"],
-  ["legacy appointment scheduled_date column", /\.from\(\s*["']appointments["']\s*\)[\s\S]{0,900}?\.select\([^)]*\bscheduled_date\b/m, "use starts_at"],
-  ["legacy appointment scheduled_time column", /\.from\(\s*["']appointments["']\s*\)[\s\S]{0,900}?\.select\([^)]*\bscheduled_time\b/m, "use starts_at"],
+  ["legacy appointments.user_id scope", new RegExp(`\\.from\\(\\s*["']appointments["']\\s*\\)${SAME_CHAIN_1400}\\.eq\\(\\s*["']user_id["']`, "m"), "scope appointments by workspace_id"],
+  ["legacy appointment title column", new RegExp(`\\.from\\(\\s*["']appointments["']\\s*\\)${SAME_CHAIN_900}\\.select\\([^)]*\\btitle\\b`, "m"), "appointments.title does not exist; derive display text"],
+  ["legacy appointment scheduled_date column", new RegExp(`\\.from\\(\\s*["']appointments["']\\s*\\)${SAME_CHAIN_900}\\.select\\([^)]*\\bscheduled_date\\b`, "m"), "use starts_at"],
+  ["legacy appointment scheduled_time column", new RegExp(`\\.from\\(\\s*["']appointments["']\\s*\\)${SAME_CHAIN_900}\\.select\\([^)]*\\bscheduled_time\\b`, "m"), "use starts_at"],
 ];
 
 function normalized(file) {
