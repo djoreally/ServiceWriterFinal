@@ -3,7 +3,6 @@ import path from "node:path";
 import process from "node:process";
 
 const ROOT = process.cwd();
-const RUNTIME_PREFIXES = ["src", "app", "packages"];
 const RUNTIME_SUFFIXES = [".ts", ".tsx", ".js", ".jsx", ".mjs"];
 const SKIP_PARTS = ["/__tests__/", "/test/", "/tests/", "/fixtures/", "/generated/"];
 
@@ -28,9 +27,13 @@ const RULES = [
   ["legacy appointment scheduled_time column", /\.from\(\s*["']appointments["']\s*\)[\s\S]{0,900}?\.select\([^)]*\bscheduled_time\b/m, "use starts_at"],
 ];
 
+function normalized(file) {
+  return file.split(path.sep).join("/");
+}
+
 function isRuntimeFile(file) {
-  const normalized = `/${file.split(path.sep).join("/")}`;
-  return RUNTIME_SUFFIXES.some((suffix) => file.endsWith(suffix)) && !SKIP_PARTS.some((part) => normalized.includes(part));
+  const value = `/${normalized(file)}`;
+  return RUNTIME_SUFFIXES.some((suffix) => file.endsWith(suffix)) && !SKIP_PARTS.some((part) => value.includes(part));
 }
 
 function walk(dir, out = []) {
@@ -43,11 +46,66 @@ function walk(dir, out = []) {
   return out;
 }
 
-const files = RUNTIME_PREFIXES.flatMap((prefix) => walk(path.join(ROOT, prefix)))
-  .map((full) => path.relative(ROOT, full))
-  .filter(isRuntimeFile)
-  .sort();
+function resolveModule(importer, specifier) {
+  let base;
+  if (specifier.startsWith("@/")) base = path.join(ROOT, "src", specifier.slice(2));
+  else if (specifier.startsWith("@packages/")) base = path.join(ROOT, "packages", specifier.slice("@packages/".length));
+  else if (specifier.startsWith("./") || specifier.startsWith("../")) base = path.resolve(path.dirname(path.join(ROOT, importer)), specifier);
+  else return null;
 
+  const candidates = [base];
+  for (const extension of RUNTIME_SUFFIXES) candidates.push(`${base}${extension}`);
+  for (const extension of RUNTIME_SUFFIXES) candidates.push(path.join(base, `index${extension}`));
+
+  for (const candidate of candidates) {
+    if (!fs.existsSync(candidate) || !fs.statSync(candidate).isFile()) continue;
+    const relative = normalized(path.relative(ROOT, candidate));
+    return isRuntimeFile(relative) ? relative : null;
+  }
+  return null;
+}
+
+function importSpecifiers(text) {
+  const specs = new Set();
+  const patterns = [
+    /(?:import|export)\s+(?:[^"']*?\s+from\s+)?["']([^"']+)["']/g,
+    /import\(\s*["']([^"']+)["']\s*\)/g,
+    /require\(\s*["']([^"']+)["']\s*\)/g,
+  ];
+  for (const regex of patterns) {
+    let match;
+    while ((match = regex.exec(text))) specs.add(match[1]);
+  }
+  return [...specs];
+}
+
+function shippingGraph() {
+  const entries = new Set();
+  const appDir = path.join(ROOT, "app");
+  for (const full of walk(appDir)) {
+    const relative = normalized(path.relative(ROOT, full));
+    if (isRuntimeFile(relative)) entries.add(relative);
+  }
+  for (const candidate of ["src/App.tsx", "proxy.ts"]) {
+    if (fs.existsSync(path.join(ROOT, candidate))) entries.add(candidate);
+  }
+
+  const reachable = new Set();
+  const queue = [...entries];
+  while (queue.length > 0) {
+    const file = queue.shift();
+    if (!file || reachable.has(file)) continue;
+    reachable.add(file);
+    const text = fs.readFileSync(path.join(ROOT, file), "utf8");
+    for (const specifier of importSpecifiers(text)) {
+      const resolved = resolveModule(file, specifier);
+      if (resolved && !reachable.has(resolved)) queue.push(resolved);
+    }
+  }
+  return [...reachable].sort();
+}
+
+const files = shippingGraph();
 const violations = [];
 for (const file of files) {
   const text = fs.readFileSync(path.join(ROOT, file), "utf8");
@@ -59,7 +117,7 @@ for (const file of files) {
   }
 }
 
-console.log(`runtime-schema-contract: checked ${files.length} runtime file(s)`);
+console.log(`runtime-schema-contract: checked ${files.length} import-reachable shipping runtime file(s)`);
 if (violations.length === 0) {
   console.log("runtime-schema-contract: PASS");
   process.exit(0);
