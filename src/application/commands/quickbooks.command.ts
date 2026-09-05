@@ -1,48 +1,28 @@
 /**
- * QuickBooks Commands — Write operations for QBO integration.
+ * QuickBooks integration has been sunset.
+ *
+ * These compatibility exports intentionally perform no provider or database I/O.
+ * They fail closed so stale callers cannot silently reactivate the retired integration.
  */
-import { supabase } from "@/integrations/supabase/client";
+const SUNSET_ERROR = "QuickBooks integration has been retired";
 
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
-export async function saveQBOSettings(settings: {
+export async function saveQBOSettings(_settings: {
   qbo_sync_customers: boolean;
   qbo_sync_invoices: boolean;
   qbo_sync_payments: boolean;
   qbo_income_account_id: string | null;
 }) {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) throw new Error("Not authenticated");
-
-  return supabase
-    .from("business_profiles")
-    .update(settings)
-    .eq("user_id", user.id);
+  return { data: null, error: new Error(SUNSET_ERROR) };
 }
 
 export async function invokeQBOConnect() {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error("Not authenticated");
-
-  return supabase.functions.invoke("qbo-connect", {
-    headers: { Authorization: `Bearer ${session.access_token}` },
-  });
+  return { data: null, error: new Error(SUNSET_ERROR) };
 }
 
 export async function invokeQBODisconnect() {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error("Not authenticated");
-
-  return supabase.functions.invoke("qbo-disconnect", {
-    headers: { Authorization: `Bearer ${session.access_token}` },
-  });
+  return { data: null, error: new Error(SUNSET_ERROR) };
 }
 
-export async function invokeQBOSync(entityType?: string) {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error("Not authenticated");
-
-  return supabase.functions.invoke("qbo-sync", {
-    body: { entityType: entityType || "all" },
-    headers: { Authorization: `Bearer ${session.access_token}` },
-  });
+export async function invokeQBOSync(_entityType?: string) {
+  return { data: null, error: new Error(SUNSET_ERROR) };
 }
