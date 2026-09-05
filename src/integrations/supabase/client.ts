@@ -7,10 +7,6 @@ import { generateCorrelationId, reportClientError } from '@/lib/client-observabi
 // ─────────────────────────────────────────────────────────────────────────────
 // Single canonical backend
 // ─────────────────────────────────────────────────────────────────────────────
-// Auth, operational data, functions, storage and realtime MUST resolve to the
-// same Supabase project. Production may receive NEXT_PUBLIC_* values from the
-// deployment environment, but it must never fall back to a disconnected local
-// Supabase instance when those variables are absent from a build.
 const CANONICAL_SUPABASE_PROJECT_ID = 'rjfbrfognxqkyhdrpibx';
 const CANONICAL_SUPABASE_URL = `https://${CANONICAL_SUPABASE_PROJECT_ID}.supabase.co`;
 const CANONICAL_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_-TAyW6MChnKyB_0yICU79g_miXrX3xy';
@@ -39,9 +35,6 @@ const SUPABASE_PROJECT_ID = NEXT_PUBLIC_SUPABASE_PROJECT_ID.trim() || CANONICAL_
 const CLIENT_SUPABASE_URL = SUPABASE_URL;
 const CLIENT_SUPABASE_KEY = SUPABASE_PUBLISHABLE_KEY;
 
-// Guard: the resolved URL must be the canonical production project. Publishable
-// keys are opaque and do not encode their project ref, so the URL/project-id
-// invariant is the reliable browser-side project guard for modern keys.
 {
   const urlRef = CLIENT_SUPABASE_URL.replace(/^https?:\/\//, '').split('.')[0];
   const legacyKeyRef = projectRefFromAnonKey(SUPABASE_PUBLISHABLE_KEY);
@@ -121,8 +114,7 @@ const tracedFetch: typeof fetch = async (input: RequestInfo | URL, init: Request
     }
 
     const response = await fetch(input, requestInit);
-    const isTelemetryRequest = requestUrl.includes('/rest/v1/client_error_events');
-    if ((isEdgeFunctionRequest || isRestRequest) && !isTelemetryRequest && !response.ok) {
+    if ((isEdgeFunctionRequest || isRestRequest) && !response.ok) {
       const endpoint = (() => {
         const edgeMarker = '/functions/v1/';
         const restMarker = '/rest/v1/';
@@ -149,8 +141,7 @@ const tracedFetch: typeof fetch = async (input: RequestInfo | URL, init: Request
 
     return response;
   } catch (error) {
-    const isTelemetryRequest = requestUrl.includes('/rest/v1/client_error_events');
-    if ((isEdgeFunctionRequest || isRestRequest) && !isTelemetryRequest) {
+    if (isEdgeFunctionRequest || isRestRequest) {
       const endpoint = (() => {
         const edgeMarker = '/functions/v1/';
         const restMarker = '/rest/v1/';
