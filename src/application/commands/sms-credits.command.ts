@@ -1,59 +1,47 @@
-/**
- * SMS Credits Commands — checkout for prepaid credit packs, low-balance
- * threshold, and test sends through the single `send-sms` outbound door.
- */
-import { supabase } from "@/integrations/supabase/client";
+/** SMS credit/settings commands. Workspace preferences live in operational_settings. */
+import { supabase, productionSupabase } from "@/integrations/supabase/client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+import type { Json } from "@/integrations/supabase/types.production";
 
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+async function patchSmsSettings(patch: Record<string, unknown>): Promise<void> {
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("Not signed in");
+  const { data, error: readError } = await productionSupabase
+    .from("workspace_settings")
+    .select("operational_settings")
+    .eq("workspace_id", context.workspaceId)
+    .maybeSingle();
+  if (readError) throw readError;
+  const operational = { ...object(data?.operational_settings), ...patch };
+  const { error } = await productionSupabase
+    .from("workspace_settings")
+    .update({ operational_settings: operational as Json })
+    .eq("workspace_id", context.workspaceId);
+  if (error) throw error;
+}
+
 export async function startSmsCreditCheckout(bundleKey: string): Promise<{ url?: string }> {
-  const { data, error } = await supabase.functions.invoke("create-messaging-addon-checkout", {
-    body: { bundleKey },
-  });
+  const { data, error } = await supabase.functions.invoke("create-messaging-addon-checkout", { body: { bundleKey } });
   if (error) throw error;
   return (data ?? {}) as { url?: string };
 }
 
 export async function updateSmsLowBalanceThreshold(threshold: number): Promise<void> {
-  const { data: userData } = await getCurrentAuthUser();
-  const uid = userData.user?.id;
-  if (!uid) throw new Error("Not signed in");
-  const { error } = await supabase
-    .from("business_profiles")
-    .update({ sms_low_balance_threshold: Math.max(0, Math.round(threshold)) })
-    .eq("user_id", uid);
-  if (error) throw error;
+  await patchSmsSettings({ sms_low_balance_threshold: Math.max(0, Math.round(threshold)) });
 }
 
-/**
- * Turn texting on or off for the workspace. These flags are what the backend
- * `consume_sms_credits_v1` gate checks — a disabled channel refuses with
- * `channel_disabled` before any credits are reserved.
- */
-export async function updateSmsChannelToggles(patch: {
-  transactional?: boolean;
-  marketing?: boolean;
-}): Promise<void> {
-  const { data: userData } = await getCurrentAuthUser();
-  const uid = userData.user?.id;
-  if (!uid) throw new Error("Not signed in");
-  const update: { sms_transactional_enabled?: boolean; sms_marketing_enabled?: boolean } = {};
+export async function updateSmsChannelToggles(patch: { transactional?: boolean; marketing?: boolean }): Promise<void> {
+  const update: Record<string, unknown> = {};
   if (typeof patch.transactional === "boolean") update.sms_transactional_enabled = patch.transactional;
   if (typeof patch.marketing === "boolean") update.sms_marketing_enabled = patch.marketing;
-  if (Object.keys(update).length === 0) return;
-  const { error } = await supabase.from("business_profiles").update(update).eq("user_id", uid);
-  if (error) throw error;
+  if (Object.keys(update).length > 0) await patchSmsSettings(update);
 }
 
-
-
-export interface SendSmsResponse {
-  sent: boolean;
-  reason?: string;
-  segments?: number;
-  available?: number;
-  details?: string;
-}
-
+export interface SendSmsResponse { sent: boolean; reason?: string; segments?: number; available?: number; details?: string }
 export async function sendTestSms(to: string, message: string): Promise<SendSmsResponse> {
   const { data, error } = await supabase.functions.invoke("send-sms", {
     body: { to, message, messageClass: "transactional", messageType: "test" },

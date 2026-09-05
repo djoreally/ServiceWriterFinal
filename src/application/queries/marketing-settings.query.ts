@@ -1,10 +1,7 @@
-/**
- * Marketing Settings Query — Read-only data access for marketing config.
- * All write operations have been moved to marketing-settings.command.ts.
- */
-import { supabase } from "@/integrations/supabase/client";
+/** Marketing Settings Query — canonical workspace settings. */
+import { productionSupabase } from "@/integrations/supabase/client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface MarketingSettingsData {
   google_review_url: string;
   yelp_review_url: string;
@@ -13,23 +10,26 @@ export interface MarketingSettingsData {
   service_reminder_months: number;
 }
 
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
 export async function fetchMarketingSettings(): Promise<MarketingSettingsData | null> {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) return null;
-
-  const { data } = await supabase
-    .from("business_profiles")
-    .select("google_review_url, yelp_review_url, review_request_delay_hours, appointment_reminder_hours, service_reminder_months")
-    .eq("user_id", user.id)
+  const context = await resolveCurrentWorkspace();
+  if (!context) return null;
+  const { data, error } = await productionSupabase
+    .from("workspace_settings")
+    .select("google_review_url,yelp_review_url,operational_settings")
+    .eq("workspace_id", context.workspaceId)
     .maybeSingle();
-
+  if (error) throw error;
   if (!data) return null;
-
+  const operational = object(data.operational_settings);
   return {
     google_review_url: data.google_review_url || "",
     yelp_review_url: data.yelp_review_url || "",
-    review_request_delay_hours: data.review_request_delay_hours || 24,
-    appointment_reminder_hours: data.appointment_reminder_hours || 24,
-    service_reminder_months: data.service_reminder_months || 3,
+    review_request_delay_hours: Number(operational.review_request_delay_hours ?? 24),
+    appointment_reminder_hours: Number(operational.appointment_reminder_hours ?? 24),
+    service_reminder_months: Number(operational.service_reminder_months ?? 3),
   };
 }

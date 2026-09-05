@@ -1,9 +1,8 @@
-/**
- * Onboarding check query - determines if user needs onboarding
- */
-import { supabase } from "@/integrations/supabase/client";
-
+/** Onboarding check — canonical workspace membership/settings contract. */
+import { productionSupabase } from "@/integrations/supabase/client";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+
 export interface OnboardingCheckResult {
   authenticated: boolean;
   onboardingCompleted: boolean;
@@ -13,27 +12,34 @@ export async function checkOnboardingStatus(): Promise<OnboardingCheckResult> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return { authenticated: false, onboardingCompleted: false };
 
-  // Team members (manager/dispatcher/technician) belong to someone else's tenant.
-  // They never go through onboarding — that's the owner's responsibility.
-  const { data: link } = await supabase
-    .from("team_user_links")
-    .select("id")
-    .eq("member_user_id", user.id)
-    .limit(1)
-    .maybeSingle();
+  const context = await resolveCurrentWorkspace();
+  if (!context) return { authenticated: true, onboardingCompleted: false };
 
-  if (link) {
+  const [{ data: membership, error: membershipError }, { data: settings, error: settingsError }] = await Promise.all([
+    productionSupabase
+      .from("workspace_members")
+      .select("role")
+      .eq("workspace_id", context.workspaceId)
+      .eq("user_id", user.id)
+      .eq("is_active", true)
+      .maybeSingle(),
+    productionSupabase
+      .from("workspace_settings")
+      .select("operational_settings")
+      .eq("workspace_id", context.workspaceId)
+      .maybeSingle(),
+  ]);
+  if (membershipError) throw membershipError;
+  if (settingsError) throw settingsError;
+
+  if (membership && membership.role !== "owner") {
     return { authenticated: true, onboardingCompleted: true };
   }
 
-  const { data: profile } = await supabase
-    .from("business_profiles")
-    .select("onboarding_completed")
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  return {
-    authenticated: true,
-    onboardingCompleted: !!profile?.onboarding_completed,
-  };
+  const operational = settings?.operational_settings;
+  const completed = Boolean(
+    operational && typeof operational === "object" && !Array.isArray(operational)
+      && (operational as Record<string, unknown>).onboarding_completed === true,
+  );
+  return { authenticated: true, onboardingCompleted: completed };
 }
