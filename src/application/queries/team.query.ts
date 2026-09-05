@@ -1,11 +1,11 @@
 /**
  * Team Query
- * Fetches team/business context for the current user.
+ * Canonical workspace-backed business context for the current user.
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { productionSupabase } from "@/integrations/supabase/client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface TeamData {
   id: string;
   name: string | null;
@@ -14,55 +14,41 @@ export interface TeamData {
 }
 
 export async function fetchTeamData(): Promise<{ team: TeamData; role: string } | null> {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) return null;
+  const context = await resolveCurrentWorkspace();
+  if (!context) return null;
 
-  const { data: membership } = await supabase
-    .from("team_members")
-    .select("role, teams!inner(id, name, user_id)")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (membership?.teams) {
-    // Fetch booking_slug from business_profiles for the team owner
-    const ownerId = membership.teams.user_id;
-    const { data: bp } = await supabase
-      .from("business_profiles")
+  const [{ data: workspace, error: workspaceError }, { data: settings, error: settingsError }, { data: membership, error: membershipError }] = await Promise.all([
+    productionSupabase
+      .from("workspaces")
+      .select("id, name, created_by")
+      .eq("id", context.workspaceId)
+      .maybeSingle(),
+    productionSupabase
+      .from("workspace_settings")
       .select("booking_slug")
-      .eq("user_id", ownerId)
-      .single();
+      .eq("workspace_id", context.workspaceId)
+      .maybeSingle(),
+    productionSupabase
+      .from("workspace_members")
+      .select("role")
+      .eq("workspace_id", context.workspaceId)
+      .eq("user_id", context.userId)
+      .eq("is_active", true)
+      .maybeSingle(),
+  ]);
 
-    return {
-      team: {
-        id: membership.teams.id,
-        name: membership.teams.name,
-        booking_slug: bp?.booking_slug ?? null,
-        owner_id: ownerId,
-      },
-      role: membership.role,
-    };
-  }
+  if (workspaceError) throw workspaceError;
+  if (settingsError) throw settingsError;
+  if (membershipError) throw membershipError;
+  if (!workspace) return null;
 
-  // Fallback for legacy single-tenant records that predate teams/team_members linkage.
-  const team: TeamData = {
-    id: user.id,
-    name: null,
-    booking_slug: null,
-    owner_id: user.id,
+  return {
+    team: {
+      id: workspace.id,
+      name: workspace.name,
+      booking_slug: settings?.booking_slug ?? null,
+      owner_id: workspace.created_by,
+    },
+    role: membership?.role ?? "viewer",
   };
-
-  const { data: profile } = await supabase
-    .from("business_profiles")
-    .select("business_name, booking_slug")
-    .eq("user_id", user.id)
-    .single();
-
-  if (profile) {
-    team.name = profile.business_name;
-    team.booking_slug = profile.booking_slug;
-  }
-
-  return { team, role: "owner" };
 }
