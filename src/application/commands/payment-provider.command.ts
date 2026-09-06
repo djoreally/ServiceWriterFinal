@@ -7,7 +7,9 @@ export async function updatePaymentProvider(provider: string) {
   if (!context) throw new Error("Select a workspace before updating the payment provider.");
   if (!["stripe", "square", "none"].includes(provider)) throw new Error("Unsupported payment provider");
 
-  const { error } = await supabase
+  // Generated Supabase types still lag the canonical workspace_settings schema.
+  const db = supabase as any;
+  const { error } = await db
     .from("workspace_settings")
     .update({ payment_provider: provider })
     .eq("workspace_id", context.workspaceId);

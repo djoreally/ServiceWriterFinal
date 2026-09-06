@@ -73,7 +73,7 @@ async function ensureStripeCustomer(params: {
 
   if (customerId) {
     try {
-      const existing = await params.stripe.customers.retrieve(customerId, {
+      const existing = await params.stripe.customers.retrieve(customerId, {}, {
         stripeAccount: params.stripeAccountId,
       });
       if (!("deleted" in existing) || !existing.deleted) return customerId;

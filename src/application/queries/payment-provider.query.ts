@@ -12,7 +12,9 @@ export async function fetchPaymentProvider() {
   const context = await resolveCurrentWorkspace();
   if (!context) return null;
 
-  const { data: settings, error } = await supabase
+  // Generated Supabase types still lag the canonical workspace_settings schema.
+  const db = supabase as any;
+  const { data: settings, error } = await db
     .from("workspace_settings")
     .select("payment_provider,operational_settings")
     .eq("workspace_id", context.workspaceId)
