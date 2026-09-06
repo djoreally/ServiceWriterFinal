@@ -5,6 +5,7 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import type { Json } from "@/integrations/supabase/types";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import {
   getAutomationTemplateById,
   renderTemplate,
@@ -13,14 +14,13 @@ import {
   type AutomationTemplateAction,
 } from "@/lib/retention/automation-templates";
 
+const db = supabase as any;
+
 export interface SeedAutomationResult {
   ruleId: string;
   ruleName: string;
 }
 
-/**
- * Seed an automation rule from a template.
- */
 export async function seedAutomationTemplate(
   userId: string,
   templateId: string,
@@ -46,33 +46,25 @@ export async function seedAutomationTemplate(
     .select("id, name")
     .single();
 
-  if (error || !data) {
-    throw new Error(error?.message || "Failed to seed automation template");
-  }
-
+  if (error || !data) throw new Error(error?.message || "Failed to seed automation template");
   return { ruleId: data.id, ruleName: data.name };
 }
-
 
 export interface SeedAllDefaultsResult {
   automationRulesInserted: number;
   customerSegmentsInserted: number;
 }
 
-/**
- * Restore the default automation and segment catalog for the current business.
- * The RPCs are idempotent and skip records that already exist by name.
- */
 export async function seedAllDefaults(userId: string): Promise<SeedAllDefaultsResult> {
   if (!userId?.trim()) throw new Error("Cannot restore defaults before authentication is ready.");
 
-  const { data: automationRulesInserted, error: rulesError } = await (supabase as any).rpc(
+  const { data: automationRulesInserted, error: rulesError } = await db.rpc(
     "seed_default_automation_rules",
     { p_user_id: userId },
   );
   if (rulesError) throw new Error(rulesError.message || "Failed to restore default automation rules");
 
-  const { data: customerSegmentsInserted, error: segmentsError } = await (supabase as any).rpc(
+  const { data: customerSegmentsInserted, error: segmentsError } = await db.rpc(
     "seed_default_customer_segments",
     { p_user_id: userId },
   );
@@ -103,10 +95,6 @@ export interface DryRunRuleResult {
   actionResults: DryRunActionResult[];
 }
 
-/**
- * Dry-run a rule: resolves variables against sample (or real customer) context
- * and returns what *would* happen — without enqueuing any jobs or sending anything.
- */
 export async function dryRunAutomationRule(
   userId: string,
   ruleId: string,
@@ -121,20 +109,23 @@ export async function dryRunAutomationRule(
 
   if (error || !rule) throw new Error("Rule not found");
 
-  // Build context — sample by default, real customer when provided.
   let context: Record<string, string> = { ...SAMPLE_PREVIEW_CONTEXT };
   if (customerId) {
-    const { data: cust } = await supabase
+    const workspace = await resolveCurrentWorkspace();
+    if (!workspace) throw new Error("No active workspace is available.");
+    const { data: cust, error: customerError } = await db
       .from("customers")
-      .select("name, first_name, email, phone")
+      .select("first_name,last_name,company_name,email,phone")
+      .eq("workspace_id", workspace.workspaceId)
       .eq("id", customerId)
-      .eq("user_id", userId)
       .maybeSingle();
+    if (customerError) throw customerError;
     if (cust) {
+      const fullName = [cust.first_name, cust.last_name].filter(Boolean).join(" ") || cust.company_name || context.customer_name;
       context = {
         ...context,
-        customer_name: (cust.name as string) || context.customer_name,
-        customer_first_name: (cust.first_name as string) || (cust.name as string)?.split(" ")[0] || context.customer_first_name,
+        customer_name: fullName,
+        customer_first_name: cust.first_name || fullName.split(" ")[0] || context.customer_first_name,
       };
     }
   }
