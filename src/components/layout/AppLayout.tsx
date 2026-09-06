@@ -24,8 +24,8 @@ export const AppLayout = ({ children, title = "Dashboard" }: AppLayoutProps) => 
 
   if (loading) {
     return (
-      <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-background p-4 sm:p-6" role="status" aria-live="polite" aria-label="Loading workspace">
-        <div className="mx-auto grid min-w-0 max-w-7xl gap-4 lg:grid-cols-[220px_1fr]">
+      <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-background p-4 sm:p-5 lg:p-6" role="status" aria-live="polite" aria-label="Loading workspace">
+        <div className="mx-auto grid min-w-0 max-w-[1440px] gap-4 lg:grid-cols-[220px_1fr]">
           <aside className="hidden space-y-4 rounded-lg border bg-card p-4 lg:block" aria-hidden="true">
             <Skeleton className="h-10 w-36" />
             <Skeleton className="h-8 w-full" />
@@ -72,7 +72,7 @@ export const AppLayout = ({ children, title = "Dashboard" }: AppLayoutProps) => 
           showMenuButton={showHamburgerMenu}
         />
         <WorkspaceIdentityBanner />
-        <main className="safe-bottom-content min-w-0 w-full max-w-full flex-1 overflow-x-hidden px-3 py-4 sm:px-4 md:px-5 md:py-5 lg:overflow-y-auto lg:pb-safe" data-app-main>
+        <main className="safe-bottom-content min-w-0 w-full max-w-full flex-1 overflow-x-hidden px-4 py-4 sm:px-5 md:py-5 lg:overflow-y-auto lg:px-6 lg:pb-safe" data-app-main>
           <PageContainer>{children}</PageContainer>
         </main>
       </div>

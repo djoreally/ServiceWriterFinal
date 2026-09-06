@@ -1,0 +1,124 @@
+/* Material-inspired color hierarchy for Service Writer.
+ * Keeps the existing Service Writer blue while formalizing tonal roles.
+ * Semantic success/warning/danger colors remain reserved for state meaning.
+ */
+
+@layer base {
+  :root {
+    /* Brand tonal family */
+    --primary: 211 100% 52%;              /* #0A84FF */
+    --primary-hover: 210 100% 40%;        /* ~#0066CC */
+    --primary-pressed: 210 100% 30%;      /* ~#004C99 */
+    --primary-container: 211 100% 95%;    /* pale selected surface */
+    --primary-container-soft: 211 100% 98%;
+    --on-primary-container: 211 100% 28%;
+
+    /* Interactive text stays darker than the filled action blue for contrast. */
+    --action-text: 211 100% 36%;
+    --ring: 211 100% 48%;
+
+    /* Cool neutral surfaces keep hierarchy visible without competing with actions. */
+    --background: 215 33% 98%;
+    --card: 0 0% 100%;
+    --popover: 0 0% 100%;
+    --secondary: 214 28% 96%;
+    --muted: 214 28% 96%;
+    --accent: 211 100% 96%;
+    --accent-foreground: 211 100% 28%;
+    --border: 214 22% 90%;
+    --input: 214 22% 90%;
+
+    --surface: #ffffff;
+    --surface-2: #f4f7fb;
+    --surface-3: #e9eef5;
+    --surface-elevated: rgba(255, 255, 255, 0.94);
+    --border-raw: rgba(28, 45, 65, 0.10);
+    --border-strong: rgba(28, 45, 65, 0.18);
+
+    /* Blue is the only non-semantic accent family. */
+    --accent-blue: #0a84ff;
+    --info: #1677c8;
+
+    /* Selection/status variants now derive from the same blue family. */
+    --status-scheduled-bg: 211 100% 96%;
+    --status-scheduled-text: 211 100% 34%;
+    --status-inprogress-bg: 211 100% 93%;
+    --status-inprogress-text: 211 100% 28%;
+    --logistics-van-assigned: 211 65% 95%;
+    --logistics-route-optimized: 211 80% 93%;
+    --alert-info-bg: 211 100% 95%;
+    --alert-info-text: 211 100% 30%;
+
+    --sidebar-primary: var(--primary);
+    --sidebar-accent: 211 100% 96%;
+    --sidebar-accent-foreground: 211 100% 28%;
+    --sidebar-ring: var(--ring);
+
+    --shadow-hover: 0 10px 28px rgba(10, 132, 255, 0.14);
+    --shadow-btn: 0 4px 14px rgba(0, 102, 204, 0.24);
+    --ring-glow: 0 0 0 3px rgba(10, 132, 255, 0.20);
+  }
+
+  .dark {
+    --primary: 211 100% 62%;
+    --primary-hover: 211 100% 68%;
+    --primary-pressed: 211 100% 74%;
+    --primary-container: 211 65% 16%;
+    --primary-container-soft: 211 50% 10%;
+    --on-primary-container: 211 100% 82%;
+
+    --action-text: 211 100% 72%;
+    --ring: 211 100% 66%;
+
+    --background: 220 27% 3%;
+    --card: 220 24% 6%;
+    --popover: 220 24% 6%;
+    --secondary: 217 20% 10%;
+    --muted: 217 20% 10%;
+    --accent: 211 52% 14%;
+    --accent-foreground: 211 100% 84%;
+    --border: 216 17% 16%;
+    --input: 216 17% 16%;
+
+    --surface: #0c1118;
+    --surface-2: #111923;
+    --surface-3: #182330;
+    --surface-elevated: rgba(17, 25, 35, 0.94);
+
+    --status-scheduled-bg: 211 52% 13%;
+    --status-scheduled-text: 211 100% 78%;
+    --status-inprogress-bg: 211 58% 16%;
+    --status-inprogress-text: 211 100% 82%;
+    --alert-info-bg: 211 50% 12%;
+    --alert-info-text: 211 100% 78%;
+
+    --sidebar-primary: var(--primary);
+    --sidebar-accent: 211 50% 13%;
+    --sidebar-accent-foreground: 211 100% 84%;
+    --sidebar-ring: var(--ring);
+
+    --shadow-hover: 0 10px 30px rgba(10, 132, 255, 0.22);
+    --shadow-btn: 0 4px 16px rgba(10, 132, 255, 0.30);
+    --ring-glow: 0 0 0 3px rgba(10, 132, 255, 0.30);
+  }
+}
+
+@layer components {
+  /* Reusable tonal selected surface for cards, rows and segmented controls. */
+  .surface-selected {
+    background: hsl(var(--primary-container));
+    color: hsl(var(--on-primary-container));
+    border-color: hsl(var(--primary) / 0.35);
+  }
+
+  .surface-selected-soft {
+    background: hsl(var(--primary-container-soft));
+    border-color: hsl(var(--primary) / 0.18);
+  }
+
+  /* Make focus treatment consistent across native and composed controls. */
+  :where(button, a, input, select, textarea, [role="button"], [tabindex]):focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px hsl(var(--ring) / 0.22);
+  }
+}

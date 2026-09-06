@@ -10,7 +10,7 @@ const AssetsPage = lazy(() =>
 export default function Assets() {
   return (
     <AppLayout>
-      <div className="container mx-auto px-4 py-6 max-w-7xl">
+      <div className="w-full py-2 sm:py-3">
         <AssetsErrorBoundary>
           <Suspense fallback={<AssetsLoading />}>
             <AssetsPage />
