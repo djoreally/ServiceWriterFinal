@@ -60,12 +60,18 @@ export interface DispatchBoardData {
 export async function fetchDispatchBoardData(selectedDate: Date, viewMode: "day" | "week" | "all" = "day"): Promise<DispatchBoardData> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("Not authenticated");
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("No active workspace is available.");
 
   const dateStr = format(selectedDate, "yyyy-MM-dd");
   const endDateStr = format(addDays(selectedDate, 6), "yyyy-MM-dd");
 
-  const [techRes, vanRes, jobRes, invRes, terrRes] = await Promise.all([
-    supabase.from("technicians").select("*").eq("is_active", true).order("name"),
+  const [memberRes, vanRes, jobRes, invRes, terrRes] = await Promise.all([
+    (supabase as any)
+      .from("workspace_members")
+      .select("user_id,role,is_active,profiles!workspace_members_user_id_fkey(display_name,phone,avatar_url)")
+      .eq("workspace_id", context.workspaceId)
+      .eq("is_active", true),
     supabase.from("vans").select("id, name, status, assigned_technician_id")
       .eq("user_id", user.id).eq("is_active", true).order("name"),
     viewMode === "all"
@@ -77,7 +83,21 @@ export async function fetchDispatchBoardData(selectedDate: Date, viewMode: "day"
     supabase.from("van_territories").select("van_id"),
   ]);
 
-  // Enrich vans with territory counts
+  const technicians: DispatchTechnician[] = (memberRes.data ?? [])
+    .filter((member: any) => member.role === "technician")
+    .map((member: any) => ({
+      id: member.user_id,
+      name: member.profiles?.display_name || "Technician",
+      email: null,
+      phone: member.profiles?.phone ?? null,
+      avatar_url: member.profiles?.avatar_url ?? null,
+      status: "available",
+      skills: [],
+      current_location: null,
+      last_location_update: null,
+      max_jobs_per_day: 0,
+    }));
+
   const terrMap = new Map<string, number>();
   (terrRes.data ?? []).forEach((t: any) =>
     terrMap.set(t.van_id, (terrMap.get(t.van_id) || 0) + 1)
@@ -88,7 +108,7 @@ export async function fetchDispatchBoardData(selectedDate: Date, viewMode: "day"
   })) as DispatchVan[];
 
   return {
-    technicians: (techRes.data ?? []) as unknown as DispatchTechnician[],
+    technicians,
     vans,
     jobs: ((jobRes.data ?? []) as OperationalJobRow[])
       .map((job) => ({
