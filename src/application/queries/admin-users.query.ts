@@ -19,7 +19,7 @@ export interface UserWithProfile {
 export async function fetchUsersWithRoles(): Promise<UserWithProfile[]> {
   const { data: workspaces, error } = await supabase
     .from("workspaces")
-    .select("id, name, created_by, created_at, is_active")
+    .select("id, name, created_by, created_at, updated_at, is_active")
     .order("created_at", { ascending: false });
   if (error) throw error;
   if (!workspaces?.length) return [];
@@ -48,7 +48,7 @@ export async function fetchUsersWithRoles(): Promise<UserWithProfile[]> {
     const operational = workspaceSettings?.operational_settings;
     const onboardingCompleted = Boolean(
       operational && typeof operational === "object" && !Array.isArray(operational)
-        ? (operational as Record<string, unknown>).onboarding_completed
+        ? (operational as Record<string, unknown>).onboarding_completed ?? true
         : true,
     );
 
