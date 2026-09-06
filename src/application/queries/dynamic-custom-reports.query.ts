@@ -3,6 +3,12 @@ import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { type DimensionSchema, type MeasureSchema, type DynamicReportConfig } from "@/types/reporting";
 import { format } from "date-fns";
 
+// This module is an explicit compatibility boundary over the live canonical
+// schema. Generated Supabase types can lag production migrations, so keeping the
+// boundary untyped prevents stale generated columns/relationships from forcing
+// retired schema assumptions back into reporting code.
+const db = supabase as any;
+
 export interface UnifiedReportingRecord {
   appointment_id: string | null;
   customer_id: string | null;
@@ -99,7 +105,7 @@ export async function fetchRawReportingRecords(
   const fromDate = filter.from ? format(filter.from, "yyyy-MM-dd") : null;
   const toDate = filter.to ? format(filter.to, "yyyy-MM-dd") : null;
 
-  let appointmentQuery = supabase
+  let appointmentQuery = db
     .from("appointments")
     .select("id,customer_id,vehicle_id,assigned_user_id,status,starts_at,ends_at,source,metadata,customers(first_name,last_name,address_line1,address_line2,city,region,postal_code,metadata),vehicles(make,model,year,metadata,vehicle_service_specs(oil_type,oil_capacity,metadata))")
     .eq("workspace_id", context.workspaceId)
@@ -112,16 +118,17 @@ export async function fetchRawReportingRecords(
   const { data: appointments, error: appointmentError } = await appointmentQuery;
   if (appointmentError) throw appointmentError;
 
-  const appointmentIds = (appointments ?? []).map((row) => row.id);
+  const appointmentRows = (appointments ?? []) as Array<Record<string, any>>;
+  const appointmentIds = appointmentRows.map((row) => row.id).filter(Boolean);
   const assignedUserIds = Array.from(new Set(
-    (appointments ?? [])
+    appointmentRows
       .map((row) => row.assigned_user_id)
       .filter((value): value is string => typeof value === "string" && value.length > 0),
   ));
 
   const [serviceResult, profileResult] = await Promise.all([
     appointmentIds.length
-      ? supabase
+      ? db
           .from("service_records")
           .select("appointment_id,status,work_performed,total_amount,oil_quarts_used,metadata,completed_at,started_at,created_at")
           .eq("workspace_id", context.workspaceId)
@@ -129,27 +136,29 @@ export async function fetchRawReportingRecords(
           .neq("status", "voided")
       : Promise.resolve({ data: [], error: null }),
     assignedUserIds.length
-      ? supabase.from("profiles").select("id,display_name").in("id", assignedUserIds)
+      ? db.from("profiles").select("id,display_name").in("id", assignedUserIds)
       : Promise.resolve({ data: [], error: null }),
   ]);
 
   if (serviceResult.error) throw serviceResult.error;
   if (profileResult.error) throw profileResult.error;
 
-  const servicesByAppointment = new Map<string, (typeof serviceResult.data)[number]>();
-  for (const service of serviceResult.data ?? []) {
+  const serviceRows = (serviceResult.data ?? []) as Array<Record<string, any>>;
+  const profileRows = (profileResult.data ?? []) as Array<Record<string, any>>;
+  const servicesByAppointment = new Map<string, Record<string, any>>();
+  for (const service of serviceRows) {
     if (!service.appointment_id || servicesByAppointment.has(service.appointment_id)) continue;
     servicesByAppointment.set(service.appointment_id, service);
   }
 
   const profileNames = new Map<string, string>();
-  for (const profile of profileResult.data ?? []) {
+  for (const profile of profileRows) {
     if (profile.id) profileNames.set(profile.id, profile.display_name || "Technician");
   }
 
   const records: UnifiedReportingRecord[] = [];
 
-  for (const appt of appointments ?? []) {
+  for (const appt of appointmentRows) {
     const metadata = objectValue(appt.metadata);
     const dataOrigin = String(metadata.data_origin ?? metadata.migration_source ?? "canonical");
     if (!filter.includeLegacy && dataOrigin === "legacy_import") continue;
