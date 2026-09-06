@@ -1,72 +1,17 @@
-/** Provider marketplace listing backed by canonical workspace tables. */
+/** Provider marketplace queries backed by canonical workspace tables. */
 import { supabase } from "@/integrations/supabase/client";
-
-export const MARKETPLACE_BOOKING_SOURCE = "provider_directory";
-export const MARKETPLACE_VIEW_EVENT = "marketplace_profile_view";
-
-export interface MarketplaceListing {
-  business_name: string; logo_url: string | null; cover_image_url: string | null; marketplace_description: string | null;
-  phone: string | null; email: string | null; website_url: string | null; booking_slug: string | null;
-  service_address: string | null; city: string | null; state: string | null; postal_code: string | null;
-  service_radius_miles: number | null; marketplace_service_area_zips: string[]; marketplace_opt_in: boolean;
-  marketplace_accept_new_customers: boolean; marketplace_allow_same_day: boolean; marketplace_auto_accept: boolean;
-  marketplace_max_jobs_per_day: number | null; require_approval: boolean; min_lead_time_hours: number | null;
-  max_advance_days: number | null; working_days: string[]; opening_time: string | null; closing_time: string | null;
-}
-
-function asObject(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
-export async function fetchMarketplaceListing(userId: string): Promise<MarketplaceListing | null> {
-  const { data: workspace, error: workspaceError } = await supabase
-    .from("workspaces")
-    .select("id, name")
-    .eq("created_by", userId)
-    .eq("is_active", true)
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-  if (workspaceError || !workspace) return null;
-
-  const { data: settings, error: settingsError } = await supabase
-    .from("workspace_settings")
-    .select("logo_url, phone, email, website_url, booking_slug, address_line1, address_line2, city, region, postal_code, service_radius_miles, marketplace_opt_in, require_approval, min_lead_time_hours, max_advance_days, working_days, opening_time, closing_time, operational_settings")
-    .eq("workspace_id", workspace.id)
-    .maybeSingle();
-  if (settingsError || !settings) return null;
-
-  const marketplace = asObject(asObject(settings.operational_settings).marketplace);
-  const zips = Array.isArray(marketplace.service_area_zips)
-    ? marketplace.service_area_zips.filter((value): value is string => typeof value === "string")
-    : [];
-  const address = [settings.address_line1, settings.address_line2].filter(Boolean).join(", ") || null;
-
-  return {
-    business_name: workspace.name ?? "",
-    logo_url: settings.logo_url ?? null,
-    cover_image_url: typeof marketplace.cover_image_url === "string" ? marketplace.cover_image_url : null,
-    marketplace_description: typeof marketplace.description === "string" ? marketplace.description : null,
-    phone: settings.phone ?? null,
-    email: settings.email ?? null,
-    website_url: settings.website_url ?? null,
-    booking_slug: settings.booking_slug ?? null,
-    service_address: address,
-    city: settings.city ?? null,
-    state: settings.region ?? null,
-    postal_code: settings.postal_code ?? null,
-    service_radius_miles: settings.service_radius_miles == null ? null : Number(settings.service_radius_miles),
-    marketplace_service_area_zips: zips,
-    marketplace_opt_in: Boolean(settings.marketplace_opt_in),
-    marketplace_accept_new_customers: marketplace.accept_new_customers !== false,
-    marketplace_allow_same_day: marketplace.allow_same_day !== false,
-    marketplace_auto_accept: Boolean(marketplace.auto_accept),
-    marketplace_max_jobs_per_day: typeof marketplace.max_jobs_per_day === "number" ? marketplace.max_jobs_per_day : null,
-    require_approval: Boolean(settings.require_approval),
-    min_lead_time_hours: settings.min_lead_time_hours ?? null,
-    max_advance_days: settings.max_advance_days ?? null,
-    working_days: settings.working_days ?? [],
-    opening_time: settings.opening_time ?? null,
-    closing_time: settings.closing_time ?? null,
-  };
-}
+export const MARKETPLACE_BOOKING_SOURCE="provider_directory";export const MARKETPLACE_VIEW_EVENT="marketplace_profile_view";
+export interface MarketplaceListing{business_name:string;logo_url:string|null;cover_image_url:string|null;marketplace_description:string|null;phone:string|null;email:string|null;website_url:string|null;booking_slug:string|null;service_address:string|null;city:string|null;state:string|null;postal_code:string|null;service_radius_miles:number|null;marketplace_service_area_zips:string[];marketplace_opt_in:boolean;marketplace_accept_new_customers:boolean;marketplace_allow_same_day:boolean;marketplace_auto_accept:boolean;marketplace_max_jobs_per_day:number|null;require_approval:boolean;min_lead_time_hours:number|null;max_advance_days:number|null;working_days:string[];opening_time:string|null;closing_time:string|null;}
+export interface MarketplaceMetrics{views:number;bookings:number;completed:number;revenue:number;}
+export interface MarketplaceLead{id:string;customer_name:string|null;guest_name:string|null;guest_email:string|null;guest_phone:string|null;title:string;scheduled_date:string;scheduled_time:string|null;vehicle_label:string|null;status:string;created_at?:string|null;}
+export interface MarketplaceService{id:string;name:string;description:string|null;default_price:number|null;estimated_duration:number|null;is_active:boolean;}
+export interface MarketplaceReview{id:string;customer_name:string|null;rating:number|null;content:string|null;provider_reply:string|null;provider_replied_at:string|null;created_at:string;}
+function asObject(value:unknown):Record<string,unknown>{return value&&typeof value==="object"&&!Array.isArray(value)?value as Record<string,unknown>:{};}
+async function workspaceForUser(userId:string){const{data,error}=await supabase.from("workspaces").select("id,name").eq("created_by",userId).eq("is_active",true).order("created_at",{ascending:true}).limit(1).maybeSingle();if(error)throw error;return data;}
+export async function fetchMarketplaceListing(userId:string):Promise<MarketplaceListing|null>{const workspace=await workspaceForUser(userId);if(!workspace)return null;const{data:settings,error}=await supabase.from("workspace_settings").select("logo_url,phone,email,website_url,booking_slug,address_line1,address_line2,city,region,postal_code,service_radius_miles,marketplace_opt_in,require_approval,min_lead_time_hours,max_advance_days,working_days,opening_time,closing_time,operational_settings").eq("workspace_id",workspace.id).maybeSingle();if(error||!settings)return null;const marketplace=asObject(asObject(settings.operational_settings).marketplace);const zips=Array.isArray(marketplace.service_area_zips)?marketplace.service_area_zips.filter((v):v is string=>typeof v==="string"):[];return{business_name:workspace.name??"",logo_url:settings.logo_url??null,cover_image_url:typeof marketplace.cover_image_url==="string"?marketplace.cover_image_url:null,marketplace_description:typeof marketplace.description==="string"?marketplace.description:null,phone:settings.phone??null,email:settings.email??null,website_url:settings.website_url??null,booking_slug:settings.booking_slug??null,service_address:[settings.address_line1,settings.address_line2].filter(Boolean).join(", ")||null,city:settings.city??null,state:settings.region??null,postal_code:settings.postal_code??null,service_radius_miles:settings.service_radius_miles==null?null:Number(settings.service_radius_miles),marketplace_service_area_zips:zips,marketplace_opt_in:Boolean(settings.marketplace_opt_in),marketplace_accept_new_customers:marketplace.accept_new_customers!==false,marketplace_allow_same_day:marketplace.allow_same_day!==false,marketplace_auto_accept:Boolean(marketplace.auto_accept),marketplace_max_jobs_per_day:typeof marketplace.max_jobs_per_day==="number"?marketplace.max_jobs_per_day:null,require_approval:Boolean(settings.require_approval),min_lead_time_hours:settings.min_lead_time_hours??null,max_advance_days:settings.max_advance_days??null,working_days:settings.working_days??[],opening_time:settings.opening_time??null,closing_time:settings.closing_time??null};}
+function marketplaceSource(row:any){const meta=asObject(row.metadata);return row.source===MARKETPLACE_BOOKING_SOURCE||meta.booking_source===MARKETPLACE_BOOKING_SOURCE||meta.source===MARKETPLACE_BOOKING_SOURCE;}
+export async function fetchMarketplaceLeads(userId:string):Promise<MarketplaceLead[]>{const workspace=await workspaceForUser(userId);if(!workspace)return[];const{data,error}=await(supabase as any).from("appointments").select("id,status,starts_at,source,metadata,created_at,customers(first_name,last_name,company_name,email,phone),vehicles(year,make,model)").eq("workspace_id",workspace.id).order("starts_at",{ascending:false}).limit(100);if(error)throw error;return(data??[]).filter(marketplaceSource).map((row:any)=>{const meta=asObject(row.metadata);const starts=row.starts_at?new Date(row.starts_at):null;return{id:row.id,customer_name:row.customers?.company_name||[row.customers?.first_name,row.customers?.last_name].filter(Boolean).join(" ")||null,guest_name:typeof meta.guest_name==="string"?meta.guest_name:null,guest_email:row.customers?.email??(typeof meta.guest_email==="string"?meta.guest_email:null),guest_phone:row.customers?.phone??(typeof meta.guest_phone==="string"?meta.guest_phone:null),title:String(meta.title||"Marketplace booking"),scheduled_date:starts?starts.toISOString().slice(0,10):"",scheduled_time:starts?starts.toISOString().slice(11,16):null,vehicle_label:row.vehicles?`${row.vehicles.year??""} ${row.vehicles.make??""} ${row.vehicles.model??""}`.trim()||null:null,status:String(row.status||"pending"),created_at:row.created_at??null};});}
+export async function fetchMarketplaceMetrics(userId:string,period:"month"|"all"="month"):Promise<MarketplaceMetrics>{const leads=await fetchMarketplaceLeads(userId);const cutoff=period==="month"?new Date(new Date().getFullYear(),new Date().getMonth(),1):null;const rows=cutoff?leads.filter(l=>!l.created_at||new Date(l.created_at)>=cutoff):leads;const completed=rows.filter(l=>l.status==="completed").length;return{views:0,bookings:rows.length,completed,revenue:0};}
+export async function fetchMarketplaceServices(userId:string):Promise<MarketplaceService[]>{const workspace=await workspaceForUser(userId);if(!workspace)return[];const{data,error}=await supabase.from("service_catalog").select("id,name,description,labor_price,estimated_minutes,is_active").eq("workspace_id",workspace.id).order("name");if(error)throw error;return(data??[]).map(row=>({id:row.id,name:row.name,description:row.description??null,default_price:row.labor_price==null?null:Number(row.labor_price),estimated_duration:row.estimated_minutes??null,is_active:Boolean(row.is_active)}));}
+/** Review persistence is not present in the canonical workspace schema yet; fail closed with an empty read. */
+export async function fetchMarketplaceReviews(_userId:string):Promise<MarketplaceReview[]>{return[];}
