@@ -1,31 +1,29 @@
 /**
- * Team Members Commands — Write operations for technician and invitation management.
+ * Team Members Commands — Write operations for canonical workspace membership.
  */
 import { supabase } from "@/integrations/supabase/client";
 import { nextApi } from "@/lib/nextApiClient";
-import type { Database } from "@/integrations/supabase/types";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
-type TechnicianInsert = Database["public"]["Tables"]["technicians"]["Insert"];
-type TechnicianUpdate = Database["public"]["Tables"]["technicians"]["Update"];
+export interface TechnicianProfileUpdate {
+  display_name?: string | null;
+  phone?: string | null;
+  avatar_url?: string | null;
+}
 
+/**
+ * Direct technician-row creation is retired. Staff identities must be created
+ * through the invitation flow so Supabase Auth and workspace membership remain
+ * the source of truth.
+ */
 export async function addTechnician(
-  userId: string,
-  data: Omit<TechnicianInsert, "user_id">,
+  _userId: string,
+  _data: Record<string, unknown>,
 ) {
-  const result = await supabase.from("technicians").insert({ user_id: userId, ...data });
-
-  if (result.error?.message === "seat_limit_reached") {
-    return {
-      ...result,
-      error: {
-        ...result.error,
-        code: "seat_limit_reached",
-        message: "Technician seat limit reached for current plan.",
-      },
-    };
-  }
-
-  return result;
+  return {
+    data: null,
+    error: new Error("Create technicians through the team invitation flow."),
+  };
 }
 
 export async function createTeamInvitation(workspaceId: string, email: string, _name: string, role: string): Promise<{ data: Awaited<ReturnType<typeof nextApi.invitations.create>> | null; error: unknown }> {
@@ -50,14 +48,20 @@ export async function cancelTeamInvitation(invitationId: string): Promise<{ data
   }
 }
 
-export async function updateTechnician(techId: string, data: TechnicianUpdate) {
-  return supabase.from("technicians").update(data).eq("id", techId);
+export async function updateTechnician(userId: string, data: TechnicianProfileUpdate) {
+  return supabase.from("profiles").update(data).eq("id", userId);
 }
 
 export async function uploadTeamDocument(filePath: string, file: File) {
   return supabase.storage.from("team-documents").upload(filePath, file, { upsert: true });
 }
 
-export async function deleteTechnician(techId: string) {
-  return supabase.from("technicians").delete().eq("id", techId);
+export async function deleteTechnician(userId: string) {
+  const context = await resolveCurrentWorkspace();
+  if (!context) return { data: null, error: new Error("No active workspace is available.") };
+  return supabase
+    .from("workspace_members")
+    .update({ is_active: false })
+    .eq("workspace_id", context.workspaceId)
+    .eq("user_id", userId);
 }
