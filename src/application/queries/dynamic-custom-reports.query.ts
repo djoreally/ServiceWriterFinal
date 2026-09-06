@@ -1,13 +1,11 @@
 import { supabase } from "@/integrations/supabase/client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { type DimensionSchema, type MeasureSchema, type DynamicReportConfig } from "@/types/reporting";
 import { format } from "date-fns";
 
 export interface UnifiedReportingRecord {
-  // Identity
   appointment_id: string | null;
   customer_id: string | null;
-
-  // Dimensions
   city: string;
   postal_code: string;
   state: string;
@@ -25,8 +23,6 @@ export interface UnifiedReportingRecord {
   origin_source: string;
   technician_name: string;
   van_name: string;
-
-  // Measures
   total_billed: number;
   net_collected: number;
   balance_due: number;
@@ -35,8 +31,6 @@ export interface UnifiedReportingRecord {
   duration_minutes: number;
   actual_minutes: number;
   travel_minutes: number;
-
-  // Spatial/Coordinates
   latitude?: number;
   longitude?: number;
 }
@@ -47,7 +41,17 @@ export interface ReportingRecordsFilter {
   includeLegacy?: boolean;
 }
 
-/** Bucket a `HH:MM[:SS]` clock value into a booking window. */
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function numeric(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 export function timeSlotForClock(clock: string | null | undefined): string {
   if (!clock) return "Unknown";
   const hour = Number.parseInt(String(clock).split(":")[0], 10);
@@ -58,149 +62,135 @@ export function timeSlotForClock(clock: string | null | undefined): string {
   return "Night";
 }
 
-/** Extract a 5-digit ZIP from any free-form address string. */
 export function zipFromAddress(address: string | null | undefined): string | null {
   const match = (address || "").match(/\b(\d{5})(?:-\d{4})?\b/);
   return match ? match[1] : null;
 }
 
-/** Extract the city portion from a "street, city, ST 19002" style address. */
 export function cityFromAddress(address: string | null | undefined): string | null {
   const parts = (address || "").split(",").map((part) => part.trim()).filter(Boolean);
   if (parts.length < 2) return null;
   const candidate = parts[parts.length - 2];
-  // Guard against "PA 19002" landing in the city slot.
   if (/^[A-Z]{2}\s*\d{5}/.test(candidate)) return parts.length >= 3 ? parts[parts.length - 3] : null;
   return candidate.replace(/\s*\d{5}(-\d{4})?$/, "").trim() || null;
 }
 
-/** Extract a two-letter state code from a free-form address string. */
 export function stateFromAddress(address: string | null | undefined): string | null {
   const match = (address || "").match(/\b([A-Z]{2})\s+\d{5}(?:-\d{4})?\b/);
   return match ? match[1] : null;
 }
 
 /**
- * Unified reporting dataset.
+ * Canonical reporting dataset.
  *
- * Appointments are the booking spine (retail business line); their linked
- * service record supplies billed/collected/oil measures. Fleet work orders are
- * the fleet business line. Location dimensions fall back from the appointment
- * columns to the appointment address, then to the customer record, because the
- * denormalized appointment city/ZIP columns are not always populated.
+ * Appointments no longer have a PostgREST relationship to the retired
+ * `technicians` table. Technician identity is `appointments.assigned_user_id`
+ * -> `profiles.id`, resolved explicitly below. Service financials are likewise
+ * loaded from canonical `service_records` rather than the retired `services`
+ * relationship. Keeping these joins explicit prevents schema-cache drift from
+ * taking down the entire Reports page.
  */
 export async function fetchRawReportingRecords(
   filter: ReportingRecordsFilter = {},
 ): Promise<UnifiedReportingRecord[]> {
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("Select a workspace before viewing reports.");
+
   const fromDate = filter.from ? format(filter.from, "yyyy-MM-dd") : null;
   const toDate = filter.to ? format(filter.to, "yyyy-MM-dd") : null;
 
   let appointmentQuery = supabase
     .from("appointments")
-    .select(`
-      id,
-      status,
-      source,
-      origin_source,
-      data_origin,
-      scheduled_date,
-      scheduled_time,
-      duration_minutes,
-      estimated_duration_minutes,
-      actual_start_time,
-      actual_end_time,
-      travel_time_minutes,
-      estimated_cost,
-      title,
-      customer_id,
-      customer_city,
-      customer_postal_code,
-      customer_state,
-      location_address,
-      location_lat,
-      location_lng,
-      technicians ( name ),
-      vans ( name ),
-      customers ( address, postal_code, latitude, longitude ),
-      vehicles ( make, model, year, oil_type, oil_capacity ),
-      services!services_appointment_id_fkey (
-        service_type,
-        status,
-        total_cost,
-        paid_amount,
-        oil_quarts_used
-      )
-    `)
+    .select("id,customer_id,vehicle_id,assigned_user_id,status,starts_at,ends_at,source,metadata,customers(first_name,last_name,address_line1,address_line2,city,region,postal_code,metadata),vehicles(make,model,year,metadata,vehicle_service_specs(oil_type,oil_capacity,metadata))")
+    .eq("workspace_id", context.workspaceId)
     .neq("source", "fleet_work_order")
-    .is("deleted_at", null)
     .limit(5000);
 
-  let fleetQuery = supabase
-    .from("fleet_work_orders")
-    .select(`
-      id,
-      status,
-      total,
-      invoice_paid_amount,
-      invoice_balance_due,
-      scheduled_date,
-      scheduled_time,
-      labor_hours,
-      fleet_vehicles ( make, model, year, fuel_type ),
-      fleet_locations ( city, postal_code, state, latitude, longitude ),
-      technicians ( name ),
-      vans ( name )
-    `)
-    .limit(5000);
+  if (fromDate) appointmentQuery = appointmentQuery.gte("starts_at", `${fromDate}T00:00:00`);
+  if (toDate) appointmentQuery = appointmentQuery.lte("starts_at", `${toDate}T23:59:59`);
 
-  if (fromDate) {
-    appointmentQuery = appointmentQuery.gte("scheduled_date", fromDate);
-    fleetQuery = fleetQuery.gte("scheduled_date", fromDate);
+  const { data: appointments, error: appointmentError } = await appointmentQuery;
+  if (appointmentError) throw appointmentError;
+
+  const appointmentIds = (appointments ?? []).map((row) => row.id);
+  const assignedUserIds = Array.from(new Set(
+    (appointments ?? [])
+      .map((row) => row.assigned_user_id)
+      .filter((value): value is string => typeof value === "string" && value.length > 0),
+  ));
+
+  const [serviceResult, profileResult] = await Promise.all([
+    appointmentIds.length
+      ? supabase
+          .from("service_records")
+          .select("appointment_id,status,work_performed,total_amount,oil_quarts_used,metadata,completed_at,started_at,created_at")
+          .eq("workspace_id", context.workspaceId)
+          .in("appointment_id", appointmentIds)
+          .neq("status", "voided")
+      : Promise.resolve({ data: [], error: null }),
+    assignedUserIds.length
+      ? supabase.from("profiles").select("id,display_name").in("id", assignedUserIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (serviceResult.error) throw serviceResult.error;
+  if (profileResult.error) throw profileResult.error;
+
+  const servicesByAppointment = new Map<string, (typeof serviceResult.data)[number]>();
+  for (const service of serviceResult.data ?? []) {
+    if (!service.appointment_id || servicesByAppointment.has(service.appointment_id)) continue;
+    servicesByAppointment.set(service.appointment_id, service);
   }
-  if (toDate) {
-    appointmentQuery = appointmentQuery.lte("scheduled_date", toDate);
-    fleetQuery = fleetQuery.lte("scheduled_date", toDate);
+
+  const profileNames = new Map<string, string>();
+  for (const profile of profileResult.data ?? []) {
+    if (profile.id) profileNames.set(profile.id, profile.display_name || "Technician");
   }
-
-  const [appointmentsRes, fleetOrdersRes] = await Promise.all([appointmentQuery, fleetQuery]);
-
-  if (appointmentsRes.error) throw appointmentsRes.error;
-  if (fleetOrdersRes.error) throw fleetOrdersRes.error;
 
   const records: UnifiedReportingRecord[] = [];
 
-  for (const appt of appointmentsRes.data ?? []) {
-    if (!filter.includeLegacy && appt.data_origin === "legacy_import") continue;
+  for (const appt of appointments ?? []) {
+    const metadata = objectValue(appt.metadata);
+    const dataOrigin = String(metadata.data_origin ?? metadata.migration_source ?? "canonical");
+    if (!filter.includeLegacy && dataOrigin === "legacy_import") continue;
 
-    const vehicle = appt.vehicles;
     const customer = appt.customers;
-    const service = Array.isArray(appt.services) ? appt.services[0] : appt.services;
+    const vehicle = appt.vehicles;
+    const service = servicesByAppointment.get(appt.id);
+    const serviceMetadata = objectValue(service?.metadata);
+    const vehicleMetadata = objectValue(vehicle?.metadata);
+    const customerMetadata = objectValue(customer?.metadata);
+    const specs = Array.isArray(vehicle?.vehicle_service_specs)
+      ? vehicle?.vehicle_service_specs[0]
+      : vehicle?.vehicle_service_specs;
 
-    const address = appt.location_address || customer?.address || "";
-    const postal =
-      appt.customer_postal_code ||
-      zipFromAddress(appt.location_address) ||
-      customer?.postal_code ||
-      zipFromAddress(customer?.address) ||
-      "Unknown";
-    const city = appt.customer_city || cityFromAddress(address) || "Unknown";
-    const state = appt.customer_state || stateFromAddress(address) || "Unknown";
+    const address = String(
+      metadata.location_address ??
+      [customer?.address_line1, customer?.address_line2, customer?.city, customer?.region, customer?.postal_code]
+        .filter(Boolean)
+        .join(", ")
+    );
+    const postal = String(metadata.customer_postal_code ?? customer?.postal_code ?? zipFromAddress(address) ?? "Unknown");
+    const city = String(metadata.customer_city ?? customer?.city ?? cityFromAddress(address) ?? "Unknown");
+    const state = String(metadata.customer_state ?? customer?.region ?? stateFromAddress(address) ?? "Unknown");
 
-    const billed = Number(service?.total_cost ?? appt.estimated_cost) || 0;
-    const collected = Number(service?.paid_amount) || 0;
+    const billed = numeric(service?.total_amount ?? metadata.estimated_cost);
+    const collected = numeric(serviceMetadata.paid_amount ?? metadata.paid_amount);
+    const startsAt = new Date(appt.starts_at);
+    const endsAt = new Date(appt.ends_at);
+    const durationMinutes = Number.isFinite(startsAt.getTime()) && Number.isFinite(endsAt.getTime())
+      ? Math.max(0, Math.round((endsAt.getTime() - startsAt.getTime()) / 60_000))
+      : 0;
 
-    const actualMinutes =
-      appt.actual_start_time && appt.actual_end_time
-        ? Math.max(
-            0,
-            Math.round(
-              (new Date(appt.actual_end_time).getTime() - new Date(appt.actual_start_time).getTime()) / 60000,
-            ),
-          )
-        : 0;
+    const actualStart = metadata.actual_start_time;
+    const actualEnd = metadata.actual_end_time;
+    const actualMinutes = typeof actualStart === "string" && typeof actualEnd === "string"
+      ? Math.max(0, Math.round((Date.parse(actualEnd) - Date.parse(actualStart)) / 60_000))
+      : 0;
 
-    const latitude = appt.location_lat ?? customer?.latitude ?? null;
-    const longitude = appt.location_lng ?? customer?.longitude ?? null;
+    const latitude = numeric(metadata.location_lat ?? customerMetadata.latitude) || undefined;
+    const longitude = numeric(metadata.location_lng ?? customerMetadata.longitude) || undefined;
+    const oilCapacityRaw = specs?.oil_capacity ?? vehicleMetadata.oil_capacity;
 
     records.push({
       appointment_id: appt.id,
@@ -210,68 +200,28 @@ export async function fetchRawReportingRecords(
       state,
       make: vehicle?.make || "Unknown",
       model: vehicle?.model || "Unknown",
-      year: Number(vehicle?.year) || 0,
-      fuel_type: "Unknown",
-      oil_type: vehicle?.oil_type || "Unknown",
-      oil_capacity: Number.parseFloat(vehicle?.oil_capacity ?? "") || 0,
-      scheduled_time_slot: timeSlotForClock(appt.scheduled_time),
-      scheduled_date: appt.scheduled_date || "",
-      client_type: "Retail",
+      year: numeric(vehicle?.year),
+      fuel_type: String(vehicleMetadata.fuel_type ?? "Unknown"),
+      oil_type: String(specs?.oil_type ?? vehicleMetadata.oil_type ?? "Unknown"),
+      oil_capacity: Number.parseFloat(String(oilCapacityRaw ?? "")) || 0,
+      scheduled_time_slot: timeSlotForClock(appt.starts_at?.slice(11, 16)),
+      scheduled_date: appt.starts_at?.slice(0, 10) ?? "",
+      client_type: String(metadata.client_type ?? "Retail"),
       status: appt.status || "Unknown",
-      service_type: service?.service_type || appt.title || "Unspecified",
-      origin_source: appt.origin_source || appt.source || "direct",
-      technician_name: appt.technicians?.name || "Unassigned",
-      van_name: appt.vans?.name || "Unassigned",
+      service_type: String(serviceMetadata.service_type ?? metadata.title ?? service?.work_performed ?? "Unspecified"),
+      origin_source: String(metadata.origin_source ?? appt.source ?? "direct"),
+      technician_name: appt.assigned_user_id ? profileNames.get(appt.assigned_user_id) ?? "Assigned technician" : "Unassigned",
+      van_name: String(metadata.van_name ?? metadata.assigned_van_name ?? "Unassigned"),
       total_billed: billed,
       net_collected: collected,
       balance_due: Math.max(0, billed - collected),
-      quarts_used: Number(service?.oil_quarts_used) || 0,
+      quarts_used: numeric(service?.oil_quarts_used),
       job_count: 1,
-      duration_minutes: Number(appt.duration_minutes || appt.estimated_duration_minutes) || 0,
-      actual_minutes: actualMinutes,
-      travel_minutes: Number(appt.travel_time_minutes) || 0,
-      latitude: latitude != null ? Number(latitude) : undefined,
-      longitude: longitude != null ? Number(longitude) : undefined,
-    });
-  }
-
-  for (const wo of fleetOrdersRes.data ?? []) {
-    const vehicle = wo.fleet_vehicles;
-    const location = wo.fleet_locations;
-    const totalVal = Number(wo.total) || 0;
-    const paidVal = Number(wo.invoice_paid_amount) || 0;
-    const balanceVal = wo.invoice_balance_due != null ? Number(wo.invoice_balance_due) : totalVal - paidVal;
-
-    records.push({
-      appointment_id: null,
-      customer_id: null,
-      city: location?.city || "Unknown",
-      postal_code: location?.postal_code || "Unknown",
-      state: location?.state || "Unknown",
-      make: vehicle?.make || "Unknown",
-      model: vehicle?.model || "Unknown",
-      year: Number(vehicle?.year) || 0,
-      fuel_type: vehicle?.fuel_type || "Unknown",
-      oil_type: "Unknown",
-      oil_capacity: 0,
-      scheduled_time_slot: timeSlotForClock(wo.scheduled_time),
-      scheduled_date: wo.scheduled_date || "",
-      client_type: "Fleet",
-      status: wo.status || "Unknown",
-      service_type: "Fleet work order",
-      origin_source: "fleet",
-      technician_name: wo.technicians?.name || "Unassigned",
-      van_name: wo.vans?.name || "Unassigned",
-      total_billed: totalVal,
-      net_collected: paidVal,
-      balance_due: Math.max(0, balanceVal),
-      quarts_used: 0,
-      job_count: 1,
-      duration_minutes: Number(wo.labor_hours) > 0 ? Number(wo.labor_hours) * 60 : 0,
-      actual_minutes: 0,
-      travel_minutes: 0,
-      latitude: location?.latitude != null ? Number(location.latitude) : undefined,
-      longitude: location?.longitude != null ? Number(location.longitude) : undefined,
+      duration_minutes: durationMinutes,
+      actual_minutes: Number.isFinite(actualMinutes) ? actualMinutes : 0,
+      travel_minutes: numeric(metadata.travel_time_minutes),
+      latitude,
+      longitude,
     });
   }
 
@@ -282,29 +232,28 @@ export function pivotDataset(
   records: UnifiedReportingRecord[],
   config: DynamicReportConfig
 ): {
-  pivotData: Record<string, Record<string, Record<string, number>>>; // RowKey -> ColKey -> { Metric -> Value }
+  pivotData: Record<string, Record<string, Record<string, number>>>;
   allRows: string[];
   allCols: string[];
   totals: Record<string, number>;
 } {
-  // Apply Filter Clauses
   const filtered = records.filter(record => {
     return config.filters.every(filter => {
       const val = record[filter.field as keyof UnifiedReportingRecord];
       if (val === undefined) return true;
 
       switch (filter.operator) {
-        case 'eq':
+        case "eq":
           return String(val).toLowerCase() === String(filter.value).toLowerCase();
-        case 'neq':
+        case "neq":
           return String(val).toLowerCase() !== String(filter.value).toLowerCase();
-        case 'gt':
+        case "gt":
           return Number(val) > Number(filter.value);
-        case 'lt':
+        case "lt":
           return Number(val) < Number(filter.value);
-        case 'contains':
+        case "contains":
           return String(val).toLowerCase().includes(String(filter.value).toLowerCase());
-        case 'between':
+        case "between":
           if (Array.isArray(filter.value)) {
             return Number(val) >= Number(filter.value[0]) && Number(val) <= Number(filter.value[1]);
           }
@@ -348,13 +297,12 @@ export function pivotDataset(
     });
   });
 
-  // Calculate Averages if config.values specifies average
   rowSet.forEach(r => {
     colSet.forEach(c => {
       if (pivotData[r] && pivotData[r][c]) {
         config.values.forEach(v => {
-          if (v.aggregation === 'avg') {
-            const countField = 'job_count';
+          if (v.aggregation === "avg") {
+            const countField = "job_count";
             const count = pivotData[r][c][countField] || 1;
             pivotData[r][c][v.field] = pivotData[r][c][v.field] / count;
           }
@@ -367,6 +315,6 @@ export function pivotDataset(
     pivotData,
     allRows: Array.from(rowSet).sort(),
     allCols: Array.from(colSet).sort(),
-    totals
+    totals,
   };
 }
