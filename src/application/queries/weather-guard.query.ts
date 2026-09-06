@@ -1,6 +1,6 @@
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { supabase } from "@/integrations/supabase/client";
 
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export type RiskLevel = "low" | "medium" | "high" | "extreme";
 export type WeatherDecision = "OK" | "WARN" | "SUGGEST_RESCHEDULE" | "BLOCK";
 
@@ -42,7 +42,12 @@ export interface AtRiskAppointment {
   weather_evaluated_at: string | null;
 }
 
-/** Fetch the current user's shop coordinates + weather settings (for the map). */
+function asObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
 export async function fetchShopWeatherContext(): Promise<{
   lat: number | null;
   lng: number | null;
@@ -50,129 +55,103 @@ export async function fetchShopWeatherContext(): Promise<{
   weatherGuardEnabled: boolean;
   settings: unknown;
 } | null> {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) return null;
-  const { data, error } = await (supabase
-    .from("business_profiles")
-    .select("service_address, service_coordinates, weather_guard_enabled, weather_guard_settings") as any)
-    .eq("user_id", user.id)
+  const context = await resolveCurrentWorkspace();
+  if (!context) return null;
+  const { data, error } = await supabase
+    .from("workspace_settings")
+    .select("address_line1, address_line2, city, region, postal_code, operational_settings")
+    .eq("workspace_id", context.workspaceId)
     .maybeSingle();
   if (error || !data) return null;
-  const coords = (data.service_coordinates ?? null) as { lat?: number; lng?: number } | null;
+
+  const operational = asObject(data.operational_settings);
+  const weather = asObject(operational.weather_guard);
+  const coordinates = asObject(weather.coordinates);
   return {
-    lat: coords?.lat ?? null,
-    lng: coords?.lng ?? null,
-    address: data.service_address ?? null,
-    weatherGuardEnabled: data.weather_guard_enabled ?? false,
-    settings: data.weather_guard_settings ?? null,
+    lat: typeof coordinates.lat === "number" ? coordinates.lat : null,
+    lng: typeof coordinates.lng === "number" ? coordinates.lng : null,
+    address: [data.address_line1, data.address_line2, data.city, data.region, data.postal_code].filter(Boolean).join(", ") || null,
+    weatherGuardEnabled: weather.enabled === true,
+    settings: weather.settings ?? weather,
   };
 }
 
-/** Ensure default rules exist for the current user. */
 export async function ensureDefaultRules(): Promise<void> {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) return;
-  await supabase.rpc("seed_default_dispatch_rules", { _user_id: user.id });
+  const context = await resolveCurrentWorkspace();
+  if (!context) return;
+  await supabase.rpc("seed_default_dispatch_rules", { _user_id: context.userId });
 }
 
 export async function fetchDispatchRules(): Promise<DispatchRule[]> {
-  const { data, error } = await supabase
-    .from("dispatch_rules")
-    .select("*")
-    .order("created_at", { ascending: true });
+  const { data, error } = await supabase.from("dispatch_rules").select("*").order("created_at", { ascending: true });
   if (error) throw error;
   return (data ?? []) as unknown as DispatchRule[];
 }
 
-export async function updateDispatchRule(
-  id: string,
-  patch: Partial<Pick<DispatchRule, "active" | "auto_execute" | "name" | "condition" | "action">>,
-): Promise<void> {
+export async function updateDispatchRule(id: string, patch: Partial<Pick<DispatchRule, "active" | "auto_execute" | "name" | "condition" | "action">>): Promise<void> {
   const { error } = await supabase.from("dispatch_rules").update(patch as never).eq("id", id);
   if (error) throw error;
 }
 
 export async function fetchUpcomingAtRisk(): Promise<AtRiskAppointment[]> {
-  const today = new Date().toISOString().slice(0, 10);
-  const horizon = new Date(Date.now() + 48 * 3_600_000).toISOString().slice(0, 10);
-
+  const context = await resolveCurrentWorkspace();
+  if (!context) return [];
+  const now = new Date();
+  const horizon = new Date(Date.now() + 48 * 3_600_000);
   const { data, error } = await supabase
     .from("appointments")
-    .select(
-      "id, title, scheduled_date, scheduled_time, duration_minutes, status, location_address, guest_name, weather_risk_score, weather_decision, weather_evaluated_at",
-    )
-    .gte("scheduled_date", today)
-    .lte("scheduled_date", horizon)
-    .is("deleted_at", null)
-    .order("scheduled_date", { ascending: true })
-    .order("scheduled_time", { ascending: true });
-
+    .select("id, starts_at, ends_at, status, metadata")
+    .eq("workspace_id", context.workspaceId)
+    .gte("starts_at", now.toISOString())
+    .lte("starts_at", horizon.toISOString())
+    .order("starts_at", { ascending: true });
   if (error) throw error;
-  return (data ?? []) as AtRiskAppointment[];
+
+  return (data ?? []).map((appointment) => {
+    const metadata = asObject(appointment.metadata);
+    const start = new Date(appointment.starts_at);
+    const end = new Date(appointment.ends_at);
+    return {
+      id: appointment.id,
+      title: typeof metadata.title === "string" ? metadata.title : "Service appointment",
+      scheduled_date: start.toISOString().slice(0, 10),
+      scheduled_time: start.toTimeString().slice(0, 5),
+      duration_minutes: Math.max(0, Math.round((end.getTime() - start.getTime()) / 60_000)),
+      status: appointment.status,
+      location_address: typeof metadata.location_address === "string" ? metadata.location_address : typeof metadata.service_address === "string" ? metadata.service_address : null,
+      guest_name: typeof metadata.guest_name === "string" ? metadata.guest_name : null,
+      weather_risk_score: typeof metadata.weather_risk_score === "number" ? metadata.weather_risk_score : null,
+      weather_decision: typeof metadata.weather_decision === "string" ? metadata.weather_decision : null,
+      weather_evaluated_at: typeof metadata.weather_evaluated_at === "string" ? metadata.weather_evaluated_at : null,
+    };
+  });
 }
 
 export async function fetchRecentRiskLogs(limit = 20): Promise<WeatherRiskLog[]> {
-  const { data, error } = await supabase
-    .from("weather_risk_logs")
-    .select("*")
-    .order("evaluated_at", { ascending: false })
-    .limit(limit);
+  const { data, error } = await supabase.from("weather_risk_logs").select("*").order("evaluated_at", { ascending: false }).limit(limit);
   if (error) throw error;
   return (data ?? []) as unknown as WeatherRiskLog[];
 }
 
 export async function evaluateAppointmentNow(appointmentId: string) {
-  const { data, error } = await supabase.functions.invoke("weather-guard-evaluate", {
-    body: { appointmentId },
-  });
+  const { data, error } = await supabase.functions.invoke("weather-guard-evaluate", { body: { appointmentId } });
   if (error) throw error;
   return data;
 }
 
-export async function executeWeatherAction(
-  appointmentId: string,
-  decision: WeatherDecision,
-  reason: string,
-) {
-  const { data, error } = await supabase.functions.invoke("weather-guard-action", {
-    body: { appointmentId, decision, reason },
-  });
+export async function executeWeatherAction(appointmentId: string, decision: WeatherDecision, reason: string) {
+  const { data, error } = await supabase.functions.invoke("weather-guard-action", { body: { appointmentId, decision, reason } });
   if (error) throw error;
   return data;
 }
 
-export async function checkSlotRisk(args: {
-  businessUserId?: string;
-  lat: number;
-  lng: number;
-  start: string;
-  end?: string;
-  scope?: "all" | "outdoor" | "mobile";
-}) {
+export async function checkSlotRisk(args: { businessUserId?: string; lat: number; lng: number; start: string; end?: string; scope?: "all" | "outdoor" | "mobile"; }) {
   const { data, error } = await supabase.functions.invoke("weather-guard-check-slot", { body: args });
   if (error) throw error;
-  return data as {
-    riskScore: number;
-    riskLevel: RiskLevel;
-    decision: WeatherDecision;
-    message: string;
-    reasons?: string[];
-  };
+  return data as { riskScore: number; riskLevel: RiskLevel; decision: WeatherDecision; message: string; reasons?: string[]; };
 }
 
-/** Subscribe to weather_risk_logs INSERTs; used by the guard dashboard to refresh live. */
 export function subscribeWeatherRiskLogs(onInsert: () => void): { unsubscribe: () => void } {
-  const channel = supabase
-    .channel("weather-risk-logs")
-    .on(
-      "postgres_changes",
-      { event: "INSERT", schema: "public", table: "weather_risk_logs" },
-      () => onInsert(),
-    )
-    .subscribe();
-  return {
-    unsubscribe: () => {
-      supabase.removeChannel(channel);
-    },
-  };
+  const channel = supabase.channel("weather-risk-logs").on("postgres_changes", { event: "INSERT", schema: "public", table: "weather_risk_logs" }, () => onInsert()).subscribe();
+  return { unsubscribe: () => { void supabase.removeChannel(channel); } };
 }
