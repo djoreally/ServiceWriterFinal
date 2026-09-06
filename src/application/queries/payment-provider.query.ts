@@ -1,27 +1,42 @@
-/**
- * Payment Provider Query — Read operations for payment provider settings.
- */
+/** Payment Provider Query — canonical workspace-scoped provider settings. */
 import { supabase } from "@/integrations/supabase/client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
 
 export async function fetchPaymentProvider() {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) return null;
+  const context = await resolveCurrentWorkspace();
+  if (!context) return null;
 
-  const headers = { Authorization: `Bearer ${session.access_token}` };
+  const { data: settings, error } = await supabase
+    .from("workspace_settings")
+    .select("payment_provider,operational_settings")
+    .eq("workspace_id", context.workspaceId)
+    .single();
+  if (error) throw error;
 
-  const [profileResp, stripeResp, squareResp] = await Promise.all([
-    supabase
-      .from("business_profiles")
-      .select("payment_provider")
-      .eq("user_id", session.user.id)
-      .single(),
-    supabase.functions.invoke("stripe-connect-status", { headers }),
-    supabase.functions.invoke("square-connect-status", { headers }),
-  ]);
-
+  const operational = object(settings?.operational_settings);
   return {
-    provider: profileResp.data?.payment_provider ?? null,
-    stripeStatus: stripeResp.data,
-    squareStatus: squareResp.data,
+    provider: settings?.payment_provider ?? "none",
+    stripeStatus: {
+      connected: typeof operational.stripe_account_id === "string" && operational.stripe_account_id.length > 0,
+      chargesEnabled: operational.stripe_charges_enabled === true,
+      payoutsEnabled: operational.stripe_payouts_enabled === true,
+      detailsSubmitted: operational.stripe_onboarding_complete === true,
+      accountId: typeof operational.stripe_account_id === "string" ? operational.stripe_account_id : undefined,
+    },
+    squareStatus: {
+      connected: operational.square_connected === true || typeof operational.square_merchant_id === "string",
+      chargesEnabled: operational.square_charges_enabled === true,
+      merchantId: typeof operational.square_merchant_id === "string" ? operational.square_merchant_id : null,
+      locationId: typeof operational.square_location_id === "string" ? operational.square_location_id : null,
+      onboardingComplete: operational.square_onboarding_complete === true,
+      accountStatus: typeof operational.square_account_status === "string" ? operational.square_account_status : undefined,
+      tokenExpiringSoon: operational.square_token_expiring_soon === true,
+    },
   };
 }
