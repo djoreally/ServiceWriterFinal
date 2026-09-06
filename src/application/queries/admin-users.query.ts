@@ -1,11 +1,9 @@
 /**
- * Admin User Management Query & Commands
- * Fetches provider profiles with roles, and manages admin roles plus
- * marketplace listing / booking slug / soft-delete state.
+ * Admin provider management backed by canonical workspace tables.
  */
 import { supabase } from "@/integrations/supabase/client";
-
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
+
 export interface UserWithProfile {
   id: string;
   email: string;
@@ -18,47 +16,59 @@ export interface UserWithProfile {
   onboarding_completed: boolean;
 }
 
-/**
- * Fetches every provider profile on the platform (including incomplete
- * onboarding and archived/soft-deleted records) so admins can audit and
- * manage the full list, not just the polished subset.
- */
 export async function fetchUsersWithRoles(): Promise<UserWithProfile[]> {
-  const { data: profiles, error } = await supabase
-    .from("business_profiles")
-    .select(
-      "user_id, business_name, email, created_at, booking_slug, marketplace_opt_in, deleted_at, onboarding_completed",
-    )
+  const { data: workspaces, error } = await supabase
+    .from("workspaces")
+    .select("id, name, created_by, created_at, is_active")
     .order("created_at", { ascending: false });
-
   if (error) throw error;
+  if (!workspaces?.length) return [];
 
-  const userIds = profiles?.map((p) => p.user_id) || [];
-  if (userIds.length === 0) return [];
+  const workspaceIds = workspaces.map((workspace) => workspace.id);
+  const ownerIds = Array.from(new Set(workspaces.map((workspace) => workspace.created_by)));
 
-  const { data: roles } = await supabase
-    .from("user_roles")
-    .select("user_id, role")
-    .in("user_id", userIds);
+  const [{ data: settings, error: settingsError }, { data: roles, error: rolesError }] = await Promise.all([
+    supabase
+      .from("workspace_settings")
+      .select("workspace_id, email, booking_slug, marketplace_opt_in, operational_settings")
+      .in("workspace_id", workspaceIds),
+    supabase
+      .from("user_roles")
+      .select("user_id, role")
+      .in("user_id", ownerIds),
+  ]);
+  if (settingsError) throw settingsError;
+  if (rolesError) throw rolesError;
 
-  const roleMap = new Map(roles?.map((r) => [r.user_id, r.role]) || []);
+  const settingsMap = new Map((settings ?? []).map((row) => [row.workspace_id, row]));
+  const roleMap = new Map((roles ?? []).map((row) => [row.user_id, row.role]));
 
-  return (profiles || []).map((p) => ({
-    id: p.user_id,
-    email: p.email || "",
-    created_at: p.created_at,
-    business_name: p.business_name,
-    role: roleMap.get(p.user_id) || "user",
-    booking_slug: p.booking_slug ?? null,
-    marketplace_opt_in: Boolean(p.marketplace_opt_in),
-    deleted_at: p.deleted_at ?? null,
-    onboarding_completed: Boolean(p.onboarding_completed),
-  }));
+  return workspaces.map((workspace) => {
+    const workspaceSettings = settingsMap.get(workspace.id);
+    const operational = workspaceSettings?.operational_settings;
+    const onboardingCompleted = Boolean(
+      operational && typeof operational === "object" && !Array.isArray(operational)
+        ? (operational as Record<string, unknown>).onboarding_completed
+        : true,
+    );
+
+    return {
+      id: workspace.created_by,
+      email: workspaceSettings?.email ?? "",
+      created_at: workspace.created_at,
+      business_name: workspace.name,
+      role: roleMap.get(workspace.created_by) ?? "user",
+      booking_slug: workspaceSettings?.booking_slug ?? null,
+      marketplace_opt_in: Boolean(workspaceSettings?.marketplace_opt_in),
+      deleted_at: workspace.is_active ? null : workspace.updated_at ?? workspace.created_at,
+      onboarding_completed: onboardingCompleted,
+    };
+  });
 }
 
 export async function getCurrentUserId(): Promise<string | null> {
   const { data: { user } } = await getCurrentAuthUser();
-  return user?.id || null;
+  return user?.id ?? null;
 }
 
 export async function makeUserAdmin(userId: string): Promise<void> {
@@ -77,26 +87,42 @@ export async function removeUserAdmin(userId: string): Promise<void> {
   if (error) throw error;
 }
 
-/** Toggle public marketplace/directory visibility for a provider. */
+async function workspaceIdsForOwner(userId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("workspaces")
+    .select("id")
+    .eq("created_by", userId);
+  if (error) throw error;
+  return (data ?? []).map((workspace) => workspace.id);
+}
+
 export async function setMarketplaceOptIn(userId: string, optIn: boolean): Promise<void> {
+  const workspaceIds = await workspaceIdsForOwner(userId);
+  if (!workspaceIds.length) return;
   const { error } = await supabase
-    .from("business_profiles")
+    .from("workspace_settings")
     .update({ marketplace_opt_in: optIn })
-    .eq("user_id", userId);
+    .in("workspace_id", workspaceIds);
   if (error) throw error;
 }
 
-/** Archive (soft-delete) or restore a provider profile. */
 export async function setProviderArchived(userId: string, archived: boolean): Promise<void> {
-  const payload: { deleted_at: string | null; marketplace_opt_in?: boolean } = archived
-    ? { deleted_at: new Date().toISOString(), marketplace_opt_in: false }
-    : { deleted_at: null };
+  const workspaceIds = await workspaceIdsForOwner(userId);
+  if (!workspaceIds.length) return;
 
-  const { error } = await supabase
-    .from("business_profiles")
-    .update(payload)
-    .eq("user_id", userId);
-  if (error) throw error;
+  const { error: workspaceError } = await supabase
+    .from("workspaces")
+    .update({ is_active: !archived })
+    .in("id", workspaceIds);
+  if (workspaceError) throw workspaceError;
+
+  if (archived) {
+    const { error: settingsError } = await supabase
+      .from("workspace_settings")
+      .update({ marketplace_opt_in: false, booking_enabled: false })
+      .in("workspace_id", workspaceIds);
+    if (settingsError) throw settingsError;
+  }
 }
 
 export function normalizeBookingSlug(raw: string): string {
@@ -108,16 +134,17 @@ export function normalizeBookingSlug(raw: string): string {
     .replace(/^-|-$/g, "");
 }
 
-/** Update a provider's public booking slug (/book/:slug). */
 export async function updateBookingSlug(userId: string, slug: string): Promise<string> {
   const normalized = normalizeBookingSlug(slug);
   if (normalized.length < 3) throw new Error("Booking link must be at least 3 characters");
 
-  const { error } = await supabase
-    .from("business_profiles")
-    .update({ booking_slug: normalized })
-    .eq("user_id", userId);
+  const workspaceIds = await workspaceIdsForOwner(userId);
+  if (!workspaceIds.length) throw new Error("No workspace found for provider");
 
+  const { error } = await supabase
+    .from("workspace_settings")
+    .update({ booking_slug: normalized })
+    .in("workspace_id", workspaceIds);
   if (error) {
     if (error.code === "23505" || error.message.toLowerCase().includes("duplicate")) {
       throw new Error("That booking link is already taken");
