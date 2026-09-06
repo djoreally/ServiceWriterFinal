@@ -9,13 +9,26 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   try {
     const id = z.string().uuid().parse((await context.params).id);
     const { workspace_id } = schema.parse(await request.json());
-    const { supabase } = await requireWorkspaceMember(workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher", "technician"], request);
+    const { supabase } = await requireWorkspaceMember(
+      workspace_id,
+      ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher", "technician"],
+      request,
+    );
 
-    const { data: serviceRecordId, error } = await supabase.rpc(
-      "complete_appointment_v1" as never,
-      { p_workspace_id: workspace_id, p_appointment_id: id } as never,
+    // Completion, service history, invoicing, and the receivable are one
+    // canonical closeout operation. The database function is idempotent so a
+    // browser retry reuses the same financial records instead of duplicating
+    // revenue or open balances.
+    const { data: closeout, error } = await (supabase as any).rpc(
+      "complete_appointment_closeout_v1",
+      { p_workspace_id: workspace_id, p_appointment_id: id },
     );
     if (error) throw error;
+
+    const closeoutData = closeout && typeof closeout === "object" && !Array.isArray(closeout)
+      ? closeout as Record<string, unknown>
+      : {};
+    const serviceRecordId = String(closeoutData.service_record_id ?? "");
 
     try {
       const [{ data: appointment }, { data: workspace }] = await Promise.all([
@@ -30,7 +43,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       if (appointment) {
         await dispatchAppointmentLifecycle({
           eventKey: LIFECYCLE_EVENT_KEYS.serviceCompleted,
-          eventId: `${id}:completed:${String(serviceRecordId)}`,
+          eventId: `${id}:completed:${serviceRecordId}`,
           appointment,
           workspaceName: workspace?.name ?? "Service Writer",
           workspaceTimezone: workspace?.timezone ?? "UTC",
@@ -41,7 +54,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       console.error("[Lifecycle] service-completed email enqueue failed", dispatchError);
     }
 
-    return json({ data: { appointment_id: id, service_record_id: serviceRecordId } });
+    return json({ data: closeoutData });
   } catch (error) {
     return errorResponse(error);
   }
