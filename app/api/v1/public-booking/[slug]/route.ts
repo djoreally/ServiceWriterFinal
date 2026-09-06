@@ -10,6 +10,7 @@ const querySchema = z.object({
 
 const bookingSlugAliases: Readonly<Record<string, string>> = {
   moms: "momsoilchange",
+  "moms-mobile-oil-change": "momsoilchange",
 };
 
 type RpcRow = Record<string, unknown>;
