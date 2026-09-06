@@ -77,11 +77,12 @@ export async function POST(request: Request) {
       }
     }
 
-    // Browser retries and stale clients must not create duplicate unresolved
-    // appointment payments. Provider-backed payments rely on provider_payment_id.
+    // Appointment closeout owns the receivable. Older callers may still ask to
+    // "create" the same pending payment; return the canonical existing row so
+    // retries and mixed client versions remain idempotent.
     if (body.status === "pending" && appointmentId && !body.provider_payment_id) {
       let duplicateQuery = (supabase.from("payments") as any)
-        .select("id")
+        .select("*")
         .eq("workspace_id", body.workspace_id)
         .eq("status", "pending")
         .eq("metadata->>appointment_id", appointmentId)
@@ -90,13 +91,7 @@ export async function POST(request: Request) {
       const { data: duplicate, error: duplicateError } = await duplicateQuery.maybeSingle();
       if (duplicateError) throw duplicateError;
       if (duplicate?.id) {
-        return json({
-          error: {
-            code: "duplicate_pending_payment",
-            message: "A pending payment already exists for this appointment and payment type.",
-            payment_id: duplicate.id,
-          },
-        }, { status: 409 });
+        return json({ data: duplicate, reused: true });
       }
     }
 
