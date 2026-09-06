@@ -11,7 +11,6 @@ import { PageContainer } from "./PagePrimitives";
 import { Skeleton } from "@/components/ui/skeleton";
 import { WorkspaceIdentityBanner } from "./WorkspaceIdentityBanner";
 
-
 interface AppLayoutProps {
   children: React.ReactNode;
   title?: string;
@@ -20,17 +19,13 @@ interface AppLayoutProps {
 export const AppLayout = ({ children, title = "Dashboard" }: AppLayoutProps) => {
   const { loading } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
   const isMobile = useMediaQuery("(max-width: 767px)");
   const showHamburgerMenu = useMediaQuery("(max-width: 1023px)");
 
-  // Auth/session enforcement is handled centrally by `RequireAuth` in App.tsx.
-  // No layout-level navigate effect → no double redirect race.
-
   if (loading) {
     return (
-      <div className="min-h-screen bg-background p-4 sm:p-6" role="status" aria-live="polite" aria-label="Loading workspace">
-        <div className="mx-auto grid max-w-7xl gap-4 lg:grid-cols-[220px_1fr]">
+      <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-background p-4 sm:p-5 lg:p-6" role="status" aria-live="polite" aria-label="Loading workspace">
+        <div className="mx-auto grid min-w-0 max-w-[1440px] gap-4 lg:grid-cols-[220px_1fr]">
           <aside className="hidden space-y-4 rounded-lg border bg-card p-4 lg:block" aria-hidden="true">
             <Skeleton className="h-10 w-36" />
             <Skeleton className="h-8 w-full" />
@@ -39,17 +34,17 @@ export const AppLayout = ({ children, title = "Dashboard" }: AppLayoutProps) => 
             <Skeleton className="h-8 w-10/12" />
             <Skeleton className="h-8 w-full" />
           </aside>
-          <div className="space-y-5">
-            <div className="flex items-center justify-between rounded-lg border bg-card p-4">
-              <Skeleton className="h-8 w-48" />
-              <div className="flex gap-3">
-                <Skeleton className="h-9 w-40" />
+          <div className="min-w-0 space-y-5">
+            <div className="flex min-w-0 items-center justify-between rounded-lg border bg-card p-4">
+              <Skeleton className="h-8 w-48 max-w-full" />
+              <div className="flex shrink-0 gap-3">
+                <Skeleton className="hidden h-9 w-40 sm:block" />
                 <Skeleton className="h-9 w-9 rounded-full" />
               </div>
             </div>
-            <div className="space-y-4" aria-hidden="true">
-              <Skeleton className="h-9 w-64" />
-              <div className="grid gap-4 sm:grid-cols-3">
+            <div className="min-w-0 space-y-4" aria-hidden="true">
+              <Skeleton className="h-9 w-64 max-w-full" />
+              <div className="grid min-w-0 gap-4 sm:grid-cols-3">
                 <Skeleton className="h-28 w-full" />
                 <Skeleton className="h-28 w-full" />
                 <Skeleton className="h-28 w-full" />
@@ -64,25 +59,20 @@ export const AppLayout = ({ children, title = "Dashboard" }: AppLayoutProps) => 
   }
 
   return (
-    <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-background flex">
-      {/* Session security: auto sign-out on idle/expiry */}
+    <div className="flex min-h-screen w-full max-w-full overflow-x-hidden bg-background lg:h-screen lg:overflow-hidden" data-app-shell>
       <SessionExpiryWarning />
       <GlobalCommandPalette />
-
       {!showHamburgerMenu && <Sidebar />}
-      
       {showHamburgerMenu && <MobileNav open={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} />}
 
-      <div className="flex-1 flex flex-col w-0 min-h-screen lg:min-h-0">
-        <TopHeader 
-          title={title} 
-          onMenuClick={() => setMobileMenuOpen(true)} 
-          showMenuButton={showHamburgerMenu} 
+      <div className="flex min-h-screen min-w-0 w-full max-w-full flex-1 flex-col lg:min-h-0">
+        <TopHeader
+          title={title}
+          onMenuClick={() => setMobileMenuOpen(true)}
+          showMenuButton={showHamburgerMenu}
         />
         <WorkspaceIdentityBanner />
-        {/* Mobile/tablet: the document scrolls (no nested scroll container) so the
-            last rows are always reachable. Desktop: the main region scrolls. */}
-        <main className="flex-1 lg:overflow-y-auto px-3 py-4 sm:px-4 md:px-5 md:py-5 safe-bottom-content lg:pb-safe">
+        <main className="safe-bottom-content min-w-0 w-full max-w-full flex-1 overflow-x-hidden px-4 py-4 sm:px-5 md:py-5 lg:overflow-y-auto lg:px-6 lg:pb-safe" data-app-main>
           <PageContainer>{children}</PageContainer>
         </main>
       </div>
@@ -90,6 +80,4 @@ export const AppLayout = ({ children, title = "Dashboard" }: AppLayoutProps) => 
       {isMobile && <BottomNavBar />}
     </div>
   );
-
-
 };

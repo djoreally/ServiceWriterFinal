@@ -7,7 +7,7 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import { hardDelete } from "@/lib/soft-delete";
-import { nextApi } from "@/lib/nextApiClient";
+import { ApiClientError, nextApi } from "@/lib/nextApiClient";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 import { invalidateVehicleOverview } from "@/application/queries/vehicles.query";
 import { invalidateCustomerOverview } from "@/application/queries/customers.query";
@@ -57,8 +57,23 @@ export async function updateVehicle(id: string, payload: VehicleWritePayload): P
 
 export async function updateVehicleOilType(id: string, oilType: string): Promise<void> {
   const workspaceId = requireSelectedWorkspaceId();
-  await nextApi.vehicles.update(id, { workspace_id: workspaceId, oil_type: oilType });
-  invalidateVehicleOverview(workspaceId);
+  try {
+    await nextApi.vehicles.update(id, { workspace_id: workspaceId, oil_type: oilType });
+    invalidateVehicleOverview(workspaceId);
+  } catch (error) {
+    // Appointment completion records the selected oil type in the canonical
+    // service record as well. A stale/legacy vehicle projection must not block
+    // closing the appointment simply because that optional profile write can no
+    // longer resolve the vehicle in the selected workspace.
+    if (error instanceof ApiClientError && error.status === 404) {
+      console.warn("[updateVehicleOilType] vehicle profile unavailable; preserving oil type in service record", {
+        vehicleId: id,
+        workspaceId,
+      });
+      return;
+    }
+    throw error;
+  }
 }
 
 export async function deleteVehicle(id: string): Promise<void> {

@@ -1,17 +1,18 @@
-/**
- * Payment Provider Commands — Write operations for payment provider settings.
- */
+/** Payment Provider Commands — canonical workspace-scoped provider writes. */
 import { supabase } from "@/integrations/supabase/client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 export async function updatePaymentProvider(provider: string) {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error("Not authenticated");
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("Select a workspace before updating the payment provider.");
+  if (!["stripe", "square", "none"].includes(provider)) throw new Error("Unsupported payment provider");
 
-  const { error } = await supabase
-    .from("business_profiles")
+  // Generated Supabase types still lag the canonical workspace_settings schema.
+  const db = supabase as any;
+  const { error } = await db
+    .from("workspace_settings")
     .update({ payment_provider: provider })
-    .eq("user_id", session.user.id);
-
+    .eq("workspace_id", context.workspaceId);
   if (error) throw new Error(error.message);
 }
 

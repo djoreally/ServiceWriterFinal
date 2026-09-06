@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "../src/index.css";
+import "../src/material-color-system.css";
 import ClientOnlyShell from "../src/ClientOnlyShell";
 
 export const metadata: Metadata = {

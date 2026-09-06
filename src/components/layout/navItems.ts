@@ -1,4 +1,5 @@
 import type { LucideIcon } from "lucide-react";
+import type { WorkforceRole } from "@/application/queries/workforce-identity.query";
 import { canAccessRoute } from "@/domain/auth/access-policy";
 
 import {
@@ -60,7 +61,7 @@ type Terms = {
   quote: string;
 };
 
-export type RoleScope = "admin" | "owner" | "manager" | "dispatcher" | "fleet_manager" | "technician" | null;
+export type RoleScope = WorkforceRole | null;
 
 export const getNavGroups = (terms: Terms, role: RoleScope = "admin"): NavGroup[] => {
   const all = buildAllGroups(terms);

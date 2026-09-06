@@ -38,62 +38,44 @@ export const TopHeader = ({ title, onMenuClick, showMenuButton = true }: TopHead
   };
 
   const userEmail = user?.email || "";
-  const initials = userEmail
-    ? userEmail.substring(0, 2).toUpperCase()
-    : "U";
+  const initials = userEmail ? userEmail.substring(0, 2).toUpperCase() : "U";
 
   return (
-    <header className="sticky top-0 z-40 bg-card border-b border-border pt-safe">
-      <div className="flex min-h-14 items-center justify-between px-3 py-2 sm:px-4 md:min-h-16 md:px-5">
-        <div className="flex items-center gap-3 md:gap-4">
+    <header className="sticky top-0 z-40 w-full max-w-full overflow-x-hidden border-b border-border bg-card pt-safe">
+      <div className="flex min-h-14 min-w-0 w-full max-w-full items-center gap-2 px-2 py-2 sm:px-4 md:min-h-16 md:px-5">
+        <div className="flex min-w-0 flex-1 items-center gap-2 md:gap-4">
           {showMenuButton && (
-            <Button
-              variant="ghost"
-              size="icon"
-              className="lg:hidden h-9 w-9"
-              onClick={onMenuClick}
-            >
+            <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0 lg:hidden" onClick={onMenuClick}>
               <Menu className="h-5 w-5" />
             </Button>
           )}
-          <h1 className="max-w-[180px] truncate text-base font-semibold text-foreground sm:max-w-none md:text-lg">{title}</h1>
+          <h1 className="min-w-0 flex-1 truncate text-base font-semibold text-foreground md:text-lg">{title}</h1>
         </div>
 
-        <div className="flex items-center gap-2 md:gap-4">
-          {/* Search */}
-          <div className="hidden md:flex items-center relative">
+        <div className="flex min-w-0 shrink-0 items-center gap-1 sm:gap-2 md:gap-4">
+          <div className="relative hidden items-center md:flex">
             <Search className="absolute left-3 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search VIN, Name, Plate..."
-              className="pl-9 w-64 bg-muted/50 border-0"
-            />
+            <Input placeholder="Search VIN, Name, Plate..." className="w-64 border-0 bg-muted/50 pl-9" />
           </div>
 
-          {/* Workspace context */}
           {user && (memberships.length > 0 || workspacesLoading || workspacesError) && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="outline"
-                  className="h-9 max-w-[170px] gap-2 px-2 text-left sm:max-w-[240px]"
+                  className="h-9 w-9 shrink-0 gap-2 p-0 text-left sm:w-auto sm:max-w-[240px] sm:px-2"
                   aria-label="Select workspace"
                   disabled={workspacesLoading && memberships.length === 0}
                 >
                   <Building2 className="h-4 w-4 shrink-0 text-primary" />
-                  <span className="min-w-0 truncate text-xs font-semibold sm:text-sm">
-                    {workspacesLoading && memberships.length === 0
-                      ? "Loading workspaces…"
-                      : selectedWorkspace?.workspaces?.name || "Select workspace"}
+                  <span className="hidden min-w-0 truncate text-xs font-semibold sm:inline sm:text-sm">
+                    {workspacesLoading && memberships.length === 0 ? "Loading workspaces…" : selectedWorkspace?.workspaces?.name || "Select workspace"}
                   </span>
-                  <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <ChevronsUpDown className="hidden h-3.5 w-3.5 shrink-0 text-muted-foreground sm:block" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[min(18rem,calc(100vw-1.5rem))]">
-                {workspacesError && (
-                  <DropdownMenuItem disabled className="text-destructive">
-                    {workspacesError}
-                  </DropdownMenuItem>
-                )}
+              <DropdownMenuContent align="end" className="w-[min(18rem,calc(100vw-1rem))]">
+                {workspacesError && <DropdownMenuItem disabled className="text-destructive">{workspacesError}</DropdownMenuItem>}
                 {memberships.map((membership) => {
                   const workspace = membership.workspaces;
                   if (!workspace) return null;
@@ -119,48 +101,26 @@ export const TopHeader = ({ title, onMenuClick, showMenuButton = true }: TopHead
             </DropdownMenu>
           )}
 
-          {/* Theme Toggle */}
           <ThemeToggle />
-
-          {/* Real-time Notifications */}
           <NotificationBell />
 
-          {/* User Profile */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="flex items-center gap-3 px-2">
+              <Button variant="ghost" className="flex h-9 w-9 shrink-0 items-center gap-3 p-0 md:w-auto md:px-2">
                 <Avatar className="h-9 w-9">
-                  <AvatarFallback className="bg-primary/10 text-primary text-sm">
-                    {initials}
-                  </AvatarFallback>
+                  <AvatarFallback className="bg-primary/10 text-sm text-primary">{initials}</AvatarFallback>
                 </Avatar>
-                <div className="hidden md:block text-left">
+                <div className="hidden text-left md:block">
                   <p className="text-sm font-medium">{isFleetContext ? "Fleet Manager" : "Shop Manager"}</p>
-                  <p className="text-xs text-muted-foreground truncate max-w-[120px]">
-                    {userEmail || "User"}
-                  </p>
+                  <p className="max-w-[120px] truncate text-xs text-muted-foreground">{userEmail || "User"}</p>
                 </div>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem onClick={() => navigate("/settings")}>
-                <Settings className="h-4 w-4 mr-2" />
-                Settings
-              </DropdownMenuItem>
-              {isAdmin && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => navigate("/admin")}>
-                    <Shield className="h-4 w-4 mr-2" />
-                    Admin Dashboard
-                  </DropdownMenuItem>
-                </>
-              )}
+              <DropdownMenuItem onClick={() => navigate("/settings")}><Settings className="mr-2 h-4 w-4" />Settings</DropdownMenuItem>
+              {isAdmin && (<><DropdownMenuSeparator /><DropdownMenuItem onClick={() => navigate("/admin")}><Shield className="mr-2 h-4 w-4" />Admin Dashboard</DropdownMenuItem></>)}
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleSignOut} className="text-destructive">
-                <LogOut className="h-4 w-4 mr-2" />
-                Sign Out
-              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleSignOut} className="text-destructive"><LogOut className="mr-2 h-4 w-4" />Sign Out</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
