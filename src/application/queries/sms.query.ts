@@ -6,7 +6,7 @@ import { supabase } from "@/integrations/supabase/client";
 export interface SmsMessage {
   id: string;
   direction: "inbound" | "outbound";
-  phone: string; // counterparty number
+  phone: string;
   text: string;
   created_at: string;
   correlation_id?: string | null;
@@ -50,10 +50,10 @@ export async function fetchSmsEligibleRecipients(): Promise<SmsRecipient[]> {
   const allowedStatuses = ["pending", "confirmed", "in_progress", "scheduled", "no_show"];
   const { data, error } = await supabase
     .from("appointments")
-    .select("id, status, scheduled_date, scheduled_time, customer:customers(name, phone)")
+    .select("id, status, starts_at, customer:customers(first_name, last_name, company_name, phone)")
     .in("status", allowedStatuses)
     .not("customer.phone", "is", null)
-    .order("scheduled_date", { ascending: true });
+    .order("starts_at", { ascending: true });
 
   if (error) {
     throw new Error(error.message || "Failed to load message recipients");
@@ -63,10 +63,13 @@ export async function fetchSmsEligibleRecipients(): Promise<SmsRecipient[]> {
     .filter((row) => row.customer?.phone)
     .map((row) => ({
       appointment_id: row.id,
-      customer_name: row.customer?.name || "Customer",
+      customer_name:
+        row.customer?.company_name ||
+        [row.customer?.first_name, row.customer?.last_name].filter(Boolean).join(" ") ||
+        "Customer",
       phone: row.customer?.phone as string,
       status: row.status,
-      scheduled_at: `${row.scheduled_date} ${row.scheduled_time}`,
+      scheduled_at: row.starts_at || "",
     }));
 }
 
