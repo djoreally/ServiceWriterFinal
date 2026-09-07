@@ -3,6 +3,7 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import type { TechProfile } from "@/application/queries/team-dashboard.query";
+import { updateAppointmentStatus } from "@/application/commands/appointment-detail.command";
 
 export async function updateTechProfile(
   techId: string,
@@ -30,15 +31,7 @@ export async function updateAppointmentDispatchStatus(
   appointmentId: string,
   newStatus: string,
 ): Promise<void> {
-  const { error } = await supabase
-    .from("appointments")
-    .update({
-      dispatch_status: newStatus,
-      status: newStatus === "completed" ? "completed" : undefined,
-    })
-    .eq("id", appointmentId);
-
-  if (error) throw error;
+  await updateAppointmentStatus(appointmentId, newStatus);
 }
 
 export async function signOutUser(): Promise<void> {
