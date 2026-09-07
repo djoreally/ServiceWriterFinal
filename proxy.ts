@@ -1,7 +1,7 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const CANONICAL_PRODUCTION_HOST = "servicewriter.xyz";
+const CANONICAL_PRODUCTION_HOST = "www.servicewriter.xyz";
 
 function canonicalProductionRedirect(request: NextRequest): NextResponse | null {
   // Keep API/webhook/cron traffic on its requested host so signed requests,
@@ -13,8 +13,7 @@ function canonicalProductionRedirect(request: NextRequest): NextResponse | null 
   }
 
   const hostname = request.nextUrl.hostname.toLowerCase();
-  const shouldCanonicalize = hostname.endsWith(".vercel.app") || hostname === "www.servicewriter.xyz";
-  if (!shouldCanonicalize) return null;
+  if (!hostname.endsWith(".vercel.app")) return null;
 
   const target = request.nextUrl.clone();
   target.protocol = "https:";
