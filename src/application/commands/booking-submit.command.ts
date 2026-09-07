@@ -7,6 +7,11 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Json } from "@/integrations/supabase/types.production";
 import type { AppointmentBookingConfiguration } from "@/lib/booking-configuration";
 
+const vehiclePersistenceFailures = new Set<string>();
+function bookingVehicleKey(slug: string, email: string) {
+  return `${slug.trim().toLowerCase()}:${email.trim().toLowerCase()}`;
+}
+
 // ---------------------------------------------------------------------------
 // Customer
 // ---------------------------------------------------------------------------
@@ -20,6 +25,7 @@ export interface UpsertCustomerParams {
 }
 
 export async function upsertBookingCustomer(params: UpsertCustomerParams) {
+  vehiclePersistenceFailures.delete(bookingVehicleKey(params.p_booking_slug, params.p_email));
   return supabase.rpc("public_booking_upsert_customer", params);
 }
 
@@ -43,7 +49,10 @@ export interface UpsertBookingVehicleParams {
 }
 
 export async function upsertBookingVehicle(params: UpsertBookingVehicleParams) {
-  return supabase.rpc("public_booking_upsert_vehicle", params);
+  const key = bookingVehicleKey(params.p_booking_slug, params.p_customer_email);
+  const result = await supabase.rpc("public_booking_upsert_vehicle", params);
+  if (result.error || !result.data) vehiclePersistenceFailures.add(key);
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -69,6 +78,14 @@ export interface BookAppointmentSafeParams {
 }
 
 export async function bookAppointmentSafe(params: BookAppointmentSafeParams) {
+  const key = bookingVehicleKey(params.p_booking_slug, params.p_guest_email);
+  if (vehiclePersistenceFailures.has(key)) {
+    vehiclePersistenceFailures.delete(key);
+    throw new Error("BOOKING_VEHICLE_PERSISTENCE_FAILED");
+  }
+  if (!params.p_vehicle_id) {
+    throw new Error("BOOKING_VEHICLE_REQUIRED");
+  }
   return supabase.rpc("public_booking_book_appointment", {
     ...params,
     p_status: params.p_status ?? "confirmed",
@@ -397,7 +414,7 @@ export interface SetVehicleTireSpecParams {
 
 /**
  * Persist the wheel/tire configurator result on the vehicle record so tire
- * appointments carry the confirmed tire size (OE or customer override).
+ * appointments carry the confirmed tire size (OE or override).
  */
 export async function setVehicleTireSpec(params: SetVehicleTireSpecParams) {
   return supabase.rpc("public_booking_set_vehicle_tire_spec_v2", {
