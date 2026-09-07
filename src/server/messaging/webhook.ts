@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createSupabaseAdminClient } from "@/lib/supabase";
-import type { InboundReply, MessagingAdapter, NormalizedDeliveryEvent } from "./types";
+import type { InboundReply, MessagingAdapter } from "./types";
 
 const MAX_WEBHOOK_BODY_BYTES = 256 * 1024;
 function parseWebhookPayload(rawBody: string): Record<string, unknown> | null {
@@ -45,6 +45,14 @@ async function recordWebhookEvent(supabase: ReturnType<typeof createSupabaseAdmi
   return result.data?.id ?? null;
 }
 
+async function markWebhookProcessed(supabase: ReturnType<typeof createSupabaseAdminClient>, webhookId: string) {
+  const processed = await supabase.from("webhook_events").update({
+    status: "processed",
+    processed_at: new Date().toISOString(),
+  }).eq("id", webhookId);
+  if (processed.error) throw processed.error;
+}
+
 export async function ingestDeliveryWebhook(provider: string, adapter: MessagingAdapter, request: Request, rawBody: string): Promise<{ accepted: boolean; duplicate: boolean; count: number }> {
   const payload = parseWebhookPayload(rawBody);
   if (!payload || !adapter.verifyWebhook(request, rawBody)) return { accepted: false, duplicate: false, count: 0 };
@@ -53,7 +61,15 @@ export async function ingestDeliveryWebhook(provider: string, adapter: Messaging
   const workspaceId = await findWorkspaceForMessage(supabase, provider, events[0]?.providerMessageId);
   const eventId = externalEventId(request, payload, rawBody);
   const webhookId = await recordWebhookEvent(supabase, provider, eventId, payload, workspaceId);
-  if (!webhookId || events.length === 0) return { accepted: true, duplicate: !webhookId, count: 0 };
+  if (!webhookId) return { accepted: true, duplicate: true, count: 0 };
+
+  // Valid provider events such as opens/clicks may intentionally normalize to
+  // no delivery-state transition. They are still fully handled events and must
+  // not remain indefinitely in the operational "received" queue.
+  if (events.length === 0) {
+    await markWebhookProcessed(supabase, webhookId);
+    return { accepted: true, duplicate: false, count: 0 };
+  }
 
   let inserted = 0;
   for (const event of events) {
@@ -99,8 +115,7 @@ export async function ingestDeliveryWebhook(provider: string, adapter: Messaging
       if (optOutResult.error) throw optOutResult.error;
     }
   }
-  const processed = await supabase.from("webhook_events").update({ status: "processed", processed_at: new Date().toISOString() }).eq("id", webhookId);
-  if (processed.error) throw processed.error;
+  await markWebhookProcessed(supabase, webhookId);
   return { accepted: true, duplicate: inserted === 0, count: inserted };
 }
 
@@ -116,7 +131,11 @@ export async function ingestInboundWebhook(provider: string, adapter: MessagingA
   const supabase = createSupabaseAdminClient();
   const workspaceId = await findWorkspaceByDestination(supabase, provider, replies[0]?.to);
   const webhookId = await recordWebhookEvent(supabase, provider, externalEventId(request, payload, rawBody), payload, workspaceId);
-  if (!webhookId || replies.length === 0) return { accepted: true, duplicate: !webhookId, count: 0 };
+  if (!webhookId) return { accepted: true, duplicate: true, count: 0 };
+  if (replies.length === 0) {
+    await markWebhookProcessed(supabase, webhookId);
+    return { accepted: true, duplicate: false, count: 0 };
+  }
   let inserted = 0;
   for (const reply of replies) {
     const { error } = await supabase.from("inbound_messages").upsert({
@@ -134,7 +153,7 @@ export async function ingestInboundWebhook(provider: string, adapter: MessagingA
     }, { onConflict: "provider,provider_event_id", ignoreDuplicates: true });
     if (!error) inserted += 1;
   }
-  await supabase.from("webhook_events").update({ status: "processed", processed_at: new Date().toISOString() }).eq("id", webhookId);
+  await markWebhookProcessed(supabase, webhookId);
   return { accepted: true, duplicate: inserted === 0, count: inserted };
 }
 
