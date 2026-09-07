@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "installCommand": "bash scripts/security-lock-remediate.sh",
+  "installCommand": "bash scripts/secure-npm-install.sh",
   "buildCommand": "npm run build",
   "crons": [
     {
