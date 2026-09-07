@@ -22,8 +22,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher", "technician"],
       request,
     );
+    const db = supabase as any;
 
-    const { data: current, error: currentError } = await supabase
+    const { data: current, error: currentError } = await db
       .from("appointments")
       .select("id,status,assigned_user_id,metadata")
       .eq("workspace_id", body.workspace_id)
@@ -50,13 +51,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       nextMetadata.last_dispatch_location_at = now;
     }
 
-    // Dispatch state is intentionally separate from the appointment lifecycle enum.
-    // Arrival is the only dispatch transition that also has a canonical appointment equivalent.
     const appointmentStatus = body.status === "arrived" && ["requested", "confirmed"].includes(current.status)
       ? "checked_in"
       : current.status;
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from("appointments")
       .update({ status: appointmentStatus, metadata: nextMetadata, updated_at: now })
       .eq("workspace_id", body.workspace_id)
@@ -65,14 +64,18 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       .single();
     if (error) throw error;
 
-    const presenceStatus = body.status === "en_route" ? "en_route" : body.status === "arrived" ? "on_job" : "available";
-    const { error: presenceError } = await supabase.rpc("set_technician_presence_v1", {
-      p_workspace_id: body.workspace_id,
-      p_status: presenceStatus,
-      p_appointment_id: appointmentId,
-      p_location: body.location ?? null,
-    });
-    if (presenceError && membership.role === "technician") throw presenceError;
+    // Only the field technician owns mutable presence. Office/dispatch users
+    // may advance dispatch state without becoming the job's live technician.
+    if (membership.role === "technician") {
+      const presenceStatus = body.status === "en_route" ? "en_route" : body.status === "arrived" ? "on_job" : "available";
+      const { error: presenceError } = await db.rpc("set_technician_presence_v1", {
+        p_workspace_id: body.workspace_id,
+        p_status: presenceStatus,
+        p_appointment_id: appointmentId,
+        p_location: body.location ?? null,
+      });
+      if (presenceError) throw presenceError;
+    }
 
     return json({ data });
   } catch (error) {
