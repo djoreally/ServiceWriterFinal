@@ -1,12 +1,9 @@
 /**
- * Vehicles Command - Write operations for vehicles.
+ * Vehicles Command - canonical workspace-scoped vehicle writes.
  *
- * Uses direct Supabase calls instead of the API server.
- * Sprint 1 Epic 1.1 - Updated to use soft delete for GDPR compliance
+ * All active vehicle mutations go through the authenticated Next API boundary.
  */
 
-import { supabase } from "@/integrations/supabase/client";
-import { hardDelete } from "@/lib/soft-delete";
 import { ApiClientError, nextApi } from "@/lib/nextApiClient";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 import { invalidateVehicleOverview } from "@/application/queries/vehicles.query";
@@ -79,16 +76,5 @@ export async function updateVehicleOilType(id: string, oilType: string): Promise
 export async function deleteVehicle(id: string): Promise<void> {
   const workspaceId = requireSelectedWorkspaceId();
   await nextApi.vehicles.remove(workspaceId, id);
-  invalidateVehicleRelatedCaches(workspaceId);
-}
-
-/**
- * Permanently delete a vehicle (admin only)
- * ⚠️ WARNING: This permanently removes vehicle data
- */
-export async function hardDeleteVehicle(id: string): Promise<void> {
-  const workspaceId = requireSelectedWorkspaceId();
-  const { error } = await hardDelete(supabase, "vehicles", id);
-  if (error) throw error;
   invalidateVehicleRelatedCaches(workspaceId);
 }
