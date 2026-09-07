@@ -4,6 +4,8 @@ import { nextApi } from "@/lib/nextApiClient";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 
+const db = supabase as any;
+
 export interface TechStatusUpdate {
   technician_id: string;
   new_status: "available" | "en_route" | "on_job" | "on_break" | "unavailable" | "offline";
@@ -30,7 +32,7 @@ export async function updateTechnicianStatus(update: TechStatusUpdate) {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("Not authenticated");
   if (update.technician_id !== user.id) throw new Error("You can only update your own technician status.");
-  return supabase.rpc("set_technician_presence_v1", {
+  return db.rpc("set_technician_presence_v1", {
     p_workspace_id: workspaceId,
     p_status: update.new_status,
     p_appointment_id: update.appointment_id ?? null,
@@ -54,7 +56,7 @@ export async function sendDispatchNotification(notification: DispatchNotificatio
 
 export async function syncTechnicianDailyLoad(technician_id: string, date: string) {
   const workspaceId = requireWorkspaceId();
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from("appointments")
     .select("id,status,starts_at,ends_at")
     .eq("workspace_id", workspaceId)
@@ -71,13 +73,13 @@ export async function updateTechnicianLocation(technician_id: string, location: 
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("Not authenticated");
   if (technician_id !== user.id) throw new Error("You can only update your own location.");
-  const { data: current } = await supabase
+  const { data: current } = await db
     .from("technician_presence")
     .select("status,current_appointment_id")
     .eq("workspace_id", workspaceId)
     .eq("user_id", user.id)
     .maybeSingle();
-  return supabase.rpc("set_technician_presence_v1", {
+  return db.rpc("set_technician_presence_v1", {
     p_workspace_id: workspaceId,
     p_status: current?.status ?? "available",
     p_appointment_id: current?.current_appointment_id ?? null,
@@ -87,7 +89,7 @@ export async function updateTechnicianLocation(technician_id: string, location: 
 
 async function clock(action: "clock_in" | "clock_out" | "start_break" | "end_break", location?: { lat: number; lng: number }) {
   const workspaceId = requireWorkspaceId();
-  return supabase.rpc("clock_technician_v1", {
+  return db.rpc("clock_technician_v1", {
     p_workspace_id: workspaceId,
     p_action: action,
     p_location: location ?? null,
