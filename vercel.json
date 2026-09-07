@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "installCommand": "npm ci && npm audit fix --package-lock-only && npm audit && (git diff --quiet -- package-lock.json || (git config user.name 'vercel-security-bot' && git config user.email 'security@servicewriter.xyz' && git add package-lock.json && git commit -m 'Apply npm audit lockfile remediation' && git push origin HEAD:main))",
+  "installCommand": "bash scripts/security-lock-remediate.sh",
   "buildCommand": "npm run build",
   "crons": [
     {
