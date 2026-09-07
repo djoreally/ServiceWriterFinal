@@ -5,6 +5,8 @@ import { fetchOperationalJobsByDate, fetchOperationalJobsByDateRange, fetchAllUp
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
+const db = supabase as any;
+
 export interface DispatchTechnician {
   id: string;
   name: string;
@@ -70,13 +72,13 @@ export async function fetchDispatchBoardData(selectedDate: Date, viewMode: "day"
   const dateStr = format(selectedDate, "yyyy-MM-dd");
   const endDateStr = format(addDays(selectedDate, 6), "yyyy-MM-dd");
   const [membersRes, presenceRes, jobRes] = await Promise.all([
-    supabase
+    db
       .from("workspace_members")
       .select("user_id,role,is_active,profiles!workspace_members_user_id_fkey(display_name,phone,avatar_url)")
       .eq("workspace_id", context.workspaceId)
       .eq("is_active", true)
       .in("role", ["technician", "owner", "manager"]),
-    supabase
+    db
       .from("technician_presence")
       .select("user_id,status,current_location,last_seen_at")
       .eq("workspace_id", context.workspaceId),
@@ -119,7 +121,6 @@ export async function fetchDispatchBoardData(selectedDate: Date, viewMode: "day"
 
   return {
     technicians,
-    // Fleet resources are intentionally not fabricated: production currently has no canonical van/inventory tables.
     vans: [],
     jobs: ((jobRes.data ?? []) as OperationalJobRow[]).map((job) => ({
       id: job.job_id,
