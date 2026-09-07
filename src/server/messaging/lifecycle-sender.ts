@@ -1,8 +1,9 @@
 import { createSupabaseAdminClient } from "@/lib/supabase";
 import { EnginemailerEmailAdapter } from "@/server/messaging/enginemailer";
 import { ResendEmailAdapter } from "@/server/messaging/resend";
-import { renderLifecycleEmail, type LifecycleVariables } from "@/server/messaging/lifecycle-templates";
+import { type LifecycleVariables } from "@/server/messaging/lifecycle-templates";
 import type { LifecyclePurpose } from "@/server/messaging/lifecycle-templates";
+import { renderLifecycleEmailForDelivery } from "@/server/messaging/render-lifecycle-email";
 import type { MessagingAdapter, ProviderSendResult } from "@/server/messaging/types";
 
 export type LifecycleSendInput = {
@@ -53,7 +54,7 @@ export async function enqueueLifecycleEmail(input: LifecycleSendInput & {
   entityId?: string;
   recipientRole?: string;
 }): Promise<{ id: string; status: "queued" }> {
-  const rendered = renderLifecycleEmail(input.templateKey, input.variables);
+  const rendered = renderLifecycleEmailForDelivery(input.templateKey, input.variables);
   const email = assertEmail(input.recipientEmail);
   const supabase = createSupabaseAdminClient();
   const { data, error } = await supabase.rpc("enqueue_lifecycle_event", {
@@ -79,7 +80,7 @@ export async function enqueueLifecycleEmail(input: LifecycleSendInput & {
 }
 
 export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ providerMessageId?: string; status: string }> {
-  const rendered = renderLifecycleEmail(input.templateKey, input.variables);
+  const rendered = renderLifecycleEmailForDelivery(input.templateKey, input.variables);
   const supabase = createSupabaseAdminClient();
   const recipientEmail = assertEmail(input.recipientEmail);
   const adapter = lifecycleAdapterForPurpose(rendered.purpose);
@@ -220,9 +221,6 @@ async function reconcileCrmProjection(): Promise<number> {
 export async function processLifecycleEventOutbox(limit = 50, workerId = `vercel:${crypto.randomUUID()}`) {
   const supabase = createSupabaseAdminClient();
 
-  // CRM is a failure-isolated projection of canonical customers. Reconcile it
-  // best-effort in the existing background cadence; never block lifecycle mail
-  // processing if the projection is temporarily unavailable.
   try {
     const inserted = await reconcileCrmProjection();
     if (inserted > 0) console.info("[CRM] reconciled missing customer profiles", { inserted });
