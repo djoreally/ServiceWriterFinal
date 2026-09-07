@@ -12,6 +12,18 @@ type AppointmentRow = {
   metadata: Record<string, unknown> | null;
 };
 
+type BookingVehicle = {
+  year?: string | number;
+  make?: string;
+  model?: string;
+};
+
+type BookingService = {
+  name?: string;
+  price?: number | string;
+  quantity?: number | string;
+};
+
 function formatDateTime(value: string, timezone: string) {
   const date = new Date(value);
   return {
@@ -30,6 +42,38 @@ function formatDateTime(value: string, timezone: string) {
   };
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function formatCurrency(value: unknown): string | null {
+  const amount = Number(value);
+  return Number.isFinite(amount)
+    ? amount.toLocaleString("en-US", { style: "currency", currency: "USD" })
+    : null;
+}
+
+function bookingSummary(metadata: Record<string, unknown>) {
+  const configuration = asRecord(metadata.booking_configuration);
+  const vehicles = Array.isArray(configuration?.vehicles) ? configuration.vehicles : [];
+  const vehicle = asRecord(vehicles[0]) ?? null;
+  const vehicleDetails = asRecord(vehicle?.vehicle) as BookingVehicle | null;
+  const services = Array.isArray(vehicle?.services) ? vehicle.services.map(asRecord).filter(Boolean) as BookingService[] : [];
+
+  const vehicleDescription = vehicleDetails
+    ? [vehicleDetails.year, vehicleDetails.make, vehicleDetails.model].filter(Boolean).join(" ")
+    : String(metadata.vehicle_info || "Vehicle details not provided");
+  const serviceDescription = services.length
+    ? services.map((service) => {
+        const quantity = Math.max(1, Number(service.quantity) || 1);
+        const price = formatCurrency((Number(service.price) || 0) * quantity);
+        return `${service.name || "Service"}${quantity > 1 ? ` × ${quantity}` : ""}${price ? ` — ${price}` : ""}`;
+      }).join("; ")
+    : String(metadata.title || "Service appointment");
+
+  return { vehicleDescription, serviceDescription };
+}
+
 export async function sendBookingConfirmation(input: {
   appointment: AppointmentRow;
   workspaceName: string;
@@ -39,16 +83,14 @@ export async function sendBookingConfirmation(input: {
 }) {
   const metadata = input.appointment.metadata ?? {};
   const appointmentDateTime = formatDateTime(input.appointment.starts_at, input.workspaceTimezone);
-  const title = String(metadata.title || "Service appointment");
   const guestName = String(metadata.guest_name || "Customer");
-  const vehicleInfo = String(metadata.vehicle_info || "Vehicle details not provided");
-  const address = String(metadata.service_address || metadata.address || "Address provided by the shop");
-  const paymentMethod = String(metadata.payment_method || "Pay at time of service");
-  const estimatedCost = Number(metadata.estimated_cost || 0);
-  const total = Number.isFinite(estimatedCost)
-    ? estimatedCost.toLocaleString("en-US", { style: "currency", currency: "USD" })
-    : String(metadata.estimated_cost || "See appointment details");
-  const confirmationCode = input.appointment.id.slice(0, 8).toUpperCase();
+  const { vehicleDescription, serviceDescription } = bookingSummary(metadata);
+  const address = String(metadata.location_address || metadata.service_address || metadata.address || "Address provided by the shop");
+  const paymentMethod = String(metadata.payment_method || "Pay at service");
+  const total = formatCurrency(metadata.estimated_cost) ?? String(metadata.estimated_cost || "See appointment details");
+  const confirmationCode = typeof metadata.confirmation_code === "string" && metadata.confirmation_code.trim()
+    ? metadata.confirmation_code.trim()
+    : input.appointment.id.slice(0, 8).toUpperCase();
   const configuredManageUrl = typeof metadata.manage_url === "string" && /^https?:\/\//i.test(metadata.manage_url) ? metadata.manage_url : null;
   const manageUrl = configuredManageUrl ?? input.actionUrl;
 
@@ -59,7 +101,7 @@ export async function sendBookingConfirmation(input: {
     "business.phone": typeof metadata.business_phone === "string" ? metadata.business_phone : undefined,
     "customer.first_name": guestName.split(/\s+/)[0],
     "customer.full_name": guestName,
-    "appointment.service": title,
+    "appointment.service": serviceDescription,
     "appointment.date": appointmentDateTime.date,
     "appointment.time": appointmentDateTime.time,
     "appointment.address": address,
@@ -67,7 +109,7 @@ export async function sendBookingConfirmation(input: {
     "appointment.confirmation_code": confirmationCode,
     "appointment.payment_method": paymentMethod,
     "appointment.manage_url": manageUrl,
-    "vehicle.description": vehicleInfo,
+    "vehicle.description": vehicleDescription,
     "email.primary_action_url": manageUrl,
   };
   const customerResult = await dispatchLifecycleEvent({
