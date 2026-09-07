@@ -23,22 +23,50 @@ const vehicleSchema = z.object({
   notes: z.string().max(5000).nullable().optional(),
 });
 
+async function assertCustomerInWorkspace(
+  supabase: Awaited<ReturnType<typeof requireWorkspaceMember>>["supabase"],
+  workspaceId: string,
+  customerId: string | null | undefined,
+) {
+  if (!customerId) return;
+  const { data, error } = await supabase
+    .from("customers")
+    .select("id")
+    .eq("workspace_id", workspaceId)
+    .eq("id", customerId)
+    .neq("status", "archived")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("Customer does not belong to this workspace.");
+}
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const workspaceId = url.searchParams.get("workspace_id");
     if (!workspaceId) throw new Error("workspace_id is required");
     const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
-    const { limit, offset } = paginationSchema.parse(Object.fromEntries(url.searchParams));
-    const { data, error } = await supabase
+
+    let query = supabase
       .from("vehicles")
       .select("*,customers(id,first_name,last_name),vehicle_service_specs(engine,oil_type,oil_capacity,oil_filter,metadata)")
       .eq("workspace_id", workspaceId)
       .neq("status", "archived")
-      .order("created_at", { ascending: false })
-      .range(offset, offset + limit - 1);
+      .order("created_at", { ascending: false });
+
+    let pagination: { limit: number; offset: number } | undefined;
+    if (url.searchParams.has("limit") || url.searchParams.has("offset")) {
+      const { limit, offset } = paginationSchema.parse(Object.fromEntries(url.searchParams));
+      query = query.range(offset, offset + limit - 1);
+      pagination = { limit, offset };
+    }
+
+    const { data, error } = await query;
     if (error) throw error;
-    return json({ data: data ?? [], pagination: { limit, offset } });
+    return json({
+      data: data ?? [],
+      pagination: pagination ?? { limit: data?.length ?? 0, offset: 0 },
+    });
   } catch (error) {
     return errorResponse(error);
   }
@@ -48,8 +76,9 @@ export async function POST(request: Request) {
   try {
     const body = vehicleSchema.parse(await request.json());
     const { supabase } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist", "technician"], request);
-    const { engine, oil_type, oil_capacity, oil_filter, odometer_measure, plate_state, ...vehicleInput } = body;
+    await assertCustomerInWorkspace(supabase, body.workspace_id, body.customer_id);
 
+    const { engine, oil_type, oil_capacity, oil_filter, odometer_measure, plate_state, ...vehicleInput } = body;
     const { data: vehicle, error } = await supabase.from("vehicles").insert({
       ...vehicleInput,
       plate_region: body.plate_region ?? plate_state ?? null,
