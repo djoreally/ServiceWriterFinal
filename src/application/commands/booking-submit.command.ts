@@ -12,6 +12,37 @@ function bookingVehicleKey(slug: string, email: string) {
   return `${slug.trim().toLowerCase()}:${email.trim().toLowerCase()}`;
 }
 
+function currentPublicBookingSlug(): string | null {
+  if (typeof window === "undefined") return null;
+
+  const pathMatch = window.location.pathname.match(/\/book\/([^/?#]+)/i);
+  if (pathMatch?.[1]) {
+    try {
+      return decodeURIComponent(pathMatch[1]);
+    } catch {
+      return pathMatch[1];
+    }
+  }
+
+  const hostname = window.location.hostname.toLowerCase();
+  const suffix = ".servicewriter.xyz";
+  if (hostname.endsWith(suffix)) {
+    const subdomain = hostname.slice(0, -suffix.length);
+    if (subdomain && subdomain !== "www") return subdomain;
+  }
+
+  return null;
+}
+
+function optionalText(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function optionalFiniteNumber(value: unknown): number | null {
+  const number = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+  return Number.isFinite(number) ? number : null;
+}
+
 // ---------------------------------------------------------------------------
 // Customer
 // ---------------------------------------------------------------------------
@@ -100,7 +131,17 @@ export async function updateBookingAppointment(
   appointmentId: string,
   payload: Record<string, unknown>,
 ) {
-  return supabase.from("appointments").update(payload as never).eq("id", appointmentId);
+  const bookingSlug = currentPublicBookingSlug();
+  if (!bookingSlug) throw new Error("BOOKING_CONTEXT_INVALID");
+
+  return supabase.rpc("public_booking_update_appointment_context" as never, {
+    p_booking_slug: bookingSlug,
+    p_appointment_id: appointmentId,
+    p_dispatch_notes: optionalText(payload.dispatch_notes),
+    p_location_address: optionalText(payload.location_address),
+    p_location_lat: optionalFiniteNumber(payload.location_lat),
+    p_location_lng: optionalFiniteNumber(payload.location_lng),
+  } as never);
 }
 
 export async function saveAppointmentBookingConfiguration(
