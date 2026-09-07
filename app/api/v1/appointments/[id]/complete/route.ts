@@ -1,4 +1,4 @@
-import { errorResponse, json, requireWorkspaceMember } from "@/server/api";
+import { ApiError, errorResponse, json, requireWorkspaceMember } from "@/server/api";
 import { dispatchAppointmentLifecycle } from "@/server/messaging/appointment-events";
 import { LIFECYCLE_EVENT_KEYS } from "@/server/messaging/lifecycle-events";
 import { syncCanonicalInvoiceToStripe } from "@/server/payments/stripe-invoice-sync";
@@ -16,17 +16,42 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   try {
     const id = z.string().uuid().parse((await context.params).id);
     const { workspace_id } = schema.parse(await request.json());
-    const { supabase } = await requireWorkspaceMember(
+    const { supabase, user, membership } = await requireWorkspaceMember(
       workspace_id,
       ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher", "technician"],
       request,
     );
+    const db = supabase as any;
 
-    const { data: closeout, error } = await (supabase as any).rpc(
+    if (membership.role === "technician") {
+      const { data: current, error: currentError } = await db
+        .from("appointments")
+        .select("assigned_user_id,status")
+        .eq("workspace_id", workspace_id)
+        .eq("id", id)
+        .maybeSingle();
+      if (currentError) throw currentError;
+      if (!current) throw new ApiError(404, "Appointment not found.", "not_found");
+      if (current.assigned_user_id !== user.id) {
+        throw new ApiError(403, "This appointment is not assigned to you.", "forbidden");
+      }
+    }
+
+    const { data: closeout, error } = await db.rpc(
       "complete_appointment_closeout_v1",
       { p_workspace_id: workspace_id, p_appointment_id: id },
     );
     if (error) throw error;
+
+    if (membership.role === "technician") {
+      const { error: presenceError } = await db.rpc("set_technician_presence_v1", {
+        p_workspace_id: workspace_id,
+        p_status: "available",
+        p_appointment_id: null,
+        p_location: null,
+      });
+      if (presenceError) throw presenceError;
+    }
 
     const closeoutData = object(closeout);
     const serviceRecordId = String(closeoutData.service_record_id ?? "");
@@ -53,12 +78,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         console.error("[Closeout] Stripe invoice sync failed", { appointmentId: id, invoiceId, paymentId, message });
 
         const [{ data: invoice }, { data: payment }] = await Promise.all([
-          supabase.from("invoices").select("metadata").eq("workspace_id", workspace_id).eq("id", invoiceId).maybeSingle(),
-          supabase.from("payments").select("metadata").eq("workspace_id", workspace_id).eq("id", paymentId).maybeSingle(),
+          db.from("invoices").select("metadata").eq("workspace_id", workspace_id).eq("id", invoiceId).maybeSingle(),
+          db.from("payments").select("metadata").eq("workspace_id", workspace_id).eq("id", paymentId).maybeSingle(),
         ]);
         const failedAt = new Date().toISOString();
         await Promise.all([
-          supabase.from("invoices").update({
+          db.from("invoices").update({
             metadata: {
               ...object(invoice?.metadata),
               stripe_sync_status: "failed",
@@ -66,7 +91,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
               stripe_sync_failed_at: failedAt,
             },
           }).eq("workspace_id", workspace_id).eq("id", invoiceId),
-          supabase.from("payments").update({
+          db.from("payments").update({
             metadata: {
               ...object(payment?.metadata),
               stripe_sync_status: "failed",
@@ -81,13 +106,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     let completionEmail: Record<string, unknown> = { status: "skipped" };
     try {
       const [{ data: appointment }, { data: workspace }] = await Promise.all([
-        supabase
+        db
           .from("appointments")
           .select("id,workspace_id,customer_id,starts_at,ends_at,status,notes,metadata,updated_at,customers(id,first_name,last_name,email),vehicles(id,year,make,model)")
           .eq("workspace_id", workspace_id)
           .eq("id", id)
           .single(),
-        supabase.from("workspaces").select("name,timezone").eq("id", workspace_id).single(),
+        db.from("workspaces").select("name,timezone").eq("id", workspace_id).single(),
       ]);
       if (appointment) {
         const queued = await dispatchAppointmentLifecycle({
