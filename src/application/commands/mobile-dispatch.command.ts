@@ -2,6 +2,8 @@
 import { supabase } from "@/integrations/supabase/client";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
+const db = supabase as any;
+
 async function authenticatedPost(path: string, body: Record<string, unknown>) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.access_token) throw new Error("Not authenticated");
@@ -56,14 +58,14 @@ export async function updateTechnicianLocationRpc(
   try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Not authenticated");
-    const { data: presence, error: presenceReadError } = await supabase
+    const { data: presence, error: presenceReadError } = await db
       .from("technician_presence")
       .select("status,current_appointment_id")
       .eq("workspace_id", workspaceId)
       .eq("user_id", user.id)
       .maybeSingle();
     if (presenceReadError) throw presenceReadError;
-    const { data, error } = await supabase.rpc("set_technician_presence_v1", {
+    const { data, error } = await db.rpc("set_technician_presence_v1", {
       p_workspace_id: workspaceId,
       p_status: presence?.status ?? "available",
       p_appointment_id: presence?.current_appointment_id ?? null,
