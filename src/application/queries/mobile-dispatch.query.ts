@@ -3,6 +3,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
+const db = supabase as any;
+
 function meta(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -15,7 +17,7 @@ export async function getAuthUser() {
 export async function fetchTechnicianRecord(userId: string) {
   const workspaceId = getSelectedWorkspaceId();
   if (!workspaceId) return { data: null, error: new Error("Select a workspace before loading technician state.") };
-  const { data: member, error: memberError } = await supabase
+  const { data: member, error: memberError } = await db
     .from("workspace_members")
     .select("user_id,role,is_active")
     .eq("workspace_id", workspaceId)
@@ -23,7 +25,7 @@ export async function fetchTechnicianRecord(userId: string) {
     .eq("is_active", true)
     .maybeSingle();
   if (memberError || !member) return { data: null, error: memberError };
-  const { data: presence, error: presenceError } = await supabase
+  const { data: presence, error: presenceError } = await db
     .from("technician_presence")
     .select("status,current_appointment_id,current_location,clocked_in_at,break_started_at")
     .eq("workspace_id", workspaceId)
@@ -48,7 +50,7 @@ export async function fetchTechnicianRecord(userId: string) {
 export async function fetchActiveClockEntry(userId: string) {
   const workspaceId = getSelectedWorkspaceId();
   if (!workspaceId) return { data: [], error: new Error("Select a workspace before loading clock state.") };
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from("technician_presence")
     .select("user_id,clocked_in_at,status")
     .eq("workspace_id", workspaceId)
@@ -61,7 +63,6 @@ export async function fetchActiveClockEntry(userId: string) {
 export async function fetchTechnicianJobs(technicianId: string) {
   const workspaceId = getSelectedWorkspaceId();
   if (!workspaceId) return { data: [], error: new Error("Select a workspace before loading jobs.") };
-  const db = supabase as any;
   const { data, error } = await db.from("appointments")
     .select("id,starts_at,ends_at,status,notes,metadata,customers(first_name,last_name,company_name,phone),vehicles(year,make,model,color,license_plate)")
     .eq("workspace_id", workspaceId)
