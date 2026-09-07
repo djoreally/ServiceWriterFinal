@@ -85,14 +85,30 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       patch.metadata = { ...metadata, odometer_measure: odometer_measure ?? null };
     }
 
-    const { data: vehicle, error } = await supabase
-      .from("vehicles")
-      .update(patch as never)
-      .eq("id", id)
-      .eq("workspace_id", workspace_id)
-      .select()
-      .single();
-    if (error) throw error;
+    let vehicle: unknown;
+    if (Object.keys(patch).length > 0) {
+      const { data, error } = await supabase
+        .from("vehicles")
+        .update(patch as never)
+        .eq("id", id)
+        .eq("workspace_id", workspace_id)
+        .select()
+        .single();
+      if (error) throw error;
+      vehicle = data;
+    } else {
+      // Spec-only edits belong in vehicle_service_specs. Do not issue an empty
+      // vehicles UPDATE because PostgREST can return no row and surface a false
+      // PGRST116/404 even though the canonical vehicle exists.
+      const { data, error } = await supabase
+        .from("vehicles")
+        .select("*")
+        .eq("id", id)
+        .eq("workspace_id", workspace_id)
+        .single();
+      if (error) throw error;
+      vehicle = data;
+    }
 
     if ([engine, oil_type, oil_capacity, oil_filter].some((value) => value !== undefined)) {
       const { data: currentSpecs, error: currentSpecsError } = await supabase
