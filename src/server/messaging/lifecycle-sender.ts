@@ -1,6 +1,7 @@
 import { createSupabaseAdminClient } from "@/lib/supabase";
 import { EnginemailerEmailAdapter } from "@/server/messaging/enginemailer";
 import { ResendEmailAdapter } from "@/server/messaging/resend";
+import { reconcileResendDeliveryStatuses } from "@/server/messaging/resend-reconciliation";
 import { type LifecycleVariables } from "@/server/messaging/lifecycle-templates";
 import type { LifecyclePurpose } from "@/server/messaging/lifecycle-templates";
 import { renderLifecycleEmailForDelivery } from "@/server/messaging/render-lifecycle-email";
@@ -226,6 +227,15 @@ export async function processLifecycleEventOutbox(limit = 50, workerId = `vercel
     if (inserted > 0) console.info("[CRM] reconciled missing customer profiles", { inserted });
   } catch (crmError) {
     console.error("[CRM] projection reconciliation failed", crmError);
+  }
+
+  try {
+    const reconciled = await reconcileResendDeliveryStatuses(Math.max(10, Math.min(limit, 50)));
+    if (reconciled > 0) console.info("[Lifecycle] reconciled Resend delivery statuses", { reconciled });
+  } catch (reconciliationError) {
+    console.error("[Lifecycle] Resend delivery reconciliation pass failed", {
+      message: reconciliationError instanceof Error ? reconciliationError.message : "unknown",
+    });
   }
 
   const { data: claimed, error } = await supabase.rpc("claim_lifecycle_events", {
