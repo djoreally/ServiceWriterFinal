@@ -12,8 +12,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher", "technician"],
       request,
     );
+    const db = supabase as any;
 
-    const { data: current, error: readError } = await supabase
+    const { data: current, error: readError } = await db
       .from("appointments")
       .select("id,status,assigned_user_id,metadata")
       .eq("workspace_id", workspace_id)
@@ -33,7 +34,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       ? current.metadata as Record<string, unknown>
       : {};
     const now = new Date().toISOString();
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from("appointments")
       .update({
         status: "in_progress",
@@ -46,13 +47,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       .single();
     if (error) throw error;
 
-    const { error: presenceError } = await supabase.rpc("set_technician_presence_v1", {
-      p_workspace_id: workspace_id,
-      p_status: "on_job",
-      p_appointment_id: id,
-      p_location: null,
-    });
-    if (presenceError && membership.role === "technician") throw presenceError;
+    if (membership.role === "technician") {
+      const { error: presenceError } = await db.rpc("set_technician_presence_v1", {
+        p_workspace_id: workspace_id,
+        p_status: "on_job",
+        p_appointment_id: id,
+        p_location: null,
+      });
+      if (presenceError) throw presenceError;
+    }
 
     return json({ data: { ...data, already_started: false } });
   } catch (error) {
