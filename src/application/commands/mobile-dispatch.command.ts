@@ -1,14 +1,49 @@
-/**
- * Mobile Dispatch Commands — Write operations for field technician job management.
- */
+/** Mobile Dispatch Commands — canonical write operations for field technician job management. */
 import { supabase } from "@/integrations/supabase/client";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 import { ingestLocationBatch } from "@/application/commands/location-service.command";
 
-export async function updateDispatchStatusRpc(appointmentId: string, status: string) {
-  return supabase.rpc("update_dispatch_status", {
-    p_appointment_id: appointmentId,
-    p_status: status,
+async function authenticatedPost(path: string, body: Record<string, unknown>) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.access_token) throw new Error("Not authenticated");
+  const response = await fetch(path, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+    body: JSON.stringify(body),
   });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error((payload as { error?: { message?: string } }).error?.message || "Unable to update dispatch status.");
+  return payload;
+}
+
+export async function updateDispatchStatusRpc(appointmentId: string, status: string) {
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) return { data: null, error: new Error("Select a workspace before updating dispatch status.") };
+  try {
+    if (status === "acknowledged" || status === "en_route" || status === "arrived") {
+      const payload = await authenticatedPost(`/api/v1/appointments/${encodeURIComponent(appointmentId)}/technician-status`, {
+        workspace_id: workspaceId,
+        status,
+      });
+      return { data: (payload as { data?: unknown }).data ?? null, error: null };
+    }
+    if (status === "in_progress") {
+      const payload = await authenticatedPost(`/api/v1/appointments/${encodeURIComponent(appointmentId)}/start`, {
+        workspace_id: workspaceId,
+      });
+      return { data: (payload as { data?: unknown }).data ?? null, error: null };
+    }
+    if (status === "completed") {
+      const payload = await authenticatedPost(`/api/v1/appointments/${encodeURIComponent(appointmentId)}/complete`, {
+        workspace_id: workspaceId,
+      });
+      return { data: (payload as { data?: unknown }).data ?? null, error: null };
+    }
+    return { data: null, error: new Error(`Unsupported dispatch status: ${status}`) };
+  } catch (error) {
+    return { data: null, error };
+  }
 }
 
 export async function updateTechnicianLocationRpc(
