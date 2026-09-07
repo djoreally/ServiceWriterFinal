@@ -51,20 +51,35 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const body = vehicleUpdateSchema.parse(await request.json());
     const id = z.string().uuid().parse((await context.params).id);
     const { supabase } = await requireWorkspaceMember(body.workspace_id, [...writeRoles], request);
-    const { workspace_id, engine, oil_type, oil_capacity, oil_filter, odometer_measure, plate_state, ...vehicleInput } = body;
 
+    if (Object.prototype.hasOwnProperty.call(body, "customer_id") && body.customer_id) {
+      const { data: customer, error: customerError } = await supabase
+        .from("customers")
+        .select("id")
+        .eq("workspace_id", body.workspace_id)
+        .eq("id", body.customer_id)
+        .neq("status", "archived")
+        .maybeSingle();
+      if (customerError) throw customerError;
+      if (!customer) throw new Error("Customer does not belong to this workspace.");
+    }
+
+    const { workspace_id, engine, oil_type, oil_capacity, oil_filter, odometer_measure, plate_state, ...vehicleInput } = body;
     const patch: Record<string, unknown> = { ...vehicleInput };
+
     if (Object.prototype.hasOwnProperty.call(body, "plate_state") && !Object.prototype.hasOwnProperty.call(body, "plate_region")) {
       patch.plate_region = plate_state ?? null;
     }
     if (Object.prototype.hasOwnProperty.call(body, "odometer_measure")) {
-      const { data: current } = await supabase
+      const { data: current, error: currentError } = await supabase
         .from("vehicles")
         .select("metadata")
         .eq("workspace_id", workspace_id)
         .eq("id", id)
         .maybeSingle();
-      const metadata = current?.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata)
+      if (currentError) throw currentError;
+      if (!current) throw new Error("Vehicle does not belong to this workspace.");
+      const metadata = current.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata)
         ? current.metadata as Record<string, unknown>
         : {};
       patch.metadata = { ...metadata, odometer_measure: odometer_measure ?? null };
@@ -80,12 +95,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (error) throw error;
 
     if ([engine, oil_type, oil_capacity, oil_filter].some((value) => value !== undefined)) {
-      const { data: currentSpecs } = await supabase
+      const { data: currentSpecs, error: currentSpecsError } = await supabase
         .from("vehicle_service_specs")
         .select("engine,oil_type,oil_capacity,oil_filter,metadata")
         .eq("workspace_id", workspace_id)
         .eq("vehicle_id", id)
         .maybeSingle();
+      if (currentSpecsError) throw currentSpecsError;
       const { error: specsError } = await supabase.from("vehicle_service_specs").upsert({
         workspace_id,
         vehicle_id: id,
