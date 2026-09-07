@@ -20,6 +20,8 @@ import {
   type TechnicianOperationalStatus,
 } from "@/lib/dispatch-state";
 
+const db = supabase as any;
+
 export interface TechOperationalState {
   technician_id: string;
   status: TechnicianOperationalStatus;
@@ -47,32 +49,21 @@ export function useRealTimeTechStatus(technician_id?: string) {
   const [assignedUserId, setAssignedUserId] = useState<string | null>(null);
 
   const fetchTechState = useCallback(async () => {
-    if (!technician_id) {
-      setLoading(false);
-      return;
-    }
+    if (!technician_id) { setLoading(false); return; }
     const workspaceId = getSelectedWorkspaceId();
-    if (!workspaceId) {
-      setState(null);
-      setLoading(false);
-      return;
-    }
+    if (!workspaceId) { setState(null); setLoading(false); return; }
 
     try {
       const [{ data: member, error: memberError }, { data: presence, error: presenceError }] = await Promise.all([
-        supabase.from("workspace_members").select("user_id,role,is_active").eq("workspace_id", workspaceId).eq("user_id", technician_id).eq("is_active", true).maybeSingle(),
-        supabase.from("technician_presence").select("status,current_location,current_appointment_id,clocked_in_at").eq("workspace_id", workspaceId).eq("user_id", technician_id).maybeSingle(),
+        db.from("workspace_members").select("user_id,role,is_active").eq("workspace_id", workspaceId).eq("user_id", technician_id).eq("is_active", true).maybeSingle(),
+        db.from("technician_presence").select("status,current_location,current_appointment_id,clocked_in_at").eq("workspace_id", workspaceId).eq("user_id", technician_id).maybeSingle(),
       ]);
       if (memberError) throw memberError;
       if (presenceError) throw presenceError;
-      if (!member) {
-        setState(null);
-        setAssignedUserId(null);
-        return;
-      }
+      if (!member) { setState(null); setAssignedUserId(null); return; }
 
       setAssignedUserId(technician_id);
-      const { data: appointments, error: appointmentError } = await (supabase as any)
+      const { data: appointments, error: appointmentError } = await db
         .from("appointments")
         .select("id,status,metadata,starts_at")
         .eq("workspace_id", workspaceId)
@@ -129,9 +120,7 @@ export function useRealTimeTechStatus(technician_id?: string) {
     if (!workspaceId) return;
     const channel = supabase.channel(`tech-dispatch-${technician_id}`);
 
-    channel.on("postgres_changes", {
-      event: "*", schema: "public", table: "appointments", filter: `assigned_user_id=eq.${assignedUserId}`,
-    }, (payload) => {
+    channel.on("postgres_changes", { event: "*", schema: "public", table: "appointments", filter: `assigned_user_id=eq.${assignedUserId}` }, (payload) => {
       const next = (payload.new ?? {}) as { status?: unknown; metadata?: unknown };
       const prev = (payload.old ?? {}) as { status?: unknown; metadata?: unknown };
       const nextDispatch = deriveDispatchStatusFromAppointment(next.status, metadataDispatchStatus(next.metadata));
@@ -144,31 +133,15 @@ export function useRealTimeTechStatus(technician_id?: string) {
       handleRealTimeUpdate({ type, action: payload.eventType as RealTimeUpdate["action"], payload });
     });
 
-    channel.on("postgres_changes", {
-      event: "*", schema: "public", table: "dispatch_events", filter: `technician_id=eq.${technician_id}`,
-    }, (payload) => handleRealTimeUpdate({ type: "status_sync", payload }));
-
-    channel.on("postgres_changes", {
-      event: "*", schema: "public", table: "technician_presence", filter: `user_id=eq.${technician_id}`,
-    }, (payload) => handleRealTimeUpdate({ type: "status_sync", payload }));
-
+    channel.on("postgres_changes", { event: "*", schema: "public", table: "dispatch_events", filter: `technician_id=eq.${technician_id}` }, (payload) => handleRealTimeUpdate({ type: "status_sync", payload }));
+    channel.on("postgres_changes", { event: "*", schema: "public", table: "technician_presence", filter: `user_id=eq.${technician_id}` }, (payload) => handleRealTimeUpdate({ type: "status_sync", payload }));
     channel.subscribe();
     return () => { void supabase.removeChannel(channel); };
   }, [assignedUserId, handleRealTimeUpdate, technician_id]);
 
-  const transitionToEnRoute = async (appointment_id: string, location?: { lat: number; lng: number }) => {
-    if (!technician_id) return;
-    await markEnRoute(appointment_id, location); await fetchTechState(); toast.success("En route to job");
-  };
-  const transitionToArrived = async (appointment_id: string, location?: { lat: number; lng: number }) => {
-    if (!technician_id) return;
-    await markArrived(appointment_id, location); await fetchTechState(); toast.success("Marked as arrived");
-  };
-  const transitionToInProgress = async (appointment_id: string) => {
-    if (!technician_id) return;
-    await startJob(appointment_id); await fetchTechState(); toast.success("Job started");
-  };
-
+  const transitionToEnRoute = async (appointment_id: string, location?: { lat: number; lng: number }) => { if (!technician_id) return; await markEnRoute(appointment_id, location); await fetchTechState(); toast.success("En route to job"); };
+  const transitionToArrived = async (appointment_id: string, location?: { lat: number; lng: number }) => { if (!technician_id) return; await markArrived(appointment_id, location); await fetchTechState(); toast.success("Marked as arrived"); };
+  const transitionToInProgress = async (appointment_id: string) => { if (!technician_id) return; await startJob(appointment_id); await fetchTechState(); toast.success("Job started"); };
   const handleClockIn = async (location?: { lat: number; lng: number }) => { await clockInTechnician(location); await fetchTechState(); toast.success("Shift started!"); };
   const handleClockOut = async (location?: { lat: number; lng: number }) => { await clockOutTechnician(location); await fetchTechState(); toast.success("Shift ended"); };
   const handleStartBreak = async () => { await startBreak(); await fetchTechState(); toast.success("Break started!"); };
