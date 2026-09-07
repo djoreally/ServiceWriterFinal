@@ -1,9 +1,10 @@
-/**
- * Customer Portal Queries — Read operations for customer-facing service history and payments.
- */
+/** Customer Portal Queries — canonical customer-facing service history and payments. */
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
-
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
+
+const canonicalSupabase = supabase as unknown as SupabaseClient;
+
 export interface CustomerServiceRecord {
   id: string;
   title: string;
@@ -33,50 +34,80 @@ export interface CustomerPaymentRecord {
   service_catalog: { name: string } | null;
 }
 
-/**
- * Fetch service history for a customer account.
- */
-export async function fetchCustomerServiceHistory(accountId: string): Promise<CustomerServiceRecord[]> {
+export async function fetchCustomerServiceHistory(_accountId: string): Promise<CustomerServiceRecord[]> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return [];
-  const escapedEmail = (user.email || "").replace(/,/g, "\\,");
 
-  const { data, error } = await supabase
-    .from("appointments")
-    .select(`
-      id, title, scheduled_date, scheduled_time, status,
-      estimated_cost, duration_minutes, description, notes,
-      tax_amount, actual_start_time, actual_end_time,
-      service_catalog:service_catalog(name),
-      vehicles:vehicle_id(make, model, year)
-    `)
-    .or(`customer_account_id.eq.${accountId},guest_email.ilike.${escapedEmail}`)
-    .in("status", ["completed", "in_progress"])
-    .order("scheduled_date", { ascending: false });
-
+  const { data, error } = await canonicalSupabase.rpc("get_customer_portal_service_history_v1");
   if (error) throw error;
-  return (data as CustomerServiceRecord[]) || [];
+
+  type Row = {
+    id: string;
+    title: string | null;
+    scheduled_date: string;
+    scheduled_time: string;
+    status: string;
+    estimated_cost: number | null;
+    duration_minutes: number | null;
+    description: string | null;
+    notes: string | null;
+    tax_amount: number | null;
+    actual_start_time: string | null;
+    actual_end_time: string | null;
+    service_catalog_name: string | null;
+    vehicle_make: string | null;
+    vehicle_model: string | null;
+    vehicle_year: number | null;
+  };
+
+  return ((data ?? []) as Row[]).map((row) => ({
+    id: row.id,
+    title: row.title ?? "Service",
+    scheduled_date: row.scheduled_date,
+    scheduled_time: row.scheduled_time,
+    status: row.status,
+    estimated_cost: row.estimated_cost,
+    duration_minutes: row.duration_minutes ?? 0,
+    description: row.description,
+    notes: row.notes,
+    tax_amount: row.tax_amount,
+    actual_start_time: row.actual_start_time,
+    actual_end_time: row.actual_end_time,
+    service_catalog: row.service_catalog_name ? { name: row.service_catalog_name } : null,
+    vehicles: row.vehicle_make || row.vehicle_model || row.vehicle_year != null
+      ? { make: row.vehicle_make ?? "", model: row.vehicle_model ?? "", year: row.vehicle_year ?? 0 }
+      : null,
+  }));
 }
 
-/**
- * Fetch payment history for a customer account.
- */
-export async function fetchCustomerPaymentHistory(accountId: string): Promise<CustomerPaymentRecord[]> {
+export async function fetchCustomerPaymentHistory(_accountId: string): Promise<CustomerPaymentRecord[]> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return [];
-  const escapedEmail = (user.email || "").replace(/,/g, "\\,");
 
-  const { data, error } = await supabase
-    .from("appointments")
-    .select(`
-      id, title, scheduled_date, scheduled_time, status,
-      estimated_cost, payment_status, tax_amount,
-      service_catalog:service_catalog(name)
-    `)
-    .or(`customer_account_id.eq.${accountId},guest_email.ilike.${escapedEmail}`)
-    .not("payment_status", "is", null)
-    .order("scheduled_date", { ascending: false });
-
+  const { data, error } = await canonicalSupabase.rpc("get_customer_portal_payments_v1");
   if (error) throw error;
-  return (data as CustomerPaymentRecord[]) || [];
+
+  type Row = {
+    id: string;
+    title: string | null;
+    scheduled_date: string;
+    scheduled_time: string;
+    status: string;
+    estimated_cost: number | null;
+    payment_status: string | null;
+    tax_amount: number | null;
+    service_catalog_name: string | null;
+  };
+
+  return ((data ?? []) as Row[]).map((row) => ({
+    id: row.id,
+    title: row.title ?? "Payment",
+    scheduled_date: row.scheduled_date,
+    scheduled_time: row.scheduled_time,
+    status: row.status,
+    estimated_cost: row.estimated_cost,
+    payment_status: row.payment_status,
+    tax_amount: row.tax_amount,
+    service_catalog: row.service_catalog_name ? { name: row.service_catalog_name } : null,
+  }));
 }
