@@ -77,7 +77,7 @@ export function useRealTimeTechStatus(technician_id?: string) {
           .limit(1)
           .maybeSingle(),
         authUserId
-          ? supabase
+          ? (supabase as any)
               .from("appointments")
               .select("id,status,metadata,starts_at")
               .eq("assigned_user_id", authUserId)
@@ -187,7 +187,7 @@ export function useRealTimeTechStatus(technician_id?: string) {
 
   const handleClockIn = async (location?: { lat: number; lng: number }) => { await clockInTechnician(location); await fetchTechState(); toast.success("Shift started!"); };
   const handleClockOut = async (location?: { lat: number; lng: number }) => { await clockOutTechnician(location); await fetchTechState(); toast.success("Shift ended"); };
-  const handleStartBreak = async () => { await startBreak(); await fetchTechState(); toast.success("Break started"); };
+  const handleStartBreak = async () => { await startBreak(); await fetchTechState(); toast.success("Break started!"); };
   const handleEndBreak = async () => { await endBreak(); await fetchTechState(); toast.success("Break ended"); };
 
   return {
