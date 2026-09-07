@@ -19,44 +19,95 @@ export interface DispatchNotification {
   metadata?: Record<string, unknown>;
 }
 
+function requireWorkspaceId() {
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) throw new Error("Select a workspace before updating technician state.");
+  return workspaceId;
+}
+
 export async function updateTechnicianStatus(update: TechStatusUpdate) {
-  return supabase.functions.invoke("tech-dispatch-sync", { body: { action: "update_tech_status", data: update } });
+  const workspaceId = requireWorkspaceId();
+  const { data: { user } } = await getCurrentAuthUser();
+  if (!user) throw new Error("Not authenticated");
+  if (update.technician_id !== user.id) throw new Error("You can only update your own technician status.");
+  return supabase.rpc("set_technician_presence_v1", {
+    p_workspace_id: workspaceId,
+    p_status: update.new_status,
+    p_appointment_id: update.appointment_id ?? null,
+    p_location: update.location ?? null,
+  });
 }
 
 export async function sendDispatchNotification(notification: DispatchNotification) {
-  return supabase.functions.invoke("tech-dispatch-sync", { body: { action: "dispatch_notification", data: notification } });
+  if (!notification.appointment_id) throw new Error("A dispatch notification must reference an appointment.");
+  const workspaceId = requireWorkspaceId();
+  return nextApi.dispatchEvents.create({
+    workspace_id: workspaceId,
+    appointment_id: notification.appointment_id,
+    technician_id: notification.technician_id,
+    event_type: "note",
+    notes: notification.message || notification.type,
+    new_status: notification.type,
+    location: null,
+  });
 }
 
 export async function syncTechnicianDailyLoad(technician_id: string, date: string) {
-  return supabase.functions.invoke("tech-dispatch-sync", { body: { action: "sync_daily_load", data: { technician_id, date } } });
+  const workspaceId = requireWorkspaceId();
+  const { data, error } = await supabase
+    .from("appointments")
+    .select("id,status,starts_at,ends_at")
+    .eq("workspace_id", workspaceId)
+    .eq("assigned_user_id", technician_id)
+    .gte("starts_at", `${date}T00:00:00`)
+    .lt("starts_at", `${date}T23:59:59.999`)
+    .order("starts_at", { ascending: true });
+  if (error) throw error;
+  return { data: data ?? [], error: null };
 }
 
 export async function updateTechnicianLocation(technician_id: string, location: { lat: number; lng: number }) {
-  return supabase.functions.invoke("tech-dispatch-sync", { body: { action: "update_location", data: { technician_id, location } } });
+  const workspaceId = requireWorkspaceId();
+  const { data: { user } } = await getCurrentAuthUser();
+  if (!user) throw new Error("Not authenticated");
+  if (technician_id !== user.id) throw new Error("You can only update your own location.");
+  const { data: current } = await supabase
+    .from("technician_presence")
+    .select("status,current_appointment_id")
+    .eq("workspace_id", workspaceId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  return supabase.rpc("set_technician_presence_v1", {
+    p_workspace_id: workspaceId,
+    p_status: current?.status ?? "available",
+    p_appointment_id: current?.current_appointment_id ?? null,
+    p_location: location,
+  });
+}
+
+async function clock(action: "clock_in" | "clock_out" | "start_break" | "end_break", location?: { lat: number; lng: number }) {
+  const workspaceId = requireWorkspaceId();
+  return supabase.rpc("clock_technician_v1", {
+    p_workspace_id: workspaceId,
+    p_action: action,
+    p_location: location ?? null,
+  });
 }
 
 export async function clockInTechnician(location?: { lat: number; lng: number }) {
-  return supabase.rpc("clock_in", { p_location: location ? JSON.stringify(location) : null });
+  return clock("clock_in", location);
 }
 
 export async function clockOutTechnician(location?: { lat: number; lng: number }) {
-  return supabase.rpc("clock_out", { p_location: location ? JSON.stringify(location) : null });
+  return clock("clock_out", location);
 }
 
 export async function startBreak() {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) throw new Error("Not authenticated");
-  const { data: shift } = await supabase.from("time_clock_entries").select("id").eq("user_id", user.id).eq("status", "active").order("clock_in", { ascending: false }).limit(1).maybeSingle();
-  if (!shift) throw new Error("No active shift found");
-  const { error: shiftError } = await supabase.from("time_clock_entries").update({ status: "on_break", break_start: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", shift.id);
-  if (shiftError) throw shiftError;
-  const { error: techError } = await supabase.from("technicians").update({ status: "on_break", updated_at: new Date().toISOString() }).eq("auth_user_id", user.id);
-  if (techError) throw techError;
-  return { success: true };
+  return clock("start_break");
 }
 
 export async function endBreak() {
-  return supabase.rpc("end_break");
+  return clock("end_break");
 }
 
 async function appointmentTransition(
@@ -64,8 +115,7 @@ async function appointmentTransition(
   status: "acknowledged" | "en_route" | "arrived",
   location?: { lat: number; lng: number },
 ) {
-  const workspaceId = getSelectedWorkspaceId();
-  if (!workspaceId) throw new Error("Select a workspace before updating this job.");
+  const workspaceId = requireWorkspaceId();
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.access_token) throw new Error("Not authenticated");
   const response = await fetch(`/api/v1/appointments/${encodeURIComponent(appointmentId)}/technician-status`, {
@@ -82,8 +132,7 @@ async function appointmentTransition(
 async function currentTechnicianId(): Promise<string | null> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("Not authenticated");
-  const { data } = await supabase.from("technicians").select("id").eq("auth_user_id", user.id).maybeSingle();
-  return data?.id ?? null;
+  return user.id;
 }
 
 async function recordDispatchEvent(input: {
@@ -129,8 +178,7 @@ export async function markArrived(appointment_id: string, location?: { lat: numb
 }
 
 export async function startJob(appointment_id: string) {
-  const workspaceId = getSelectedWorkspaceId();
-  if (!workspaceId) throw new Error("Select a workspace before starting a job.");
+  const workspaceId = requireWorkspaceId();
   const { data: { session } } = await supabase.auth.getSession();
   if (!session?.access_token) throw new Error("Not authenticated");
   const response = await fetch(`/api/v1/appointments/${encodeURIComponent(appointment_id)}/start`, {
