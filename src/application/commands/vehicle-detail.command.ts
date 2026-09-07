@@ -1,14 +1,27 @@
-/**
- * Vehicle Detail Commands — Write operations for vehicle records.
- */
-import { supabase } from "@/integrations/supabase/client";
+/** Vehicle Detail Commands — canonical workspace-scoped vehicle writes. */
+import { nextApi } from "@/lib/nextApiClient";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
-/** Update vehicle notes */
-export async function updateVehicleNotes(vehicleId: string, notes: string) {
-  return supabase.from("vehicles").update({ notes }).eq("id", vehicleId);
+async function updateVehicle(vehicleId: string, data: Record<string, unknown>) {
+  try {
+    const context = await resolveCurrentWorkspace();
+    if (!context) throw new Error("No active workspace is available.");
+    const response = await nextApi.vehicles.update(vehicleId, {
+      workspace_id: context.workspaceId,
+      ...data,
+    });
+    return { data: response.data, error: null };
+  } catch (error) {
+    return { data: null, error };
+  }
 }
 
-/** Update vehicle details (incl. admin-override specs: engine/oil_type/oil_capacity) */
+/** Update vehicle notes through the authenticated workspace API. */
+export async function updateVehicleNotes(vehicleId: string, notes: string) {
+  return updateVehicle(vehicleId, { notes });
+}
+
+/** Update vehicle details and canonical vehicle-service specs through one API boundary. */
 export async function updateVehicleDetails(
   vehicleId: string,
   data: {
@@ -25,5 +38,5 @@ export async function updateVehicleDetails(
     oil_capacity?: string | null;
   }
 ) {
-  return supabase.from("vehicles").update(data).eq("id", vehicleId);
+  return updateVehicle(vehicleId, data);
 }
