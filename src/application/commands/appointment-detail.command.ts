@@ -58,16 +58,25 @@ export async function deleteAppointment(id: string) {
   }
 }
 
-/** Start the job through the canonical appointment mutation API. */
+/** Start the job through a role-limited canonical endpoint. */
 export async function startAppointmentJob(appointmentId: string): Promise<{ success: boolean; alreadyStarted?: boolean; error?: string }> {
   try {
     const context = await resolveCurrentWorkspace();
     if (!context) throw new Error("No active workspace is available.");
-    const currentStatus = await readCurrentStatus(context.workspaceId, appointmentId);
-    if (!currentStatus) throw new Error("Appointment not found in the active workspace.");
-    if (currentStatus === "in_progress") return { success: true, alreadyStarted: true };
-    await nextApi.appointments.update(appointmentId, { workspace_id: context.workspaceId, status: "in_progress" });
-    return { success: true };
+    const { data: { session } } = await productionSupabase.auth.getSession();
+    if (!session?.access_token) throw new Error("Authentication required to start this appointment.");
+    const response = await fetch(`/api/v1/appointments/${encodeURIComponent(appointmentId)}/start`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ workspace_id: context.workspaceId }),
+    });
+    const body = await response.json().catch(() => ({})) as { data?: { already_started?: boolean }; error?: { message?: string } };
+    if (!response.ok) throw new Error(body.error?.message || "Failed to start job");
+    return { success: true, alreadyStarted: body.data?.already_started === true };
   } catch (err: unknown) {
     return { success: false, error: errorMessage(err, "Failed to start job") };
   }
