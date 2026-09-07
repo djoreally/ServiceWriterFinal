@@ -1,4 +1,4 @@
-import { json, errorResponse, paginationSchema, requireWorkspaceMember } from "@/server/api";
+import { ApiError, json, errorResponse, paginationSchema, requireWorkspaceMember } from "@/server/api";
 import { createSupabaseAdminClient } from "@/lib/supabase";
 import { dispatchAppointmentLifecycle } from "@/server/messaging/appointment-events";
 import { LIFECYCLE_EVENT_KEYS } from "@/server/messaging/lifecycle-events";
@@ -42,8 +42,40 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = dispatchEventSchema.parse(await request.json());
-    const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician", "fleet_manager"], request);
-    const { data, error } = await supabase.from("dispatch_events").insert({ ...body, performed_by: user.id }).select().single();
+    const { supabase, user, membership } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician", "fleet_manager"], request);
+
+    if (membership.role === "technician") {
+      if (body.technician_id && body.technician_id !== user.id) {
+        throw new ApiError(403, "Technicians can only record their own dispatch events.", "forbidden");
+      }
+      if (body.appointment_id) {
+        const { data: appointment, error } = await supabase
+          .from("appointments")
+          .select("assigned_user_id")
+          .eq("workspace_id", body.workspace_id)
+          .eq("id", body.appointment_id)
+          .maybeSingle();
+        if (error) throw error;
+        if (!appointment || appointment.assigned_user_id !== user.id) {
+          throw new ApiError(403, "This appointment is not assigned to you.", "forbidden");
+        }
+      }
+      if (body.work_order_id) {
+        const { data: assignment, error } = await supabase
+          .from("work_order_assignments")
+          .select("user_id")
+          .eq("workspace_id", body.workspace_id)
+          .eq("work_order_id", body.work_order_id)
+          .eq("user_id", user.id)
+          .is("unassigned_at", null)
+          .maybeSingle();
+        if (error) throw error;
+        if (!assignment) throw new ApiError(403, "This work order is not assigned to you.", "forbidden");
+      }
+    }
+
+    const eventTechnicianId = membership.role === "technician" ? user.id : (body.technician_id ?? null);
+    const { data, error } = await supabase.from("dispatch_events").insert({ ...body, technician_id: eventTechnicianId, performed_by: user.id }).select().single();
     if (error) throw error;
     const eventKey = {
       en_route: LIFECYCLE_EVENT_KEYS.technicianEnRoute,
@@ -70,7 +102,7 @@ export async function POST(request: Request) {
           ]);
           if (appointment) {
             const admin = createSupabaseAdminClient();
-            const technician = body.technician_id ? await admin.auth.admin.getUserById(body.technician_id) : null;
+            const technician = eventTechnicianId ? await admin.auth.admin.getUserById(eventTechnicianId) : null;
             const technicianName = String(
               technician?.data?.user?.user_metadata?.full_name
               || technician?.data?.user?.user_metadata?.name
