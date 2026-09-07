@@ -31,7 +31,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       .maybeSingle();
     if (currentError) throw currentError;
     if (!current) throw new ApiError(404, "Appointment not found.", "not_found");
-
+    if (["completed", "cancelled", "no_show"].includes(current.status)) {
+      throw new ApiError(409, "This appointment can no longer receive dispatch updates.", "invalid_status");
+    }
     if (membership.role === "technician" && current.assigned_user_id !== user.id) {
       throw new ApiError(403, "This appointment is not assigned to you.", "forbidden");
     }
@@ -48,14 +50,29 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       nextMetadata.last_dispatch_location_at = now;
     }
 
+    // Dispatch state is intentionally separate from the appointment lifecycle enum.
+    // Arrival is the only dispatch transition that also has a canonical appointment equivalent.
+    const appointmentStatus = body.status === "arrived" && ["requested", "confirmed"].includes(current.status)
+      ? "checked_in"
+      : current.status;
+
     const { data, error } = await supabase
       .from("appointments")
-      .update({ status: body.status, metadata: nextMetadata, updated_at: now })
+      .update({ status: appointmentStatus, metadata: nextMetadata, updated_at: now })
       .eq("workspace_id", body.workspace_id)
       .eq("id", appointmentId)
       .select("id,status,assigned_user_id,metadata,updated_at")
       .single();
     if (error) throw error;
+
+    const presenceStatus = body.status === "en_route" ? "en_route" : body.status === "arrived" ? "on_job" : "available";
+    const { error: presenceError } = await supabase.rpc("set_technician_presence_v1", {
+      p_workspace_id: body.workspace_id,
+      p_status: presenceStatus,
+      p_appointment_id: appointmentId,
+      p_location: body.location ?? null,
+    });
+    if (presenceError && membership.role === "technician") throw presenceError;
 
     return json({ data });
   } catch (error) {
