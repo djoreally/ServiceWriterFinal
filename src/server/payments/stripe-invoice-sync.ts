@@ -30,16 +30,15 @@ function text(value: unknown): string | null {
 
 function asStripeCustomerId(metadata: Record<string, unknown>): string | null {
   const id = text(metadata.stripe_customer_id);
-  return id && id.startsWith("cus_") ? id : null;
+  return id?.startsWith("cus_") ? id : null;
 }
 
 function asStripeInvoiceId(metadata: Record<string, unknown>): string | null {
   const id = text(metadata.stripe_invoice_id);
-  return id && id.startsWith("in_") ? id : null;
+  return id?.startsWith("in_") ? id : null;
 }
 
 async function retrieveExecutionAccount(execution: StripeWorkspaceExecution): Promise<Stripe.Account> {
-  if (execution.mode === "direct") return execution.stripe.accounts.retrieve();
   return execution.stripe.accounts.retrieve(execution.accountId);
 }
 
@@ -48,27 +47,27 @@ async function refreshStripeWorkspaceState(
   workspaceId: string,
   operational: Record<string, unknown>,
   execution: StripeWorkspaceExecution,
-  stripeAccount: Stripe.Account,
+  account: Stripe.Account,
 ) {
   const checkedAt = new Date().toISOString();
   const nextOperational = execution.mode === "direct"
     ? {
         ...operational,
         stripe_payment_mode: "direct",
-        stripe_direct_account_id: stripeAccount.id,
-        stripe_direct_charges_enabled: stripeAccount.charges_enabled,
-        stripe_direct_payouts_enabled: stripeAccount.payouts_enabled,
-        stripe_direct_details_submitted: stripeAccount.details_submitted,
+        stripe_direct_account_id: account.id,
+        stripe_direct_charges_enabled: account.charges_enabled,
+        stripe_direct_payouts_enabled: account.payouts_enabled,
+        stripe_direct_details_submitted: account.details_submitted,
         stripe_direct_checked_at: checkedAt,
       }
     : {
         ...operational,
         stripe_payment_mode: "connect",
-        stripe_account_id: stripeAccount.id,
-        stripe_account_status: stripeAccount.charges_enabled ? "active" : "restricted",
-        stripe_charges_enabled: stripeAccount.charges_enabled,
-        stripe_payouts_enabled: stripeAccount.payouts_enabled,
-        stripe_onboarding_complete: stripeAccount.details_submitted,
+        stripe_account_id: account.id,
+        stripe_account_status: account.charges_enabled ? "active" : "restricted",
+        stripe_charges_enabled: account.charges_enabled,
+        stripe_payouts_enabled: account.payouts_enabled,
+        stripe_onboarding_complete: account.details_submitted,
         stripe_status_checked_at: checkedAt,
       };
 
@@ -103,37 +102,31 @@ async function ensureStripeCustomer(params: {
     customerId = null;
   }
 
-  const name = [params.customer.first_name, params.customer.last_name]
-    .filter(Boolean)
-    .join(" ") || params.customer.company_name || undefined;
   const line1 = text(params.customer.address_line1);
-  const address = line1 ? {
-    line1,
-    line2: text(params.customer.address_line2) ?? undefined,
-    city: text(params.customer.city) ?? undefined,
-    state: text(params.customer.region) ?? undefined,
-    postal_code: text(params.customer.postal_code) ?? undefined,
-    country: text(params.customer.country_code) ?? "US",
-  } : undefined;
-
   const created = await params.execution.stripe.customers.create({
     email: text(params.customer.email) ?? undefined,
-    name,
+    name: [params.customer.first_name, params.customer.last_name].filter(Boolean).join(" ") || params.customer.company_name || undefined,
     phone: text(params.customer.phone) ?? undefined,
-    address,
+    address: line1 ? {
+      line1,
+      line2: text(params.customer.address_line2) ?? undefined,
+      city: text(params.customer.city) ?? undefined,
+      state: text(params.customer.region) ?? undefined,
+      postal_code: text(params.customer.postal_code) ?? undefined,
+      country: text(params.customer.country_code) ?? "US",
+    } : undefined,
     metadata: {
       servicewriter_customer_id: String(params.customer.id),
       workspace_id: params.workspaceId,
     },
   }, params.execution.requestOptions(`sw-customer-${params.customer.id}`));
-  customerId = created.id;
 
   const { error } = await params.supabase
     .from("customers")
     .update({
       metadata: {
         ...metadata,
-        stripe_customer_id: customerId,
+        stripe_customer_id: created.id,
         stripe_account_id: params.execution.accountId,
         stripe_payment_mode: params.execution.mode,
         stripe_synced_at: new Date().toISOString(),
@@ -143,7 +136,7 @@ async function ensureStripeCustomer(params: {
     .eq("id", params.customer.id);
   if (error) throw error;
 
-  return customerId;
+  return created.id;
 }
 
 export async function syncCanonicalInvoiceToStripe(params: {
@@ -165,22 +158,22 @@ export async function syncCanonicalInvoiceToStripe(params: {
 
   const operational = object(settings?.operational_settings);
   const execution = resolveStripeWorkspaceExecution(operational);
-  const stripeAccount = await retrieveExecutionAccount(execution);
-  await refreshStripeWorkspaceState(params.supabase, params.workspaceId, operational, execution, stripeAccount);
-  if (!stripeAccount.charges_enabled) {
+  const account = await retrieveExecutionAccount(execution);
+  await refreshStripeWorkspaceState(params.supabase, params.workspaceId, operational, execution, account);
+  if (!account.charges_enabled) {
     throw new Error(`${execution.mode === "direct" ? "Workspace" : "Connected"} Stripe account is not enabled to accept charges.`);
   }
 
   const [{ data: invoice, error: invoiceError }, { data: payment, error: paymentError }] = await Promise.all([
     params.supabase
       .from("invoices")
-      .select("id,customer_id,invoice_number,subtotal,tax_total,total,due_at,status,metadata")
+      .select("id,customer_id,invoice_number,tax_total,total,metadata")
       .eq("workspace_id", params.workspaceId)
       .eq("id", params.invoiceId)
       .single(),
     params.supabase
       .from("payments")
-      .select("id,invoice_id,customer_id,amount,currency_code,status,metadata")
+      .select("id,currency_code,metadata")
       .eq("workspace_id", params.workspaceId)
       .eq("id", params.paymentId)
       .single(),
@@ -198,7 +191,7 @@ export async function syncCanonicalInvoiceToStripe(params: {
       .single(),
     params.supabase
       .from("invoice_lines")
-      .select("id,description,quantity,unit_price,tax_rate,sort_order,metadata")
+      .select("id,description,quantity,unit_price,sort_order")
       .eq("workspace_id", params.workspaceId)
       .eq("invoice_id", invoice.id)
       .order("sort_order", { ascending: true }),
@@ -216,8 +209,7 @@ export async function syncCanonicalInvoiceToStripe(params: {
   const invoiceMetadata = object(invoice.metadata);
   let stripeInvoice: Stripe.Invoice | null = null;
   const storedStripeInvoiceId = asStripeInvoiceId(invoiceMetadata);
-  const storedAccountId = text(invoiceMetadata.stripe_account_id);
-  if (storedStripeInvoiceId && storedAccountId === execution.accountId) {
+  if (storedStripeInvoiceId && text(invoiceMetadata.stripe_account_id) === execution.accountId) {
     try {
       stripeInvoice = await execution.stripe.invoices.retrieve(
         storedStripeInvoiceId,
@@ -297,42 +289,34 @@ export async function syncCanonicalInvoiceToStripe(params: {
 
   const syncedAt = new Date().toISOString();
   const hostedInvoiceUrl = stripeInvoice.hosted_invoice_url ?? null;
-  const nextInvoiceMetadata = {
-    ...invoiceMetadata,
-    stripe_customer_id: stripeCustomerId,
-    stripe_invoice_id: stripeInvoice.id,
-    stripe_account_id: execution.accountId,
-    stripe_payment_mode: execution.mode,
-    stripe_hosted_invoice_url: hostedInvoiceUrl,
-    stripe_invoice_status: stripeInvoice.status,
-    stripe_sync_status: "synced",
-    stripe_synced_at: syncedAt,
-  };
   const paymentMetadata = object(payment.metadata);
-
   const [{ error: invoiceUpdateError }, { error: paymentUpdateError }] = await Promise.all([
-    params.supabase
-      .from("invoices")
-      .update({ metadata: nextInvoiceMetadata })
-      .eq("workspace_id", params.workspaceId)
-      .eq("id", invoice.id),
-    params.supabase
-      .from("payments")
-      .update({
-        provider: "stripe",
-        metadata: {
-          ...paymentMetadata,
-          stripe_customer_id: stripeCustomerId,
-          stripe_invoice_id: stripeInvoice.id,
-          stripe_account_id: execution.accountId,
-          stripe_payment_mode: execution.mode,
-          payment_url: hostedInvoiceUrl,
-          stripe_sync_status: "synced",
-          stripe_synced_at: syncedAt,
-        },
-      })
-      .eq("workspace_id", params.workspaceId)
-      .eq("id", payment.id),
+    params.supabase.from("invoices").update({
+      metadata: {
+        ...invoiceMetadata,
+        stripe_customer_id: stripeCustomerId,
+        stripe_invoice_id: stripeInvoice.id,
+        stripe_account_id: execution.accountId,
+        stripe_payment_mode: execution.mode,
+        stripe_hosted_invoice_url: hostedInvoiceUrl,
+        stripe_invoice_status: stripeInvoice.status,
+        stripe_sync_status: "synced",
+        stripe_synced_at: syncedAt,
+      },
+    }).eq("workspace_id", params.workspaceId).eq("id", invoice.id),
+    params.supabase.from("payments").update({
+      provider: "stripe",
+      metadata: {
+        ...paymentMetadata,
+        stripe_customer_id: stripeCustomerId,
+        stripe_invoice_id: stripeInvoice.id,
+        stripe_account_id: execution.accountId,
+        stripe_payment_mode: execution.mode,
+        payment_url: hostedInvoiceUrl,
+        stripe_sync_status: "synced",
+        stripe_synced_at: syncedAt,
+      },
+    }).eq("workspace_id", params.workspaceId).eq("id", payment.id),
   ]);
   if (invoiceUpdateError) throw invoiceUpdateError;
   if (paymentUpdateError) throw paymentUpdateError;
@@ -357,13 +341,11 @@ export async function markStripeInvoicePaidOutOfBand(params: {
   if (!params.invoiceId) return { status: "skipped" };
 
   const [{ data: settings, error: settingsError }, { data: invoice, error: invoiceError }] = await Promise.all([
-    params.supabase
-      .from("workspace_settings")
+    params.supabase.from("workspace_settings")
       .select("payment_provider,operational_settings")
       .eq("workspace_id", params.workspaceId)
       .single(),
-    params.supabase
-      .from("invoices")
+    params.supabase.from("invoices")
       .select("id,metadata")
       .eq("workspace_id", params.workspaceId)
       .eq("id", params.invoiceId)
@@ -375,10 +357,9 @@ export async function markStripeInvoicePaidOutOfBand(params: {
 
   const operational = object(settings.operational_settings);
   const execution = resolveStripeWorkspaceExecution(operational);
-  const invoiceMetadata = object(invoice.metadata);
-  const stripeInvoiceId = asStripeInvoiceId(invoiceMetadata);
-  if (!stripeInvoiceId) return { status: "skipped" };
-  if (text(invoiceMetadata.stripe_account_id) !== execution.accountId) {
+  const metadata = object(invoice.metadata);
+  const stripeInvoiceId = asStripeInvoiceId(metadata);
+  if (!stripeInvoiceId || text(metadata.stripe_account_id) !== execution.accountId) {
     return { status: "skipped" };
   }
 
@@ -394,5 +375,10 @@ export async function markStripeInvoicePaidOutOfBand(params: {
       execution.requestOptions(`sw-invoice-oob-paid-${invoice.id}`),
     );
   }
-  return { status: "synced", stripeInvoiceId, paymentMode: stripePaymentMode(operational) };
+
+  return {
+    status: "synced",
+    stripeInvoiceId,
+    paymentMode: stripePaymentMode(operational),
+  };
 }
