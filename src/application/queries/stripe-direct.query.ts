@@ -44,13 +44,14 @@ export async function fetchStripeDirectStatus(): Promise<StripeDirectStatus> {
   return parseResponse(response);
 }
 
-export async function configureStripeDirect(secretKey: string, webhookSecret: string): Promise<StripeDirectStatus> {
+export async function configureStripeDirect(accountId: string, secretKey: string, webhookSecret: string): Promise<StripeDirectStatus> {
   const workspaceId = await currentWorkspaceId();
   const response = await fetch("/api/v1/payments/stripe-direct", {
     method: "PUT",
     headers: await authHeaders(),
     body: JSON.stringify({
       workspace_id: workspaceId,
+      account_id: accountId,
       secret_key: secretKey,
       webhook_secret: webhookSecret,
     }),
