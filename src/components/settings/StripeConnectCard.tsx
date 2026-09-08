@@ -43,6 +43,7 @@ export const StripeConnectCard = () => {
   const [connecting, setConnecting] = useState(false);
   const [connectStatus, setConnectStatus] = useState<StripeConnectStatus>(emptyConnect);
   const [directStatus, setDirectStatus] = useState<StripeDirectStatus>(emptyDirect);
+  const [accountId, setAccountId] = useState("");
   const [secretKey, setSecretKey] = useState("");
   const [webhookSecret, setWebhookSecret] = useState("");
 
@@ -77,14 +78,15 @@ export const StripeConnectCard = () => {
   };
 
   const handleDirectSave = async () => {
-    if (!secretKey.trim() || !webhookSecret.trim()) {
-      toast.error("Enter both the Stripe secret key and webhook signing secret");
+    if (!accountId.trim() || !secretKey.trim() || !webhookSecret.trim()) {
+      toast.error("Enter the Stripe account ID, secret API key, and webhook signing secret");
       return;
     }
     setSaving(true);
     try {
-      const status = await configureStripeDirect(secretKey.trim(), webhookSecret.trim());
+      const status = await configureStripeDirect(accountId.trim(), secretKey.trim(), webhookSecret.trim());
       setDirectStatus(status);
+      setAccountId("");
       setSecretKey("");
       setWebhookSecret("");
       toast.success("Your Stripe account is now the active payment processor for this workspace");
@@ -156,6 +158,10 @@ export const StripeConnectCard = () => {
             </div>
           ) : (
             <div className="space-y-3">
+              <div className="space-y-2">
+                <Label htmlFor="stripe-account-id">Stripe account ID</Label>
+                <Input id="stripe-account-id" autoComplete="off" value={accountId} onChange={(event) => setAccountId(event.target.value)} placeholder="acct_…" />
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="stripe-secret-key">Stripe secret API key</Label>
                 <Input id="stripe-secret-key" type="password" autoComplete="off" value={secretKey} onChange={(event) => setSecretKey(event.target.value)} placeholder="sk_live_…" />
