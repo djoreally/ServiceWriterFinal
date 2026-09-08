@@ -15,6 +15,80 @@ function object(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function eventWorkspaceId(event: Stripe.Event): string | null {
+  const data = object(event.data?.object);
+  const metadata = object(data.metadata);
+  const workspaceId = metadata.workspace_id;
+  return typeof workspaceId === "string" && workspaceId.trim() ? workspaceId : null;
+}
+
+async function beginWebhookEvent(event: Stripe.Event) {
+  const admin = createSupabaseAdminClient();
+  const workspaceId = eventWorkspaceId(event);
+  const payload = JSON.parse(JSON.stringify(event));
+
+  const { error: insertError } = await admin.from("webhook_events").insert({
+    workspace_id: workspaceId,
+    provider: "stripe",
+    external_event_id: event.id,
+    event_type: event.type,
+    signature_verified: true,
+    status: "processing",
+    payload,
+  });
+
+  if (!insertError) return { duplicate: false, admin };
+  if ((insertError as { code?: string }).code !== "23505") throw insertError;
+
+  const { data: existing, error: existingError } = await admin
+    .from("webhook_events")
+    .select("status")
+    .eq("provider", "stripe")
+    .eq("external_event_id", event.id)
+    .single();
+  if (existingError) throw existingError;
+
+  if (existing.status !== "failed") {
+    return { duplicate: true, admin };
+  }
+
+  const { error: retryError } = await admin
+    .from("webhook_events")
+    .update({
+      workspace_id: workspaceId,
+      event_type: event.type,
+      signature_verified: true,
+      status: "processing",
+      payload,
+      error_message: null,
+      processed_at: null,
+    })
+    .eq("provider", "stripe")
+    .eq("external_event_id", event.id)
+    .eq("status", "failed");
+  if (retryError) throw retryError;
+
+  return { duplicate: false, admin };
+}
+
+async function finishWebhookEvent(
+  event: Stripe.Event,
+  status: "processed" | "failed" | "ignored",
+  errorMessage?: string,
+) {
+  const admin = createSupabaseAdminClient();
+  const { error } = await admin
+    .from("webhook_events")
+    .update({
+      status,
+      error_message: errorMessage ?? null,
+      processed_at: new Date().toISOString(),
+    })
+    .eq("provider", "stripe")
+    .eq("external_event_id", event.id);
+  if (error) throw error;
+}
+
 async function reconcileInvoiceEvent(event: Stripe.Event, invoice: Stripe.Invoice) {
   const paymentId = invoice.metadata?.payment_id;
   const workspaceId = invoice.metadata?.workspace_id;
@@ -122,33 +196,53 @@ export async function POST(request: Request) {
   const signature = request.headers.get("stripe-signature");
   if (!signature) return new Response("Missing Stripe signature", { status: 400 });
 
+  let event: Stripe.Event | null = null;
   try {
     const stripe = new Stripe(required("STRIPE_SECRET_KEY"));
-    const event = stripe.webhooks.constructEvent(
+    event = stripe.webhooks.constructEvent(
       await request.text(),
       signature,
       required("STRIPE_WEBHOOK_SECRET"),
     );
+
+    const ingress = await beginWebhookEvent(event);
+    if (ingress.duplicate) {
+      return Response.json({ received: true, duplicate: true });
+    }
+
+    let result: Record<string, unknown> = { received: true };
 
     if (
       event.type === "invoice.paid" ||
       event.type === "invoice.payment_succeeded" ||
       event.type === "invoice.payment_failed"
     ) {
-      return Response.json(await reconcileInvoiceEvent(event, event.data.object as Stripe.Invoice));
-    }
-
-    if (
+      result = await reconcileInvoiceEvent(event, event.data.object as Stripe.Invoice);
+    } else if (
       event.type === "checkout.session.completed" ||
       event.type === "checkout.session.async_payment_succeeded" ||
       event.type === "checkout.session.async_payment_failed"
     ) {
-      return Response.json(await reconcileCheckoutEvent(event, event.data.object as Stripe.Checkout.Session));
+      result = await reconcileCheckoutEvent(event, event.data.object as Stripe.Checkout.Session);
+    } else {
+      result = { received: true, ignored: "unsupported_event_type" };
     }
 
-    return Response.json({ received: true });
+    await finishWebhookEvent(event, result.ignored ? "ignored" : "processed");
+    return Response.json(result);
   } catch (error) {
     console.error("[stripe-webhook] reconciliation failed", error);
+    if (event) {
+      try {
+        await finishWebhookEvent(
+          event,
+          "failed",
+          error instanceof Error ? error.message : "Unknown Stripe webhook error",
+        );
+      } catch (ledgerError) {
+        console.error("[stripe-webhook] failed to update webhook ledger", ledgerError);
+      }
+    }
     return new Response("Webhook error", { status: 400 });
   }
 }
