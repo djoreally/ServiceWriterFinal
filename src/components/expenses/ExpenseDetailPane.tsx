@@ -24,7 +24,8 @@ interface LineItem {
   id: string;
   description: string;
   quantity: number;
-  unit_price: number;
+  unit_cost?: number;
+  unit_price?: number;
   line_total: number;
 }
 
@@ -58,7 +59,10 @@ export function ExpenseDetailPane({ expense, categoryName, onChanged, onEdit }: 
       edited: "Edited",
       approved: "Approved",
       rejected: "Rejected",
+      reimbursed: "Reimbursed",
       deleted: "Deleted",
+      receipt_attached: "Receipt attached",
+      line_items_changed: "Line items changed",
     };
 
     const detailMap: Partial<Record<ExpenseActivityRow["event_type"], string>> = {
@@ -67,19 +71,13 @@ export function ExpenseDetailPane({ expense, categoryName, onChanged, onEdit }: 
       created: typeof entry.details?.vendor_name_raw === "string" ? `Entered for ${entry.details.vendor_name_raw}` : undefined,
     };
 
-    return {
-      ...entry,
-      label: labelMap[entry.event_type],
-      detail: detailMap[entry.event_type],
-    };
+    return { ...entry, label: labelMap[entry.event_type], detail: detailMap[entry.event_type] };
   }), [activity]);
 
   if (!expense) {
     return (
       <Card>
-        <CardContent className="p-12 text-center text-sm text-muted-foreground">
-          Select an expense to view details.
-        </CardContent>
+        <CardContent className="p-12 text-center text-sm text-muted-foreground">Select an expense to view details.</CardContent>
       </Card>
     );
   }
@@ -117,9 +115,7 @@ export function ExpenseDetailPane({ expense, categoryName, onChanged, onEdit }: 
         <div className="flex items-start justify-between">
           <div>
             <h3 className="font-bold text-lg">{expense.vendor_name_raw}</h3>
-            <p className="text-xs text-muted-foreground">
-              {format(parseISO(expense.transaction_date), "MMMM d, yyyy")}
-            </p>
+            <p className="text-xs text-muted-foreground">{format(parseISO(expense.transaction_date), "MMMM d, yyyy")}</p>
           </div>
           <Badge variant="outline">{expense.status}</Badge>
         </div>
@@ -145,21 +141,21 @@ export function ExpenseDetailPane({ expense, categoryName, onChanged, onEdit }: 
           <div className="border-t pt-2">
             <p className="text-xs uppercase tracking-wider font-bold text-muted-foreground mb-2">Line items</p>
             <div className="space-y-1 text-xs">
-              {items.map((li) => (
-                <div key={li.id} className="flex justify-between gap-2">
-                  <span className="truncate">{li.description}</span>
-                  <span className="text-muted-foreground tabular-nums">{li.quantity} × ${Number(li.unit_price).toFixed(2)} = ${Number(li.line_total).toFixed(2)}</span>
-                </div>
-              ))}
+              {items.map((li) => {
+                const unitPrice = Number(li.unit_cost ?? li.unit_price ?? 0);
+                return (
+                  <div key={li.id} className="flex justify-between gap-2">
+                    <span className="truncate">{li.description}</span>
+                    <span className="text-muted-foreground tabular-nums">{li.quantity} × ${unitPrice.toFixed(2)} = ${Number(li.line_total).toFixed(2)}</span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
 
         <div className="border-t pt-3">
-          <div className="flex items-center gap-2 mb-3">
-            <History className="h-4 w-4 text-muted-foreground" />
-            <p className="text-xs uppercase tracking-wider font-bold text-muted-foreground">Activity</p>
-          </div>
+          <div className="flex items-center gap-2 mb-3"><History className="h-4 w-4 text-muted-foreground" /><p className="text-xs uppercase tracking-wider font-bold text-muted-foreground">Activity</p></div>
           {timelineItems.length === 0 ? (
             <p className="text-xs text-muted-foreground">No activity recorded yet.</p>
           ) : (
@@ -175,13 +171,9 @@ export function ExpenseDetailPane({ expense, categoryName, onChanged, onEdit }: 
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <p className="text-sm font-medium text-foreground">{entry.label}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {entry.actor_name ?? "Team member"} • {formatDistanceToNow(parseISO(entry.created_at), { addSuffix: true })}
-                          </p>
+                          <p className="text-xs text-muted-foreground">{entry.actor_name ?? "Team member"} • {formatDistanceToNow(parseISO(entry.created_at), { addSuffix: true })}</p>
                         </div>
-                        <p className="text-[11px] text-muted-foreground whitespace-nowrap">
-                          {format(parseISO(entry.created_at), "MMM d, yyyy h:mm a")}
-                        </p>
+                        <p className="text-[11px] text-muted-foreground whitespace-nowrap">{format(parseISO(entry.created_at), "MMM d, yyyy h:mm a")}</p>
                       </div>
                       {entry.detail && <p className="text-xs text-muted-foreground mt-1">{entry.detail}</p>}
                     </div>
@@ -193,9 +185,7 @@ export function ExpenseDetailPane({ expense, categoryName, onChanged, onEdit }: 
         </div>
 
         <div className="flex gap-2 pt-2 border-t">
-          <Button size="sm" variant="outline" onClick={() => onEdit?.(expense)} className="gap-1">
-            <Pencil className="h-3 w-3" /> Edit
-          </Button>
+          <Button size="sm" variant="outline" onClick={() => onEdit?.(expense)} className="gap-1"><Pencil className="h-3 w-3" /> Edit</Button>
           {expense.status === "pending" && (
             <>
               <Button size="sm" onClick={handleApprove} className="gap-1"><Check className="h-3 w-3" /> Approve</Button>
