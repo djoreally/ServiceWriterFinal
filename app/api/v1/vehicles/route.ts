@@ -40,6 +40,15 @@ async function assertCustomerInWorkspace(
   if (!data) throw new Error("Customer does not belong to this workspace.");
 }
 
+function isArchivedVehicle(row: { metadata?: unknown }): boolean {
+  return !!(
+    row.metadata &&
+    typeof row.metadata === "object" &&
+    !Array.isArray(row.metadata) &&
+    (row.metadata as Record<string, unknown>).archived_at
+  );
+}
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
@@ -47,8 +56,6 @@ export async function GET(request: Request) {
     if (!workspaceId) throw new Error("workspace_id is required");
     const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
 
-    // `vehicles` has no status column in the canonical production schema.
-    // Workspace scoping plus RLS is the authoritative visibility boundary.
     let query = supabase
       .from("vehicles")
       .select("*,customers(id,first_name,last_name),vehicle_service_specs(engine,oil_type,oil_capacity,oil_filter,metadata)")
@@ -64,9 +71,10 @@ export async function GET(request: Request) {
 
     const { data, error } = await query;
     if (error) throw error;
+    const visibleVehicles = (data ?? []).filter((row) => !isArchivedVehicle(row));
     return json({
-      data: data ?? [],
-      pagination: pagination ?? { limit: data?.length ?? 0, offset: 0 },
+      data: visibleVehicles,
+      pagination: pagination ?? { limit: visibleVehicles.length, offset: 0 },
     });
   } catch (error) {
     return errorResponse(error);
