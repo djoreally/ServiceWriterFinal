@@ -41,11 +41,27 @@ export async function fetchAppointmentWithRelations(id: string, _userId: string)
       address: [customerRow.address_line1, customerRow.address_line2, customerRow.city, customerRow.region, customerRow.postal_code].filter(Boolean).join(", "),
       notes: customerRow.notes ?? undefined,
     } : null;
+
+    let vehicleSpecs: Record<string, any> | null = null;
+    if (vehicleRow?.id) {
+      const specs = await db.from("vehicle_service_specs")
+        .select("engine,oil_type,oil_capacity,oil_filter,metadata")
+        .eq("workspace_id", context.workspaceId)
+        .eq("vehicle_id", vehicleRow.id)
+        .maybeSingle();
+      if (specs.error) throw specs.error;
+      vehicleSpecs = specs.data ?? null;
+    }
+
     const vehicle = vehicleRow ? {
       id: vehicleRow.id, customer_id: vehicleRow.customer_id ?? undefined, year: Number(vehicleRow.year || new Date().getFullYear()),
       make: vehicleRow.make || "Unknown", model: vehicleRow.model || "Unknown", vin: vehicleRow.vin ?? undefined,
       license_plate: vehicleRow.license_plate ?? undefined, plate_state: vehicleRow.plate_region ?? undefined,
       color: vehicleRow.color ?? undefined, mileage: vehicleRow.mileage ?? undefined, notes: vehicleRow.notes ?? undefined,
+      engine: vehicleSpecs?.engine ?? undefined,
+      oil_type: vehicleSpecs?.oil_type ?? undefined,
+      oil_capacity: vehicleSpecs?.oil_capacity ?? undefined,
+      oil_filter: vehicleSpecs?.oil_filter ?? undefined,
     } : null;
 
     const serviceCatalogId = text(metadata.service_catalog_id);
@@ -72,7 +88,7 @@ export async function fetchAppointmentWithRelations(id: string, _userId: string)
   } catch (error) { return { data: null, error }; }
 }
 
-/** Specs are keyed by vehicle_id in the canonical schema; detail data remains valid when no cached spec is resolved here. */
+/** Legacy compatibility fallback. Canonical appointment detail now resolves specs by vehicle_id above. */
 export async function fetchVehicleSpecs(_make: string, _model: string, _year: string | number) { return { data: null, error: null }; }
 
 export async function fetchCustomerAddressByGuestEmail(email: string, _userId: string) {
