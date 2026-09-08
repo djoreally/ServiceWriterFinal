@@ -41,6 +41,7 @@ export function AppointmentConfigurationSummary({
                   {vehicle.oil.engine ? `Engine ${vehicle.oil.engine}` : "Oil service"}
                   {vehicle.oil.oilType ? ` · ${vehicle.oil.oilType}` : ""}
                   {vehicle.oil.oilCapacity ? ` · ${vehicle.oil.oilCapacity}` : ""}
+                  {vehicle.oil.oilFilter ? ` · Filter ${vehicle.oil.oilFilter}` : ""}
                   {vehicle.oil.capacitySource
                     ? ` · ${vehicle.oil.capacitySource.toUpperCase()} source`
                     : ""}
