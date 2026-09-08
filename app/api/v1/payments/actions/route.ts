@@ -1,3 +1,4 @@
+import Stripe from "stripe";
 import { errorResponse, json, requireWorkspaceMember } from "@/server/api";
 import { dispatchPaymentLifecycle, LIFECYCLE_EVENT_KEYS } from "@/server/messaging/quote-payment-events";
 import { markStripeInvoicePaidOutOfBand, syncCanonicalInvoiceToStripe } from "@/server/payments/stripe-invoice-sync";
@@ -18,6 +19,52 @@ function object(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function text(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function required(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required`);
+  return value;
+}
+
+function stripeObjectId(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  const record = object(value);
+  return text(record.id);
+}
+
+async function resolveRefundTarget(stripe: Stripe, stripeAccountId: string, providerPaymentId: string) {
+  if (providerPaymentId.startsWith("pi_")) {
+    return { payment_intent: providerPaymentId } as const;
+  }
+  if (providerPaymentId.startsWith("ch_")) {
+    return { charge: providerPaymentId } as const;
+  }
+  if (!providerPaymentId.startsWith("in_")) {
+    throw new Error("Stripe payment reference is not refundable.");
+  }
+
+  const invoicePayments = await (stripe as any).invoicePayments.list({
+    invoice: providerPaymentId,
+    status: "paid",
+    limit: 10,
+  }, {
+    stripeAccount: stripeAccountId,
+  });
+
+  for (const invoicePayment of invoicePayments.data ?? []) {
+    const payment = object(invoicePayment.payment);
+    const paymentIntentId = stripeObjectId(payment.payment_intent);
+    if (paymentIntentId?.startsWith("pi_")) return { payment_intent: paymentIntentId } as const;
+    const chargeId = stripeObjectId(payment.charge);
+    if (chargeId?.startsWith("ch_")) return { charge: chargeId } as const;
+  }
+
+  throw new Error("No refundable Stripe payment was found for this invoice.");
+}
+
 export async function POST(request: Request) {
   try {
     const body = schema.parse(await request.json());
@@ -26,6 +73,96 @@ export async function POST(request: Request) {
       ["owner", "admin", "manager", "service_advisor", "receptionist"],
       request,
     );
+
+    if (body.action === "refund") {
+      const [{ data: current, error: currentError }, { data: settings, error: settingsError }] = await Promise.all([
+        supabase
+          .from("payments")
+          .select("id,invoice_id,status,amount,provider,provider_payment_id,metadata")
+          .eq("workspace_id", body.workspace_id)
+          .eq("id", body.payment_id)
+          .single(),
+        supabase
+          .from("workspace_settings")
+          .select("payment_provider,operational_settings")
+          .eq("workspace_id", body.workspace_id)
+          .single(),
+      ]);
+      if (currentError || !current) throw currentError ?? new Error("Payment not found");
+      if (settingsError || !settings) throw settingsError ?? new Error("Workspace payment settings not found");
+      if (current.status !== "succeeded" && current.status !== "partially_refunded") {
+        return json({ error: { code: "invalid_payment_state", message: "Only succeeded or partially refunded payments can be refunded." } }, { status: 409 });
+      }
+      if (current.provider !== "stripe") {
+        return json({ error: { code: "stripe_payment_required", message: "Only Stripe payments can be refunded through this provider action." } }, { status: 409 });
+      }
+
+      const metadata = object(current.metadata);
+      const operational = object(settings.operational_settings);
+      const stripeAccountId = text(metadata.stripe_account_id) ?? text(operational.stripe_account_id);
+      const providerPaymentId = text(current.provider_payment_id) ?? text(metadata.stripe_invoice_id);
+      if (!stripeAccountId) throw new Error("Connected Stripe account is missing for this workspace.");
+      if (!providerPaymentId) throw new Error("Stripe payment reference is missing from this payment.");
+
+      const paymentAmountCents = Math.round(Number(current.amount ?? 0) * 100);
+      const existingRefundCents = Math.round(Number(metadata.refunded_amount ?? 0) * 100);
+      const requestedRefundCents = Math.round(body.amount);
+      const remainingCents = paymentAmountCents - existingRefundCents;
+      if (requestedRefundCents <= 0) {
+        return json({ error: { code: "invalid_refund_amount", message: "Refund amount must be greater than zero." } }, { status: 400 });
+      }
+      if (requestedRefundCents > remainingCents) {
+        return json({ error: { code: "refund_exceeds_remaining", message: "Refund amount exceeds the remaining refundable balance." } }, { status: 409 });
+      }
+
+      const stripe = new Stripe(required("STRIPE_SECRET_KEY"));
+      const refundTarget = await resolveRefundTarget(stripe, stripeAccountId, providerPaymentId);
+      const nextRefundCents = existingRefundCents + requestedRefundCents;
+      const refund = await stripe.refunds.create({
+        ...refundTarget,
+        amount: requestedRefundCents,
+        reason: "requested_by_customer",
+        metadata: {
+          servicewriter_payment_id: current.id,
+          workspace_id: body.workspace_id,
+          servicewriter_reason: body.reason ?? "",
+        },
+      }, {
+        stripeAccount: stripeAccountId,
+        idempotencyKey: `sw-refund-${current.id}-${nextRefundCents}`,
+      });
+
+      const fullyRefunded = nextRefundCents >= paymentAmountCents;
+      const refundedDollars = Number((nextRefundCents / 100).toFixed(2));
+      const { data: updated, error: updateError } = await (supabase.from("payments") as any)
+        .update({
+          status: fullyRefunded ? "refunded" : "partially_refunded",
+          metadata: {
+            ...metadata,
+            refunded_amount: refundedDollars,
+            last_refund_amount: Number((requestedRefundCents / 100).toFixed(2)),
+            last_refund_id: refund.id,
+            last_refund_reason: body.reason ?? null,
+            last_refunded_at: new Date().toISOString(),
+            stripe_account_id: stripeAccountId,
+          },
+        })
+        .eq("workspace_id", body.workspace_id)
+        .eq("id", current.id)
+        .select("id,status,metadata")
+        .single();
+      if (updateError) throw updateError;
+
+      return json({
+        data: {
+          success: true,
+          refund_id: refund.id,
+          amount_refunded: requestedRefundCents,
+          total_refunded: nextRefundCents,
+          status: updated.status,
+        },
+      });
+    }
 
     if (body.action === "manual_payment") {
       if (body.waive_fees || body.waive_tax || body.waive_remaining) {
