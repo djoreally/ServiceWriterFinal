@@ -8,6 +8,7 @@ export const runtime = "nodejs";
 
 const configureSchema = z.object({
   workspace_id: z.string().uuid(),
+  account_id: z.string().startsWith("acct_"),
   secret_key: z.string().min(20),
   webhook_secret: z.string().min(10),
 });
@@ -70,10 +71,13 @@ export async function PUT(request: Request) {
     const stripe = new Stripe(body.secret_key);
     let account: Stripe.Account;
     try {
-      account = await stripe.accounts.retrieve();
+      account = await stripe.accounts.retrieve(body.account_id);
     } catch (error) {
       console.error("[stripe-direct] credential validation failed", error);
-      throw new ApiError(400, "Stripe rejected this API key", "stripe_key_rejected");
+      throw new ApiError(400, "Stripe rejected this account ID / API key combination", "stripe_key_rejected");
+    }
+    if (account.id !== body.account_id) {
+      throw new ApiError(400, "Stripe account ID does not match the validated account", "stripe_account_mismatch");
     }
 
     const { admin, settings } = await readSettings(body.workspace_id);
