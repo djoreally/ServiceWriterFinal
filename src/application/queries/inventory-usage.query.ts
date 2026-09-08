@@ -1,23 +1,24 @@
 /**
- * Inventory Usage Query - Reads completed service records for reporting.
- * Oil usage is the technician-entered quantity on completed jobs
- * (`services.oil_quarts_used`), not inventory reservation rows.
+ * Oil usage reporting.
+ *
+ * Completed service records are authoritative for actual oil consumed. Inventory
+ * is optional and never required for this report to function.
  */
 
 import { supabase } from "@/integrations/supabase/client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface UsageRow {
   id: string;
   consumed_at: string;
-  day: string; // YYYY-MM-DD (local)
+  day: string;
   inventory_item_id: string;
   item_name: string;
   item_category: string | null;
   quantity: number;
   unit: string;
-  qty_in_qts: number; // completed-service oil quantity entered by technician
-  source: "warehouse" | "van";
+  qty_in_qts: number;
+  source: "completed_service" | "inventory_reconciled";
   van_id: string | null;
   van_name: string | null;
   appointment_id: string | null;
@@ -25,43 +26,19 @@ export interface UsageRow {
   vehicle_label: string | null;
 }
 
-export interface UsageDayBucket {
-  day: string;
-  qty_qt: number;
-  service_count: number;
-}
-
-export interface UsageItemBucket {
-  inventory_item_id: string;
-  name: string;
-  qty_qt: number;
-  raw_qty: number;
-  unit: string;
-}
-
-export interface UsageTotals {
-  total_qt: number;
-  total_gal: number;
-  service_count: number;
-  top_item_name: string | null;
-  top_item_qt: number;
-}
-
+export interface UsageDayBucket { day: string; qty_qt: number; service_count: number }
+export interface UsageItemBucket { inventory_item_id: string; name: string; qty_qt: number; raw_qty: number; unit: string }
+export interface UsageTotals { total_qt: number; total_gal: number; service_count: number; top_item_name: string | null; top_item_qt: number }
 export interface FetchOilUsageParams {
   from: Date;
   to: Date;
   itemIds?: string[];
   vanId?: string | null;
-  source?: "van" | "warehouse" | null;
+  source?: "completed_service" | "inventory_reconciled" | null;
   search?: string | null;
-  oilOnly?: boolean; // retained for API compatibility; completed job oil quantities are always oil-only
+  oilOnly?: boolean;
 }
-
-export interface OilItemOption {
-  id: string;
-  name: string;
-}
-
+export interface OilItemOption { id: string; name: string }
 export interface FetchOilUsageResult {
   rows: UsageRow[];
   totals: UsageTotals;
@@ -73,162 +50,131 @@ export interface FetchOilUsageResult {
 
 function localDay(iso: string): string {
   const d = new Date(iso);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function formatDateForQuery(date: Date): string {
-  return date.toISOString().slice(0, 10);
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-export async function fetchOilUsage(
-  params: FetchOilUsageParams,
-): Promise<FetchOilUsageResult> {
-  const { from, to, itemIds, vanId, source, search } = params;
+function bookingOilType(metadata: unknown): string | null {
+  const root = asRecord(metadata);
+  const config = asRecord(root.booking_configuration);
+  const vehicle = asRecord(config.vehicle);
+  const oil = asRecord(vehicle.oil);
+  const value = oil.oilType;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
 
+export async function fetchOilUsage(params: FetchOilUsageParams): Promise<FetchOilUsageResult> {
   const empty: FetchOilUsageResult = {
     rows: [],
     totals: { total_qt: 0, total_gal: 0, service_count: 0, top_item_name: null, top_item_qt: 0 },
-    byDay: [],
-    byItem: [],
-    availableItems: [],
-    availableVans: [],
+    byDay: [], byItem: [], availableItems: [], availableVans: [],
   };
 
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) return empty;
+  const workspace = await resolveCurrentWorkspace();
+  if (!workspace?.workspaceId) return empty;
+  const workspaceId = workspace.workspaceId;
 
-  // Facets come from completed service records because oil usage is based on the
-  // quantity entered at job completion, not inventory reservation consumption.
-  const [servicesRes, vansRes] = await Promise.all([
-    supabase
-      .from("services")
-      .select(`
-        id, completed_at, service_date, appointment_id, oil_quarts_used, status,
-        appointments:appointments!services_appointment_id_fkey ( id, assigned_van_id,
-          customers ( name ),
-          vehicles ( year, make, model, oil_type )
-        )
-      `)
-      .eq("user_id", user.id)
-      .eq("status", "completed")
-      .gt("oil_quarts_used", 0)
-      .gte("service_date", formatDateForQuery(from))
-      .lte("service_date", formatDateForQuery(to))
-      .order("service_date", { ascending: false })
-      .limit(5000),
-    supabase.from("vans").select("id, name").eq("user_id", user.id).order("name"),
-  ]);
-
+  const servicesRes = await supabase
+    .from("service_records")
+    .select("id,appointment_id,customer_id,vehicle_id,completed_at,oil_quarts_used,metadata")
+    .eq("workspace_id", workspaceId)
+    .eq("status", "completed")
+    .gt("oil_quarts_used", 0)
+    .gte("completed_at", params.from.toISOString())
+    .lte("completed_at", params.to.toISOString())
+    .order("completed_at", { ascending: false })
+    .limit(5000);
   if (servicesRes.error) throw new Error(servicesRes.error.message);
 
-  const availableVans = ((vansRes.data ?? []) as { id: string; name: string }[]).map((v) => ({
-    id: v.id,
-    name: v.name,
-  }));
-  const vanNameById = new Map<string, string>(availableVans.map((v) => [v.id, v.name] as [string, string]));
+  const services = (servicesRes.data ?? []) as Array<{
+    id: string; appointment_id: string | null; customer_id: string | null; vehicle_id: string | null;
+    completed_at: string | null; oil_quarts_used: number | string | null; metadata: unknown;
+  }>;
+  if (!services.length) return empty;
 
-  const serviceRows = ((servicesRes.data ?? []) as any[]).filter((r) => {
-    const oilType = r.appointments?.vehicles?.oil_type ?? "Motor Oil";
-    if (itemIds?.length && !itemIds.includes(oilType)) return false;
-    if (vanId && r.appointments?.assigned_van_id !== vanId) return false;
-    if (source === "van" && !r.appointments?.assigned_van_id) return false;
-    if (source === "warehouse" && r.appointments?.assigned_van_id) return false;
-    return true;
-  });
+  const customerIds = [...new Set(services.map((r) => r.customer_id).filter((v): v is string => !!v))];
+  const vehicleIds = [...new Set(services.map((r) => r.vehicle_id).filter((v): v is string => !!v))];
+  const appointmentIds = [...new Set(services.map((r) => r.appointment_id).filter((v): v is string => !!v))];
+  const serviceIds = services.map((r) => r.id);
 
-  const availableItems: OilItemOption[] = Array.from(
-    new Set(((servicesRes.data ?? []) as any[]).map((r) => r.appointments?.vehicles?.oil_type ?? "Motor Oil")),
-  )
-    .sort((a, b) => a.localeCompare(b))
-    .map((name) => ({ id: name, name }));
+  const [customersRes, vehiclesRes, specsRes, appointmentsRes, movementsRes] = await Promise.all([
+    customerIds.length ? supabase.from("customers").select("id,first_name,last_name,company_name").eq("workspace_id", workspaceId).in("id", customerIds) : Promise.resolve({ data: [], error: null }),
+    vehicleIds.length ? supabase.from("vehicles").select("id,year,make,model").eq("workspace_id", workspaceId).in("id", vehicleIds) : Promise.resolve({ data: [], error: null }),
+    vehicleIds.length ? supabase.from("vehicle_service_specs").select("vehicle_id,oil_type").eq("workspace_id", workspaceId).in("vehicle_id", vehicleIds) : Promise.resolve({ data: [], error: null }),
+    appointmentIds.length ? supabase.from("appointments").select("id,metadata").eq("workspace_id", workspaceId).in("id", appointmentIds) : Promise.resolve({ data: [], error: null }),
+    supabase.from("inventory_movements").select("service_record_id,inventory_item_id,location_id").eq("workspace_id", workspaceId).eq("movement_type", "consumption").in("service_record_id", serviceIds),
+  ]);
 
-  const rows: UsageRow[] = [];
-  const searchLc = (search || "").trim().toLowerCase();
-  for (const r of serviceRows) {
+  for (const result of [customersRes, vehiclesRes, specsRes, appointmentsRes, movementsRes]) {
+    if (result.error) throw new Error(result.error.message);
+  }
+
+  const customerMap = new Map((customersRes.data ?? []).map((r: any) => [r.id, r]));
+  const vehicleMap = new Map((vehiclesRes.data ?? []).map((r: any) => [r.id, r]));
+  const specMap = new Map((specsRes.data ?? []).map((r: any) => [r.vehicle_id, r.oil_type as string | null]));
+  const appointmentMap = new Map((appointmentsRes.data ?? []).map((r: any) => [r.id, r.metadata]));
+  const reconciled = new Set((movementsRes.data ?? []).map((r: any) => r.service_record_id as string));
+
+  const allRows: UsageRow[] = services.map((r) => {
     const qty = Number(r.oil_quarts_used ?? 0);
-    if (qty <= 0) continue;
-
-    const oilType = r.appointments?.vehicles?.oil_type ?? "Motor Oil";
-    const completedAt = r.completed_at || `${r.service_date}T00:00:00`;
-    const veh = r.appointments?.vehicles;
-    const vehicleLabel = veh ? `${veh.year ?? ""} ${veh.make ?? ""} ${veh.model ?? ""}`.trim() : null;
-    const customerName = r.appointments?.customers?.name ?? null;
-    const assignedVanId = r.appointments?.assigned_van_id ?? null;
-
-    if (searchLc) {
-      const hay = `${oilType} ${customerName ?? ""} ${vehicleLabel ?? ""}`.toLowerCase();
-      if (!hay.includes(searchLc)) continue;
-    }
-
-    rows.push({
+    const customer = r.customer_id ? customerMap.get(r.customer_id) : null;
+    const vehicle = r.vehicle_id ? vehicleMap.get(r.vehicle_id) : null;
+    const appointmentMetadata = r.appointment_id ? appointmentMap.get(r.appointment_id) : null;
+    const oilType = (r.vehicle_id ? specMap.get(r.vehicle_id) : null) || bookingOilType(appointmentMetadata) || bookingOilType(r.metadata) || "Oil type not captured";
+    const customerName = customer ? (customer.company_name || `${customer.first_name ?? ""} ${customer.last_name ?? ""}`.trim() || null) : null;
+    const vehicleLabel = vehicle ? `${vehicle.year ?? ""} ${vehicle.make ?? ""} ${vehicle.model ?? ""}`.trim() || null : null;
+    const consumedAt = r.completed_at || new Date(0).toISOString();
+    return {
       id: r.id,
-      consumed_at: completedAt,
-      day: localDay(completedAt),
+      consumed_at: consumedAt,
+      day: localDay(consumedAt),
       inventory_item_id: oilType,
       item_name: oilType,
       item_category: "Oil",
       quantity: qty,
       unit: "qt",
       qty_in_qts: qty,
-      source: assignedVanId ? "van" : "warehouse",
-      van_id: assignedVanId,
-      van_name: assignedVanId ? vanNameById.get(assignedVanId) ?? null : null,
+      source: reconciled.has(r.id) ? "inventory_reconciled" : "completed_service",
+      van_id: null,
+      van_name: null,
       appointment_id: r.appointment_id,
       customer_name: customerName,
-      vehicle_label: vehicleLabel || null,
-    });
-  }
-
-  // Aggregations
-  const dayMap = new Map<string, { qt: number; appts: Set<string> }>();
-  const itemMap = new Map<string, UsageItemBucket>();
-  const apptSet = new Set<string>();
-
-  for (const row of rows) {
-    if (row.appointment_id) apptSet.add(row.appointment_id);
-
-    const dayBucket = dayMap.get(row.day) ?? { qt: 0, appts: new Set<string>() };
-    dayBucket.qt += row.qty_in_qts;
-    if (row.appointment_id) dayBucket.appts.add(row.appointment_id);
-    dayMap.set(row.day, dayBucket);
-
-    const itemBucket = itemMap.get(row.inventory_item_id) ?? {
-      inventory_item_id: row.inventory_item_id,
-      name: row.item_name,
-      qty_qt: 0,
-      raw_qty: 0,
-      unit: row.unit,
+      vehicle_label: vehicleLabel,
     };
-    itemBucket.qty_qt += row.qty_in_qts;
-    itemBucket.raw_qty += row.quantity;
-    itemMap.set(row.inventory_item_id, itemBucket);
+  });
+
+  const itemFilter = params.itemIds?.length ? new Set(params.itemIds) : null;
+  const q = (params.search ?? "").trim().toLowerCase();
+  const rows = allRows.filter((r) => {
+    if (itemFilter && !itemFilter.has(r.inventory_item_id)) return false;
+    if (params.source && r.source !== params.source) return false;
+    if (q && !`${r.item_name} ${r.customer_name ?? ""} ${r.vehicle_label ?? ""}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  const availableItems = [...new Set(allRows.map((r) => r.item_name))].sort().map((name) => ({ id: name, name }));
+  const dayMap = new Map<string, { qt: number; services: Set<string> }>();
+  const itemMap = new Map<string, UsageItemBucket>();
+  for (const row of rows) {
+    const day = dayMap.get(row.day) ?? { qt: 0, services: new Set<string>() };
+    day.qt += row.qty_in_qts; day.services.add(row.id); dayMap.set(row.day, day);
+    const item = itemMap.get(row.inventory_item_id) ?? { inventory_item_id: row.inventory_item_id, name: row.item_name, qty_qt: 0, raw_qty: 0, unit: "qt" };
+    item.qty_qt += row.qty_in_qts; item.raw_qty += row.quantity; itemMap.set(row.inventory_item_id, item);
   }
 
-  const byDay: UsageDayBucket[] = Array.from(dayMap.entries())
-    .map(([day, b]) => ({ day, qty_qt: Math.round(b.qt * 100) / 100, service_count: b.appts.size }))
-    .sort((a, b) => (a.day < b.day ? -1 : 1));
-
-  const byItem: UsageItemBucket[] = Array.from(itemMap.values())
-    .sort((a, b) => b.qty_qt - a.qty_qt);
-
-  const totalQt = rows.reduce((s, r) => s + r.qty_in_qts, 0);
+  const byDay = [...dayMap.entries()].map(([day, b]) => ({ day, qty_qt: Math.round(b.qt * 100) / 100, service_count: b.services.size })).sort((a, b) => a.day.localeCompare(b.day));
+  const byItem = [...itemMap.values()].sort((a, b) => b.qty_qt - a.qty_qt);
+  const totalQt = rows.reduce((sum, row) => sum + row.qty_in_qts, 0);
   const top = byItem[0];
-
   return {
     rows,
-    totals: {
-      total_qt: Math.round(totalQt * 100) / 100,
-      total_gal: Math.round((totalQt / 4) * 100) / 100,
-      service_count: apptSet.size,
-      top_item_name: top?.name ?? null,
-      top_item_qt: top ? Math.round(top.qty_qt * 100) / 100 : 0,
-    },
+    totals: { total_qt: Math.round(totalQt * 100) / 100, total_gal: Math.round(totalQt / 4 * 100) / 100, service_count: rows.length, top_item_name: top?.name ?? null, top_item_qt: top?.qty_qt ?? 0 },
     byDay,
     byItem,
     availableItems,
-    availableVans,
+    availableVans: [],
   };
 }
