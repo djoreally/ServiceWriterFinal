@@ -26,6 +26,7 @@ export async function getCurrentUserId(): Promise<string | null> {
 /**
  * Final stores payment amounts in dollars. This adapter returns cents because
  * the legacy Financials chart/currency utilities explicitly consume cents.
+ * Settled revenue is periodized by paid_at, never payment creation time.
  */
 export async function fetchSucceededPayments(_userId: string, sinceIso: string) {
   const context = await resolveCurrentWorkspace();
@@ -34,19 +35,23 @@ export async function fetchSucceededPayments(_userId: string, sinceIso: string) 
     .select("id,amount,status,provider,paid_at,created_at,metadata")
     .eq("workspace_id", context.workspaceId)
     .in("status", ["succeeded", "partially_refunded", "refunded"])
-    .gte("created_at", sinceIso)
-    .order("created_at");
+    .not("paid_at", "is", null)
+    .gte("paid_at", sinceIso)
+    .order("paid_at");
   if (error) return { data: null, error };
   return {
     data: (data ?? []).map((row) => {
       const metadata = object(row.metadata);
+      const refundDollars = row.status === "refunded"
+        ? Number(metadata.refunded_amount ?? row.amount ?? 0)
+        : Number(metadata.refunded_amount ?? 0);
       return {
         id: row.id,
         amount: cents(row.amount),
-        refund_amount: cents(metadata.refunded_amount),
+        refund_amount: cents(refundDollars),
         status: row.status,
         created_at: row.paid_at ?? row.created_at,
-        payment_type: metadata.payment_type ?? row.provider ?? "card",
+        payment_type: metadata.payment_type ?? metadata.payment_method ?? row.provider ?? "card",
         appointment_id: metadata.appointment_id ?? null,
       };
     }),
