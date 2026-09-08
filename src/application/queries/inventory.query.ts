@@ -1,10 +1,13 @@
 /**
- * Inventory Query - Read operations for inventory and van stock.
+ * Inventory Query - canonical workspace-scoped inventory reads.
+ *
+ * Oil usage is intentionally not sourced from these tables. Completed service
+ * records remain authoritative for actual oil consumption.
  */
 
 import { supabase } from "@/integrations/supabase/client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface InventoryItem {
   id: string;
   name: string;
@@ -25,11 +28,13 @@ export interface InventoryItem {
   tire_position?: string | null;
 }
 
+/** Compatibility name retained for the existing Inventory UI. */
 export interface Van {
   id: string;
   name: string;
 }
 
+/** Compatibility shape: van_id is now an inventory location id. */
 export interface VanInventoryLink {
   inventory_item_id: string;
   van_id: string;
@@ -51,42 +56,72 @@ export interface InventoryOverviewResult {
 }
 
 export async function fetchInventoryOverview(): Promise<InventoryOverviewResult> {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) {
+  const workspace = await resolveCurrentWorkspace();
+  if (!workspace?.workspaceId) {
     return { items: [], vans: [], vanInventory: [], reservations: [] };
   }
 
-  const [itemsRes, vansRes, vanInvRes, reservationsRes] = await Promise.all([
+  const workspaceId = workspace.workspaceId;
+  const [itemsRes, locationsRes, stockRes, reservationsRes] = await Promise.all([
     supabase
       .from("inventory_items")
-      .select("*")
-      .eq("user_id", user.id)
+      .select("id,name,description,sku,unit,unit_cost,sell_price,category,low_stock_threshold,image_url,reorder_url,tire_size,tire_load_index,tire_speed_rating,tire_season,tire_position")
+      .eq("workspace_id", workspaceId)
       .order("name"),
     supabase
-      .from("vans")
-      .select("id, name")
-      .eq("user_id", user.id)
+      .from("inventory_locations")
+      .select("id,name,location_type")
+      .eq("workspace_id", workspaceId)
       .eq("is_active", true)
       .order("name"),
     supabase
-      .from("van_inventory")
-      .select("inventory_item_id, van_id, quantity"),
+      .from("inventory_stock")
+      .select("inventory_item_id,location_id,quantity")
+      .eq("workspace_id", workspaceId),
     supabase
       .from("inventory_reservations")
-      .select("inventory_item_id, quantity, source, van_id")
-      .eq("user_id", user.id)
+      .select("inventory_item_id,quantity,location_id,status")
+      .eq("workspace_id", workspaceId)
       .eq("status", "reserved"),
   ]);
 
-  if (itemsRes.error) {
-    console.error("[fetchInventoryOverview] items error", itemsRes.error);
-    throw new Error(itemsRes.error.message || "Failed to fetch inventory");
+  for (const result of [itemsRes, locationsRes, stockRes, reservationsRes]) {
+    if (result.error) throw new Error(result.error.message || "Failed to fetch inventory");
   }
 
-  const items = (itemsRes.data || []) as InventoryItem[];
-  const vans = (vansRes.data || []) as Van[];
-  const vanInventory = (vanInvRes.data || []) as VanInventoryLink[];
-  const reservations = (reservationsRes.data || []) as ReservationLink[];
+  const locations = (locationsRes.data ?? []) as Array<{ id: string; name: string; location_type: string }>;
+  const stock = (stockRes.data ?? []) as Array<{ inventory_item_id: string; location_id: string; quantity: number | string }>;
+  const warehouseIds = new Set(locations.filter((l) => l.location_type === "warehouse").map((l) => l.id));
+
+  const warehouseQty = new Map<string, number>();
+  for (const row of stock) {
+    if (!warehouseIds.has(row.location_id)) continue;
+    warehouseQty.set(row.inventory_item_id, (warehouseQty.get(row.inventory_item_id) ?? 0) + Number(row.quantity ?? 0));
+  }
+
+  const items = ((itemsRes.data ?? []) as Omit<InventoryItem, "quantity">[]).map((item) => ({
+    ...item,
+    quantity: warehouseQty.get(item.id) ?? 0,
+  }));
+
+  const nonWarehouseLocations = locations.filter((l) => l.location_type !== "warehouse");
+  const vans: Van[] = nonWarehouseLocations.map((l) => ({ id: l.id, name: l.name }));
+  const nonWarehouseIds = new Set(nonWarehouseLocations.map((l) => l.id));
+  const vanInventory: VanInventoryLink[] = stock
+    .filter((row) => nonWarehouseIds.has(row.location_id))
+    .map((row) => ({ inventory_item_id: row.inventory_item_id, van_id: row.location_id, quantity: Number(row.quantity ?? 0) }));
+
+  const reservations: ReservationLink[] = ((reservationsRes.data ?? []) as Array<{
+    inventory_item_id: string;
+    quantity: number | string;
+    location_id: string | null;
+    status: string;
+  }>).map((row) => ({
+    inventory_item_id: row.inventory_item_id,
+    quantity: Number(row.quantity ?? 0),
+    source: row.location_id && nonWarehouseIds.has(row.location_id) ? "van" : "warehouse",
+    van_id: row.location_id && nonWarehouseIds.has(row.location_id) ? row.location_id : null,
+  }));
 
   return { items, vans, vanInventory, reservations };
 }
