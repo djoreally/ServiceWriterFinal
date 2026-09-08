@@ -21,7 +21,6 @@ const vehicleUpdateSchema = z.object({
   oil_capacity: z.string().trim().max(40).nullable().optional(),
   oil_filter: z.string().trim().max(100).nullable().optional(),
   notes: z.string().max(5000).nullable().optional(),
-  status: z.enum(["active", "inactive", "sold", "archived"]).optional(),
 }).refine((body) => Object.keys(body).some((key) => key !== "workspace_id"), {
   message: "At least one vehicle field is required",
 });
@@ -97,9 +96,6 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       if (error) throw error;
       vehicle = data;
     } else {
-      // Spec-only edits belong in vehicle_service_specs. Do not issue an empty
-      // vehicles UPDATE because PostgREST can return no row and surface a false
-      // PGRST116/404 even though the canonical vehicle exists.
       const { data, error } = await supabase
         .from("vehicles")
         .select("*")
@@ -141,13 +137,25 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   try {
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
     const id = z.string().uuid().parse((await context.params).id);
-    const { supabase } = await requireWorkspaceMember(workspaceId, [...writeRoles], request);
-    const { data, error } = await supabase
+    const { supabase, user } = await requireWorkspaceMember(workspaceId, [...writeRoles], request);
+    const { data: current, error: currentError } = await supabase
       .from("vehicles")
-      .update({ status: "archived" } as never)
+      .select("id,metadata")
       .eq("id", id)
       .eq("workspace_id", workspaceId)
-      .select("id,status")
+      .maybeSingle();
+    if (currentError) throw currentError;
+    if (!current) throw new Error("Vehicle does not belong to this workspace.");
+    const metadata = current.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata)
+      ? current.metadata as Record<string, unknown>
+      : {};
+    const archivedAt = new Date().toISOString();
+    const { data, error } = await supabase
+      .from("vehicles")
+      .update({ metadata: { ...metadata, archived_at: archivedAt, archived_by: user.id } } as never)
+      .eq("id", id)
+      .eq("workspace_id", workspaceId)
+      .select("id,metadata")
       .single();
     if (error) throw error;
     return json({ data });
