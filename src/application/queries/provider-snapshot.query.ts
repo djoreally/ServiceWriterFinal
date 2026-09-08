@@ -13,6 +13,9 @@ import {
 } from "date-fns";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+import { fetchCanonicalCashReceipts } from "@/application/queries/canonical-cash-receipts.query";
+
 export interface UpcomingAppt {
   id: string;
   title: string;
@@ -46,6 +49,8 @@ export interface SnapshotData {
 export async function fetchProviderSnapshot(): Promise<SnapshotData | null> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return null;
+  const context = await resolveCurrentWorkspace();
+  if (!context) return null;
 
   const now = new Date();
   const weekStart = format(startOfWeek(now, { weekStartsOn: 1 }), "yyyy-MM-dd");
@@ -61,17 +66,16 @@ export async function fetchProviderSnapshot(): Promise<SnapshotData | null> {
     completedRes, scheduledRes, upcomingRes, reviewsRes,
     servicesRes, profileRes, apptServicesRes,
   ] = await Promise.all([
-    supabase.from("cash_collection_receipts_v1").select("net_collected_cents").gte("collected_at", `${weekStart}T00:00:00`),
-    supabase.from("cash_collection_receipts_v1").select("net_collected_cents").gte("collected_at", `${monthStart}T00:00:00`),
-    supabase.from("cash_collection_receipts_v1").select("net_collected_cents").gte("collected_at", `${yearStart}T00:00:00`),
-    supabase.from("cash_collection_receipts_v1").select("net_collected_cents").gte("collected_at", `${prevMonthStart}T00:00:00`).lte("collected_at", `${prevMonthEnd}T23:59:59`),
+    fetchCanonicalCashReceipts({ workspaceId: context.workspaceId, from: `${weekStart}T00:00:00` }),
+    fetchCanonicalCashReceipts({ workspaceId: context.workspaceId, from: `${monthStart}T00:00:00` }),
+    fetchCanonicalCashReceipts({ workspaceId: context.workspaceId, from: `${yearStart}T00:00:00` }),
+    fetchCanonicalCashReceipts({ workspaceId: context.workspaceId, from: `${prevMonthStart}T00:00:00`, to: `${prevMonthEnd}T23:59:59` }),
     supabase.from("appointments").select("id", { count: "exact", head: true }).gte("scheduled_date", monthStart).eq("status", "completed"),
     supabase.from("appointments").select("id", { count: "exact", head: true }).gte("scheduled_date", monthStart).in("status", ["confirmed", "pending"]),
     supabase.from("appointments").select("id, title, scheduled_date, scheduled_time, status, guest_name").gte("scheduled_date", today).lte("scheduled_date", next7).in("status", ["confirmed", "pending"]).order("scheduled_date").order("scheduled_time").limit(25),
     supabase.from("review_requests").select("status, clicked_at"),
     supabase.from("services").select("service_type, total_cost, service_date, appointment_id").gte("service_date", monthStart).eq("status", "completed"),
     supabase.from("business_profiles").select("stripe_payouts_enabled, stripe_account_id").eq("user_id", user.id).single(),
-    // Fetch appointment_services for this month's completed services to derive revenue
     supabase.from("appointment_services").select("appointment_id, name, price, quantity"),
   ]);
 
@@ -79,8 +83,6 @@ export async function fetchProviderSnapshot(): Promise<SnapshotData | null> {
     rows: Array<{ net_collected_cents: number | null }> | null,
   ) => (rows || []).reduce((sum, row) => sum + (Number(row.net_collected_cents) || 0), 0) / 100;
 
-  // Service type revenue breakdown
-  // Build a map of appointment_id -> line item totals for fallback when services.total_cost is 0
   const apptLineItems = (apptServicesRes.data || []) as Array<{
     appointment_id: string;
     name: string;
@@ -102,7 +104,6 @@ export async function fetchProviderSnapshot(): Promise<SnapshotData | null> {
   for (const s of monthServices) {
     const t = s.service_type || "Other";
     if (!typeMap[t]) typeMap[t] = { revenue: 0, count: 0 };
-    // Use total_cost if populated, otherwise fallback to appointment_services line items
     let rev = Number(s.total_cost) || 0;
     if (rev === 0 && s.appointment_id) {
       rev = apptRevenueMap.get(s.appointment_id) || 0;
@@ -118,7 +119,6 @@ export async function fetchProviderSnapshot(): Promise<SnapshotData | null> {
   const reviews = reviewsRes.data || [];
 
   return {
-    // Canonical collection view returns net cents, including refund handling.
     revenueWeek: sumCollectedNet(weekPayRes.data),
     revenueMonth: sumCollectedNet(monthPayRes.data),
     revenueYTD: sumCollectedNet(ytdPayRes.data),
