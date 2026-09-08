@@ -3,7 +3,7 @@
  *
  * Single trustworthy data source for the Analytics Hub. All money values
  * use the canonical financial model:
- *   - Collected revenue → `cash_collection_receipts_v1.net_collected_cents`.
+ *   - Collected revenue → workspace-scoped canonical `payments`, periodized by `paid_at`.
  *   - Billed revenue / Outstanding A/R → `services.total_cost` /
  *     `services.payment_status` for completed services.
  *
@@ -16,21 +16,18 @@ import type { Json } from "@/integrations/supabase/types";
 import { computeFinancialSummary } from "@/domain/financials/canonical-financials";
 import { toCents } from "@/lib/financialMath";
 import { format, startOfYear, subDays } from "date-fns";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+import { fetchCanonicalCashReceipts, type CanonicalCashReceipt } from "@/application/queries/canonical-cash-receipts.query";
 
 export interface ReportsKpi {
-  // Revenue (dollars)
   collected: number;
   collectedPrev: number;
   billed: number;
   outstanding: number;
   refunds: number;
   taxCollected: number;
-
-  // YTD baseline (dollars)
   ytdCollected: number;
   ytdBilled: number;
-
-  // Operations
   jobsCompleted: number;
   jobsTotal: number;
   jobsCancelled: number;
@@ -38,28 +35,20 @@ export interface ReportsKpi {
   appointmentsNoShow: number;
   avgTicket: number;
   avgDurationMin: number;
-
-  // Customers & Vehicles
   totalCustomers: number;
   newCustomers: number;
   repeatCustomers: number;
   totalVehicles: number;
   uniqueServiceCustomers: number;
-
-  // Mix
   revenueByServiceType: Array<{ type: string; revenue: number; count: number }>;
   revenueByPaymentMethod: Array<{ method: string; revenue: number; count: number }>;
   topMakes: Array<{ make: string; count: number }>;
   topZips: Array<{ zip: string; jobs: number; revenue: number }>;
-
-  // Trend (daily, last N days within range)
   dailyRevenue: Array<{ date: string; collected: number; billed: number }>;
-
-  // Period info
   periodStart: string;
   periodEnd: string;
   periodLabel: string;
-  legacyExcluded: number; // count of records hidden by data-origin filter
+  legacyExcluded: number;
 }
 
 export interface ReportsRange {
@@ -120,6 +109,20 @@ function asJsonObject(value: Json | null | undefined): Record<string, Json> {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
+function receiptToPayment(receipt: CanonicalCashReceipt): PaymentRow {
+  return {
+    id: receipt.payment_record_id,
+    amount: receipt.collected_cents,
+    refund_amount: receipt.refunded_cents,
+    status: receipt.payment_status,
+    created_at: receipt.collected_at,
+    payment_type: receipt.payment_type,
+    tax_amount: receipt.tax_amount,
+    data_origin: receipt.data_origin,
+    metadata: receipt.metadata as Json,
+  };
+}
+
 function resolveMethod(p: PaymentRow): string {
   const meta = asJsonObject(p.metadata);
   if (meta.manual_payment && meta.payment_method) return String(meta.payment_method);
@@ -133,6 +136,9 @@ export async function fetchReportsCanonical(
   range: ReportsRange,
   includeLegacy = false,
 ): Promise<ReportsKpi> {
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("Select a workspace before viewing reports.");
+
   const fromDate = format(range.from, "yyyy-MM-dd");
   const toDate = format(range.to, "yyyy-MM-dd");
   const periodDays = Math.max(
@@ -144,20 +150,9 @@ export async function fetchReportsCanonical(
   const ytdFrom = format(startOfYear(new Date()), "yyyy-MM-dd");
 
   const [pay, payPrev, payYtd, svc, svcYtd, appt, custAll, vehAll] = await Promise.all([
-    supabase
-      .from("cash_collection_receipts_v1")
-      .select("id:payment_record_id, amount:collected_cents, refund_amount:refunded_cents, status:payment_status, created_at:collected_at, payment_type, tax_amount, data_origin, metadata")
-      .gte("collected_at", `${fromDate}T00:00:00`)
-      .lte("collected_at", `${toDate}T23:59:59`),
-    supabase
-      .from("cash_collection_receipts_v1")
-      .select("id:payment_record_id, amount:collected_cents, refund_amount:refunded_cents, status:payment_status, created_at:collected_at, payment_type, tax_amount, data_origin, metadata")
-      .gte("collected_at", `${prevFrom}T00:00:00`)
-      .lte("collected_at", `${prevTo}T23:59:59`),
-    supabase
-      .from("cash_collection_receipts_v1")
-      .select("amount:collected_cents, refund_amount:refunded_cents, status:payment_status, data_origin")
-      .gte("collected_at", `${ytdFrom}T00:00:00`),
+    fetchCanonicalCashReceipts({ workspaceId: context.workspaceId, from: `${fromDate}T00:00:00`, to: `${toDate}T23:59:59` }),
+    fetchCanonicalCashReceipts({ workspaceId: context.workspaceId, from: `${prevFrom}T00:00:00`, to: `${prevTo}T23:59:59` }),
+    fetchCanonicalCashReceipts({ workspaceId: context.workspaceId, from: `${ytdFrom}T00:00:00` }),
     supabase
       .from("services")
       .select("id, service_type, total_cost, paid_amount, payment_status, status, service_date, data_origin, customer_id, vehicle:vehicles(make, model, year)")
@@ -173,13 +168,13 @@ export async function fetchReportsCanonical(
       .neq("source", "fleet_work_order")
       .gte("scheduled_date", fromDate)
       .lte("scheduled_date", toDate),
-    supabase
-      .from("customers")
-      .select("id, created_at, total_services, data_origin"),
-    supabase
-      .from("vehicles")
-      .select("id, make, data_origin"),
+    supabase.from("customers").select("id, created_at, total_services, data_origin"),
+    supabase.from("vehicles").select("id, make, data_origin"),
   ]);
+
+  if (pay.error) throw pay.error;
+  if (payPrev.error) throw payPrev.error;
+  if (payYtd.error) throw payYtd.error;
 
   const filterOrigin = <T extends { data_origin: string | null }>(rows: T[] | null): T[] => {
     if (!rows) return [];
@@ -187,15 +182,18 @@ export async function fetchReportsCanonical(
     return rows.filter((r) => r.data_origin !== "legacy_import");
   };
 
-  // Track how much legacy data we are hiding (helps the UI show transparency).
+  const paymentRows = pay.data.map(receiptToPayment);
+  const paymentPrevRows = payPrev.data.map(receiptToPayment);
+  const paymentYtdRows = payYtd.data.map(receiptToPayment);
+
   const legacyExcluded =
-    ((pay.data || []) as PaymentRow[]).filter((r) => r.data_origin === "legacy_import").length +
+    paymentRows.filter((r) => r.data_origin === "legacy_import").length +
     ((svc.data || []) as ServiceRow[]).filter((r) => r.data_origin === "legacy_import").length +
     ((appt.data || []) as AppointmentRow[]).filter((r) => r.data_origin === "legacy_import").length;
 
-  const payments = filterOrigin((pay.data || []) as PaymentRow[]);
-  const paymentsPrev = filterOrigin((payPrev.data || []) as PaymentRow[]);
-  const paymentsYtd = filterOrigin((payYtd.data || []) as Pick<PaymentRow, "amount" | "refund_amount" | "status" | "data_origin">[]);
+  const payments = filterOrigin(paymentRows);
+  const paymentsPrev = filterOrigin(paymentPrevRows);
+  const paymentsYtd = filterOrigin(paymentYtdRows);
   const services = filterOrigin((svc.data || []) as ServiceRow[]);
   const servicesYtd = filterOrigin((svcYtd.data || []) as Pick<ServiceRow, "total_cost" | "paid_amount" | "payment_status" | "status" | "data_origin">[]);
   const appointments = filterOrigin((appt.data || []) as AppointmentRow[]);
@@ -249,11 +247,10 @@ export async function fetchReportsCanonical(
     if (p.tax_amount && p.tax_amount > 0) return sum + Number(p.tax_amount);
     const pricingDetails = asJsonObject(asJsonObject(p.metadata).pricing_details as Json | null);
     const meta = Number(pricingDetails.taxAmount ?? 0);
-    if (meta > 0) return sum + meta;
+    if (meta > 0) return sum + Math.round(meta * 100);
     return sum;
   }, 0);
 
-  // Operations
   const completed = appointments.filter((a) => a.status === "completed");
   const cancelled = appointments.filter((a) => a.status === "cancelled");
   const noShow = appointments.filter((a) => a.status === "no_show");
@@ -262,7 +259,6 @@ export async function fetchReportsCanonical(
     ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
     : 0;
 
-  // Customer aggregates
   const newCustomers = customers.filter((c) => {
     const createdAt = new Date(c.created_at);
     return createdAt >= range.from && createdAt <= range.to;
@@ -272,7 +268,6 @@ export async function fetchReportsCanonical(
     services.filter((s) => s.customer_id).map((s) => s.customer_id as string),
   ).size;
 
-  // Service-type revenue (billed, from completed services)
   const typeMap = new Map<string, { revenue: number; count: number }>();
   for (const s of services.filter((x) => x.status === "completed")) {
     const t = s.service_type || "Other";
@@ -285,7 +280,6 @@ export async function fetchReportsCanonical(
     .map(([type, v]) => ({ type, ...v }))
     .sort((a, b) => b.revenue - a.revenue);
 
-  // Payment method revenue (collected)
   const methodMap = new Map<string, { revenue: number; count: number }>();
   for (const p of payments) {
     const m = resolveMethod(p);
@@ -299,7 +293,6 @@ export async function fetchReportsCanonical(
     .map(([method, v]) => ({ method, ...v }))
     .sort((a, b) => b.revenue - a.revenue);
 
-  // Top makes
   const makeMap = new Map<string, number>();
   for (const v of vehicles) {
     if (!v.make) continue;
@@ -310,7 +303,6 @@ export async function fetchReportsCanonical(
     .sort((a, b) => b.count - a.count)
     .slice(0, 8);
 
-  // Top zips
   const zipMap = new Map<string, { jobs: number; revenue: number }>();
   for (const a of appointments) {
     const zip = a.customer_postal_code;
@@ -325,7 +317,6 @@ export async function fetchReportsCanonical(
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 8);
 
-  // Daily revenue trend
   const dayMap = new Map<string, { collected: number; billed: number }>();
   for (const p of payments) {
     const d = (p.created_at || "").slice(0, 10);
@@ -352,32 +343,25 @@ export async function fetchReportsCanonical(
     outstanding: periodSummary.outstandingCents / 100,
     refunds: periodSummary.refundedCents / 100,
     taxCollected: taxCollectedCents / 100,
-
     ytdCollected: ytdSummary.collectedCents / 100,
     ytdBilled: ytdSummary.bookedCents / 100,
-
     jobsCompleted: completed.length,
     jobsTotal: appointments.length,
     jobsCancelled: cancelled.length,
     appointmentsBooked: appointments.length,
     appointmentsNoShow: noShow.length,
-    avgTicket:
-      completed.length > 0 ? periodSummary.bookedCents / 100 / Math.max(completed.length, 1) : 0,
+    avgTicket: completed.length > 0 ? periodSummary.bookedCents / 100 / Math.max(completed.length, 1) : 0,
     avgDurationMin: avgDuration,
-
     totalCustomers: customers.length,
     newCustomers,
     repeatCustomers,
     totalVehicles: vehicles.length,
     uniqueServiceCustomers,
-
     revenueByServiceType,
     revenueByPaymentMethod,
     topMakes,
     topZips,
-
     dailyRevenue,
-
     periodStart: fromDate,
     periodEnd: toDate,
     periodLabel: range.label,
