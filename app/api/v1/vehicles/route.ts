@@ -47,11 +47,12 @@ export async function GET(request: Request) {
     if (!workspaceId) throw new Error("workspace_id is required");
     const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
 
+    // `vehicles` has no status column in the canonical production schema.
+    // Workspace scoping plus RLS is the authoritative visibility boundary.
     let query = supabase
       .from("vehicles")
       .select("*,customers(id,first_name,last_name),vehicle_service_specs(engine,oil_type,oil_capacity,oil_filter,metadata)")
       .eq("workspace_id", workspaceId)
-      .neq("status", "archived")
       .order("created_at", { ascending: false });
 
     let pagination: { limit: number; offset: number } | undefined;
