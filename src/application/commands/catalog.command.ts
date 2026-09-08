@@ -19,8 +19,8 @@ export interface CatalogItemWritePayload {
   notes?: string | null;
   is_active?: boolean;
   is_upsell?: boolean;
-  service_vertical?: 'general' | 'detailing' | 'tires';
-  pricing_mode?: 'flat' | 'labor_parts' | 'detailing_assessment' | 'tire_inventory' | 'quote_required';
+  service_vertical?: string;
+  pricing_mode?: string;
   service_intent?: string | null;
   requires_fitment_lookup?: boolean;
   requires_inventory_selection?: boolean;
