@@ -3,10 +3,7 @@ import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { type DimensionSchema, type MeasureSchema, type DynamicReportConfig } from "@/types/reporting";
 import { format } from "date-fns";
 
-// This module is an explicit compatibility boundary over the live canonical
-// schema. Generated Supabase types can lag production migrations, so keeping the
-// boundary untyped prevents stale generated columns/relationships from forcing
-// retired schema assumptions back into reporting code.
+// Explicit compatibility boundary over the live canonical schema.
 const db = supabase as any;
 
 export interface UnifiedReportingRecord {
@@ -58,6 +55,20 @@ function numeric(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function paymentNetDollars(row: Record<string, any>): number {
+  const amount = Math.max(numeric(row.amount), 0);
+  const metadata = objectValue(row.metadata);
+  if (row.status === "refunded") {
+    const refunded = numeric(metadata.refunded_amount ?? metadata.refund_amount);
+    return Math.max(amount - (refunded > 0 ? Math.min(refunded, amount) : amount), 0);
+  }
+  if (row.status === "partially_refunded") {
+    const refunded = Math.min(Math.max(numeric(metadata.refunded_amount ?? metadata.refund_amount), 0), amount);
+    return Math.max(amount - refunded, 0);
+  }
+  return row.status === "succeeded" ? amount : 0;
+}
+
 export function timeSlotForClock(clock: string | null | undefined): string {
   if (!clock) return "Unknown";
   const hour = Number.parseInt(String(clock).split(":")[0], 10);
@@ -88,13 +99,9 @@ export function stateFromAddress(address: string | null | undefined): string | n
 
 /**
  * Canonical reporting dataset.
- *
- * Appointments no longer have a PostgREST relationship to the retired
- * `technicians` table. Technician identity is `appointments.assigned_user_id`
- * -> `profiles.id`, resolved explicitly below. Service financials are likewise
- * loaded from canonical `service_records` rather than the retired `services`
- * relationship. Keeping these joins explicit prevents schema-cache drift from
- * taking down the entire Reports page.
+ * Appointment/service dimensions are joined explicitly. Collected cash comes
+ * only from the workspace payment ledger; service/appointment metadata is never
+ * treated as payment truth.
  */
 export async function fetchRawReportingRecords(
   filter: ReportingRecordsFilter = {},
@@ -120,13 +127,14 @@ export async function fetchRawReportingRecords(
 
   const appointmentRows = (appointments ?? []) as Array<Record<string, any>>;
   const appointmentIds = appointmentRows.map((row) => row.id).filter(Boolean);
+  const appointmentIdSet = new Set(appointmentIds);
   const assignedUserIds = Array.from(new Set(
     appointmentRows
       .map((row) => row.assigned_user_id)
       .filter((value): value is string => typeof value === "string" && value.length > 0),
   ));
 
-  const [serviceResult, profileResult] = await Promise.all([
+  const [serviceResult, profileResult, paymentResult] = await Promise.all([
     appointmentIds.length
       ? db
           .from("service_records")
@@ -138,17 +146,39 @@ export async function fetchRawReportingRecords(
     assignedUserIds.length
       ? db.from("profiles").select("id,display_name").in("id", assignedUserIds)
       : Promise.resolve({ data: [], error: null }),
+    appointmentIds.length
+      ? db
+          .from("payments")
+          .select("id,amount,status,paid_at,metadata")
+          .eq("workspace_id", context.workspaceId)
+          .in("status", ["succeeded", "partially_refunded", "refunded"])
+          .not("paid_at", "is", null)
+          .limit(10000)
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   if (serviceResult.error) throw serviceResult.error;
   if (profileResult.error) throw profileResult.error;
+  if (paymentResult.error) throw paymentResult.error;
 
   const serviceRows = (serviceResult.data ?? []) as Array<Record<string, any>>;
   const profileRows = (profileResult.data ?? []) as Array<Record<string, any>>;
+  const paymentRows = (paymentResult.data ?? []) as Array<Record<string, any>>;
   const servicesByAppointment = new Map<string, Record<string, any>>();
   for (const service of serviceRows) {
     if (!service.appointment_id || servicesByAppointment.has(service.appointment_id)) continue;
     servicesByAppointment.set(service.appointment_id, service);
+  }
+
+  const collectedByAppointment = new Map<string, number>();
+  for (const payment of paymentRows) {
+    const metadata = objectValue(payment.metadata);
+    const appointmentId = typeof metadata.appointment_id === "string" ? metadata.appointment_id : null;
+    if (!appointmentId || !appointmentIdSet.has(appointmentId)) continue;
+    collectedByAppointment.set(
+      appointmentId,
+      (collectedByAppointment.get(appointmentId) ?? 0) + paymentNetDollars(payment),
+    );
   }
 
   const profileNames = new Map<string, string>();
@@ -184,7 +214,7 @@ export async function fetchRawReportingRecords(
     const state = String(metadata.customer_state ?? customer?.region ?? stateFromAddress(address) ?? "Unknown");
 
     const billed = numeric(service?.total_amount ?? metadata.estimated_cost);
-    const collected = numeric(serviceMetadata.paid_amount ?? metadata.paid_amount);
+    const collected = collectedByAppointment.get(appt.id) ?? 0;
     const startsAt = new Date(appt.starts_at);
     const endsAt = new Date(appt.ends_at);
     const durationMinutes = Number.isFinite(startsAt.getTime()) && Number.isFinite(endsAt.getTime())
