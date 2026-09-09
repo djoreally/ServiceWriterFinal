@@ -19,11 +19,13 @@ interface FeatureGateProps {
 }
 
 const planLabels: Record<PlanName, string> = {
-  free: 'Free',
-  payg: 'Pay As You Go',
+  basic: 'Basic',
+  free: 'Basic',
+  payg: 'Basic',
   pro: 'Pro',
-  business: 'Business',
-  enterprise: 'Enterprise',
+  business: 'Pro',
+  fleet: 'Fleet',
+  enterprise: 'Fleet',
 };
 
 export function FeatureGate({
