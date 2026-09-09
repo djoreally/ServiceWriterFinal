@@ -12,6 +12,12 @@ function object(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function billingAllowsPayments(billing: unknown): boolean {
+  const row = object(billing);
+  return row.payments_addon_active === true
+    && (row.subscription_status === "active" || row.subscription_status === "trialing");
+}
+
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const id = z.string().uuid().parse((await context.params).id);
@@ -58,10 +64,17 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const invoiceId = String(closeoutData.invoice_id ?? "");
     const paymentId = String(closeoutData.payment_id ?? "");
 
-    let stripeSync: Record<string, unknown> = { status: "skipped" };
+    let stripeSync: Record<string, unknown> = { status: "skipped", reason: "payments_addon_inactive" };
     let actionUrl = new URL("/my-bookings", request.url).toString();
 
-    if (invoiceId && paymentId) {
+    const { data: billing, error: billingError } = await db
+      .from("workspace_billing")
+      .select("payments_addon_active,subscription_status")
+      .eq("workspace_id", workspace_id)
+      .maybeSingle();
+    if (billingError) throw billingError;
+
+    if (invoiceId && paymentId && billingAllowsPayments(billing)) {
       try {
         const synced = await syncCanonicalInvoiceToStripe({
           supabase,
