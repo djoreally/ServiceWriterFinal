@@ -19,4 +19,7 @@ begin
 end;
 $function$;
 
+revoke execute on function public.ensure_appointment_management_token_v1()
+  from public, anon, authenticated;
+
 commit;
