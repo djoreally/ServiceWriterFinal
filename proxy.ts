@@ -26,6 +26,15 @@ export async function proxy(request: NextRequest) {
   const canonicalRedirect = canonicalProductionRedirect(request);
   if (canonicalRedirect) return canonicalRedirect;
 
+  // The mature payment-action handler contains refund, payment-link, invoice,
+  // and manual-settlement workflows. Route every public call through the
+  // workspace Payments entitlement choke point before that handler executes.
+  if (request.nextUrl.pathname === "/api/v1/payments/actions") {
+    const target = request.nextUrl.clone();
+    target.pathname = "/api/v1/payments/actions-entitled";
+    return NextResponse.rewrite(target);
+  }
+
   let response = NextResponse.next({ request });
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
