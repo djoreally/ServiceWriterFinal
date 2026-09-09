@@ -1,6 +1,6 @@
 import Stripe from "stripe";
 import { z } from "zod";
-import { ApiError, errorResponse, json, requireWorkspaceMember } from "@/server/api";
+import { ApiError, errorResponse, json, requireWorkspacePaymentsAddon } from "@/server/api";
 import { createSupabaseAdminClient } from "@/lib/supabase";
 import { encryptPaymentCredential } from "@/server/payments/stripe-workspace-execution";
 
@@ -48,7 +48,7 @@ export async function GET(request: Request) {
   try {
     const workspaceId = new URL(request.url).searchParams.get("workspace_id");
     if (!workspaceId) throw new ApiError(400, "workspace_id is required", "invalid_workspace");
-    await requireWorkspaceMember(workspaceId, undefined, request);
+    await requireWorkspacePaymentsAddon(workspaceId, undefined, request);
     const { settings } = await readSettings(workspaceId);
     return json({ data: directStatus(object(settings.operational_settings)) });
   } catch (error) {
@@ -59,7 +59,7 @@ export async function GET(request: Request) {
 export async function PUT(request: Request) {
   try {
     const body = configureSchema.parse(await request.json());
-    await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "platform_admin"], request);
+    await requireWorkspacePaymentsAddon(body.workspace_id, ["owner", "admin", "platform_admin"], request);
 
     if (!body.secret_key.startsWith("sk_")) {
       throw new ApiError(400, "Enter a valid Stripe secret API key", "invalid_stripe_key");
@@ -98,10 +98,7 @@ export async function PUT(request: Request) {
 
     const { error: updateError } = await admin
       .from("workspace_settings")
-      .update({
-        payment_provider: "stripe",
-        operational_settings: nextOperational,
-      })
+      .update({ payment_provider: "stripe", operational_settings: nextOperational })
       .eq("workspace_id", body.workspace_id);
     if (updateError) throw updateError;
 
@@ -115,7 +112,7 @@ export async function DELETE(request: Request) {
   try {
     const workspaceId = new URL(request.url).searchParams.get("workspace_id");
     if (!workspaceId) throw new ApiError(400, "workspace_id is required", "invalid_workspace");
-    await requireWorkspaceMember(workspaceId, ["owner", "admin", "platform_admin"], request);
+    await requireWorkspacePaymentsAddon(workspaceId, ["owner", "admin", "platform_admin"], request);
 
     const { admin, settings } = await readSettings(workspaceId);
     const nextOperational = { ...object(settings.operational_settings) };
