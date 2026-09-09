@@ -36,6 +36,12 @@ function money(value: unknown, currency = "USD"): string {
     : String(value ?? "");
 }
 
+function lineAmount(quantity: unknown, unitPrice: unknown): number {
+  const qty = Number(quantity ?? 0);
+  const rate = Number(unitPrice ?? 0);
+  return Number.isFinite(qty) && Number.isFinite(rate) ? Number((qty * rate).toFixed(2)) : 0;
+}
+
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const invoiceId = z.string().uuid().parse((await context.params).id);
@@ -49,7 +55,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const [{ data: invoice, error: invoiceError }, { data: workspace, error: workspaceError }] = await Promise.all([
       supabase
         .from("invoices")
-        .select("id,workspace_id,invoice_number,status,subtotal,tax_total,total,amount_paid,currency_code,due_at,metadata,invoice_lines(description,quantity,unit_price,line_total,sort_order),customers(id,first_name,last_name,email)")
+        .select("id,workspace_id,invoice_number,status,subtotal,tax_total,total,amount_paid,currency_code,due_at,metadata,invoice_lines(description,quantity,unit_price,sort_order),customers(id,first_name,last_name,email)")
         .eq("workspace_id", body.workspace_id)
         .eq("id", invoiceId)
         .single(),
@@ -101,7 +107,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       (a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0),
     );
     const lineText = lines.length
-      ? lines.map((line) => `${line.description} — ${line.quantity} × ${money(line.unit_price, currency)} = ${money(line.line_total ?? Number(line.quantity) * Number(line.unit_price), currency)}`).join("\n")
+      ? lines.map((line) => `${line.description} — ${line.quantity} × ${money(line.unit_price, currency)} = ${money(lineAmount(line.quantity, line.unit_price), currency)}`).join("\n")
       : "No line items";
 
     const paymentSummary = isPaid
@@ -115,7 +121,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const plainText = `${intro}\n\nInvoice ${invoice.invoice_number}\n${lineText}\n\nSubtotal: ${money(invoice.subtotal, currency)}\nTax: ${money(invoice.tax_total, currency)}\nTotal: ${money(total, currency)}\n${paymentSummary}${dueText}`;
 
     const rowsHtml = lines.length
-      ? lines.map((line) => `<tr><td style="padding:10px 8px;border-bottom:1px solid #e5e7eb">${escapeHtml(line.description)}</td><td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${escapeHtml(line.quantity)}</td><td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${escapeHtml(money(line.unit_price, currency))}</td><td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${escapeHtml(money(line.line_total ?? Number(line.quantity) * Number(line.unit_price), currency))}</td></tr>`).join("")
+      ? lines.map((line) => `<tr><td style="padding:10px 8px;border-bottom:1px solid #e5e7eb">${escapeHtml(line.description)}</td><td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${escapeHtml(line.quantity)}</td><td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${escapeHtml(money(line.unit_price, currency))}</td><td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${escapeHtml(money(lineAmount(line.quantity, line.unit_price), currency))}</td></tr>`).join("")
       : `<tr><td colspan="4" style="padding:12px 8px">No line items</td></tr>`;
 
     const statusHtml = isPaid
