@@ -1,5 +1,6 @@
 import Stripe from "stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase";
+import { reconcileServiceWriterBillingEvent } from "@/server/billing/stripe-billing-reconciliation";
 
 export const runtime = "nodejs";
 
@@ -48,9 +49,7 @@ async function beginWebhookEvent(event: Stripe.Event) {
     .single();
   if (existingError) throw existingError;
 
-  if (existing.status !== "failed") {
-    return { duplicate: true, admin };
-  }
+  if (existing.status !== "failed") return { duplicate: true, admin };
 
   const { error: retryError } = await admin
     .from("webhook_events")
@@ -92,9 +91,7 @@ async function finishWebhookEvent(
 async function reconcileInvoiceEvent(event: Stripe.Event, invoice: Stripe.Invoice) {
   const paymentId = invoice.metadata?.payment_id;
   const workspaceId = invoice.metadata?.workspace_id;
-  if (!paymentId || !workspaceId) {
-    return { received: true, ignored: "missing_invoice_metadata" };
-  }
+  if (!paymentId || !workspaceId) return { received: true, ignored: "missing_invoice_metadata" };
 
   const admin = createSupabaseAdminClient();
   const { data: current, error: currentError } = await admin
@@ -131,25 +128,16 @@ async function reconcileInvoiceEvent(event: Stripe.Event, invoice: Stripe.Invoic
     },
   };
 
-  const query = admin
-    .from("payments")
-    .update(update)
-    .eq("workspace_id", workspaceId)
-    .eq("id", paymentId);
-  const { error: updateError } = failed
-    ? await query.in("status", ["pending", "failed"])
-    : await query;
+  const query = admin.from("payments").update(update).eq("workspace_id", workspaceId).eq("id", paymentId);
+  const { error: updateError } = failed ? await query.in("status", ["pending", "failed"]) : await query;
   if (updateError) throw updateError;
-
   return { received: true };
 }
 
 async function reconcileCheckoutEvent(event: Stripe.Event, session: Stripe.Checkout.Session) {
   const paymentId = session.metadata?.payment_id;
   const workspaceId = session.metadata?.workspace_id;
-  if (!paymentId || !workspaceId) {
-    return { received: true, ignored: "missing_payment_metadata" };
-  }
+  if (!paymentId || !workspaceId) return { received: true, ignored: "missing_payment_metadata" };
 
   const admin = createSupabaseAdminClient();
   const { data: current, error: currentError } = await admin
@@ -163,12 +151,8 @@ async function reconcileCheckoutEvent(event: Stripe.Event, session: Stripe.Check
 
   const metadata = object(current.metadata);
   const failed = event.type === "checkout.session.async_payment_failed";
-  const providerPaymentId = typeof session.payment_intent === "string"
-    ? session.payment_intent
-    : session.id;
-  const amountDollars = session.amount_total == null
-    ? undefined
-    : Number((session.amount_total / 100).toFixed(2));
+  const providerPaymentId = typeof session.payment_intent === "string" ? session.payment_intent : session.id;
+  const amountDollars = session.amount_total == null ? undefined : Number((session.amount_total / 100).toFixed(2));
 
   const { error: updateError } = await admin
     .from("payments")
@@ -188,7 +172,6 @@ async function reconcileCheckoutEvent(event: Stripe.Event, session: Stripe.Check
     .eq("workspace_id", workspaceId)
     .eq("id", paymentId);
   if (updateError) throw updateError;
-
   return { received: true };
 }
 
@@ -199,20 +182,17 @@ export async function POST(request: Request) {
   let event: Stripe.Event | null = null;
   try {
     const stripe = new Stripe(required("STRIPE_SECRET_KEY"));
-    event = stripe.webhooks.constructEvent(
-      await request.text(),
-      signature,
-      required("STRIPE_WEBHOOK_SECRET"),
-    );
+    event = stripe.webhooks.constructEvent(await request.text(), signature, required("STRIPE_WEBHOOK_SECRET"));
 
     const ingress = await beginWebhookEvent(event);
-    if (ingress.duplicate) {
-      return Response.json({ received: true, duplicate: true });
-    }
+    if (ingress.duplicate) return Response.json({ received: true, duplicate: true });
 
     let result: Record<string, unknown> = { received: true };
+    const billingHandled = await reconcileServiceWriterBillingEvent(event, stripe);
 
-    if (
+    if (billingHandled) {
+      result = { received: true, billing: true };
+    } else if (
       event.type === "invoice.paid" ||
       event.type === "invoice.payment_succeeded" ||
       event.type === "invoice.payment_failed"
@@ -234,11 +214,7 @@ export async function POST(request: Request) {
     console.error("[stripe-webhook] reconciliation failed", error);
     if (event) {
       try {
-        await finishWebhookEvent(
-          event,
-          "failed",
-          error instanceof Error ? error.message : "Unknown Stripe webhook error",
-        );
+        await finishWebhookEvent(event, "failed", error instanceof Error ? error.message : "Unknown Stripe webhook error");
       } catch (ledgerError) {
         console.error("[stripe-webhook] failed to update webhook ledger", ledgerError);
       }
