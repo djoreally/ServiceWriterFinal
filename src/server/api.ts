@@ -108,6 +108,21 @@ export async function requireWorkspaceMember(workspaceId: string, roles?: string
   return { supabase, user, membership };
 }
 
+export async function requireWorkspacePaymentsAddon(workspaceId: string, roles?: string[], request?: Request) {
+  const authorized = await requireWorkspaceMember(workspaceId, roles, request);
+  const { data: billing, error } = await authorized.supabase
+    .from("workspace_billing")
+    .select("payments_addon_active,subscription_status")
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (error) throw error;
+  const subscriptionActive = billing?.subscription_status === "active" || billing?.subscription_status === "trialing";
+  if (!billing?.payments_addon_active || !subscriptionActive) {
+    throw new ApiError(402, "The Payments add-on is required for this workspace", "payments_addon_required");
+  }
+  return { ...authorized, billing };
+}
+
 export const paginationSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),
   offset: z.coerce.number().int().min(0).default(0),
