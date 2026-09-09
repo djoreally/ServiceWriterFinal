@@ -169,12 +169,35 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     });
     if (logError) console.error("[invoice-send] email sent but message log write failed", logError);
 
+    const nextStatus = invoice.status === "draft" ? "issued" : invoice.status;
+    const nextMetadata = {
+      ...metadata,
+      last_sent_at: sentAt,
+      last_sent_to: recipient.toLowerCase(),
+      last_sent_provider: sent.providerName,
+      last_sent_provider_message_id: sent.providerMessageId,
+    };
+    const invoicePatch: Record<string, unknown> = {
+      status: nextStatus,
+      metadata: nextMetadata,
+      updated_at: sentAt,
+    };
+    if (invoice.status === "draft") invoicePatch.issued_at = sentAt;
+
+    const { error: invoiceUpdateError } = await (supabase.from("invoices") as any)
+      .update(invoicePatch)
+      .eq("workspace_id", body.workspace_id)
+      .eq("id", invoice.id);
+    if (invoiceUpdateError) {
+      console.error("[invoice-send] email sent but invoice delivery state update failed", invoiceUpdateError);
+    }
+
     return json({
       data: {
         recipient,
         provider: sent.providerName,
         provider_message_id: sent.providerMessageId,
-        invoice_status: invoice.status,
+        invoice_status: nextStatus,
         amount_paid: paid,
         balance_due: balance,
       },
