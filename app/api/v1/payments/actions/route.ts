@@ -1,6 +1,8 @@
 import Stripe from "stripe";
 import { errorResponse, json, requireWorkspaceMember } from "@/server/api";
 import { dispatchPaymentLifecycle, LIFECYCLE_EVENT_KEYS } from "@/server/messaging/quote-payment-events";
+import { ResendEmailAdapter } from "@/server/messaging/resend";
+import { EnginemailerEmailAdapter } from "@/server/messaging/enginemailer";
 import { markStripeInvoicePaidOutOfBand, syncCanonicalInvoiceToStripe } from "@/server/payments/stripe-invoice-sync";
 import { z } from "zod";
 
@@ -33,6 +35,22 @@ function stripeObjectId(value: unknown): string | null {
   if (typeof value === "string") return value;
   const record = object(value);
   return text(record.id);
+}
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function money(value: unknown, currency = "USD"): string {
+  const amount = Number(value ?? 0);
+  return Number.isFinite(amount)
+    ? amount.toLocaleString("en-US", { style: "currency", currency })
+    : String(value ?? "");
 }
 
 async function resolveRefundTarget(stripe: Stripe, stripeAccountId: string, providerPaymentId: string) {
@@ -73,6 +91,97 @@ export async function POST(request: Request) {
       ["owner", "admin", "manager", "service_advisor", "receptionist"],
       request,
     );
+
+    if (body.action === "send_manual_invoice") {
+      const [{ data: invoice, error: invoiceError }, { data: workspace, error: workspaceError }] = await Promise.all([
+        supabase
+          .from("invoices")
+          .select("id,workspace_id,invoice_number,subtotal,tax_total,total,currency_code,due_at,metadata,invoice_lines(description,quantity,unit_price,line_total,sort_order),customers(first_name,last_name,email)")
+          .eq("workspace_id", body.workspace_id)
+          .eq("id", body.invoice_id)
+          .single(),
+        supabase
+          .from("workspaces")
+          .select("name")
+          .eq("id", body.workspace_id)
+          .single(),
+      ]);
+      if (invoiceError || !invoice) throw invoiceError ?? new Error("Invoice not found");
+      if (workspaceError || !workspace) throw workspaceError ?? new Error("Workspace not found");
+
+      const invoiceMetadata = object(invoice.metadata);
+      const customer = Array.isArray(invoice.customers) ? invoice.customers[0] : invoice.customers;
+      const recipient = body.recipient_email
+        ?? text(invoiceMetadata.contact_email)
+        ?? customer?.email
+        ?? null;
+      if (!recipient) {
+        return json({ error: { code: "customer_email_required", message: "Recipient email is required to send this invoice." } }, { status: 422 });
+      }
+
+      const customerName = [customer?.first_name, customer?.last_name].filter(Boolean).join(" ")
+        || text(invoiceMetadata.contact_name)
+        || "Customer";
+      const currency = invoice.currency_code || "USD";
+      const subject = body.subject?.trim()
+        || `Invoice ${invoice.invoice_number} from ${workspace.name} — ${money(invoice.total, currency)}`;
+      const intro = body.message?.trim()
+        || `Hi ${customerName},\n\nPlease find your invoice ${invoice.invoice_number} below. Let us know if you have any questions.\n\nThanks,\n${workspace.name}`;
+      const lines = [...(invoice.invoice_lines ?? [])].sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0));
+      const lineText = lines.length
+        ? lines.map((line) => `${line.description} — ${line.quantity} × ${money(line.unit_price, currency)} = ${money(line.line_total ?? Number(line.quantity) * Number(line.unit_price), currency)}`).join("\n")
+        : "No line items";
+      const plainText = `${intro}\n\nInvoice ${invoice.invoice_number}\n${lineText}\n\nSubtotal: ${money(invoice.subtotal, currency)}\nTax: ${money(invoice.tax_total, currency)}\nTotal: ${money(invoice.total, currency)}${invoice.due_at ? `\nDue: ${new Date(invoice.due_at).toLocaleDateString("en-US")}` : ""}`;
+      const rowsHtml = lines.length
+        ? lines.map((line) => `<tr><td style="padding:10px 8px;border-bottom:1px solid #e5e7eb">${escapeHtml(line.description)}</td><td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${escapeHtml(line.quantity)}</td><td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${escapeHtml(money(line.unit_price, currency))}</td><td style="padding:10px 8px;border-bottom:1px solid #e5e7eb;text-align:right">${escapeHtml(money(line.line_total ?? Number(line.quantity) * Number(line.unit_price), currency))}</td></tr>`).join("")
+        : `<tr><td colspan="4" style="padding:12px 8px">No line items</td></tr>`;
+      const html = `<!doctype html><html><body style="margin:0;background:#f6f7f9;font-family:Arial,sans-serif;color:#111827"><div style="max-width:680px;margin:0 auto;padding:28px 16px"><div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden"><div style="padding:24px;border-bottom:1px solid #e5e7eb"><div style="font-size:13px;color:#6b7280">${escapeHtml(workspace.name)}</div><h1 style="margin:6px 0 0;font-size:24px">Invoice ${escapeHtml(invoice.invoice_number)}</h1></div><div style="padding:24px"><div style="white-space:pre-line;line-height:1.6;margin-bottom:24px">${escapeHtml(intro).replaceAll("\n", "<br>")}</div><table style="width:100%;border-collapse:collapse;font-size:14px"><thead><tr><th style="padding:10px 8px;text-align:left;border-bottom:2px solid #111827">Item</th><th style="padding:10px 8px;text-align:right;border-bottom:2px solid #111827">Qty</th><th style="padding:10px 8px;text-align:right;border-bottom:2px solid #111827">Rate</th><th style="padding:10px 8px;text-align:right;border-bottom:2px solid #111827">Amount</th></tr></thead><tbody>${rowsHtml}</tbody></table><div style="margin-top:20px;margin-left:auto;max-width:280px"><div style="display:flex;justify-content:space-between;padding:5px 0"><span>Subtotal</span><strong>${escapeHtml(money(invoice.subtotal, currency))}</strong></div><div style="display:flex;justify-content:space-between;padding:5px 0"><span>Tax</span><strong>${escapeHtml(money(invoice.tax_total, currency))}</strong></div><div style="display:flex;justify-content:space-between;padding:10px 0;border-top:2px solid #111827;font-size:18px"><span>Total</span><strong>${escapeHtml(money(invoice.total, currency))}</strong></div>${invoice.due_at ? `<div style="text-align:right;color:#6b7280;font-size:13px">Due ${escapeHtml(new Date(invoice.due_at).toLocaleDateString("en-US"))}</div>` : ""}</div></div></div></div></body></html>`;
+
+      const idempotencyKey = `manual-invoice:${invoice.id}:${Date.now()}:${crypto.randomUUID()}`;
+      const requestPayload = {
+        workspaceId: body.workspace_id,
+        recipient: { email: recipient },
+        purpose: "transactional" as const,
+        templateKey: "manual_invoice",
+        subject,
+        body: plainText,
+        html,
+        fromName: workspace.name,
+        idempotencyKey,
+        metadata: { invoiceId: invoice.id },
+      };
+
+      let sent;
+      try {
+        sent = await new ResendEmailAdapter().send(requestPayload);
+      } catch (primaryError) {
+        if (!process.env.ENGINEMAILER_API_KEY?.trim()) throw primaryError;
+        sent = await new EnginemailerEmailAdapter().send(requestPayload);
+      }
+
+      const sentAt = new Date().toISOString();
+      const { error: logError } = await supabase.from("message_logs").insert({
+        workspace_id: body.workspace_id,
+        customer_id: null,
+        channel: "email",
+        purpose: "transactional",
+        provider: sent.providerName,
+        idempotency_key: idempotencyKey,
+        recipient_email: recipient.toLowerCase(),
+        template_key: "manual_invoice",
+        subject,
+        body_redacted: plainText.slice(0, 240),
+        status: sent.status,
+        provider_message_id: sent.providerMessageId,
+        sent_at: sent.acceptedAt || sentAt,
+        consent_checked_at: sentAt,
+        suppression_checked_at: sentAt,
+        metadata: { invoiceId: invoice.id, source: "invoice_send_dialog" },
+      });
+      if (logError) console.error("[manual-invoice] email sent but message log write failed", logError);
+
+      return json({ data: { recipient, provider: sent.providerName, provider_message_id: sent.providerMessageId } });
+    }
 
     if (body.action === "refund") {
       const [{ data: current, error: currentError }, { data: settings, error: settingsError }] = await Promise.all([
