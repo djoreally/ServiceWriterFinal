@@ -2,6 +2,7 @@ import { z } from "zod";
 import { errorResponse, json, requireWorkspaceMember } from "@/server/api";
 import { ResendEmailAdapter } from "@/server/messaging/resend";
 import { EnginemailerEmailAdapter } from "@/server/messaging/enginemailer";
+import { createSupabaseAdminClient } from "@/lib/supabase";
 
 const bodySchema = z.object({
   workspace_id: z.string().uuid(),
@@ -155,7 +156,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
 
     const sentAt = new Date().toISOString();
-    const { error: logError } = await supabase.from("message_logs").insert({
+    const admin = createSupabaseAdminClient();
+    const { error: logError } = await admin.from("message_logs").insert({
       workspace_id: body.workspace_id,
       customer_id: customer?.id ?? null,
       channel: "email",
