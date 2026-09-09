@@ -1,4 +1,4 @@
-import { errorResponse, json, paginationSchema, requireWorkspaceMember } from "@/server/api";
+import { errorResponse, json, paginationSchema, requireWorkspacePaymentsAddon } from "@/server/api";
 import { dispatchPaymentLifecycle, LIFECYCLE_EVENT_KEYS } from "@/server/messaging/quote-payment-events";
 import { z } from "zod";
 
@@ -27,7 +27,7 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const workspaceId = z.string().uuid().parse(url.searchParams.get("workspace_id"));
-    const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
+    const { supabase } = await requireWorkspacePaymentsAddon(workspaceId, undefined, request);
     const { limit, offset } = paginationSchema.parse(Object.fromEntries(url.searchParams));
     const { data, error } = await supabase
       .from("payments")
@@ -45,13 +45,11 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = paymentSchema.parse(await request.json());
-    const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"], request);
+    const { supabase, user } = await requireWorkspacePaymentsAddon(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"], request);
     const metadata = body.metadata ?? {};
     const appointmentId = metadataString(metadata, "appointment_id");
     const paymentType = metadataString(metadata, "payment_type");
 
-    // Financial writes must have traceable business provenance. This deliberately
-    // rejects the retired offline-queue shape that created orphan pending rows.
     if (!body.invoice_id && !body.customer_id && !body.provider_payment_id && !appointmentId) {
       return json({
         error: {
@@ -77,9 +75,6 @@ export async function POST(request: Request) {
       }
     }
 
-    // Appointment closeout owns the receivable. Older callers may still ask to
-    // "create" the same pending payment; return the canonical existing row so
-    // retries and mixed client versions remain idempotent.
     if (body.status === "pending" && appointmentId && !body.provider_payment_id) {
       let duplicateQuery = (supabase.from("payments") as any)
         .select("*")
