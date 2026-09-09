@@ -36,8 +36,7 @@ function formatDateTime(value: string, timezone: string) {
   return {
     date: new Intl.DateTimeFormat("en-US", {
       timeZone: timezone,
-      weekday: "long",
-      month: "long",
+      month: "numeric",
       day: "numeric",
       year: "numeric",
     }).format(date),
