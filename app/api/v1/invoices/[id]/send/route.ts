@@ -55,13 +55,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const [{ data: invoice, error: invoiceError }, { data: workspace, error: workspaceError }] = await Promise.all([
       supabase
         .from("invoices")
-        .select("id,workspace_id,invoice_number,status,subtotal,tax_total,total,amount_paid,currency_code,due_at,metadata,invoice_lines(description,quantity,unit_price,sort_order),customers(id,first_name,last_name,email)")
+        .select("id,workspace_id,invoice_number,status,subtotal,tax_total,total,amount_paid,due_at,metadata,invoice_lines(description,quantity,unit_price,sort_order),customers(id,first_name,last_name,email)")
         .eq("workspace_id", body.workspace_id)
         .eq("id", invoiceId)
         .single(),
       supabase
         .from("workspaces")
-        .select("name")
+        .select("name,currency_code")
         .eq("id", body.workspace_id)
         .single(),
     ]);
@@ -82,7 +82,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const customerName = [customer?.first_name, customer?.last_name].filter(Boolean).join(" ")
       || text(metadata.contact_name)
       || "Customer";
-    const currency = invoice.currency_code || "USD";
+    const currency = workspace.currency_code || "USD";
     const total = Math.max(0, Number(invoice.total) || 0);
     const paid = Math.max(0, Number(invoice.amount_paid) || 0);
     const balance = Math.max(0, Number((total - paid).toFixed(2)));
