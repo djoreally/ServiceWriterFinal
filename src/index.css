@@ -43,7 +43,7 @@
     --input: 220 9% 92%;
     --ring: 211 100% 52%;
 
-    --radius: 0.5rem;
+    --radius: 0.625rem;
 
     --success: 135 62% 37%;             /* semantic green for successful/assigned states */
     --warning: 36 100% 52%;             /* #ff9f0a */
@@ -84,17 +84,17 @@
 
     /* UI effects */
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
-    --shadow-md: 0 4px 12px rgba(15, 23, 32, 0.08);
-    --shadow-lg: 0 10px 28px rgba(15, 23, 32, 0.13);
+    --shadow-md: 0 2px 8px rgba(15, 23, 32, 0.07);
+    --shadow-lg: 0 12px 32px rgba(15, 23, 32, 0.12);
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.06);
     --shadow-hover: 0 10px 30px rgba(10, 132, 255, 0.12);
     --shadow-btn: 0 4px 14px rgba(10, 132, 255, 0.3);
 
     --ring-glow: 0 0 0 3px rgba(10, 132, 255, 0.22);
     --radius-sm: 6px;
-    --radius-md: 8px;
-    --radius-lg: 12px;
-    --radius-xl: 16px;
+    --radius-md: 10px;
+    --radius-lg: 10px;
+    --radius-xl: 12px;
     --space-1: 0.25rem;
     --space-2: 0.5rem;
     --space-3: 0.75rem;
@@ -393,8 +393,8 @@
 }
 
 @layer components {
-  .app-page { @apply mx-auto w-full max-w-[1600px] space-y-4; }
-  .app-section { @apply space-y-3; }
+  .app-page { @apply mx-auto w-full max-w-[1440px] space-y-5; }
+  .app-section { @apply space-y-4; }
   .app-toolbar { @apply flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between; }
   .operator-page { @apply space-y-4; }
   .operator-control-zone { @apply flex flex-col gap-2 border-b bg-card px-3 py-2.5 sm:flex-row sm:items-center; }
