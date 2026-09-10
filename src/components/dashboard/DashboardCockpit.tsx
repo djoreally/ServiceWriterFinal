@@ -136,13 +136,13 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3 rounded-xl border bg-gradient-to-r from-slate-950 to-slate-800 p-4 text-white shadow-sm">
+      <div className="flex flex-wrap items-end justify-between gap-3 rounded-lg border bg-card p-4 text-foreground shadow-sm">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             Shop Dashboard · {todayLabel}
           </p>
           <h2 className="mt-1 text-xl font-bold">{firstName} command center</h2>
-          <p className="mt-1 text-sm text-slate-300">
+          <p className="mt-1 text-sm text-muted-foreground">
             Today's revenue, appointments, jobs in progress, and outstanding invoices.
           </p>
         </div>
