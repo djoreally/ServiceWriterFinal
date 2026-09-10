@@ -4,7 +4,6 @@ import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 function serializeRules(rules: DetailingPricingRule[]) {
   return rules.map((rule) => ({
-    service_catalog_id: rule.serviceCatalogId,
     size_tier: rule.sizeTier,
     condition: rule.condition,
     price_multiplier: rule.priceMultiplier,
@@ -23,16 +22,18 @@ export async function saveDetailingPricingRules(rules: DetailingPricingRule[]) {
   if (!context) throw new Error("Select a workspace before saving detailing pricing.");
   const { error } = await supabase.rpc("replace_detailing_pricing_rules", {
     p_workspace_id: context.workspaceId,
-    p_rules: serializeRules(rules),
+    p_rules: rules.map((rule) => ({ service_catalog_id: rule.serviceCatalogId, ...serializeRules([rule])[0] })),
   });
   if (error) throw error;
 }
 
 export async function saveDetailingPricingRulesForService(serviceCatalogId: string | null, rules: DetailingPricingRule[]) {
-  if (!serviceCatalogId) throw new Error("Select a detailing service before saving pricing rules.");
-  const { error } = await supabase.rpc("replace_detailing_pricing_rules_for_service", {
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("Select a workspace before saving detailing pricing.");
+  const { error } = await supabase.rpc("replace_detailing_pricing_rules_for_scope", {
+    p_workspace_id: context.workspaceId,
     p_service_catalog_id: serviceCatalogId,
-    p_rules: serializeRules(rules).map(({ service_catalog_id: _serviceCatalogId, ...rule }) => rule),
+    p_rules: serializeRules(rules),
   });
   if (error) throw error;
 }
