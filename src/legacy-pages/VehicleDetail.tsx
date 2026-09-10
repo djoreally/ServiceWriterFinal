@@ -521,7 +521,7 @@ const VehicleDetail = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Vehicle Image Card */}
           <Card className="lg:col-span-1 overflow-hidden border-border/50">
-            <div className="relative h-64 bg-gradient-to-br from-muted to-muted/50 flex items-center justify-center">
+            <div className="relative h-64 bg-muted/30 flex items-center justify-center">
               <Car className="h-24 w-24 text-muted-foreground/50" />
               {/* Vehicle Info Overlay */}
               <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
