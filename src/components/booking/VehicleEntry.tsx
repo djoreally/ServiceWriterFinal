@@ -670,7 +670,7 @@ export function VehicleEntry({
 
             {/* AI Lookup Mode - shown when fallback is needed */}
             {fallbackMode === "ai" && needsFallbackOrLoading && (
-              <div className="space-y-4 p-4 border rounded-lg bg-gradient-to-br from-primary/5 to-transparent">
+              <div className="space-y-4 p-4 border rounded-lg bg-primary/5">
                 <div className="flex items-center gap-2 text-sm font-medium text-primary">
                   <Sparkles className="h-4 w-4" />
                   AI-Assisted Vehicle Lookup
