@@ -251,10 +251,10 @@ export function TimeClock() {
       {/* Main Clock Card */}
       <Card className="overflow-hidden">
         <div className={cn(
-          "p-6 text-center transition-colors",
-          !isClockedIn && "bg-gradient-to-br from-primary/10 to-primary/5",
-          isClockedIn && !isOnBreak && "bg-gradient-to-br from-green-500/10 to-green-500/5",
-          isOnBreak && "bg-gradient-to-br from-orange-500/10 to-orange-500/5"
+          "border-b p-6 text-center transition-colors",
+          !isClockedIn && "bg-muted/20",
+          isClockedIn && !isOnBreak && "bg-success/5",
+          isOnBreak && "bg-warning/5"
         )}>
           {/* Current Time */}
           <div className="mb-4">
@@ -273,7 +273,7 @@ export function TimeClock() {
                 variant="outline" 
                 className={cn(
                   "text-lg py-2 px-4 gap-2",
-                  isOnBreak ? "bg-orange-500/20 text-orange-700 border-orange-500" : "bg-gray-500/20 text-gray-700 border-green-500"
+                  isOnBreak ? "border-warning/40 bg-warning/10 text-warning-foreground" : "border-success/40 bg-success/10 text-success"
                 )}
               >
                 {isOnBreak ? (
@@ -327,7 +327,7 @@ export function TimeClock() {
                     size="lg"
                     onClick={handleEndBreak}
                     disabled={processing}
-                    className="gap-2 bg-gray-600 hover:bg-gray-700"
+                    className="gap-2"
                   >
                     {processing ? (
                       <Loader2 className="h-5 w-5 animate-spin" />
@@ -394,8 +394,8 @@ export function TimeClock() {
                 <p className="text-2xl font-bold">{weeklyStats.regular.toFixed(1)}</p>
                 <p className="text-xs text-muted-foreground">Regular Hours</p>
               </div>
-              <div className="p-3 bg-orange-50 dark:bg-orange-950/30 rounded-lg text-center">
-                <p className="text-2xl font-bold text-orange-600">{weeklyStats.overtime.toFixed(1)}</p>
+              <div className="rounded-lg bg-warning/5 p-3 text-center">
+                <p className="text-2xl font-semibold text-warning-foreground">{weeklyStats.overtime.toFixed(1)}</p>
                 <p className="text-xs text-muted-foreground">Overtime</p>
               </div>
             </div>
@@ -438,7 +438,7 @@ export function TimeClock() {
                     </TableCell>
                     <TableCell className="text-right">
                       {entry.approved_at ? (
-                        <Badge variant="outline" className="bg-green-50 text-gray-700">
+                        <Badge variant="outline" className="border-success/30 bg-success/10 text-success">
                           <CheckCircle2 className="h-3 w-3 mr-1" />
                           Approved
                         </Badge>
