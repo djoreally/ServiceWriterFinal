@@ -1,12 +1,10 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { DetailingPricingRule } from "@/lib/detailing-pricing";
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
-
-type RpcClient = { rpc: (name: string, args: Record<string, unknown>) => Promise<{ error: { message?: string } | null }> };
-const rpcClient = supabase as unknown as RpcClient;
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 function serializeRules(rules: DetailingPricingRule[]) {
   return rules.map((rule) => ({
+    service_catalog_id: rule.serviceCatalogId,
     size_tier: rule.sizeTier,
     condition: rule.condition,
     price_multiplier: rule.priceMultiplier,
@@ -21,19 +19,20 @@ function serializeRules(rules: DetailingPricingRule[]) {
 }
 
 export async function saveDetailingPricingRules(rules: DetailingPricingRule[]) {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) throw new Error("Not authenticated");
-  const rows = rules.map((rule) => ({ user_id: user.id, service_catalog_id: rule.serviceCatalogId, ...serializeRules([rule])[0] }));
-  const { error } = await rpcClient.rpc("replace_detailing_pricing_rules", { p_rules: rows });
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("Select a workspace before saving detailing pricing.");
+  const { error } = await supabase.rpc("replace_detailing_pricing_rules", {
+    p_workspace_id: context.workspaceId,
+    p_rules: serializeRules(rules),
+  });
   if (error) throw error;
 }
 
 export async function saveDetailingPricingRulesForService(serviceCatalogId: string | null, rules: DetailingPricingRule[]) {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) throw new Error("Not authenticated");
-  const { error } = await rpcClient.rpc("replace_detailing_pricing_rules_for_service", {
+  if (!serviceCatalogId) throw new Error("Select a detailing service before saving pricing rules.");
+  const { error } = await supabase.rpc("replace_detailing_pricing_rules_for_service", {
     p_service_catalog_id: serviceCatalogId,
-    p_rules: serializeRules(rules),
+    p_rules: serializeRules(rules).map(({ service_catalog_id: _serviceCatalogId, ...rule }) => rule),
   });
   if (error) throw error;
 }
