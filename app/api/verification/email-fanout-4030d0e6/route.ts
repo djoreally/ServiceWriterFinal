@@ -1,6 +1,7 @@
 import { createSupabaseAdminClient } from "@/lib/supabase";
 import { json } from "@/server/api";
 import { sendBookingConfirmation } from "@/server/messaging/booking-confirmation";
+import { processLifecycleEventOutbox } from "@/server/messaging/lifecycle-sender";
 
 const APPOINTMENT_ID = "4030d0e6-e2fb-4375-9e15-77c5df49690c";
 const WORKSPACE_ID = "250c258f-fad6-46e1-86de-3de41a7d4e1a";
@@ -37,9 +38,17 @@ export async function GET(request: Request) {
     actionUrl: new URL(`/appointments/${APPOINTMENT_ID}`, request.url).toString(),
   });
 
+  const worker = await processLifecycleEventOutbox(10, `verification:${APPOINTMENT_ID}`);
+
   await admin.from("appointments").update({
     metadata: { ...metadata, email_test_sent_at: new Date().toISOString() },
   }).eq("id", APPOINTMENT_ID).eq("workspace_id", WORKSPACE_ID);
 
-  return json({ data: { status: result.status, provider_message_id: result.providerMessageId } }, { headers: { "Cache-Control": "no-store" } });
+  return json({
+    data: {
+      queued_status: result.status,
+      provider_message_id: result.providerMessageId,
+      worker,
+    },
+  }, { headers: { "Cache-Control": "no-store" } });
 }
