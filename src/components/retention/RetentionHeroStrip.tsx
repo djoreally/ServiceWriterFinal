@@ -19,7 +19,6 @@ export function RetentionHeroStrip({ userId }: { userId: string }) {
       value: data ? formatCurrency(data.revenueAtRisk) : "—",
       sub: `${data?.winbackCustomers ?? 0} customers slipping`,
       icon: AlertTriangle,
-      tone: "from-red-500/15 via-red-500/5 to-transparent",
       iconTone: "text-red-500 bg-red-500/10",
     },
     {
@@ -27,7 +26,6 @@ export function RetentionHeroStrip({ userId }: { userId: string }) {
       value: data ? `${data.winbackCustomers}` : "—",
       sub: "Unresolved winback signals",
       icon: Users,
-      tone: "from-amber-500/15 via-amber-500/5 to-transparent",
       iconTone: "text-amber-500 bg-amber-500/10",
     },
     {
@@ -35,7 +33,6 @@ export function RetentionHeroStrip({ userId }: { userId: string }) {
       value: data ? `${data.overdueVehicles}` : "—",
       sub: "Past predicted service date",
       icon: Car,
-      tone: "from-orange-500/15 via-orange-500/5 to-transparent",
       iconTone: "text-orange-500 bg-orange-500/10",
     },
     {
@@ -43,7 +40,6 @@ export function RetentionHeroStrip({ userId }: { userId: string }) {
       value: data ? `${data.loyaltyActive}` : "—",
       sub: "Members earning points",
       icon: Trophy,
-      tone: "from-emerald-500/15 via-emerald-500/5 to-transparent",
       iconTone: "text-emerald-500 bg-emerald-500/10",
     },
   ];
@@ -56,9 +52,8 @@ export function RetentionHeroStrip({ userId }: { userId: string }) {
       {cards.map((c) => {
         const Icon = c.icon;
         return (
-          <Card key={c.label} className="relative overflow-hidden border-border/60">
-            <div className={`absolute inset-0 bg-gradient-to-br ${c.tone} pointer-events-none`} />
-            <CardContent className="relative p-5">
+          <Card key={c.label} className="border-border/80">
+            <CardContent className="p-5">
               <div className="flex items-start justify-between mb-3">
                 <div className={`p-2 rounded-lg ${c.iconTone}`}>
                   <Icon className="h-4 w-4" />
@@ -70,7 +65,7 @@ export function RetentionHeroStrip({ userId }: { userId: string }) {
                   </div>
                 )}
               </div>
-              <p className="text-3xl font-black tracking-tight tabular-nums">
+              <p className="text-3xl font-semibold tracking-tight tabular-nums">
                 {isLoading ? <span className="text-muted-foreground/40">···</span> : c.value}
               </p>
               <p className="text-xs text-muted-foreground mt-1">{c.label}</p>
