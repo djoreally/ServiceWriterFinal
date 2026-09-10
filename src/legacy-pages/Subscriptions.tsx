@@ -920,7 +920,7 @@ const Subscriptions = () => {
                 } ${!plan.is_active ? "opacity-60" : ""}`}
               >
                 {/* Gradient header */}
-                <div className={`absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r ${cfg.gradient}`} />
+                <div className={`absolute inset-x-0 top-0 h-1.5 bg-primary/70`} />
 
                 {/* Actions */}
                 <div className="absolute top-3 right-3 z-10">
