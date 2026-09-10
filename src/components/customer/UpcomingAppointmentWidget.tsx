@@ -31,7 +31,7 @@ export function UpcomingAppointmentWidget({ appointment }: Props) {
   );
 
   return (
-    <Card className="border-primary/30 bg-gradient-to-br from-primary/5 via-card to-card overflow-hidden">
+    <Card className="border-primary/30 bg-card overflow-hidden">
       <CardContent className="p-5 space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2">
