@@ -2,6 +2,10 @@ import { supabase } from "@/integrations/supabase/client";
 import type { TireServicePricingRule } from "@/lib/tire-pricing";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
+// Live production schema is ahead of generated Supabase types; isolate the
+// compatibility cast here until the generated database types are refreshed.
+const db = supabase as any;
+
 export async function saveTireServicePricingRule(rule: TireServicePricingRule) {
   const context = await resolveCurrentWorkspace();
   if (!context) throw new Error("Select a workspace before saving tire pricing.");
@@ -24,7 +28,7 @@ export async function saveTireServicePricingRule(rule: TireServicePricingRule) {
     updated_at: new Date().toISOString(),
   };
 
-  const { error } = await supabase
+  const { error } = await db
     .from("tire_service_pricing_rules")
     .upsert(row, { onConflict: "workspace_id,service_catalog_id" });
   if (error) throw error;
