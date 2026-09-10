@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 export const GOOGLE_INSIGHTS_REDIRECT_PATH = "/google-calendar/callback";
 
@@ -16,16 +17,40 @@ export interface GoogleInsightsResources {
   analytics: Array<{ id: string; name: string; account: string }>;
   businessAccounts: Array<{ id: string; name: string }>;
   locations: Array<{ id: string; name: string; accountId: string }>;
-  /** Per-source Google failures (API not enabled, missing grant, quota) — surfaced, never swallowed. */
   errors?: Record<string, string>;
 }
 
+export interface GoogleAnalyticsOverview {
+  property_id: string;
+  property_name?: string | null;
+  days: number;
+  totals: {
+    activeUsers: number;
+    sessions: number;
+    newUsers: number;
+    conversions: number;
+  };
+  rows: Array<{
+    date: string;
+    activeUsers: number;
+    sessions: number;
+    newUsers: number;
+    conversions: number;
+  }>;
+}
+
 async function invoke(body: Record<string, unknown>) {
-  const { data: { session } } = await supabase.auth.getSession();
+  const [{ data: { session } }, workspace] = await Promise.all([
+    supabase.auth.getSession(),
+    resolveCurrentWorkspace(),
+  ]);
   if (!session) throw new Error("Not authenticated");
-  const { data, error } = await supabase.functions.invoke("google-insights", { headers: { Authorization: `Bearer ${session.access_token}` }, body });
+  if (!workspace?.workspaceId) throw new Error("No active workspace selected");
+  const { data, error } = await supabase.functions.invoke("google-insights", {
+    headers: { Authorization: `Bearer ${session.access_token}` },
+    body: { ...body, workspace_id: workspace.workspaceId },
+  });
   if (error) {
-    // invoke reports every non-2xx as a generic message — read the real error body.
     const context = (error as { context?: { text?: () => Promise<string> } }).context;
     if (context?.text) {
       const raw = await context.text().catch(() => "");
@@ -73,9 +98,9 @@ export const completeGoogleInsightsOAuth = (code: string, state: string, redirec
 export const fetchGoogleInsightsStatus = () => invoke({ mode: "status" }) as Promise<GoogleInsightsStatus>;
 export const fetchGoogleInsightsResources = () => invoke({ mode: "resources" }) as Promise<GoogleInsightsResources>;
 export const selectGoogleInsightsResources = (analyticsPropertyId: string | null, businessLocationId: string | null) => invoke({ mode: "select", analytics_property_id: analyticsPropertyId, business_location_id: businessLocationId });
+export const fetchGoogleAnalyticsOverview = (days = 30) => invoke({ mode: "analytics_overview", days }) as Promise<GoogleAnalyticsOverview>;
 export const disconnectGoogleInsights = () => invoke({ mode: "disconnect" });
 
-/** Google Business Profile monitoring */
 export const fetchGbpOverview = () => invoke({ mode: "gbp_overview" }) as Promise<GoogleBusinessOverview>;
 export const fetchGbpReviews = (pageToken?: string | null) =>
   invoke({ mode: "gbp_reviews", page_size: 20, page_token: pageToken ?? null }) as Promise<{
@@ -86,4 +111,3 @@ export const fetchGbpReviews = (pageToken?: string | null) =>
   }>;
 export const fetchGbpPerformance = (days = 30) => invoke({ mode: "gbp_performance", days }) as Promise<GoogleBusinessPerformance>;
 export const replyToGbpReview = (reviewId: string, comment: string) => invoke({ mode: "gbp_reply", review_id: reviewId, comment });
-
