@@ -121,7 +121,7 @@ export const ExpensesTab = () => {
   return (
     <div className="space-y-6">
       {/* Premium header band */}
-      <div className="rounded-xl border border-border/60 bg-gradient-to-br from-card via-card to-muted/30 p-5 sm:p-8">
+      <div className="rounded-lg border border-border/80 bg-card p-5 shadow-sm sm:p-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="min-w-0">
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
