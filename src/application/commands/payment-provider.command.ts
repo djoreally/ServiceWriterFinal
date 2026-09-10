@@ -16,31 +16,54 @@ export async function updatePaymentProvider(provider: string) {
   if (error) throw new Error(error.message);
 }
 
-export async function initiateStripeOnboarding() {
-  const { data: { session } } = await supabase.auth.getSession();
+async function invokeProvider(provider: "stripe" | "square", mode: "initiate" | "callback" | "status", extra: Record<string, unknown> = {}) {
+  const [{ data: { session } }, context] = await Promise.all([
+    supabase.auth.getSession(),
+    resolveCurrentWorkspace(),
+  ]);
   if (!session) throw new Error("Not authenticated");
+  if (!context) throw new Error("Select a workspace before connecting a payment provider.");
 
-  return supabase.functions.invoke("stripe-connect-onboard", {
+  const { data, error } = await supabase.functions.invoke("payment-provider-connect", {
     headers: { Authorization: `Bearer ${session.access_token}` },
+    body: { workspace_id: context.workspaceId, provider, mode, ...extra },
   });
+
+  if (error) {
+    const response = (error as { context?: { text?: () => Promise<string> } }).context;
+    if (response?.text) {
+      const raw = await response.text().catch(() => "");
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw) as { error?: string };
+          if (parsed.error) throw new Error(parsed.error);
+        } catch (caught) {
+          if (caught instanceof Error && !(caught instanceof SyntaxError)) throw caught;
+        }
+      }
+    }
+    throw new Error(error.message || `${provider} connection request failed`);
+  }
+  if (data?.error) throw new Error(String(data.error));
+  return { data, error: null };
+}
+
+export async function initiateStripeOnboarding() {
+  return invokeProvider("stripe", "initiate");
+}
+
+export async function completeStripeCallback(code: string, state: string) {
+  return invokeProvider("stripe", "callback", { code, state });
+}
+
+export async function refreshStripeConnection() {
+  return invokeProvider("stripe", "status");
 }
 
 export async function initiateSquareOnboarding() {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error("Not authenticated");
-
-  return supabase.functions.invoke("square-connect-onboard", {
-    headers: { Authorization: `Bearer ${session.access_token}` },
-    body: { mode: "initiate" },
-  });
+  return invokeProvider("square", "initiate");
 }
 
-export async function completeSquareCallback(code: string) {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error("Not authenticated");
-
-  return supabase.functions.invoke("square-connect-onboard", {
-    headers: { Authorization: `Bearer ${session.access_token}` },
-    body: { mode: "callback", code },
-  });
+export async function completeSquareCallback(code: string, state: string) {
+  return invokeProvider("square", "callback", { code, state });
 }
