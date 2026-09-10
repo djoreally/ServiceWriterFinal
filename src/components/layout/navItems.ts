@@ -182,11 +182,8 @@ export const getPrimaryNavItems = (terms: Terms, role: RoleScope = "admin"): Nav
     group.items.flatMap((item) => (item.children && item.children.length > 0 ? [item, ...item.children] : [item]))
   );
 
-export const footerNavItems: NavItem[] = [
-  { path: "/settings", label: "Settings", icon: Settings },
-];
+// Settings has its own navigation group above. Keeping a second footer entry
+// rendered the same destination twice in desktop and mobile navigation.
+export const footerNavItems: NavItem[] = [];
 
-export const getFooterNavItems = (role: RoleScope = "admin"): NavItem[] => {
-  if (!role) return [];
-  return footerNavItems.filter((item) => canAccessRoute(role, item.path));
-};
+export const getFooterNavItems = (_role: RoleScope = "admin"): NavItem[] => [];
