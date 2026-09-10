@@ -1,8 +1,6 @@
-/**
- * Fleet Reports Query - Data fetching for the Fleet Reports page.
- */
-
+/** Fleet reporting over the canonical workspace-scoped Fleet OS schema. */
 import { supabase } from "@/integrations/supabase/client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 export interface FleetReportStats {
   totalSpend: number;
@@ -25,52 +23,60 @@ export interface FleetReportPageData {
   topVehicles: FleetTopVehicleSpendItem[];
 }
 
-/** Fetch all data needed for the fleet reports page. */
-export async function fetchFleetReportPageData(userId: string): Promise<FleetReportPageData> {
-  const [vehiclesRes, locationsRes, woRes, posRes] = await Promise.all([
-    supabase.from("fleet_vehicles").select("id", { count: "exact", head: true }).eq("user_id", userId),
-    supabase.from("fleet_locations").select("id", { count: "exact", head: true }).eq("user_id", userId),
-    supabase.from("fleet_work_orders")
-      .select("id, total, status, fleet_vehicle_id, invoice_status, fleet_vehicles(year, make, model, unit_number)")
-      .eq("user_id", userId),
-    supabase.from("fleet_purchase_orders")
-      .select("id, status", { count: "exact" })
-      .eq("user_id", userId)
-      .in("status", ["open", "partially_used"]),
-  ]);
+type FleetRequestRow = {
+  vehicle_id: string | null;
+  location_id: string | null;
+  status: string | null;
+  requested_for: string | null;
+};
 
-  const allOrders = woRes.data ?? [];
-  const completedOrders = allOrders.filter((order) => ["completed", "invoiced", "paid"].includes(order.status));
-  const totalSpend = completedOrders.reduce((sum, order) => sum + (order.total || 0), 0);
-  const vehicleCount = vehiclesRes.count ?? 0;
-  const pendingInvoices = allOrders.filter(
-    (order) => (order.invoice_status || "pending") === "pending" && order.status === "completed"
-  ).length;
+const EMPTY: FleetReportPageData = {
+  stats: {
+    totalSpend: 0,
+    vehicleCount: 0,
+    locationCount: 0,
+    avgCostPerVehicle: 0,
+    openApprovals: 0,
+    overdueVehicles: 0,
+    poOpenCount: 0,
+    invoicesPending: 0,
+  },
+  topVehicles: [],
+};
 
-  // Top vehicles by spend
-  const vehicleSpend: Record<string, FleetTopVehicleSpendItem> = {};
-  completedOrders.forEach((order) => {
-    if (!order.fleet_vehicle_id) return;
-    if (!vehicleSpend[order.fleet_vehicle_id]) {
-      vehicleSpend[order.fleet_vehicle_id] = { total: 0, vehicle: order.fleet_vehicles };
-    }
-    vehicleSpend[order.fleet_vehicle_id].total += order.total || 0;
-  });
-  const topVehicles = Object.values(vehicleSpend)
-    .sort((a, b) => b.total - a.total)
-    .slice(0, 5);
+/**
+ * Fleet monetary reporting is intentionally conservative here. Production no
+ * longer has the legacy fleet_work_orders / fleet_purchase_orders tables that
+ * previously supplied spend and PO totals, so those values remain zero rather
+ * than inventing financial truth. Operational fleet counts come from the
+ * canonical workspace-scoped service-request domain.
+ */
+export async function fetchFleetReportPageData(_userId: string): Promise<FleetReportPageData> {
+  const context = await resolveCurrentWorkspace();
+  if (!context) return EMPTY;
+
+  const { data, error } = await supabase
+    .from("fleet_service_requests")
+    .select("vehicle_id,location_id,status,requested_for")
+    .eq("workspace_id", context.workspaceId);
+  if (error) throw error;
+
+  const requests = (data ?? []) as FleetRequestRow[];
+  const vehicleIds = new Set(requests.map((row) => row.vehicle_id).filter((id): id is string => Boolean(id)));
+  const locationIds = new Set(requests.map((row) => row.location_id).filter((id): id is string => Boolean(id)));
+  const terminal = new Set(["completed", "cancelled", "closed", "voided"]);
+  const now = Date.now();
+  const open = requests.filter((row) => !terminal.has(String(row.status ?? "").toLowerCase()));
+  const overdue = open.filter((row) => row.requested_for && Date.parse(row.requested_for) < now).length;
 
   return {
     stats: {
-      totalSpend,
-      vehicleCount,
-      locationCount: locationsRes.count ?? 0,
-      avgCostPerVehicle: vehicleCount > 0 ? totalSpend / vehicleCount : 0,
-      openApprovals: 0,
-      overdueVehicles: 0,
-      poOpenCount: posRes.count ?? 0,
-      invoicesPending: pendingInvoices,
+      ...EMPTY.stats,
+      vehicleCount: vehicleIds.size,
+      locationCount: locationIds.size,
+      openApprovals: open.length,
+      overdueVehicles: overdue,
     },
-    topVehicles,
+    topVehicles: [],
   };
 }
