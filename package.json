@@ -12,7 +12,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node scripts/check-architecture-contract.mjs && node scripts/check-identity-contract.mjs",
+    "prebuild": "node scripts/check-architecture-contract.mjs && node scripts/check-identity-contract.mjs && node scripts/check-frontend-ui-contract.mjs",
     "build": "next build",
     "typecheck": "tsc --noEmit",
     "test": "jest --runInBand",
@@ -20,6 +20,7 @@
     "smoke:vercel": "node scripts/smoke-test-vercel-authenticated.mjs",
     "verify:architecture": "node scripts/check-architecture-contract.mjs",
     "verify:identity": "node scripts/check-identity-contract.mjs",
+    "verify:frontend-ui": "node scripts/check-frontend-ui-contract.mjs",
     "verify:deployment": "node scripts/verify-deployment.mjs",
     "verify:integrations": "node scripts/verify-production-integrations.mjs",
     "verify:env": "node scripts/verify-env-manifest.mjs",
