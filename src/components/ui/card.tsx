@@ -12,7 +12,7 @@ export interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
 
 const Card = React.forwardRef<HTMLDivElement, CardProps>(({ className, density = "standard", tone = "primary", ...props }, ref) => (
   <CardContext.Provider value={density}>
-    <div ref={ref} data-density={density} className={cn("rounded-lg border text-card-foreground", tone === "primary" && "bg-card shadow-sm", tone === "secondary" && "bg-muted/20 shadow-none", tone === "tertiary" && "border-transparent bg-transparent shadow-none", className)} {...props} />
+    <div ref={ref} data-density={density} className={cn("rounded-lg border border-border/80 text-card-foreground", tone === "primary" && "bg-card shadow-[var(--shadow-card)]", tone === "secondary" && "bg-muted/20 shadow-none", tone === "tertiary" && "border-transparent bg-transparent shadow-none", className)} {...props} />
   </CardContext.Provider>
 ));
 Card.displayName = "Card";
@@ -24,7 +24,7 @@ const CardHeader = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDiv
 });
 CardHeader.displayName = "CardHeader";
 
-const CardTitle = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLHeadingElement>>(({ className, ...props }, ref) => <h3 ref={ref} className={cn("text-base font-semibold leading-snug tracking-tight", className)} {...props} />);
+const CardTitle = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLHeadingElement>>(({ className, ...props }, ref) => <h3 ref={ref} className={cn("text-base font-semibold leading-snug tracking-[-0.015em]", className)} {...props} />);
 CardTitle.displayName = "CardTitle";
 const CardDescription = React.forwardRef<HTMLParagraphElement, React.HTMLAttributes<HTMLParagraphElement>>(({ className, ...props }, ref) => <p ref={ref} className={cn("text-sm text-muted-foreground", className)} {...props} />);
 CardDescription.displayName = "CardDescription";

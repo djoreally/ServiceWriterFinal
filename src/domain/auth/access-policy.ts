@@ -14,14 +14,14 @@ import type { TeamRole } from "@/hooks/useTeamRole";
 export type AccessRole = TeamRole | "customer";
 
 const ADMIN: AccessRole[] = ["admin", "owner"];
-const OFFICE: AccessRole[] = ["admin", "owner", "manager"];
-const BOARD: AccessRole[] = ["admin", "owner", "manager", "dispatcher"];
+const OFFICE: AccessRole[] = ["admin", "owner", "manager", "service_advisor", "receptionist", "viewer"];
+const BOARD: AccessRole[] = ["admin", "owner", "manager", "service_advisor", "receptionist", "dispatcher", "viewer"];
 const SCHEDULING: AccessRole[] = [...BOARD, "fleet_manager"];
-const FLEET: AccessRole[] = ["admin", "owner", "manager", "dispatcher", "fleet_manager"];
-const CRM: AccessRole[] = ["admin", "owner", "manager", "dispatcher", "fleet_manager"];
+const FLEET: AccessRole[] = ["admin", "owner", "manager", "dispatcher", "fleet_manager", "viewer"];
+const CRM: AccessRole[] = ["admin", "owner", "manager", "dispatcher", "fleet_manager", "service_advisor", "receptionist", "viewer"];
 const TECH: AccessRole[] = ["technician"];
 const CUSTOMER: AccessRole[] = ["customer"];
-const EVERYONE: AccessRole[] = ["admin", "owner", "manager", "dispatcher", "fleet_manager", "technician"];
+const EVERYONE: AccessRole[] = ["admin", "owner", "manager", "dispatcher", "fleet_manager", "technician", "service_advisor", "receptionist", "viewer"];
 
 export interface RouteAccessRule {
   /** Exact path or path prefix (matches `path` and `path/...`). */
@@ -55,8 +55,6 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
   { match: "/tech-app", roles: TECH },
 
   // --- CRM workspace ----------------------------------------------------
-  // The page performs the capability check against the canonical API. This
-  // route-level rule keeps technicians and customer accounts out of CRM URLs.
   { match: "/crm", roles: CRM },
   { match: "/settings/import", roles: ADMIN },
 
@@ -76,13 +74,11 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
   { match: "/assets", roles: ADMIN },
 
   // --- finance ----------------------------------------------------------
-  // Owner-only reporting surfaces (revenue / LTV / P&L / expenses).
   { match: "/financials", roles: ADMIN },
   { match: "/expenses", roles: ADMIN },
   { match: "/reports", roles: ADMIN },
   { match: "/operations", roles: ADMIN },
   { match: "/tax-compliance", roles: ADMIN },
-  // Office staff bill and collect, but see no reporting.
   { match: "/invoices", roles: OFFICE },
   { match: "/payments", roles: OFFICE },
   { match: "/pricing-tool", roles: OFFICE },
@@ -100,10 +96,10 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
   { match: "/customers", roles: BOARD },
   { match: "/vehicles", roles: BOARD },
   { match: "/services", roles: BOARD },
-  { match: "/quotes", roles: BOARD }, // dispatcher = read-only, see canWrite()
-  { match: "/availability", roles: BOARD }, // dispatcher = read-only
-  { match: "/service-catalog", roles: BOARD }, // dispatcher = read-only
-  { match: "/service-packages", roles: BOARD }, // dispatcher = read-only
+  { match: "/quotes", roles: BOARD },
+  { match: "/availability", roles: BOARD },
+  { match: "/service-catalog", roles: BOARD },
+  { match: "/service-packages", roles: BOARD },
   { match: "/tire-pricing", roles: ["admin"] },
   { match: "/detailing-pricing", roles: ["admin"] },
   { match: "/fleet", roles: FLEET },
@@ -114,8 +110,6 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
   { match: "/technician-os", roles: OFFICE },
 
   // --- Fleet OS ---------------------------------------------------------
-  // Dispatchers get the scheduling + board surfaces only; the commercial
-  // side of Fleet OS (contracts, invoices, POs, reports) stays with office.
   { match: "/fleet-os/scheduler", roles: FLEET },
   { match: "/fleet-os/command-center", roles: FLEET },
   { match: "/fleet-os/checkin", roles: FLEET },
@@ -129,7 +123,6 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
 const matches = (pathname: string, match: string) =>
   pathname === match || pathname.startsWith(`${match}/`);
 
-/** Strip query strings / hashes so nav paths like `/settings?tab=team` resolve. */
 function normalize(pathname: string): string {
   const clean = pathname.split("?")[0].split("#")[0];
   if (clean.length > 1 && clean.endsWith("/")) return clean.slice(0, -1);
@@ -140,15 +133,10 @@ export function canAccessRoute(role: AccessRole | null, pathname: string): boole
   if (!role) return false;
   const path = normalize(pathname);
   const rule = ROUTE_ACCESS.find((r) => matches(path, r.match));
-  // Deny by default: unlisted protected routes are owner-only.
   if (!rule) return role === "admin";
   return rule.roles.includes(role);
 }
 
-/**
- * Capability areas where a role may read but not mutate.
- * Used by pages to disable mutation controls instead of hiding data.
- */
 export type WriteArea =
   | "quotes"
   | "availability"
@@ -159,19 +147,32 @@ export type WriteArea =
   | "invoices"
   | "settings";
 
+const ALL_WRITE_AREAS: WriteArea[] = [
+  "quotes",
+  "availability",
+  "service-catalog",
+  "service-packages",
+  "appointments",
+  "customers",
+  "invoices",
+  "settings",
+];
+
 const READ_ONLY: Record<AccessRole, WriteArea[]> = {
   admin: [],
   owner: [],
   manager: ["settings"],
+  service_advisor: ["settings"],
+  receptionist: ["settings"],
   dispatcher: ["quotes", "availability", "service-catalog", "service-packages", "settings"],
   fleet_manager: ["settings", "invoices"],
   technician: ["quotes", "availability", "service-catalog", "service-packages", "customers", "invoices", "settings"],
-  customer: ["quotes", "availability", "service-catalog", "service-packages", "appointments", "customers", "invoices", "settings"],
+  viewer: ALL_WRITE_AREAS,
+  customer: ALL_WRITE_AREAS,
 };
 
 export function canWrite(role: AccessRole | null, area: WriteArea): boolean {
   if (!role) return false;
   if (READ_ONLY[role].includes(area)) return false;
-  // No read access implies no write access.
   return canAccessRoute(role, `/${area}`);
 }

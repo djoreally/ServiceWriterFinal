@@ -21,7 +21,6 @@ const vehicleUpdateSchema = z.object({
   oil_capacity: z.string().trim().max(40).nullable().optional(),
   oil_filter: z.string().trim().max(100).nullable().optional(),
   notes: z.string().max(5000).nullable().optional(),
-  status: z.enum(["active", "inactive", "sold", "archived"]).optional(),
 }).refine((body) => Object.keys(body).some((key) => key !== "workspace_id"), {
   message: "At least one vehicle field is required",
 });
@@ -51,41 +50,70 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const body = vehicleUpdateSchema.parse(await request.json());
     const id = z.string().uuid().parse((await context.params).id);
     const { supabase } = await requireWorkspaceMember(body.workspace_id, [...writeRoles], request);
-    const { workspace_id, engine, oil_type, oil_capacity, oil_filter, odometer_measure, plate_state, ...vehicleInput } = body;
 
+    if (Object.prototype.hasOwnProperty.call(body, "customer_id") && body.customer_id) {
+      const { data: customer, error: customerError } = await supabase
+        .from("customers")
+        .select("id")
+        .eq("workspace_id", body.workspace_id)
+        .eq("id", body.customer_id)
+        .neq("status", "archived")
+        .maybeSingle();
+      if (customerError) throw customerError;
+      if (!customer) throw new Error("Customer does not belong to this workspace.");
+    }
+
+    const { workspace_id, engine, oil_type, oil_capacity, oil_filter, odometer_measure, plate_state, ...vehicleInput } = body;
     const patch: Record<string, unknown> = { ...vehicleInput };
+
     if (Object.prototype.hasOwnProperty.call(body, "plate_state") && !Object.prototype.hasOwnProperty.call(body, "plate_region")) {
       patch.plate_region = plate_state ?? null;
     }
     if (Object.prototype.hasOwnProperty.call(body, "odometer_measure")) {
-      const { data: current } = await supabase
+      const { data: current, error: currentError } = await supabase
         .from("vehicles")
         .select("metadata")
         .eq("workspace_id", workspace_id)
         .eq("id", id)
         .maybeSingle();
-      const metadata = current?.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata)
+      if (currentError) throw currentError;
+      if (!current) throw new Error("Vehicle does not belong to this workspace.");
+      const metadata = current.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata)
         ? current.metadata as Record<string, unknown>
         : {};
       patch.metadata = { ...metadata, odometer_measure: odometer_measure ?? null };
     }
 
-    const { data: vehicle, error } = await supabase
-      .from("vehicles")
-      .update(patch as never)
-      .eq("id", id)
-      .eq("workspace_id", workspace_id)
-      .select()
-      .single();
-    if (error) throw error;
+    let vehicle: unknown;
+    if (Object.keys(patch).length > 0) {
+      const { data, error } = await supabase
+        .from("vehicles")
+        .update(patch as never)
+        .eq("id", id)
+        .eq("workspace_id", workspace_id)
+        .select()
+        .single();
+      if (error) throw error;
+      vehicle = data;
+    } else {
+      const { data, error } = await supabase
+        .from("vehicles")
+        .select("*")
+        .eq("id", id)
+        .eq("workspace_id", workspace_id)
+        .single();
+      if (error) throw error;
+      vehicle = data;
+    }
 
     if ([engine, oil_type, oil_capacity, oil_filter].some((value) => value !== undefined)) {
-      const { data: currentSpecs } = await supabase
+      const { data: currentSpecs, error: currentSpecsError } = await supabase
         .from("vehicle_service_specs")
         .select("engine,oil_type,oil_capacity,oil_filter,metadata")
         .eq("workspace_id", workspace_id)
         .eq("vehicle_id", id)
         .maybeSingle();
+      if (currentSpecsError) throw currentSpecsError;
       const { error: specsError } = await supabase.from("vehicle_service_specs").upsert({
         workspace_id,
         vehicle_id: id,
@@ -109,13 +137,25 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   try {
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
     const id = z.string().uuid().parse((await context.params).id);
-    const { supabase } = await requireWorkspaceMember(workspaceId, [...writeRoles], request);
-    const { data, error } = await supabase
+    const { supabase, user } = await requireWorkspaceMember(workspaceId, [...writeRoles], request);
+    const { data: current, error: currentError } = await supabase
       .from("vehicles")
-      .update({ status: "archived" } as never)
+      .select("id,metadata")
       .eq("id", id)
       .eq("workspace_id", workspaceId)
-      .select("id,status")
+      .maybeSingle();
+    if (currentError) throw currentError;
+    if (!current) throw new Error("Vehicle does not belong to this workspace.");
+    const metadata = current.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata)
+      ? current.metadata as Record<string, unknown>
+      : {};
+    const archivedAt = new Date().toISOString();
+    const { data, error } = await supabase
+      .from("vehicles")
+      .update({ metadata: { ...metadata, archived_at: archivedAt, archived_by: user.id } } as never)
+      .eq("id", id)
+      .eq("workspace_id", workspaceId)
+      .select("id,metadata")
       .single();
     if (error) throw error;
     return json({ data });

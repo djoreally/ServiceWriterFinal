@@ -1,214 +1,111 @@
-import { useState, useEffect } from "react";
-import { fetchStripeConnectStatus, startStripeConnectOnboarding, type StripeConnectStatus } from "@/application/queries/stripe-connect.query";
+import { useEffect, useState } from "react";
+import { CreditCard, CheckCircle2, AlertCircle, ExternalLink, Loader2, KeyRound } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, CreditCard, CheckCircle2, AlertCircle, ExternalLink } from "lucide-react";
-import { toast } from "@/components/ui/sonner";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { toast } from "@/components/ui/sonner";
+import { configureStripeDirect, disconnectStripeDirect, fetchStripeDirectStatus, type StripeDirectStatus } from "@/application/queries/stripe-direct.query";
+import { useSubscription } from "@/contexts/SubscriptionContext";
+
+const emptyDirect: StripeDirectStatus = {
+  mode: "connect", configured: false, accountId: null, keyLast4: null,
+  chargesEnabled: false, payoutsEnabled: false, detailsSubmitted: false,
+  webhookConfigured: false, checkedAt: null,
+};
 
 export const StripeConnectCard = () => {
+  const { hasFeature } = useSubscription();
+  const paymentsEnabled = hasFeature("has_stripe_payments");
   const [loading, setLoading] = useState(true);
-  const [connecting, setConnecting] = useState(false);
-  const [status, setStatus] = useState<StripeConnectStatus>({
-    connected: false,
-    chargesEnabled: false,
-    payoutsEnabled: false,
-    detailsSubmitted: false,
-  });
+  const [saving, setSaving] = useState(false);
+  const [directStatus, setDirectStatus] = useState<StripeDirectStatus>(emptyDirect);
+  const [accountId, setAccountId] = useState("");
+  const [secretKey, setSecretKey] = useState("");
+  const [webhookSecret, setWebhookSecret] = useState("");
 
-  const fetchStatus = async () => {
-    try {
-      const data = await fetchStripeConnectStatus();
-      setStatus(data);
-    } catch (error) {
-      console.error("Error fetching Stripe status:", error);
-    } finally {
-      setLoading(false);
-    }
+  const refresh = async () => {
+    setLoading(true);
+    try { setDirectStatus(await fetchStripeDirectStatus()); }
+    catch { setDirectStatus(emptyDirect); }
+    finally { setLoading(false); }
   };
 
-  useEffect(() => {
-    void Promise.resolve().then(() => fetchStatus());
+  useEffect(() => { void refresh(); }, []);
 
-    if (typeof window !== 'undefined') {
-      try {
-        const params = new URLSearchParams(window.location.search);
-        if (params.get("stripe_success") === "true") {
-          toast.success("Stripe account setup in progress! Status will update shortly.");
-          window.history.replaceState({}, "", window.location.pathname);
-          void Promise.resolve().then(() => setTimeout(fetchStatus, 2000));
-        } else if (params.get("stripe_refresh") === "true") {
-          toast.info("Please complete your Stripe account setup.");
-          window.history.replaceState({}, "", window.location.pathname);
-        }
-      } catch (e) {
-        // ignore URL parsing errors in non-browser environments
-      }
+  const handleDirectSave = async () => {
+    if (!accountId.trim() || !secretKey.trim() || !webhookSecret.trim()) {
+      toast.error("Enter the Stripe account ID, secret API key, and webhook signing secret");
+      return;
     }
-  }, []);
-
-  /** Start onboarding — creates a new Standard account + Account Link */
-  const handleConnectStripe = async (mode: "create" | "oauth" = "create") => {
-    setConnecting(true);
+    setSaving(true);
     try {
-      const url = await startStripeConnectOnboarding(mode);
-      if (typeof window !== 'undefined') {
-        window.location.href = url;
-      }
+      const status = await configureStripeDirect(accountId.trim(), secretKey.trim(), webhookSecret.trim());
+      setDirectStatus(status);
+      setAccountId(""); setSecretKey(""); setWebhookSecret("");
+      toast.success("Stripe connected. Shop payments will run directly through your Stripe account.");
     } catch (error) {
-      console.error("Error connecting to Stripe:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to connect to Stripe");
-    } finally {
-      setConnecting(false);
-    }
+      toast.error(error instanceof Error ? error.message : "Failed to configure Stripe");
+    } finally { setSaving(false); }
   };
 
-  if (loading) {
+  const handleDisconnect = async () => {
+    setSaving(true);
+    try {
+      const status = await disconnectStripeDirect();
+      setDirectStatus(status);
+      toast.success("Stripe disconnected from shop payments");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to disconnect Stripe");
+    } finally { setSaving(false); }
+  };
+
+  if (loading) return <Card><CardHeader><CardTitle className="flex items-center gap-2"><CreditCard className="h-5 w-5" />Stripe Payments</CardTitle></CardHeader><CardContent className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin" /></CardContent></Card>;
+
+  if (!paymentsEnabled) {
     return (
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <CreditCard className="h-5 w-5" />
-            Payment Processing
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin text-primary" />
-          </div>
+        <CardHeader><CardTitle className="flex items-center gap-2"><CreditCard className="h-5 w-5" />Stripe Payments</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          <Badge variant="secondary">Stripe plan required</Badge>
+          <p className="text-sm text-muted-foreground">The Free plan does not include payment processing. Upgrade to the Stripe plan to connect your own Stripe account. Service Writer takes 0% of your shop transactions.</p>
+          <Button variant="outline" onClick={() => { window.location.href = "/plans"; }}>View Stripe Plan</Button>
         </CardContent>
       </Card>
     );
   }
 
+  const directActive = directStatus.mode === "direct" && directStatus.configured;
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <CreditCard className="h-5 w-5" />
-          Payment Processing
-        </CardTitle>
-        <p className="text-sm text-muted-foreground">
-          Connect your Stripe account to accept deposits and payments from customers
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div><CardTitle className="flex items-center gap-2"><CreditCard className="h-5 w-5" />Stripe Payments</CardTitle><p className="mt-1 text-sm text-muted-foreground">Connect your Stripe account. Payments settle directly to you; Service Writer takes 0% per transaction.</p></div>
+          <Badge variant={directActive ? "default" : "secondary"}>{directActive ? "Connected" : "Not connected"}</Badge>
+        </div>
       </CardHeader>
-      <CardContent className="space-y-4">
-        {!status.connected ? (
-          <div className="space-y-4">
-            <div className="bg-muted/50 rounded-lg p-4 space-y-2">
-              <p className="text-sm">Connect with Stripe to:</p>
-              <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
-                <li>Accept deposits when customers book appointments</li>
-                <li>Process payments securely</li>
-                <li>Get paid directly to your bank account</li>
-                <li>Full access to your Stripe Dashboard</li>
-              </ul>
+      <CardContent className="space-y-5">
+        {directActive ? (
+          <div className="space-y-3">
+            <div className="rounded-md bg-muted/50 p-3 text-sm space-y-2">
+              <div className="flex justify-between gap-3"><span>Stripe account</span><span className="font-mono">{directStatus.accountId}</span></div>
+              <div className="flex justify-between gap-3"><span>API key</span><span className="font-mono">••••{directStatus.keyLast4}</span></div>
+              <div className="flex items-center gap-2">{directStatus.chargesEnabled ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}<span>Charges {directStatus.chargesEnabled ? "enabled" : "not enabled"}</span></div>
+              <div className="flex items-center gap-2">{directStatus.webhookConfigured ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}<span>Payment reconciliation {directStatus.webhookConfigured ? "ready" : "needs webhook secret"}</span></div>
             </div>
-
-            {/* Primary: Create new Stripe account */}
-            <Button onClick={() => handleConnectStripe("create")} disabled={connecting} className="gap-2 w-full">
-              {connecting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <CreditCard className="h-4 w-4" />
-              )}
-              Create & Connect Stripe Account
-            </Button>
-
-            {/* Secondary: Connect existing account */}
-            <Button
-              onClick={() => handleConnectStripe("oauth")}
-              disabled={connecting}
-              variant="outline"
-              className="gap-2 w-full"
-            >
-              <ExternalLink className="h-4 w-4" />
-              Connect Existing Stripe Account
-            </Button>
+            <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => window.open("https://dashboard.stripe.com", "_blank")}><ExternalLink className="mr-2 h-4 w-4" />Open Stripe</Button><Button variant="outline" onClick={handleDisconnect} disabled={saving}>Disconnect</Button></div>
           </div>
         ) : (
-          <div className="space-y-4">
-            <div className="bg-muted/50 rounded-lg p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">Stripe Account</span>
-                <Badge variant={status.detailsSubmitted ? "default" : "secondary"}>
-                  {status.detailsSubmitted ? "Connected" : "Pending"}
-                </Badge>
-              </div>
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-sm">
-                  {status.chargesEnabled ? (
-                    <CheckCircle2 className="h-4 w-4 text-gray-600" />
-                  ) : (
-                    <AlertCircle className="h-4 w-4 text-amber-500" />
-                  )}
-                  <span className={status.chargesEnabled ? "text-foreground" : "text-muted-foreground"}>
-                    Accept Payments
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                  {status.payoutsEnabled ? (
-                    <CheckCircle2 className="h-4 w-4 text-gray-600" />
-                  ) : (
-                    <AlertCircle className="h-4 w-4 text-amber-500" />
-                  )}
-                  <span className={status.payoutsEnabled ? "text-foreground" : "text-muted-foreground"}>
-                    Receive Payouts
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {!status.detailsSubmitted && (
-              <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-4 space-y-3">
-                <div className="flex items-start gap-2">
-                  <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Complete Your Setup</p>
-                    <p className="text-sm text-amber-700 dark:text-amber-300">
-                      Finish setting up your Stripe account to start accepting payments.
-                    </p>
-                  </div>
-                </div>
-                <Button onClick={() => handleConnectStripe("create")} disabled={connecting} variant="outline" className="gap-2">
-                  {connecting ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <ExternalLink className="h-4 w-4" />
-                  )}
-                  Continue Setup
-                </Button>
-              </div>
-            )}
-
-            {status.detailsSubmitted && status.chargesEnabled && (
-              <div className="bg-green-50 dark:bg-green-950/30 border border-gray-200 dark:border-green-800 rounded-lg p-4">
-                <div className="flex items-start gap-2">
-                  <CheckCircle2 className="h-5 w-5 text-gray-600 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium text-gray-800 dark:text-green-200">
-                      Ready to Accept Payments
-                    </p>
-                    <p className="text-sm text-gray-700 dark:text-green-300">
-                      Your account is fully set up. Customers can now pay deposits when booking.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* ⚡ Standard accounts: link to full Stripe Dashboard (not Express login) */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => window.open("https://dashboard.stripe.com", "_blank")}
-              className="gap-2"
-            >
-              <ExternalLink className="h-4 w-4" />
-              Open Stripe Dashboard
-            </Button>
+          <div className="rounded-lg border p-4 space-y-4">
+            <div className="flex items-start gap-3"><KeyRound className="h-5 w-5 mt-0.5" /><div><p className="font-medium">Connect your Stripe account</p><p className="text-sm text-muted-foreground">Your credentials are validated server-side and encrypted. They are never returned to the browser after saving.</p></div></div>
+            <div className="space-y-2"><Label htmlFor="stripe-account-id">Stripe account ID</Label><Input id="stripe-account-id" autoComplete="off" value={accountId} onChange={(e) => setAccountId(e.target.value)} placeholder="acct_…" /></div>
+            <div className="space-y-2"><Label htmlFor="stripe-secret-key">Stripe secret API key</Label><Input id="stripe-secret-key" type="password" autoComplete="off" value={secretKey} onChange={(e) => setSecretKey(e.target.value)} placeholder="sk_live_…" /></div>
+            <div className="space-y-2"><Label htmlFor="stripe-webhook-secret">Webhook signing secret</Label><Input id="stripe-webhook-secret" type="password" autoComplete="off" value={webhookSecret} onChange={(e) => setWebhookSecret(e.target.value)} placeholder="whsec_…" /></div>
+            <Button onClick={handleDirectSave} disabled={saving} className="w-full sm:w-auto">{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Connect Stripe</Button>
           </div>
         )}
+        <p className="text-xs text-muted-foreground">Service Writer Marketplace payments use separate marketplace infrastructure and are not routed through this shop connection.</p>
       </CardContent>
     </Card>
   );

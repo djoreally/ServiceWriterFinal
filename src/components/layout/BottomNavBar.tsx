@@ -1,6 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { Home, CalendarDays, Users, Settings, Zap, MessageSquare, Truck } from "lucide-react";
+import { Home, CalendarDays, Users, Zap, MessageSquare, Truck } from "lucide-react";
 import { useTeamRole } from "@/hooks/useTeamRole";
 
 type BottomNavItem = {
@@ -14,7 +14,6 @@ const adminItems: BottomNavItem[] = [
   { path: "/appointments", label: "Schedule", icon: CalendarDays },
   { path: "/customers", label: "Clients", icon: Users },
   { path: "/fleet-os", label: "Fleet OS", icon: Truck },
-  { path: "/settings", label: "Settings", icon: Settings },
 ];
 
 const managerItems: BottomNavItem[] = [
@@ -48,7 +47,7 @@ export const BottomNavBar = () => {
 
   return (
     <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-card border-t border-border/50 shadow-t-lg pb-[env(safe-area-inset-bottom)]" data-app-bottomnav>
-      <div className={cn("grid h-[var(--mobile-nav-height)]", navItems.length === 5 ? "grid-cols-5" : "grid-cols-4")}>
+      <div className={cn("grid h-[var(--mobile-nav-height)]", navItems.length === 5 ? "grid-cols-5" : navItems.length === 4 ? "grid-cols-4" : "grid-cols-3")}>
         {navItems.map((item) => {
           const Icon = item.icon;
           const active = isActive(item.path);

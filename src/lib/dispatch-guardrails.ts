@@ -1,8 +1,4 @@
-/**
- * Dispatch Guardrails — Pre-assignment validation for the dispatch system.
- * Prevents overbooking, time conflicts, and unrealistic assignments.
- */
-
+/** Dispatch Guardrails — canonical appointment schema. */
 import { supabase } from "@/integrations/supabase/client";
 import { findScheduleConflict, wouldExceedCapacity, type ScheduleSlot } from "./dispatch-state";
 
@@ -12,86 +8,53 @@ export interface AssignmentValidation {
   errors: string[];
 }
 
-/**
- * Validate whether a job can be assigned to a technician.
- * Checks: time conflicts, capacity, and basic availability.
- */
 export async function validateAssignment(
   technicianId: string,
   jobDate: string,
   jobTime: string,
   jobDurationMinutes: number,
-  excludeAppointmentId?: string
+  excludeAppointmentId?: string,
 ): Promise<AssignmentValidation> {
   const errors: string[] = [];
   const warnings: string[] = [];
+  const db = supabase as any;
 
-  // 1. Fetch technician info
-  const { data: tech } = await supabase
-    .from("technicians")
-    .select("name, status, max_daily_capacity_hours, is_active")
+  const { data: tech, error: techError } = await db.from("technicians")
+    .select("name,status,max_daily_capacity_hours,is_active,auth_user_id")
     .eq("id", technicianId)
-    .single();
+    .maybeSingle();
+  if (techError) throw techError;
+  if (!tech) return { valid: false, errors: ["Technician not found"], warnings: [] };
+  if (!tech.is_active) errors.push(`${tech.name} is not active`);
+  if (!tech.auth_user_id) errors.push(`${tech.name} is not linked to an authenticated workspace user`);
 
-  if (!tech) {
-    return { valid: false, errors: ["Technician not found"], warnings: [] };
-  }
+  const dayStart = new Date(`${jobDate}T00:00:00.000Z`);
+  const dayEnd = new Date(dayStart.getTime() + 86400000);
+  let query = db.from("appointments")
+    .select("id,starts_at,ends_at,status")
+    .eq("assigned_user_id", tech.auth_user_id)
+    .gte("starts_at", dayStart.toISOString())
+    .lt("starts_at", dayEnd.toISOString())
+    .not("status", "in", '("cancelled","completed","no_show")');
+  if (excludeAppointmentId) query = query.neq("id", excludeAppointmentId);
+  const { data: existingJobs, error: jobsError } = await query;
+  if (jobsError) throw jobsError;
 
-  if (!tech.is_active) {
-    errors.push(`${tech.name} is not active`);
-  }
-
-  // 2. Fetch existing assignments for the day
-  let query = supabase
-    .from("appointments")
-    .select("id, scheduled_time, estimated_duration_minutes, duration_minutes")
-    .eq("assigned_technician_id", technicianId)
-    .eq("scheduled_date", jobDate)
-    .not("status", "in", '("cancelled","completed")')
-    .not("dispatch_status", "in", '("cancelled","completed")');
-
-  if (excludeAppointmentId) {
-    query = query.neq("id", excludeAppointmentId);
-  }
-
-  const { data: existingJobs } = await query;
-
-  const slots: ScheduleSlot[] = (existingJobs ?? []).map((j) => ({
-    scheduledTime: j.scheduled_time?.substring(0, 5) ?? "09:00",
-    durationMinutes: j.estimated_duration_minutes || j.duration_minutes || 60,
+  const slots: ScheduleSlot[] = (existingJobs ?? []).map((row: any) => ({
+    scheduledTime: row.starts_at?.slice(11, 16) ?? "09:00",
+    durationMinutes: row.starts_at && row.ends_at
+      ? Math.max(5, Math.round((Date.parse(row.ends_at) - Date.parse(row.starts_at)) / 60000))
+      : 60,
   }));
-
-  // 3. Check time conflicts
-  const proposed: ScheduleSlot = {
-    scheduledTime: jobTime.substring(0, 5),
-    durationMinutes: jobDurationMinutes || 60,
-  };
-
+  const proposed: ScheduleSlot = { scheduledTime: jobTime.substring(0, 5), durationMinutes: jobDurationMinutes || 60 };
   const conflict = findScheduleConflict(slots, proposed, 15);
-  if (conflict) {
-    errors.push(
-      `Time conflict: overlaps with existing job at ${conflict.scheduledTime} (${conflict.durationMinutes}min)`
-    );
-  }
+  if (conflict) errors.push(`Time conflict: overlaps with existing job at ${conflict.scheduledTime} (${conflict.durationMinutes}min)`);
 
-  // 4. Check capacity
-  const totalExistingMinutes = slots.reduce((sum, s) => sum + s.durationMinutes, 0);
+  const totalExistingMinutes = slots.reduce((sum, slot) => sum + slot.durationMinutes, 0);
   const maxHours = tech.max_daily_capacity_hours ?? 8;
-
   if (wouldExceedCapacity(totalExistingMinutes / 60, jobDurationMinutes, maxHours)) {
-    warnings.push(
-      `${tech.name} would be at ${((totalExistingMinutes + jobDurationMinutes) / 60).toFixed(1)}h / ${maxHours}h capacity`
-    );
+    warnings.push(`${tech.name} would be at ${((totalExistingMinutes + jobDurationMinutes) / 60).toFixed(1)}h / ${maxHours}h capacity`);
   }
-
-  // 5. Status warning
-  if (tech.status === "offline" || tech.status === "unavailable") {
-    warnings.push(`${tech.name} is currently ${tech.status}`);
-  }
-
-  return {
-    valid: errors.length === 0,
-    warnings,
-    errors,
-  };
+  if (tech.status === "offline" || tech.status === "unavailable") warnings.push(`${tech.name} is currently ${tech.status}`);
+  return { valid: errors.length === 0, warnings, errors };
 }

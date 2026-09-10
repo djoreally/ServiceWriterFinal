@@ -18,6 +18,12 @@ function localDateTime(iso: string): { date: string; time: string } {
   const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value || "";
   return { date: `${get("year")}-${get("month")}-${get("day")}`, time: `${get("hour")}:${get("minute")}` };
 }
+function bookingOilSnapshot(metadata: Record<string, unknown>): Record<string, unknown> {
+  const configuration = object(metadata.booking_configuration);
+  const vehicles = Array.isArray(configuration.vehicles) ? configuration.vehicles : [];
+  const first = vehicles.find((entry) => object(entry).oil) ?? vehicles[0];
+  return object(object(first).oil);
+}
 
 export async function fetchAppointmentWithRelations(id: string, _userId: string) {
   const context = await resolveCurrentWorkspace();
@@ -27,6 +33,7 @@ export async function fetchAppointmentWithRelations(id: string, _userId: string)
     const row = response.data as Record<string, any> | null;
     if (!row) return { data: null, error: new Error("Appointment not found.") };
     const metadata = object(row.metadata);
+    const bookingOil = bookingOilSnapshot(metadata);
     const customerRow = one<Record<string, any>>(row.customers);
     const vehicleRow = one<Record<string, any>>(row.vehicles);
     const startsAt = String(row.starts_at || "");
@@ -41,11 +48,27 @@ export async function fetchAppointmentWithRelations(id: string, _userId: string)
       address: [customerRow.address_line1, customerRow.address_line2, customerRow.city, customerRow.region, customerRow.postal_code].filter(Boolean).join(", "),
       notes: customerRow.notes ?? undefined,
     } : null;
+
+    let vehicleSpecs: Record<string, any> | null = null;
+    if (vehicleRow?.id) {
+      const specs = await db.from("vehicle_service_specs")
+        .select("engine,oil_type,oil_capacity,oil_filter,metadata")
+        .eq("workspace_id", context.workspaceId)
+        .eq("vehicle_id", vehicleRow.id)
+        .maybeSingle();
+      if (specs.error) throw specs.error;
+      vehicleSpecs = specs.data ?? null;
+    }
+
     const vehicle = vehicleRow ? {
       id: vehicleRow.id, customer_id: vehicleRow.customer_id ?? undefined, year: Number(vehicleRow.year || new Date().getFullYear()),
       make: vehicleRow.make || "Unknown", model: vehicleRow.model || "Unknown", vin: vehicleRow.vin ?? undefined,
       license_plate: vehicleRow.license_plate ?? undefined, plate_state: vehicleRow.plate_region ?? undefined,
       color: vehicleRow.color ?? undefined, mileage: vehicleRow.mileage ?? undefined, notes: vehicleRow.notes ?? undefined,
+      engine: vehicleSpecs?.engine ?? text(bookingOil.engine) ?? undefined,
+      oil_type: vehicleSpecs?.oil_type ?? text(bookingOil.oilType) ?? undefined,
+      oil_capacity: vehicleSpecs?.oil_capacity ?? text(bookingOil.oilCapacity) ?? undefined,
+      oil_filter: vehicleSpecs?.oil_filter ?? text(bookingOil.oilFilter) ?? undefined,
     } : null;
 
     const serviceCatalogId = text(metadata.service_catalog_id);
@@ -72,7 +95,7 @@ export async function fetchAppointmentWithRelations(id: string, _userId: string)
   } catch (error) { return { data: null, error }; }
 }
 
-/** Specs are keyed by vehicle_id in the canonical schema; detail data remains valid when no cached spec is resolved here. */
+/** Legacy compatibility fallback. Canonical appointment detail resolves specs by vehicle_id and booking snapshot above. */
 export async function fetchVehicleSpecs(_make: string, _model: string, _year: string | number) { return { data: null, error: null }; }
 
 export async function fetchCustomerAddressByGuestEmail(email: string, _userId: string) {

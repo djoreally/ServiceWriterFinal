@@ -18,7 +18,7 @@ export default function NextClientShell() {
     <React.StrictMode>
       <ErrorBoundary>
         <AuthProvider authStateSource={supabase.auth}>
-          <ThemeProvider defaultTheme="light" storageKey="servicewriter-ui-theme">
+          <ThemeProvider defaultTheme="system" storageKey="servicewriter-ui-theme">
             <App />
             <GDPRConsentBanner />
           </ThemeProvider>

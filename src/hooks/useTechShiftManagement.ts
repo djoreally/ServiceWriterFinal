@@ -1,19 +1,15 @@
 /**
  * Tech Shift Management Hook — Enterprise shift operations
- * 
- * Handles all shift-related state and operations:
- * - Clock in/out with location tracking
- * - Break management
- * - Performance tracking
- * - Compliance monitoring
+ *
+ * Canonical appointment metrics use assigned_user_id + starts_at + status.
  */
 
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { format, differenceInMinutes, parseISO } from 'date-fns';
+import { differenceInMinutes, parseISO, startOfDay, endOfDay } from 'date-fns';
 import { useRealTimeTechStatus } from './useRealTimeTechStatus';
-
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
+
 export interface ShiftData {
   id: string;
   clock_in: string;
@@ -39,17 +35,16 @@ export function useTechShiftManagement(technician_id?: string) {
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(new Date());
 
-  const { 
-    handleClockIn, 
-    handleClockOut, 
-    handleStartBreak, 
+  const {
+    handleClockIn,
+    handleClockOut,
+    handleStartBreak,
     handleEndBreak,
-    state: techState 
+    state: techState,
   } = useRealTimeTechStatus(technician_id);
 
-  // ⚡ Live time ticker for shift duration
   useEffect(() => {
-    const interval = setInterval(() => setNow(new Date()), 30000); // 30s updates
+    const interval = setInterval(() => setNow(new Date()), 30000);
     return () => clearInterval(interval);
   }, []);
 
@@ -59,10 +54,11 @@ export function useTechShiftManagement(technician_id?: string) {
     const { data: { user } } = await getCurrentAuthUser();
     if (!user) return;
 
-    const today = format(new Date(), 'yyyy-MM-dd');
+    const dayStart = startOfDay(new Date()).toISOString();
+    const dayEnd = endOfDay(new Date()).toISOString();
+    const appointments = supabase as any;
 
     const [shiftRes, jobsRes, completedRes] = await Promise.all([
-      // Current active shift
       supabase
         .from('time_clock_entries')
         .select('*')
@@ -71,41 +67,41 @@ export function useTechShiftManagement(technician_id?: string) {
         .order('clock_in', { ascending: false })
         .limit(1)
         .maybeSingle(),
-      
-      // Today's job metrics
-      supabase
+      appointments
         .from('appointments')
-        .select('id, dispatch_status, estimated_duration_minutes', { count: 'exact' })
-        .eq('assigned_technician_id', technician_id)
-        .eq('scheduled_date', today)
-        .not('dispatch_status', 'eq', 'cancelled'),
-
-      // Completed jobs today
-      supabase
+        .select('id,status,starts_at,ends_at,metadata', { count: 'exact' })
+        .eq('assigned_user_id', user.id)
+        .gte('starts_at', dayStart)
+        .lte('starts_at', dayEnd)
+        .neq('status', 'cancelled'),
+      appointments
         .from('appointments')
         .select('id', { count: 'exact' })
-        .eq('assigned_technician_id', technician_id)
-        .eq('scheduled_date', today)
-        .eq('dispatch_status', 'completed'),
+        .eq('assigned_user_id', user.id)
+        .gte('starts_at', dayStart)
+        .lte('starts_at', dayEnd)
+        .eq('status', 'completed'),
     ]);
+
+    if (shiftRes.error) throw shiftRes.error;
+    if (jobsRes.error) throw jobsRes.error;
+    if (completedRes.error) throw completedRes.error;
 
     setShift(shiftRes.data as ShiftData | null);
 
-    // Calculate metrics
     const totalJobs = jobsRes.count || 0;
     const completedJobs = completedRes.count || 0;
-    const remainingJobs = totalJobs - completedJobs;
+    const remainingJobs = Math.max(0, totalJobs - completedJobs);
 
     let hoursToday = 0;
     if (shiftRes.data && shiftRes.data.status !== 'completed') {
       const shiftMinutes = differenceInMinutes(now, parseISO(shiftRes.data.clock_in));
       const breakMinutes = shiftRes.data.break_duration_minutes || 0;
-      hoursToday = (shiftMinutes - breakMinutes) / 60;
+      hoursToday = Math.max(0, (shiftMinutes - breakMinutes) / 60);
     } else if (shiftRes.data?.total_hours) {
       hoursToday = shiftRes.data.total_hours;
     }
 
-    // Efficiency: jobs completed per hour
     const efficiencyScore = hoursToday > 0 ? (completedJobs / hoursToday) * 100 : 0;
 
     setMetrics({
@@ -123,14 +119,13 @@ export function useTechShiftManagement(technician_id?: string) {
     void Promise.resolve().then(() => fetchShiftData());
   }, [fetchShiftData]);
 
-  // ⚡ Enterprise shift transition methods
   const clockIn = async () => {
     try {
       const location = await getCurrentLocation();
       await handleClockIn(location);
       await fetchShiftData();
-    } catch (err) {
-      await handleClockIn(); // Fallback without location
+    } catch {
+      await handleClockIn();
       await fetchShiftData();
     }
   };
@@ -140,8 +135,8 @@ export function useTechShiftManagement(technician_id?: string) {
       const location = await getCurrentLocation();
       await handleClockOut(location);
       await fetchShiftData();
-    } catch (err) {
-      await handleClockOut(); // Fallback without location
+    } catch {
+      await handleClockOut();
       await fetchShiftData();
     }
   };
@@ -162,19 +157,14 @@ export function useTechShiftManagement(technician_id?: string) {
         reject(new Error('Geolocation not supported'));
         return;
       }
-
       navigator.geolocation.getCurrentPosition(
-        (position) => resolve({
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-        }),
+        (position) => resolve({ lat: position.coords.latitude, lng: position.coords.longitude }),
         reject,
-        { enableHighAccuracy: true, timeout: 10000 }
+        { enableHighAccuracy: true, timeout: 10000 },
       );
     });
   };
 
-  // Calculate live shift duration
   const shiftDuration = shift && shift.status !== 'completed'
     ? differenceInMinutes(now, parseISO(shift.clock_in)) - (shift.break_duration_minutes || 0)
     : shift?.total_hours ? shift.total_hours * 60 : 0;
@@ -187,11 +177,9 @@ export function useTechShiftManagement(technician_id?: string) {
     metrics,
     loading,
     techState,
-    // Live shift display
     shiftHours,
     shiftMinutes,
     shiftDuration,
-    // Enterprise shift operations
     clockIn,
     clockOut,
     startBreak,

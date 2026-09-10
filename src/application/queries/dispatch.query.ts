@@ -1,13 +1,12 @@
-/**
- * Dispatch Query - Fetches data for the DispatchBoard component.
- */
-
+/** Dispatch Query - canonical workspace technicians + operational jobs. */
 import { supabase } from "@/integrations/supabase/client";
 import { addDays, format } from "date-fns";
 import { fetchOperationalJobsByDate, fetchOperationalJobsByDateRange, fetchAllUpcomingOperationalJobs, type OperationalJobRow } from "./operational-jobs.query";
-
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+
+const db = supabase as any;
+
 export interface DispatchTechnician {
   id: string;
   name: string;
@@ -56,75 +55,101 @@ export interface DispatchBoardData {
   inventoryCount: number;
 }
 
-/** Fetch all dispatch board data for a given date. */
+function location(value: unknown): { lat: number; lng: number } | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const lat = Number(record.lat);
+  const lng = Number(record.lng);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+}
+
 export async function fetchDispatchBoardData(selectedDate: Date, viewMode: "day" | "week" | "all" = "day"): Promise<DispatchBoardData> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("Not authenticated");
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("Select a workspace before opening dispatch.");
 
   const dateStr = format(selectedDate, "yyyy-MM-dd");
   const endDateStr = format(addDays(selectedDate, 6), "yyyy-MM-dd");
-
-  const [techRes, vanRes, jobRes, invRes, terrRes] = await Promise.all([
-    supabase.from("technicians").select("*").eq("is_active", true).order("name"),
-    supabase.from("vans").select("id, name, status, assigned_technician_id")
-      .eq("user_id", user.id).eq("is_active", true).order("name"),
+  const [membersRes, presenceRes, jobRes] = await Promise.all([
+    db
+      .from("workspace_members")
+      .select("user_id,role,is_active,profiles!workspace_members_user_id_fkey(display_name,phone,avatar_url)")
+      .eq("workspace_id", context.workspaceId)
+      .eq("is_active", true)
+      .in("role", ["technician", "owner", "manager"]),
+    db
+      .from("technician_presence")
+      .select("user_id,status,current_location,last_seen_at")
+      .eq("workspace_id", context.workspaceId),
     viewMode === "all"
       ? fetchAllUpcomingOperationalJobs(user.id)
       : viewMode === "week"
         ? fetchOperationalJobsByDateRange(user.id, dateStr, endDateStr)
         : fetchOperationalJobsByDate(user.id, dateStr),
-    supabase.from("van_inventory").select("id", { count: "exact", head: true }),
-    supabase.from("van_territories").select("van_id"),
   ]);
+  if (membersRes.error) throw membersRes.error;
+  if (presenceRes.error) throw presenceRes.error;
+  if (jobRes.error) throw jobRes.error;
 
-  // Enrich vans with territory counts
-  const terrMap = new Map<string, number>();
-  (terrRes.data ?? []).forEach((t: any) =>
-    terrMap.set(t.van_id, (terrMap.get(t.van_id) || 0) + 1)
-  );
-  const vans = (vanRes.data ?? []).map((v: any) => ({
-    ...v,
-    territory_count: terrMap.get(v.id) || 0,
-  })) as DispatchVan[];
+  const presenceByUser = new Map((presenceRes.data ?? []).map((row: any) => [row.user_id, row]));
+  const technicians: DispatchTechnician[] = (membersRes.data ?? []).map((member: any) => {
+    const profile = Array.isArray(member.profiles) ? member.profiles[0] : member.profiles;
+    const presence = presenceByUser.get(member.user_id) as any;
+    const status = presence?.status === "on_job" || presence?.status === "en_route"
+      ? "on_job"
+      : presence?.status === "on_break"
+        ? "on_break"
+        : presence?.status === "available"
+          ? "available"
+          : presence?.status === "unavailable"
+            ? "busy"
+            : "offline";
+    return {
+      id: member.user_id,
+      name: profile?.display_name || "Technician",
+      email: null,
+      phone: profile?.phone ?? null,
+      avatar_url: profile?.avatar_url ?? null,
+      status,
+      skills: [],
+      current_location: location(presence?.current_location),
+      last_location_update: presence?.last_seen_at ?? null,
+      max_jobs_per_day: 8,
+    };
+  });
 
   return {
-    technicians: (techRes.data ?? []) as unknown as DispatchTechnician[],
-    vans,
-    jobs: ((jobRes.data ?? []) as OperationalJobRow[])
-      .map((job) => ({
-        id: job.job_id,
-        source: job.source,
-        title: job.title,
-        scheduled_date: job.scheduled_date,
-        scheduled_time: job.scheduled_time,
-        status: job.status ?? "pending",
-        dispatch_status: job.dispatch_status ?? "unassigned",
-        job_priority: job.job_priority ?? "normal",
-        estimated_duration_minutes: job.estimated_duration_minutes ?? job.duration_minutes,
-        assigned_technician_id: job.assigned_technician_id,
-        assigned_van_id: job.assigned_van_id,
-        assigned_at: job.assigned_at,
-        dispatch_notes: job.dispatch_notes,
-        customer: job.customer_name ? { name: job.customer_name, phone: job.customer_phone ?? null } : null,
-        vehicle: job.vehicle_year || job.vehicle_make || job.vehicle_model
-          ? {
-              year: job.vehicle_year ?? 0,
-              make: job.vehicle_make ?? "",
-              model: job.vehicle_model ?? "",
-            }
-          : null,
-        service_catalog: job.service_catalog_name ? { name: job.service_catalog_name } : null,
-        guest_name: job.guest_name,
-      })),
-    inventoryCount: invRes.count || 0,
+    technicians,
+    vans: [],
+    jobs: ((jobRes.data ?? []) as OperationalJobRow[]).map((job) => ({
+      id: job.job_id,
+      source: job.source,
+      title: job.title,
+      scheduled_date: job.scheduled_date,
+      scheduled_time: job.scheduled_time,
+      status: job.status ?? "pending",
+      dispatch_status: job.dispatch_status ?? "unassigned",
+      job_priority: job.job_priority ?? "normal",
+      estimated_duration_minutes: job.estimated_duration_minutes ?? job.duration_minutes,
+      assigned_technician_id: job.assigned_technician_id,
+      assigned_van_id: null,
+      assigned_at: job.assigned_at,
+      dispatch_notes: job.dispatch_notes,
+      customer: job.customer_name ? { name: job.customer_name, phone: job.customer_phone ?? null } : null,
+      vehicle: job.vehicle_year || job.vehicle_make || job.vehicle_model
+        ? { year: job.vehicle_year ?? 0, make: job.vehicle_make ?? "", model: job.vehicle_model ?? "" }
+        : null,
+      service_catalog: job.service_catalog_name ? { name: job.service_catalog_name } : null,
+      guest_name: job.guest_name,
+    })),
+    inventoryCount: 0,
   };
 }
 
-/** Subscribe to realtime dispatch changes. Returns cleanup function. */
 export async function subscribeToDispatchChanges(onUpdate: () => void): Promise<() => void> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return () => undefined;
-
   const context = await resolveCurrentWorkspace();
   if (!context) return () => undefined;
 
@@ -132,6 +157,7 @@ export async function subscribeToDispatchChanges(onUpdate: () => void): Promise<
     .channel(`dispatch-updates:${context.workspaceId}`)
     .on("postgres_changes", { event: "*", schema: "public", table: "appointments", filter: `workspace_id=eq.${context.workspaceId}` }, onUpdate)
     .on("postgres_changes", { event: "*", schema: "public", table: "work_orders", filter: `workspace_id=eq.${context.workspaceId}` }, onUpdate)
+    .on("postgres_changes", { event: "*", schema: "public", table: "technician_presence", filter: `workspace_id=eq.${context.workspaceId}` }, onUpdate)
     .subscribe();
 
   return () => { supabase.removeChannel(channel); };

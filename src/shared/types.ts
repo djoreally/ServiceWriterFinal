@@ -37,6 +37,7 @@ export interface Vehicle {
   customer_id?: string;
   oil_type?: string;
   oil_capacity?: string;
+  oil_filter?: string;
   engine?: string | null;
   tire_size?: string | null;
   tire_size_source?: string | null;

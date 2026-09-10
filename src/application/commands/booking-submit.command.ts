@@ -7,6 +7,42 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Json } from "@/integrations/supabase/types.production";
 import type { AppointmentBookingConfiguration } from "@/lib/booking-configuration";
 
+const vehiclePersistenceFailures = new Set<string>();
+function bookingVehicleKey(slug: string, email: string) {
+  return `${slug.trim().toLowerCase()}:${email.trim().toLowerCase()}`;
+}
+
+function currentPublicBookingSlug(): string | null {
+  if (typeof window === "undefined") return null;
+
+  const pathMatch = window.location.pathname.match(/\/book\/([^/?#]+)/i);
+  if (pathMatch?.[1]) {
+    try {
+      return decodeURIComponent(pathMatch[1]);
+    } catch {
+      return pathMatch[1];
+    }
+  }
+
+  const hostname = window.location.hostname.toLowerCase();
+  const suffix = ".servicewriter.xyz";
+  if (hostname.endsWith(suffix)) {
+    const subdomain = hostname.slice(0, -suffix.length);
+    if (subdomain && subdomain !== "www") return subdomain;
+  }
+
+  return null;
+}
+
+function optionalText(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function optionalFiniteNumber(value: unknown): number | null {
+  const number = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+  return Number.isFinite(number) ? number : null;
+}
+
 // ---------------------------------------------------------------------------
 // Customer
 // ---------------------------------------------------------------------------
@@ -20,6 +56,7 @@ export interface UpsertCustomerParams {
 }
 
 export async function upsertBookingCustomer(params: UpsertCustomerParams) {
+  vehiclePersistenceFailures.delete(bookingVehicleKey(params.p_booking_slug, params.p_email));
   return supabase.rpc("public_booking_upsert_customer", params);
 }
 
@@ -43,7 +80,10 @@ export interface UpsertBookingVehicleParams {
 }
 
 export async function upsertBookingVehicle(params: UpsertBookingVehicleParams) {
-  return supabase.rpc("public_booking_upsert_vehicle", params);
+  const key = bookingVehicleKey(params.p_booking_slug, params.p_customer_email);
+  const result = await supabase.rpc("public_booking_upsert_vehicle", params);
+  if (result.error || !result.data) vehiclePersistenceFailures.add(key);
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -69,6 +109,14 @@ export interface BookAppointmentSafeParams {
 }
 
 export async function bookAppointmentSafe(params: BookAppointmentSafeParams) {
+  const key = bookingVehicleKey(params.p_booking_slug, params.p_guest_email);
+  if (vehiclePersistenceFailures.has(key)) {
+    vehiclePersistenceFailures.delete(key);
+    throw new Error("BOOKING_VEHICLE_PERSISTENCE_FAILED");
+  }
+  if (!params.p_vehicle_id) {
+    throw new Error("BOOKING_VEHICLE_REQUIRED");
+  }
   return supabase.rpc("public_booking_book_appointment", {
     ...params,
     p_status: params.p_status ?? "confirmed",
@@ -83,7 +131,17 @@ export async function updateBookingAppointment(
   appointmentId: string,
   payload: Record<string, unknown>,
 ) {
-  return supabase.from("appointments").update(payload as never).eq("id", appointmentId);
+  const bookingSlug = currentPublicBookingSlug();
+  if (!bookingSlug) throw new Error("BOOKING_CONTEXT_INVALID");
+
+  return supabase.rpc("public_booking_update_appointment_context" as never, {
+    p_booking_slug: bookingSlug,
+    p_appointment_id: appointmentId,
+    p_dispatch_notes: optionalText(payload.dispatch_notes),
+    p_location_address: optionalText(payload.location_address),
+    p_location_lat: optionalFiniteNumber(payload.location_lat),
+    p_location_lng: optionalFiniteNumber(payload.location_lng),
+  } as never);
 }
 
 export async function saveAppointmentBookingConfiguration(
@@ -397,7 +455,7 @@ export interface SetVehicleTireSpecParams {
 
 /**
  * Persist the wheel/tire configurator result on the vehicle record so tire
- * appointments carry the confirmed tire size (OE or customer override).
+ * appointments carry the confirmed tire size (OE or override).
  */
 export async function setVehicleTireSpec(params: SetVehicleTireSpecParams) {
   return supabase.rpc("public_booking_set_vehicle_tire_spec_v2", {

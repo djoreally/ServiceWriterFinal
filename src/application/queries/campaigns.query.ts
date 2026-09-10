@@ -4,8 +4,9 @@
 import { supabase } from "@/integrations/supabase/client";
 import { CampaignStatus } from "@/lib/enums";
 import type { Database } from "@/integrations/supabase/types";
-
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+
 async function requireUser() {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("Authentication required");
@@ -61,11 +62,15 @@ export async function fetchCampaigns(): Promise<CampaignRow[]> {
 }
 
 export async function fetchCampaignCustomerCount(): Promise<number> {
-  const user = await requireUser();
-  const { count } = await supabase
+  const context = await resolveCurrentWorkspace();
+  if (!context) return 0;
+  const db = supabase as any;
+  const { count, error } = await db
     .from("customers")
-    .select("*", { count: "exact", head: true })
-    .eq("user_id", user.id)
+    .select("id", { count: "exact", head: true })
+    .eq("workspace_id", context.workspaceId)
+    .neq("status", "archived")
     .not("email", "is", null);
+  if (error) throw error;
   return count ?? 0;
 }

@@ -100,6 +100,7 @@ export {
   deleteInventoryItem,
   transferInventoryToVan,
   uploadInventoryImage,
+  reconcileServiceOilUsage,
   type InventoryItemWritePayload,
 } from './inventory.command';
 

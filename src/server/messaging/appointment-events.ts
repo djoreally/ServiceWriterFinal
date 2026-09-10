@@ -36,8 +36,7 @@ function formatDateTime(value: string, timezone: string) {
   return {
     date: new Intl.DateTimeFormat("en-US", {
       timeZone: timezone,
-      weekday: "long",
-      month: "long",
+      month: "numeric",
       day: "numeric",
       year: "numeric",
     }).format(date),
@@ -51,6 +50,13 @@ function formatDateTime(value: string, timezone: string) {
 
 function text(value: unknown, fallback: string): string {
   return value === null || value === undefined || value === "" ? fallback : String(value);
+}
+
+function currency(value: unknown): string {
+  const amount = Number(value);
+  return Number.isFinite(amount)
+    ? amount.toLocaleString("en-US", { style: "currency", currency: "USD" })
+    : "See appointment details";
 }
 
 export function appointmentLifecycleVariables(input: {
@@ -83,6 +89,9 @@ export function appointmentLifecycleVariables(input: {
     "appointment.address": text(metadata.service_address ?? metadata.location_address ?? metadata.address, "Address on appointment"),
     "appointment.changed_fields": input.changedFields?.join(", ") || "Appointment details",
     "appointment.confirmation_code": input.appointment.id.slice(0, 8).toUpperCase(),
+    "appointment.total": currency(metadata.estimated_cost),
+    "appointment.payment_method": text(metadata.payment_method, "Pay at service"),
+    "appointment.manage_url": typeof metadata.manage_url === "string" ? metadata.manage_url : input.actionUrl,
     "technician.name": input.technicianName || "Your assigned technician",
     "vehicle.year": year,
     "vehicle.make": make,

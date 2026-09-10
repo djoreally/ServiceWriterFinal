@@ -14,7 +14,6 @@ import { useStartupRoutingStore } from "@/stores/startupRoutingStore";
 import { safeNextPath } from "@/lib/auth/next-path";
 import { errorMessage } from "@/lib/error-message";
 import { beginAuthInteraction } from "@/lib/authInteractionLock";
-
 import { withOperationTimeout } from "@/lib/operation-timeout";
 import { fetchWorkforceIdentity, selectActiveWorkspace, type WorkforceMembership } from "@/application/queries/workforce-identity.query";
 
@@ -29,7 +28,7 @@ const VARIANT_COPY: Record<Variant, { title: string; description: string; badge:
   },
   business: {
     title: "Business Owner sign in",
-    description: "For shop owners and admins managing your Service Writer workspace.",
+    description: "For owners, admins, and read-only business users accessing a Service Writer workspace.",
     badge: "Business Owner",
   },
   dispatch: {
@@ -46,21 +45,22 @@ const VARIANT_COPY: Record<Variant, { title: string; description: string; badge:
 
 type WorkforceRole = WorkforceMembership["role"];
 
-/** Which roles each login entry point is allowed to activate. */
 const VARIANT_ROLES: Record<Variant, WorkforceRole[] | null> = {
-  default: null, // generic/magic-link entry: any role
-  business: ["admin", "owner"],
-  dispatch: ["dispatcher", "manager", "fleet_manager"],
+  default: null,
+  business: ["admin", "owner", "viewer"],
+  dispatch: ["dispatcher", "manager", "fleet_manager", "service_advisor", "receptionist"],
   technician: ["technician"],
 };
 
-/** Client-side source of truth for where each role lands. */
 const ROLE_LANDING: Record<WorkforceRole, string> = {
   admin: "/dashboard",
   owner: "/dashboard",
+  viewer: "/dashboard",
   manager: "/dispatch",
   dispatcher: "/dispatch",
   fleet_manager: "/fleet-os",
+  service_advisor: "/dashboard",
+  receptionist: "/dashboard",
   technician: "/tech-app",
 };
 
@@ -69,11 +69,6 @@ const DEMO_LOGIN_ENABLED = process.env.NEXT_PUBLIC_ENABLE_DEMO_LOGIN === "true";
 const DEMO_EMAIL = (process.env.NEXT_PUBLIC_DEMO_EMAIL || "demo@servicewriter.app").trim();
 const DEMO_PASSWORD = process.env.NEXT_PUBLIC_DEMO_PASSWORD || "";
 
-/**
- * Where a signed-in user goes when workspace identity itself could not be read.
- * Credentials were already accepted at this point, so parking the user on a
- * dead-end card was the wrong call — the app shell re-resolves the role.
- */
 const VARIANT_FALLBACK_LANDING: Record<Variant, string> = {
   default: "/dashboard",
   business: "/dashboard",
@@ -93,7 +88,6 @@ const filterByVariant = (memberships: WorkforceMembership[], variant: Variant) =
 export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent; variant?: Variant }) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  // `?next=` lets flows such as the OAuth consent screen resume after sign-in.
   const nextPath = safeNextPath(searchParams.toString());
   const queryClient = useQueryClient();
   const { session, loading: authLoading } = useAuth();
@@ -125,16 +119,11 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
     navigate(nextPath ?? landingPathFor(selected), { replace: true });
   }, [memberships, navigate, nextPath, queryClient]);
 
-  /**
-   * Single source of truth for the post-sign-in destination: only memberships
-   * matching the login entry point the user picked are eligible.
-   */
   const routeIdentity = useCallback(async () => {
     await withOperationTimeout(
       (async () => {
         const identity = await fetchWorkforceIdentity();
         const eligible = filterByVariant(identity, variant);
-
         if (eligible.length === 0) {
           setRoleMismatch(true);
           return;
@@ -150,23 +139,9 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
     );
   }, [activateWorkspace, variant]);
 
-  /**
-   * Already-authenticated visitors (bookmark, browser back, page reload):
-   * this page is the single routing authority on /login/* paths —
-   * useStartupNavigation deliberately stays out of them, because the shell
-   * resolved the role without the portal variant and raced this page,
-   * bouncing dispatch/office staff into the technician app.
-   */
-  /**
-   * Identity read failed *after* credentials were accepted. The session is
-   * valid, so send the user into the app (the shell re-resolves the role) and
-   * report the real backend message instead of blocking on a dead-end card.
-   */
   const continueWithoutIdentity = useCallback((error: unknown) => {
     const destination = nextPath ?? VARIANT_FALLBACK_LANDING[variant];
     console.error("[workforce-auth] identity resolution failed", error);
-    // Non-blocking: the app shell shows an inline retry banner (see
-    // WorkspaceIdentityBanner), so this is a heads-up, not a dead end.
     toast.warning("Opening your workspace without a confirmed role", {
       description: errorMessage(error, "Retry from the banner if something looks off."),
     });
@@ -181,14 +156,11 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
     void routeIdentity()
       .catch(continueWithoutIdentity)
       .finally(() => setLoading(false));
-
   }, [isSignup, authLoading, session, loading, routeIdentity, continueWithoutIdentity]);
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setLoading(true);
-    // Hold off any deployment-sentinel reload until the credential exchange and
-    // workspace routing finish (see src/lib/authInteractionLock.ts).
     const releaseAuthLock = beginAuthInteraction();
     try {
       if (isSignup) {
@@ -200,8 +172,6 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
       } else {
         const result = await signInWithPassword(email, password);
         if (result.error) throw new Error(result.error);
-        // Credentials are accepted from here on. Anything that fails below is a
-        // backend availability problem, never an authentication failure.
         autoRouteRef.current = true;
         try {
           await routeIdentity();
@@ -217,17 +187,12 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
     }
   };
 
-
-
   const handleGoogleSignIn = async () => {
     setLoading(true);
     const releaseAuthLock = beginAuthInteraction();
     try {
-      // Always an explicit, public, same-origin callback (never a protected
-      // route): the current login page, carrying `next` when one was requested.
       const callback = new URL(window.location.pathname, window.location.origin);
       if (nextPath) callback.searchParams.set("next", nextPath);
-
       void callback;
       throw new Error("Google sign-in will be connected to the new backend during the authentication rebuild.");
     } catch (error) {
@@ -236,10 +201,18 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
       releaseAuthLock();
       setLoading(false);
     }
-
   };
-  const chooseWorkspace = async (membership: WorkforceMembership) => { setLoading(true); try { await withOperationTimeout(activateWorkspace(membership), IDENTITY_RESOLUTION_TIMEOUT_MS, "Workspace setup took too long to respond."); } catch (error) { toast.error(error instanceof Error ? error.message : "Unable to select that workspace."); } finally { setLoading(false); } };
 
+  const chooseWorkspace = async (membership: WorkforceMembership) => {
+    setLoading(true);
+    try {
+      await withOperationTimeout(activateWorkspace(membership), IDENTITY_RESOLUTION_TIMEOUT_MS, "Workspace setup took too long to respond.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Unable to select that workspace.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   if (roleMismatch) return <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4"><Card className="w-full max-w-md"><CardHeader className="text-center"><CardTitle>Wrong sign-in for this account</CardTitle><CardDescription>This account isn't set up as {copy.badge}. Pick the option that matches your role and sign in there.</CardDescription></CardHeader><CardContent className="space-y-3"><Button className="w-full" onClick={() => navigate("/login")}>Choose a different role</Button><Button className="w-full" variant="outline" disabled={loading} onClick={() => { setRoleMismatch(false); void supabase.auth.signOut(); }}>Use a different account</Button></CardContent></Card></main>;
   if (memberships) return <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4"><Card className="w-full max-w-md"><CardHeader className="text-center"><CardTitle>Choose a workspace</CardTitle><CardDescription>You belong to more than one workspace. Choose where you want to work.</CardDescription></CardHeader><CardContent className="space-y-3">{memberships.map((membership) => <Button key={`${membership.workspaceUserId}-${membership.role}`} className="h-auto w-full justify-between p-4 text-left" variant="outline" disabled={loading} onClick={() => void chooseWorkspace(membership)}><span><span className="block font-semibold">{membership.workspaceName}</span><span className="text-xs capitalize text-muted-foreground">{membership.role}</span></span><ChevronRight className="h-4 w-4" /></Button>)}</CardContent></Card></main>;

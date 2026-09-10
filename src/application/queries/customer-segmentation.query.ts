@@ -13,8 +13,14 @@ export interface SegmentRow {
   calculation_started_at: string | null; calculation_error: string | null; geo_center_lat: number | null; geo_center_lng: number | null; geo_radius_miles: number | null;
 }
 export interface LocationDemographicCustomer { id: string; name: string; address: string | null; postal_code: string | null; latitude: number | null; longitude: number | null; lifetime_value: number | null; total_services: number | null; }
+export interface SegmentCustomerRow { id: string; name: string; email: string | null; phone: string | null; lifetime_value: number; total_services: number; last_service_date: string | null; }
 
 function metadataObject(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
+function matches(value: number | null, min: number | null, max: number | null): boolean {
+  if (min != null && (value == null || value < Number(min))) return false;
+  if (max != null && (value == null || value > Number(max))) return false;
+  return true;
+}
 export async function getCurrentUserId(): Promise<string | null> { const { data: { user } } = await getCurrentAuthUser(); return user?.id ?? null; }
 
 export async function fetchSegments(_userId: string): Promise<SegmentRow[]> {
@@ -23,6 +29,55 @@ export async function fetchSegments(_userId: string): Promise<SegmentRow[]> {
   const { data, error } = await db.from("customer_segments").select("*").eq("workspace_id", context.workspaceId).order("priority", { ascending: false });
   if (error) throw error;
   return (data ?? []) as SegmentRow[];
+}
+
+/** Resolve segment membership from canonical customer + service-record facts. */
+export async function fetchSegmentCustomers(_userId: string, segmentName: string): Promise<{ data: SegmentCustomerRow[]; error: null }> {
+  const context = await resolveCurrentWorkspace();
+  if (!context) return { data: [], error: null };
+  const [segmentResult, customerResult, serviceResult] = await Promise.all([
+    db.from("customer_segments").select("*").eq("workspace_id", context.workspaceId).eq("name", segmentName).maybeSingle(),
+    db.from("customers").select("id,first_name,last_name,company_name,email,phone").eq("workspace_id", context.workspaceId).neq("status", "archived"),
+    db.from("service_records").select("customer_id,total_amount,completed_at,started_at,created_at").eq("workspace_id", context.workspaceId),
+  ]);
+  if (segmentResult.error) throw segmentResult.error;
+  if (customerResult.error) throw customerResult.error;
+  if (serviceResult.error) throw serviceResult.error;
+  const segment = segmentResult.data as SegmentRow | null;
+  if (!segment) return { data: [], error: null };
+
+  const servicesByCustomer = new Map<string, any[]>();
+  for (const service of serviceResult.data ?? []) {
+    if (!service.customer_id) continue;
+    const list = servicesByCustomer.get(service.customer_id) ?? [];
+    list.push(service); servicesByCustomer.set(service.customer_id, list);
+  }
+  const now = Date.now();
+  const rows: SegmentCustomerRow[] = [];
+  for (const customer of customerResult.data ?? []) {
+    const services = servicesByCustomer.get(customer.id) ?? [];
+    const lifetime = services.reduce((sum, row) => sum + Number(row.total_amount ?? 0), 0);
+    const total = services.length;
+    const average = total ? lifetime / total : 0;
+    const dates = services.map((row) => row.completed_at || row.started_at || row.created_at).filter(Boolean).map((value) => Date.parse(String(value))).filter(Number.isFinite);
+    const lastMs = dates.length ? Math.max(...dates) : null;
+    const days = lastMs == null ? null : Math.max(0, Math.floor((now - lastMs) / 86_400_000));
+    if (!matches(lifetime, segment.min_lifetime_value, segment.max_lifetime_value) ||
+        !matches(total, segment.min_total_services, segment.max_total_services) ||
+        !matches(days, segment.min_days_since_service, segment.max_days_since_service) ||
+        !matches(average, segment.min_average_order, segment.max_average_order)) continue;
+    rows.push({
+      id: customer.id,
+      name: [customer.first_name, customer.last_name].filter(Boolean).join(" ") || customer.company_name || "Customer",
+      email: customer.email,
+      phone: customer.phone,
+      lifetime_value: lifetime,
+      total_services: total,
+      last_service_date: lastMs == null ? null : new Date(lastMs).toISOString(),
+    });
+  }
+  rows.sort((a, b) => b.lifetime_value - a.lifetime_value);
+  return { data: rows.slice(0, 500), error: null };
 }
 
 export async function fetchLocationDemographicCustomers(_userId: string): Promise<LocationDemographicCustomer[]> {

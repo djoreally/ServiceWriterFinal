@@ -1,17 +1,9 @@
-/**
- * Real-time Tech Status Hook — Enterprise dispatch integration
- * 
- * Manages technician operational state with real-time sync:
- * - Shift management (clock in/out, breaks)
- * - Job status transitions (available → en_route → on_job)
- * - Location tracking for dispatch optimization
- * - Real-time notifications from dispatch
- */
-
-import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
-import { toast } from '@/components/ui/sonner';
-import { 
+/** Real-time technician status against canonical workspace membership, presence, and appointment state. */
+import { useCallback, useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
+import { toast } from "@/components/ui/sonner";
+import {
   clockInTechnician,
   clockOutTechnician,
   startBreak,
@@ -19,14 +11,16 @@ import {
   markEnRoute,
   markArrived,
   startJob,
-} from '@/application/commands/tech-dispatch.command';
+} from "@/application/commands/tech-dispatch.command";
 import {
   deriveDispatchStatusFromAppointment,
   isClosedDispatchStatus,
   normalizeOperationalTechnicianStatus,
   toLatLng,
   type TechnicianOperationalStatus,
-} from '@/lib/dispatch-state';
+} from "@/lib/dispatch-state";
+
+const db = supabase as any;
 
 export interface TechOperationalState {
   technician_id: string;
@@ -38,217 +32,120 @@ export interface TechOperationalState {
 }
 
 export interface RealTimeUpdate {
-  type: 'job_assigned' | 'job_cancelled' | 'route_updated' | 'urgent_message' | 'status_sync';
-  action?: 'INSERT' | 'UPDATE' | 'DELETE';
+  type: "job_assigned" | "job_cancelled" | "route_updated" | "urgent_message" | "status_sync";
+  action?: "INSERT" | "UPDATE" | "DELETE";
   payload: unknown;
+}
+
+function metadataDispatchStatus(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const status = (value as Record<string, unknown>).dispatch_status;
+  return typeof status === "string" ? status : undefined;
 }
 
 export function useRealTimeTechStatus(technician_id?: string) {
   const [state, setState] = useState<TechOperationalState | null>(null);
   const [loading, setLoading] = useState(true);
-  // ⚡ Real-time subscription for dispatch events
+  const [assignedUserId, setAssignedUserId] = useState<string | null>(null);
 
-  // ⚡ Fetch technician operational state
   const fetchTechState = useCallback(async () => {
-    if (!technician_id) return;
+    if (!technician_id) { setLoading(false); return; }
+    const workspaceId = getSelectedWorkspaceId();
+    if (!workspaceId) { setState(null); setLoading(false); return; }
 
     try {
-      const [techRes, shiftRes, appointmentRes] = await Promise.all([
-        supabase
-          .from('technicians')
-          .select('status, current_location')
-          .eq('id', technician_id)
-          .single(),
-        supabase
-          .from('time_clock_entries')
-          .select('id, status')
-          .eq('technician_id', technician_id)
-          .in('status', ['active', 'on_break'])
-          .order('clock_in', { ascending: false })
-          .limit(1)
-          .maybeSingle(),
-        supabase
-          .from('appointments')
-          .select('id, status, dispatch_status')
-          .eq('assigned_technician_id', technician_id)
-          .in('dispatch_status', ['assigned', 'en_route', 'arrived', 'in_progress'])
-          .order('scheduled_date', { ascending: true })
-          .order('scheduled_time', { ascending: true })
-          .limit(1)
-          .maybeSingle(),
+      const [{ data: member, error: memberError }, { data: presence, error: presenceError }] = await Promise.all([
+        db.from("workspace_members").select("user_id,role,is_active").eq("workspace_id", workspaceId).eq("user_id", technician_id).eq("is_active", true).maybeSingle(),
+        db.from("technician_presence").select("status,current_location,current_appointment_id,clocked_in_at").eq("workspace_id", workspaceId).eq("user_id", technician_id).maybeSingle(),
       ]);
+      if (memberError) throw memberError;
+      if (presenceError) throw presenceError;
+      if (!member) { setState(null); setAssignedUserId(null); return; }
 
-      if (techRes.data) {
-        const shiftActive = !!shiftRes.data;
-        const currentAppointmentId = appointmentRes.data?.id || null;
-        const currentDispatchStatus = appointmentRes.data
-          ? deriveDispatchStatusFromAppointment(appointmentRes.data.status, appointmentRes.data.dispatch_status)
-          : undefined;
+      setAssignedUserId(technician_id);
+      const { data: appointments, error: appointmentError } = await db
+        .from("appointments")
+        .select("id,status,metadata,starts_at")
+        .eq("workspace_id", workspaceId)
+        .eq("assigned_user_id", technician_id)
+        .not("status", "in", '("completed","cancelled","no_show")')
+        .order("starts_at", { ascending: true })
+        .limit(20);
+      if (appointmentError) throw appointmentError;
 
-        const rawLocation = techRes.data.current_location as { lat?: unknown; lng?: unknown } | null;
-        const currentLocation = rawLocation
-          ? toLatLng(rawLocation.lat, rawLocation.lng)
-          : null;
+      const appointment = (appointments ?? []).find((row: any) => {
+        const dispatch = deriveDispatchStatusFromAppointment(row.status, metadataDispatchStatus(row.metadata));
+        return dispatch === "in_progress" || dispatch === "arrived" || dispatch === "en_route" || dispatch === "acknowledged" || dispatch === "assigned";
+      }) ?? null;
+      const currentAppointmentId = presence?.current_appointment_id ?? appointment?.id ?? null;
+      const currentDispatchStatus = appointment
+        ? deriveDispatchStatusFromAppointment(appointment.status, metadataDispatchStatus(appointment.metadata))
+        : undefined;
+      const rawLocation = presence?.current_location as { lat?: unknown; lng?: unknown } | null;
+      const currentLocation = rawLocation ? toLatLng(rawLocation.lat, rawLocation.lng) : null;
+      const shiftActive = !!presence?.clocked_in_at;
 
-        setState({
-          technician_id,
-          status: normalizeOperationalTechnicianStatus({
-            technicianStatus: techRes.data.status,
-            shiftActive,
-            hasCurrentAppointment: !!currentAppointmentId,
-            currentDispatchStatus,
-          }),
-          current_appointment_id: currentAppointmentId,
-          shift_active: shiftActive,
-          location_enabled: !!currentLocation,
-          current_location: currentLocation,
-        });
-      }
+      setState({
+        technician_id,
+        status: normalizeOperationalTechnicianStatus({
+          technicianStatus: presence?.status ?? "offline",
+          shiftActive,
+          hasCurrentAppointment: !!currentAppointmentId,
+          currentDispatchStatus,
+        }),
+        current_appointment_id: currentAppointmentId,
+        shift_active: shiftActive,
+        location_enabled: !!currentLocation,
+        current_location: currentLocation,
+      });
+    } catch (error) {
+      console.error("[useRealTimeTechStatus] failed to load technician state", error);
+      setState(null);
     } finally {
       setLoading(false);
     }
   }, [technician_id]);
 
-  useEffect(() => {
-    fetchTechState();
-  }, [fetchTechState]);
+  useEffect(() => { void fetchTechState(); }, [fetchTechState]);
 
   const handleRealTimeUpdate = useCallback((update: RealTimeUpdate) => {
-    switch (update.type) {
-      case 'job_assigned':
-        fetchTechState(); // Refresh state
-        toast.success('New job assigned!', {
-          description: 'Check your Today tab for details',
-        });
-        break;
-      case 'job_cancelled':
-        fetchTechState();
-        toast.info('Job cancelled', {
-          description: 'Your schedule has been updated',
-        });
-        break;
-      case 'status_sync':
-        fetchTechState();
-        break;
-      default:
-        fetchTechState();
-        break;
-    }
+    void fetchTechState();
+    if (update.type === "job_assigned") toast.success("New job assigned!", { description: "Check your Today tab for details" });
+    if (update.type === "job_cancelled") toast.info("Job cancelled", { description: "Your schedule has been updated" });
   }, [fetchTechState]);
 
   useEffect(() => {
-    if (!technician_id) return;
-
-    // Every callback is attached synchronously BEFORE subscribe(). The
-    // previous version awaited getUser() mid-setup; supabase.channel()
-    // reuses one channel instance per topic, so a remount during that await
-    // returned the already-subscribed channel and .on() threw
-    // "cannot add postgres_changes callbacks after subscribe()".
+    if (!technician_id || !assignedUserId) return;
+    const workspaceId = getSelectedWorkspaceId();
+    if (!workspaceId) return;
     const channel = supabase.channel(`tech-dispatch-${technician_id}`);
 
-    channel.on('postgres_changes', {
-      event: '*',
-      schema: 'public',
-      table: 'appointments',
-      filter: `assigned_technician_id=eq.${technician_id}`,
-    }, (payload) => {
-      const next = (payload.new ?? {}) as { status?: unknown; dispatch_status?: unknown };
-      const prev = (payload.old ?? {}) as { status?: unknown; dispatch_status?: unknown };
-      const nextDispatch = deriveDispatchStatusFromAppointment(next.status, next.dispatch_status);
-      const prevDispatch = deriveDispatchStatusFromAppointment(prev.status, prev.dispatch_status);
-
-      const updateType: RealTimeUpdate['type'] =
-        payload.eventType === 'INSERT'
-          ? 'job_assigned'
-          : payload.eventType === 'DELETE' ||
-              (isClosedDispatchStatus(nextDispatch) && !isClosedDispatchStatus(prevDispatch))
-            ? 'job_cancelled'
-            : 'status_sync';
-
-      console.info('⚡ Real-time appointment update:', payload);
-      handleRealTimeUpdate({
-        type: updateType,
-        action: payload.eventType as RealTimeUpdate['action'],
-        payload,
-      });
+    channel.on("postgres_changes", { event: "*", schema: "public", table: "appointments", filter: `assigned_user_id=eq.${assignedUserId}` }, (payload) => {
+      const next = (payload.new ?? {}) as { status?: unknown; metadata?: unknown };
+      const prev = (payload.old ?? {}) as { status?: unknown; metadata?: unknown };
+      const nextDispatch = deriveDispatchStatusFromAppointment(next.status, metadataDispatchStatus(next.metadata));
+      const prevDispatch = deriveDispatchStatusFromAppointment(prev.status, metadataDispatchStatus(prev.metadata));
+      const type: RealTimeUpdate["type"] = payload.eventType === "INSERT"
+        ? "job_assigned"
+        : payload.eventType === "DELETE" || (isClosedDispatchStatus(nextDispatch) && !isClosedDispatchStatus(prevDispatch))
+          ? "job_cancelled"
+          : "status_sync";
+      handleRealTimeUpdate({ type, action: payload.eventType as RealTimeUpdate["action"], payload });
     });
 
-    channel.on('postgres_changes', {
-      event: '*',
-      schema: 'public',
-      table: 'dispatch_events',
-      filter: `technician_id=eq.${technician_id}`,
-    }, (payload) => {
-      console.info('⚡ Real-time dispatch event:', payload);
-      handleRealTimeUpdate({ type: 'status_sync', payload });
-    });
-
+    channel.on("postgres_changes", { event: "*", schema: "public", table: "dispatch_events", filter: `technician_id=eq.${technician_id}` }, (payload) => handleRealTimeUpdate({ type: "status_sync", payload }));
+    channel.on("postgres_changes", { event: "*", schema: "public", table: "technician_presence", filter: `user_id=eq.${technician_id}` }, (payload) => handleRealTimeUpdate({ type: "status_sync", payload }));
     channel.subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [assignedUserId, handleRealTimeUpdate, technician_id]);
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [handleRealTimeUpdate, technician_id]);
+  const transitionToEnRoute = async (appointment_id: string, location?: { lat: number; lng: number }) => { if (!technician_id) return; await markEnRoute(appointment_id, location); await fetchTechState(); toast.success("En route to job"); };
+  const transitionToArrived = async (appointment_id: string, location?: { lat: number; lng: number }) => { if (!technician_id) return; await markArrived(appointment_id, location); await fetchTechState(); toast.success("Marked as arrived"); };
+  const transitionToInProgress = async (appointment_id: string) => { if (!technician_id) return; await startJob(appointment_id); await fetchTechState(); toast.success("Job started"); };
+  const handleClockIn = async (location?: { lat: number; lng: number }) => { await clockInTechnician(location); await fetchTechState(); toast.success("Shift started!"); };
+  const handleClockOut = async (location?: { lat: number; lng: number }) => { await clockOutTechnician(location); await fetchTechState(); toast.success("Shift ended"); };
+  const handleStartBreak = async () => { await startBreak(); await fetchTechState(); toast.success("Break started!"); };
+  const handleEndBreak = async () => { await endBreak(); await fetchTechState(); toast.success("Break ended"); };
 
-  // ⚡ Enterprise-level status transition methods
-  const transitionToEnRoute = async (appointment_id: string, location?: { lat: number; lng: number }) => {
-    if (!technician_id) return;
-    await markEnRoute(appointment_id, location);
-    await fetchTechState();
-    toast.success('En route to job');
-  };
-
-  const transitionToArrived = async (appointment_id: string, location?: { lat: number; lng: number }) => {
-    if (!technician_id) return;
-    await markArrived(appointment_id, location);
-    await fetchTechState();
-    toast.success('Marked as arrived');
-  };
-
-  const transitionToInProgress = async (appointment_id: string) => {
-    if (!technician_id) return;
-    await startJob(appointment_id);
-    await fetchTechState();
-    toast.success('Job started');
-  };
-
-  const handleClockIn = async (location?: { lat: number; lng: number }) => {
-    await clockInTechnician(location);
-    await fetchTechState();
-    toast.success('Shift started!');
-  };
-
-  const handleClockOut = async (location?: { lat: number; lng: number }) => {
-    await clockOutTechnician(location);
-    await fetchTechState();
-    toast.success('Shift ended');
-  };
-
-  const handleStartBreak = async () => {
-    await startBreak();
-    await fetchTechState();
-    toast.success('Break started');
-  };
-
-  const handleEndBreak = async () => {
-    await endBreak();
-    await fetchTechState();
-    toast.success('Break ended');
-  };
-
-  return {
-    state,
-    loading,
-    // Enterprise status transitions
-    transitionToEnRoute,
-    transitionToArrived,
-    transitionToInProgress,
-    // Shift management
-    handleClockIn,
-    handleClockOut,
-    handleStartBreak,
-    handleEndBreak,
-    // Data refresh
-    refetch: fetchTechState,
-  };
+  return { state, loading, transitionToEnRoute, transitionToArrived, transitionToInProgress, handleClockIn, handleClockOut, handleStartBreak, handleEndBreak, refetch: fetchTechState };
 }

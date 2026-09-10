@@ -3,6 +3,7 @@ import { errorResponse, json, requireWorkspaceMember } from "@/server/api";
 import { createSupabaseAdminClient } from "@/lib/supabase";
 import { dispatchAppointmentLifecycle } from "@/server/messaging/appointment-events";
 import { LIFECYCLE_EVENT_KEYS } from "@/server/messaging/lifecycle-events";
+import { technicianJobUrl } from "@/server/messaging/lifecycle-action-urls";
 
 const assignmentSchema = z.object({
   workspace_id: z.string().uuid(),
@@ -56,7 +57,7 @@ export async function POST(request: Request) {
             || "Unassigned",
           );
           const customerUrl = new URL("/my-bookings", request.url).toString();
-          const staffUrl = new URL(`/appointments/${appointmentId}`, request.url).toString();
+          const technicianUrl = technicianJobUrl(appointmentId, request.url);
           if (body.technician_id) {
             await dispatchAppointmentLifecycle({
               eventKey: LIFECYCLE_EVENT_KEYS.technicianAssigned,
@@ -75,7 +76,7 @@ export async function POST(request: Request) {
                 appointment,
                 workspaceName: workspace?.name ?? "Service Writer",
                 workspaceTimezone: workspace?.timezone ?? "UTC",
-                actionUrl: staffUrl,
+                actionUrl: technicianUrl,
                 recipientEmail: newTechnicianEmail,
                 recipientRole: "technician",
                 technicianName,
@@ -91,7 +92,7 @@ export async function POST(request: Request) {
                 appointment,
                 workspaceName: workspace?.name ?? "Service Writer",
                 workspaceTimezone: workspace?.timezone ?? "UTC",
-                actionUrl: staffUrl,
+                actionUrl: technicianUrl,
                 recipientEmail: previousTechnician.data.user.email,
                 recipientRole: "technician",
                 technicianName,

@@ -1,13 +1,8 @@
 /**
- * Customers Command - Write operations for customers.
- *
- * Uses direct Supabase calls instead of the API server.
- * Sprint 1 Epic 1.1 - Updated to use soft delete for GDPR compliance
+ * Customers Command — canonical workspace-scoped customer writes.
  */
 
-import { supabase } from "@/integrations/supabase/client";
 import { z } from "zod";
-import { hardDelete } from "@/lib/soft-delete";
 import { nextApi } from "@/lib/nextApiClient";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 import { invalidateCustomerOverview } from "@/application/queries/customers.query";
@@ -30,7 +25,7 @@ function requireSelectedWorkspaceId(): string {
 function splitCustomerName(name: string): { first_name: string; last_name: string } {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   const first_name = parts.shift() || "Customer";
-  const last_name = parts.join(" ") || "Record";
+  const last_name = parts.join(" ");
   return { first_name, last_name };
 }
 
@@ -51,8 +46,7 @@ export async function createCustomer(payload: CustomerWritePayload): Promise<voi
   await createCustomerAndReturn(payload);
 }
 
-/** Same as createCustomer but returns the newly created row so callers (e.g. the
- *  invoice dialog's inline "+ New Customer" flow) can auto-select it. */
+/** Same as createCustomer but returns the newly created row so callers can auto-select it. */
 export async function createCustomerAndReturn(
   payload: CustomerWritePayload,
 ): Promise<{ id: string; name: string; email: string | null; phone: string | null }> {
@@ -69,7 +63,7 @@ export async function createCustomerAndReturn(
   const customer = customerResponseSchema.parse(response.data);
   return {
     id: customer.id,
-    name: [customer.first_name, customer.last_name].join(" "),
+    name: [customer.first_name, customer.last_name].filter(Boolean).join(" "),
     email: customer.email ?? null,
     phone: customer.phone ?? null,
   };
@@ -91,20 +85,5 @@ export async function updateCustomer(id: string, payload: CustomerWritePayload):
 export async function deleteCustomer(id: string): Promise<void> {
   const workspace_id = requireSelectedWorkspaceId();
   await nextApi.customers.remove(workspace_id, id);
-  invalidateCustomerRelatedCaches(workspace_id);
-}
-
-/**
- * Permanently delete a customer (admin only)
- * ⚠️ WARNING: This permanently removes customer data
- * Only use for:
- * - GDPR Right to Erasure requests
- * - Admin data cleanup
- * - Compliance requirements
- */
-export async function hardDeleteCustomer(id: string): Promise<void> {
-  const workspace_id = requireSelectedWorkspaceId();
-  const { error } = await hardDelete(supabase, "customers", id);
-  if (error) throw error;
   invalidateCustomerRelatedCaches(workspace_id);
 }

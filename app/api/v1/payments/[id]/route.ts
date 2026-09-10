@@ -1,4 +1,4 @@
-import { errorResponse, json, requireWorkspaceMember } from "@/server/api";
+import { errorResponse, json, requireWorkspacePaymentsAddon } from "@/server/api";
 import { dispatchPaymentLifecycle, LIFECYCLE_EVENT_KEYS } from "@/server/messaging/quote-payment-events";
 import { z } from "zod";
 
@@ -24,7 +24,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   try {
     const id = z.string().uuid().parse((await context.params).id);
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
-    const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
+    const { supabase } = await requireWorkspacePaymentsAddon(workspaceId, undefined, request);
     const { data, error } = await supabase
       .from("payments")
       .select("*, invoices(id,invoice_number,total,amount_paid,status), customers(id,first_name,last_name,email)")
@@ -43,7 +43,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const id = z.string().uuid().parse((await context.params).id);
     const body = patchSchema.parse(await request.json());
     const { workspace_id, ...patch } = body;
-    const { supabase } = await requireWorkspaceMember(workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"]);
+    const { supabase } = await requireWorkspacePaymentsAddon(workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"], request);
 
     if (body.invoice_id) {
       const { data: invoice, error: invoiceError } = await supabase
@@ -116,7 +116,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   try {
     const id = z.string().uuid().parse((await context.params).id);
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
-    await requireWorkspaceMember(workspaceId, ["owner", "admin", "manager"], request);
+    await requireWorkspacePaymentsAddon(workspaceId, ["owner", "admin", "manager"], request);
     return json({
       error: {
         code: "ledger_record_immutable",

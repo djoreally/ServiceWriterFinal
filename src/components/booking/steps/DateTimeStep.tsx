@@ -1,36 +1,28 @@
 /**
  * DateTimeStep - Step 4: Date & Time Selection
- * Handles calendar and time slot selection
- * Includes Weather Guard integration for blocking adverse weather slots
+ * Uses a single mobile-first date rail followed by appointment windows.
  */
 
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { CalendarIcon, Clock, Loader2, Shield, AlertTriangle, CloudRain } from "lucide-react";
-import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { isOperatingDay, type DayHoursMap } from "@/lib/business-hours";
+import { isOperatingDay } from "@/lib/business-hours";
 import { format, isBefore, startOfDay, addDays, parse, addMinutes } from "date-fns";
 import type { WeatherBlockedSlot } from "@/lib/weather-guard";
 import type { SlotWeatherDecisionResult } from "@/hooks/useSlotWeatherDecision";
 
-/**
- * Convert "HH:mm" to an arrival-window label like "10 AM - 11 AM".
- * Minutes are included whenever a boundary isn't on the hour, so two distinct
- * start times (17:00 / 17:30) never render the same label.
- */
 function formatSlotRange(slot: string, slotDurationMinutes: number): string {
   try {
     const start = parse(slot, "HH:mm", new Date());
     const end = addMinutes(start, slotDurationMinutes);
-    const fmt = (d: Date) => format(d, d.getMinutes() === 0 ? "h a" : "h:mm a");
+    const fmt = (date: Date) => format(date, date.getMinutes() === 0 ? "h a" : "h:mm a");
     return `${fmt(start)} - ${fmt(end)}`;
   } catch {
     return slot;
   }
 }
-
 
 interface BookedSlot {
   scheduled_time: string;
@@ -45,29 +37,22 @@ interface DateTimeStepProps {
   bookedSlots: BookedSlot[];
   loadingSlots: boolean;
   workingDays: string[] | null;
-  /** Per-weekday hours; authoritative over `workingDays` when present. */
   dayHours?: Record<string, unknown> | null;
   maxAdvanceDays: number;
   slotDurationMinutes: number;
-  /** ISO date strings (YYYY-MM-DD) the business has marked unavailable. */
   blockedDates?: string[];
   timeSlots: string[];
   isSlotBlocked: (slotTime: string) => boolean;
   isSlotTooSoon: (slotTime: string) => boolean;
   isWeatherBlocked?: (slotTime: string) => { blocked: boolean; reasons: string[] };
-  /** Disables an entire day in the calendar if any operating hour is weather-blocked. */
   isDayWeatherBlocked?: (date: Date) => boolean;
   weatherBlockedSlots?: WeatherBlockedSlot[];
   weatherLoading?: boolean;
   weatherError?: string | null;
-  /** Real-time decision from `weather-guard-check-slot` for the *currently selected* slot */
   slotDecision?: SlotWeatherDecisionResult | null;
   slotDecisionLoading?: boolean;
-  /** Called when the customer acknowledges a "suggest reschedule" suggestion and continues anyway */
   onAcknowledgeReschedule?: () => void;
-  /** Called when the customer chooses to pick a different time */
   onClearSlot?: () => void;
-  /** Suggested alternative slots (computed when SUGGEST_RESCHEDULE) */
   suggestedSlots?: Array<{
     date: Date;
     time: string;
@@ -86,7 +71,6 @@ interface DateTimeStepProps {
   selectedServiceNames: string;
 }
 
-/** ⚡ Memoized — calendar + slot grid is expensive to re-render */
 export const DateTimeStep = memo(function DateTimeStep({
   selectedDate,
   setSelectedDate,
@@ -118,291 +102,231 @@ export const DateTimeStep = memo(function DateTimeStep({
   formatCurrency,
   getTotalDuration,
   getTotalPrice,
-  selectedServiceNames,
 }: DateTimeStepProps) {
+  const today = startOfDay(new Date());
+  const blockedDateSet = useMemo(() => new Set(blockedDates), [blockedDates]);
+
   const isWorkingDay = (date: Date) => isOperatingDay(dayHours, workingDays, date);
+  const isDateBlocked = (date: Date) => blockedDateSet.has(format(date, "yyyy-MM-dd"));
+  const isDateWithinWindow = (date: Date) => !isBefore(addDays(today, maxAdvanceDays), date);
 
-  const isDateWithinWindow = (date: Date): boolean => {
-    const maxDate = addDays(startOfDay(new Date()), maxAdvanceDays);
-    return isBefore(date, maxDate);
+  const availableDates = useMemo(
+    () => Array.from({ length: Math.max(maxAdvanceDays, 1) + 1 }, (_, index) => addDays(today, index)),
+    [maxAdvanceDays, today.getTime()],
+  );
+
+  const selectDate = (date: Date) => {
+    setSelectedDate(date);
+    setSelectedTime("");
   };
-
-  const blockedDateSet = new Set(blockedDates);
-  const isDateBlocked = (date: Date): boolean => {
-    return blockedDateSet.has(format(date, "yyyy-MM-dd"));
-  };
-
 
   return (
-    <div className="grid md:grid-cols-2 gap-6 w-full max-w-full overflow-x-hidden">
-      <div className="min-w-0">
-
-        <div className="text-center md:text-left mb-6">
-          <CalendarIcon className="h-12 w-12 mx-auto md:mx-0 text-primary mb-4" />
-          <h2 className="text-2xl font-bold mb-2">Choose your date</h2>
-          <p className="text-muted-foreground">Select your date, then select your time slot</p>
+    <div className="w-full max-w-full space-y-6 overflow-x-hidden">
+      <section className="min-w-0">
+        <div className="mb-5 text-center">
+          <CalendarIcon className="mx-auto mb-3 h-12 w-12 text-primary" />
+          <h2 className="mb-2 text-2xl font-bold">Choose your date</h2>
+          <p className="text-muted-foreground">Select one available date, then choose an appointment window.</p>
         </div>
 
-        <div className="mb-3 flex gap-2 overflow-x-auto pb-2" aria-label="Quick date selection">
-          {Array.from({ length: 7 }, (_, index) => addDays(startOfDay(new Date()), index)).map((date) => {
-            const disabled = !isWorkingDay(date) || !isDateWithinWindow(date) || isDateBlocked(date) || (isDayWeatherBlocked?.(date) ?? false);
-            const selected = selectedDate?.toDateString() === date.toDateString();
-            return <button key={date.toISOString()} type="button" disabled={disabled} onClick={() => setSelectedDate(date)} className={cn("min-w-[66px] rounded-xl border px-3 py-2 text-center transition-all duration-200", selected && "-translate-y-0.5 border-primary bg-primary text-primary-foreground shadow-md", !selected && !disabled && "bg-card hover:border-primary", disabled && "opacity-35")}><span className="block text-[10px] font-semibold uppercase">{format(date, "EEE")}</span><span className="block text-lg font-bold">{format(date, "d")}</span></button>;
-          })}
-        </div>
-        <Card className="w-full max-w-full overflow-hidden">
-          <CardContent className="flex justify-center px-1 pt-4 sm:px-4">
-            <Calendar
-              mode="single"
-              selected={selectedDate}
-              onSelect={setSelectedDate}
-              disabled={(date) =>
-                isBefore(date, startOfDay(new Date())) ||
-                !isWorkingDay(date) ||
+        <div className="rounded-2xl border bg-card p-3 shadow-sm sm:p-4">
+          <div
+            className="flex snap-x snap-mandatory gap-2 overflow-x-auto overscroll-x-contain pb-2 [-webkit-overflow-scrolling:touch]"
+            aria-label="Available appointment dates"
+          >
+            {availableDates.map((date) => {
+              const disabled =
                 !isDateWithinWindow(date) ||
+                !isWorkingDay(date) ||
                 isDateBlocked(date) ||
-                (isDayWeatherBlocked?.(date) ?? false)
-              }
-              modifiers={{
-                blocked: (date) => isDateBlocked(date),
-                weather: (date) => isDayWeatherBlocked?.(date) ?? false,
-              }}
-              modifiersClassNames={{
-                blocked: "line-through text-muted-foreground/60",
-                weather: "line-through text-muted-foreground/60",
-              }}
-              className="w-full max-w-full rounded-md border-0 p-0"
-            />
-          </CardContent>
-        </Card>
-      </div>
+                (isDayWeatherBlocked?.(date) ?? false);
+              const selected = selectedDate?.toDateString() === date.toDateString();
 
-      <div className="min-w-0">
+              return (
+                <button
+                  key={date.toISOString()}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => selectDate(date)}
+                  aria-pressed={selected}
+                  className={cn(
+                    "min-h-[78px] min-w-[76px] snap-start rounded-xl border px-3 py-2 text-center transition-all",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2",
+                    selected && "border-primary bg-primary text-primary-foreground shadow-md",
+                    !selected && !disabled && "bg-background hover:border-primary hover:bg-primary/5",
+                    disabled && "cursor-not-allowed bg-muted/50 text-muted-foreground opacity-45",
+                  )}
+                >
+                  <span className="block text-[11px] font-semibold uppercase tracking-wide">{format(date, "EEE")}</span>
+                  <span className="block text-2xl font-bold leading-7">{format(date, "d")}</span>
+                  <span className="block text-[11px] font-medium">{format(date, "MMM")}</span>
+                </button>
+              );
+            })}
+          </div>
 
+          <div className="mt-2 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+            <span>Swipe to see more dates</span>
+            {selectedDate ? <span className="font-medium text-foreground">{format(selectedDate, "EEE, MMM d")}</span> : null}
+          </div>
+        </div>
+      </section>
+
+      <section className="min-w-0">
         <Card className="w-full max-w-full overflow-hidden">
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-lg">
               <Clock className="h-5 w-5" />
               Select Your Appointment Window
             </CardTitle>
+            {selectedDate ? (
+              <p className="text-sm text-muted-foreground">{format(selectedDate, "EEEE, MMMM d")}</p>
+            ) : null}
           </CardHeader>
           <CardContent>
-            {(loadingSlots || weatherLoading) ? (
+            {loadingSlots || weatherLoading ? (
               <div className="flex items-center justify-center py-8">
                 <Loader2 className="h-6 w-6 animate-spin text-primary" />
               </div>
             ) : selectedDate ? (
               <>
-                <div className="grid w-full max-w-full grid-cols-2 gap-2 sm:grid-cols-3">
-                  {timeSlots.map(slot => {
-                    const isBlocked = isSlotBlocked(slot);
-                    const isTooSoon = isSlotTooSoon(slot);
-                    const weather = isWeatherBlocked?.(slot) ?? { blocked: false, reasons: [] };
-                    // Fail-open: when the forecast can't be fetched (weatherError),
-                    // do NOT block all slots — allow booking and surface a soft notice.
-                    const isDisabled = isBlocked || isTooSoon || weather.blocked;
-                    return (
-                      <button
-                        key={slot}
-                        onClick={() => !isDisabled && setSelectedTime(slot)}
-                        disabled={isDisabled}
-                        title={weather.blocked ? `Blocked: ${weather.reasons.join(", ")}` : undefined}
-                        className={cn(
-                          "w-full min-w-0 min-h-[56px] px-2 py-3 text-[13px] sm:text-sm rounded-xl border transition-colors relative flex items-center justify-center text-center leading-tight break-words",
-                          selectedTime === slot && "bg-primary text-primary-foreground border-primary",
-                          !isDisabled && selectedTime !== slot && "hover:border-primary hover:bg-primary/5",
-                          isDisabled && "opacity-40 cursor-not-allowed line-through bg-muted",
-                          weather.blocked && !isBlocked && !isTooSoon && "border-blue-300 bg-blue-50/50"
-                        )}
-                      >
-                        {weather.blocked && (
-                          <span className="absolute -top-1 -right-1 text-xs">
-                            {weather.reasons.some(r => r.toLowerCase().includes("snow")) ? "🌨️"
-                              : weather.reasons.some(r => r.toLowerCase().includes("thunder")) ? "⛈️"
-                              : weather.reasons.some(r => r.toLowerCase().includes("wind")) ? "💨"
-                              : weather.reasons.some(r => r.toLowerCase().includes("fog")) ? "🌫️"
-                              : "🌧️"}
-                          </span>
-                        )}
-                        {formatSlotRange(slot, Math.max(slotDurationMinutes, getTotalDuration(), 15))}
-                      </button>
-                    );
-                  })}
-                </div>
+                {timeSlots.length > 0 ? (
+                  <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3">
+                    {timeSlots.map((slot) => {
+                      const isBlocked = isSlotBlocked(slot);
+                      const isTooSoon = isSlotTooSoon(slot);
+                      const weather = isWeatherBlocked?.(slot) ?? { blocked: false, reasons: [] };
+                      const isDisabled = isBlocked || isTooSoon || weather.blocked;
+
+                      return (
+                        <button
+                          key={slot}
+                          type="button"
+                          onClick={() => !isDisabled && setSelectedTime(slot)}
+                          disabled={isDisabled}
+                          title={weather.blocked ? `Blocked: ${weather.reasons.join(", ")}` : undefined}
+                          className={cn(
+                            "relative flex min-h-[58px] w-full min-w-0 items-center justify-center rounded-xl border px-2 py-3 text-center text-[13px] leading-tight transition-colors sm:text-sm",
+                            selectedTime === slot && "border-primary bg-primary text-primary-foreground",
+                            !isDisabled && selectedTime !== slot && "hover:border-primary hover:bg-primary/5",
+                            isDisabled && "cursor-not-allowed bg-muted opacity-40 line-through",
+                          )}
+                        >
+                          {formatSlotRange(slot, Math.max(slotDurationMinutes, getTotalDuration(), 15))}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+                    No appointment windows are available for this date. Choose another date.
+                  </div>
+                )}
+
                 {weatherBlockedSlots.length > 0 && (
                   <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-2">
                     <div className="flex items-start gap-2">
-                      <Shield className="h-3.5 w-3.5 text-blue-600 mt-0.5 shrink-0" />
+                      <Shield className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-600" />
                       <p className="text-xs text-blue-700">
-                        Some slots blocked due to weather:
-                        {" "}{[...new Set(weatherBlockedSlots.flatMap(s => s.reasons))].join(", ")}
+                        Some times are unavailable because of weather conditions.
                       </p>
                     </div>
                   </div>
                 )}
 
                 {weatherError && (
-                  <div className="mt-3 rounded-lg border border-muted bg-muted/30 p-3">
+                  <div className="mt-3 rounded-lg border bg-muted/30 p-3">
                     <div className="flex items-start gap-2">
-                      <CloudRain className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                      <CloudRain className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                       <div>
-                        <p className="text-sm font-medium text-foreground">Weather forecast unavailable</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          You can still book — we'll re-check the forecast closer to your appointment.
-                        </p>
+                        <p className="text-sm font-medium">Weather forecast unavailable</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">You can still book. We will re-check the forecast closer to the appointment.</p>
                       </div>
                     </div>
                   </div>
                 )}
 
-                {/* Real-time decision from weather-guard-check-slot for the chosen slot */}
                 {selectedTime && slotDecisionLoading && (
-                  <div className="mt-3 rounded-lg border border-muted bg-muted/30 p-2 flex items-center gap-2">
+                  <div className="mt-3 flex items-center gap-2 rounded-lg border bg-muted/30 p-2">
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-                    <p className="text-xs text-muted-foreground">Checking weather risk for this slot…</p>
+                    <p className="text-xs text-muted-foreground">Checking weather risk for this time…</p>
                   </div>
                 )}
 
-                {selectedTime && slotDecision && slotDecision.decision === "BLOCK" && (
+                {selectedTime && slotDecision?.decision === "BLOCK" && (
                   <div className="mt-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3">
                     <div className="flex items-start gap-2">
-                      <AlertTriangle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
                       <div className="flex-1">
-                        <p className="text-sm font-medium text-destructive">Slot unavailable due to weather</p>
-                        <p className="text-xs text-destructive/80 mt-0.5">
-                          {slotDecision.message} (risk score {slotDecision.riskScore})
-                        </p>
-                        {onClearSlot && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="mt-2 h-7 text-xs"
-                            onClick={onClearSlot}
-                          >
-                            Pick a different time
-                          </Button>
-                        )}
+                        <p className="text-sm font-medium text-destructive">This time is unavailable due to weather</p>
+                        <p className="mt-0.5 text-xs text-destructive/80">{slotDecision.message}</p>
+                        {onClearSlot ? (
+                          <Button size="sm" variant="outline" className="mt-2 h-8" onClick={onClearSlot}>Choose another time</Button>
+                        ) : null}
                       </div>
                     </div>
                   </div>
                 )}
 
-                {selectedTime && slotDecision && slotDecision.decision === "SUGGEST_RESCHEDULE" && (
-                  <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/20 p-3">
+                {selectedTime && slotDecision?.decision === "SUGGEST_RESCHEDULE" && (
+                  <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 dark:bg-amber-950/20">
                     <div className="flex items-start gap-2">
-                      <CloudRain className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                      <CloudRain className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
                       <div className="flex-1">
-                        <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
-                          Weather may impact this appointment
-                        </p>
-                        <p className="text-xs text-amber-800 dark:text-amber-300 mt-0.5">
-                          {slotDecision.message} (risk score {slotDecision.riskScore})
-                        </p>
-                        <div className="flex flex-wrap gap-2 mt-2">
-                          {onRequestSuggestions && (
-                            <Button
-                              size="sm"
-                              variant="default"
-                              className="h-7 text-xs gap-1"
-                              onClick={onRequestSuggestions}
-                              disabled={suggestionsLoading}
-                            >
-                              {suggestionsLoading ? (
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                              ) : (
-                                <CalendarIcon className="h-3 w-3" />
-                              )}
-                              Suggest next available time
+                        <p className="text-sm font-medium text-amber-900 dark:text-amber-200">Weather may impact this appointment</p>
+                        <p className="mt-0.5 text-xs text-amber-800 dark:text-amber-300">{slotDecision.message}</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {onRequestSuggestions ? (
+                            <Button size="sm" onClick={onRequestSuggestions} disabled={suggestionsLoading}>
+                              {suggestionsLoading ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                              Suggest another time
                             </Button>
-                          )}
-                          {onClearSlot && (
-                            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onClearSlot}>
-                              Choose another time
-                            </Button>
-                          )}
-                          {onAcknowledgeReschedule && (
-                            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={onAcknowledgeReschedule}>
-                              Continue anyway
-                            </Button>
-                          )}
+                          ) : null}
+                          {onClearSlot ? <Button size="sm" variant="outline" onClick={onClearSlot}>Choose another time</Button> : null}
+                          {onAcknowledgeReschedule ? <Button size="sm" variant="ghost" onClick={onAcknowledgeReschedule}>Continue anyway</Button> : null}
                         </div>
 
-                        {suggestionsError && (
-                          <p className="mt-2 text-xs text-destructive">{suggestionsError}</p>
-                        )}
+                        {suggestionsError ? <p className="mt-2 text-xs text-destructive">{suggestionsError}</p> : null}
 
-                        {suggestedSlots.length > 0 && (
-                          <div className="mt-3 space-y-1.5">
-                            <p className="text-[11px] uppercase tracking-wide font-semibold text-amber-900/80 dark:text-amber-200/80">
-                              Better times nearby
-                            </p>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                              {suggestedSlots.map((s) => (
-                                <button
-                                  key={`${s.dateLabel}-${s.time}`}
-                                  type="button"
-                                  onClick={() => onSelectSuggestion?.(s.date, s.time)}
-                                  className={cn(
-                                    "flex items-center justify-between gap-2 rounded-md border px-2.5 py-1.5 text-left",
-                                    "bg-background/60 hover:bg-background border-amber-200/70 dark:border-amber-700/40",
-                                    "transition-colors",
-                                  )}
-                                >
-                                  <div className="min-w-0">
-                                    <p className="text-xs font-medium truncate">{s.dateLabel}</p>
-                                    <p className="text-[11px] text-muted-foreground">{s.timeLabel}</p>
-                                  </div>
-                                  <span
-                                    className={cn(
-                                      "text-[10px] px-1.5 py-0.5 rounded-md border",
-                                      s.decision === "OK"
-                                        ? "border-emerald-300 text-emerald-700 dark:text-emerald-300"
-                                        : "border-blue-300 text-blue-700 dark:text-blue-300",
-                                    )}
-                                  >
-                                    {s.decision === "OK" ? "Clear" : "Mild risk"} · {s.riskScore}
-                                  </span>
-                                </button>
-                              ))}
-                            </div>
+                        {suggestedSlots.length > 0 ? (
+                          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                            {suggestedSlots.map((suggestion) => (
+                              <button
+                                key={`${suggestion.dateLabel}-${suggestion.time}`}
+                                type="button"
+                                onClick={() => onSelectSuggestion?.(suggestion.date, suggestion.time)}
+                                className="rounded-lg border bg-background px-3 py-2 text-left hover:border-primary"
+                              >
+                                <p className="text-sm font-medium">{suggestion.dateLabel}</p>
+                                <p className="text-xs text-muted-foreground">{suggestion.timeLabel}</p>
+                              </button>
+                            ))}
                           </div>
-                        )}
-
-                        {!suggestionsLoading &&
-                          suggestedSlots.length === 0 &&
-                          onRequestSuggestions === undefined && null}
+                        ) : null}
                       </div>
                     </div>
                   </div>
                 )}
 
-                {selectedTime && slotDecision && slotDecision.decision === "WARN" && (
-                  <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-2">
-                    <div className="flex items-start gap-2">
-                      <CloudRain className="h-3.5 w-3.5 text-blue-600 mt-0.5 shrink-0" />
-                      <p className="text-xs text-blue-700">{slotDecision.message}</p>
-                    </div>
+                {selectedTime && slotDecision?.decision === "WARN" && (
+                  <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-2 text-xs text-blue-700">
+                    {slotDecision.message}
                   </div>
                 )}
               </>
             ) : (
-              <p className="text-muted-foreground text-center py-8">
-                Please select a date first
-              </p>
+              <p className="py-8 text-center text-muted-foreground">Select a date above to see available appointment windows.</p>
             )}
           </CardContent>
         </Card>
 
-        {/* Selection Summary */}
-        {selectedDate && selectedTime && (
-          <Card className="mt-4 bg-primary/5 border-primary/20">
+        {selectedDate && selectedTime ? (
+          <Card className="mt-4 border-primary/20 bg-primary/5">
             <CardContent className="py-4">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-4">
                 <div>
                   <p className="font-medium">{format(selectedDate, "EEEE, MMMM d")}</p>
-                  <p className="text-sm text-muted-foreground">
-                    at {formatSlotRange(selectedTime, slotDurationMinutes)}
-                  </p>
+                  <p className="text-sm text-muted-foreground">{formatSlotRange(selectedTime, slotDurationMinutes)}</p>
                 </div>
                 <div className="text-right">
                   <p className="text-sm text-muted-foreground">{getTotalDuration()} min</p>
@@ -411,8 +335,8 @@ export const DateTimeStep = memo(function DateTimeStep({
               </div>
             </CardContent>
           </Card>
-        )}
-      </div>
+        ) : null}
+      </section>
     </div>
   );
 });

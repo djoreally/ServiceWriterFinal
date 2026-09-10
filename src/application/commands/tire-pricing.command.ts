@@ -1,29 +1,17 @@
 import { supabase } from "@/integrations/supabase/client";
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import type { TireServicePricingRule } from "@/lib/tire-pricing";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
-type TireRuleRow = {
-  user_id: string;
-  service_catalog_id: string;
-  base_installation_price: number;
-  mount_balance_price: number;
-  tpms_service_price: number;
-  disposal_price: number;
-  alignment_price: number;
-  minimum_quantity: number;
-  maximum_quantity: number;
-  requires_inventory_selection: boolean;
-  requires_fitment_lookup: boolean;
-  allows_manual_fitment: boolean;
-  allows_staggered_fitment: boolean;
-  duration_minutes_per_tire: number;
-};
+// Live production schema is ahead of generated Supabase types; isolate the
+// compatibility cast here until the generated database types are refreshed.
+const db = supabase as any;
 
 export async function saveTireServicePricingRule(rule: TireServicePricingRule) {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) throw new Error("Not authenticated");
-  const row: TireRuleRow = {
-    user_id: user.id,
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("Select a workspace before saving tire pricing.");
+
+  const row = {
+    workspace_id: context.workspaceId,
     service_catalog_id: rule.serviceCatalogId,
     base_installation_price: rule.baseInstallationPrice,
     mount_balance_price: rule.mountBalancePrice,
@@ -37,8 +25,11 @@ export async function saveTireServicePricingRule(rule: TireServicePricingRule) {
     allows_manual_fitment: rule.allowsManualFitment,
     allows_staggered_fitment: rule.allowsStaggeredFitment,
     duration_minutes_per_tire: rule.durationMinutesPerTire,
+    updated_at: new Date().toISOString(),
   };
 
-  const { error } = await (supabase as any).from("tire_service_pricing_rules").upsert(row, { onConflict: "user_id,service_catalog_id" });
+  const { error } = await db
+    .from("tire_service_pricing_rules")
+    .upsert(row, { onConflict: "workspace_id,service_catalog_id" });
   if (error) throw error;
 }

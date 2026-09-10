@@ -6,6 +6,12 @@ const db = productionSupabase as any;
 export interface CustomerAnalyticsRow { id: string; name: string; email: string | null; lifetime_value: number; total_services: number; average_order_value: number; days_since_last_service: number | null; churn_risk: string | null; customer_segment: string | null; last_service_date: string | null; first_service_date: string | null; }
 export interface CustomerAnalytics { customers: CustomerAnalyticsRow[]; totalLifetimeValue: number; repeat: number; oneTime: number; dueForService: CustomerAnalyticsRow[]; churnRisk: CustomerAnalyticsRow[]; topByValue: CustomerAnalyticsRow[]; }
 
+const parseValidDate = (value: unknown): Date | null => {
+  if (!value) return null;
+  const date = new Date(String(value));
+  return Number.isFinite(date.getTime()) ? date : null;
+};
+
 export async function fetchCustomerAnalytics(_userId: string): Promise<CustomerAnalytics> {
   const context = await resolveCurrentWorkspace();
   if (!context) throw new Error("No active workspace is available.");
@@ -30,7 +36,8 @@ export async function fetchCustomerAnalytics(_userId: string): Promise<CustomerA
     const count = services.length;
     const last = dates.length ? String(dates[dates.length - 1]) : null;
     const first = dates.length ? String(dates[0]) : null;
-    const days = last ? Math.max(0, Math.floor((now - Date.parse(last)) / 86_400_000)) : null;
+    const lastDate = parseValidDate(last);
+    const days = lastDate ? Math.max(0, Math.floor((now - lastDate.getTime()) / 86_400_000)) : null;
     return {
       id: row.id,
       name: [row.first_name, row.last_name].filter(Boolean).join(" ") || row.company_name || "Customer",
@@ -41,8 +48,8 @@ export async function fetchCustomerAnalytics(_userId: string): Promise<CustomerA
       days_since_last_service: days,
       churn_risk: days == null ? null : days >= 180 ? "high" : days >= 90 ? "medium" : "low",
       customer_segment: count >= 5 || lifetime >= 1000 ? "VIP" : count >= 2 ? "Repeat" : count === 1 ? "One-time" : "New",
-      last_service_date: last,
-      first_service_date: first || row.created_at,
+      last_service_date: lastDate ? lastDate.toISOString() : null,
+      first_service_date: parseValidDate(first)?.toISOString() || parseValidDate(row.created_at)?.toISOString() || null,
     };
   }).sort((a, b) => b.lifetime_value - a.lifetime_value);
 
@@ -81,7 +88,7 @@ export async function fetchEarliestActivityDate(): Promise<Date | null> {
   ]);
   if (apptRes.error) throw apptRes.error;
   if (serviceRes.error) throw serviceRes.error;
-  const candidates = [apptRes.data?.[0]?.starts_at, serviceRes.data?.[0]?.created_at].filter(Boolean).map((value) => new Date(String(value)));
+  const candidates = [apptRes.data?.[0]?.starts_at, serviceRes.data?.[0]?.created_at].map(parseValidDate).filter((value): value is Date => value !== null);
   if (!candidates.length) return null;
   return candidates.reduce((earliest, current) => current < earliest ? current : earliest);
 }

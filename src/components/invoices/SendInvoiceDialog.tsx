@@ -14,7 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Loader2, Mail } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
-import { sendManualInvoiceEmail, markInvoiceStatus } from "@/application/commands/invoices.command";
+import { sendInvoiceEmail } from "@/application/commands/invoice-send.command";
 import type { InvoiceFullRow } from "@/application/queries/invoices.query";
 
 interface Props {
@@ -34,6 +34,12 @@ export function SendInvoiceDialog({ invoice, businessName, open, onOpenChange, o
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
 
+  const amountPaid = Math.max(0, Number(invoice?.amount_paid || 0));
+  const total = Math.max(0, Number(invoice?.total || 0));
+  const balanceDue = Math.max(0, Number((total - amountPaid).toFixed(2)));
+  const isPaid = invoice?.status === "paid" || (!!invoice && balanceDue < 0.01);
+  const isPartial = !!invoice && !isPaid && amountPaid > 0;
+
   useEffect(() => {
     if (!open || !invoice) return;
     const isFleet = invoice.bill_to_type === "fleet";
@@ -44,12 +50,26 @@ export function SendInvoiceDialog({ invoice, businessName, open, onOpenChange, o
       ? invoice.fleet_clients?.company_name ?? "Customer"
       : invoice.customers?.name ?? invoice.contact_name ?? "Customer";
     const biz = businessName || "your shop";
+    const paid = Math.max(0, Number(invoice.amount_paid || 0));
+    const invoiceTotal = Math.max(0, Number(invoice.total || 0));
+    const balance = Math.max(0, Number((invoiceTotal - paid).toFixed(2)));
+    const paidInFull = invoice.status === "paid" || balance < 0.01;
+    const partiallyPaid = !paidInFull && paid > 0;
+
     void Promise.resolve().then(() => setRecipient(invoice.contact_email ?? defaultEmail ?? ""));
     void Promise.resolve().then(() => setSubject(
-      `Invoice ${invoice.invoice_number} from ${biz} — ${formatCurrency(Number(invoice.total) || 0)}`,
+      paidInFull
+        ? `Paid invoice ${invoice.invoice_number} from ${biz}`
+        : partiallyPaid
+          ? `Invoice ${invoice.invoice_number} — ${formatCurrency(balance)} remaining`
+          : `Invoice ${invoice.invoice_number} from ${biz} — ${formatCurrency(invoiceTotal)}`,
     ));
     void Promise.resolve().then(() => setMessage(
-      `Hi ${billToName},\n\nPlease find your invoice ${invoice.invoice_number} attached below. Let us know if you have any questions.\n\nThanks,\n${biz}`,
+      paidInFull
+        ? `Hi ${billToName},\n\nThis invoice is paid in full. Here is your final invoice for your records.\n\nThanks,\n${biz}`
+        : partiallyPaid
+          ? `Hi ${billToName},\n\nWe received ${formatCurrency(paid)} toward invoice ${invoice.invoice_number}. The remaining balance is ${formatCurrency(balance)}.\n\nThanks,\n${biz}`
+          : `Hi ${billToName},\n\nPlease find your invoice ${invoice.invoice_number} below. Let us know if you have any questions.\n\nThanks,\n${biz}`,
     ));
   }, [open, invoice, businessName, formatCurrency]);
 
@@ -63,14 +83,17 @@ export function SendInvoiceDialog({ invoice, businessName, open, onOpenChange, o
     if (!invoice || !valid) return;
     setSending(true);
     try {
-      await sendManualInvoiceEmail({
+      const result = await sendInvoiceEmail({
         invoiceId: invoice.id,
         recipientEmail: recipient.trim(),
         subject: subject.trim(),
         message: message.trim() || undefined,
       });
-      await markInvoiceStatus(invoice.id, "sent");
-      toast.success(`Invoice sent to ${recipient.trim()}`);
+      toast.success(
+        result.balance_due < 0.01
+          ? `Paid invoice sent to ${recipient.trim()}`
+          : `Invoice sent to ${recipient.trim()}`,
+      );
       onSent?.();
       onOpenChange(false);
     } catch (err) {
@@ -85,9 +108,13 @@ export function SendInvoiceDialog({ invoice, businessName, open, onOpenChange, o
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Send invoice</DialogTitle>
+          <DialogTitle>{isPaid ? "Send paid invoice" : "Send invoice"}</DialogTitle>
           <DialogDescription>
-            Confirm the recipient and subject before sending {invoice?.invoice_number ?? "this invoice"}.
+            {isPaid
+              ? `${invoice?.invoice_number ?? "This invoice"} is paid in full. The customer will receive a final invoice showing a $0.00 balance.`
+              : isPartial
+                ? `${formatCurrency(amountPaid)} has been recorded. The customer will see ${formatCurrency(balanceDue)} remaining.`
+                : `Confirm the recipient and subject before sending ${invoice?.invoice_number ?? "this invoice"}.`}
           </DialogDescription>
         </DialogHeader>
 
@@ -95,6 +122,11 @@ export function SendInvoiceDialog({ invoice, businessName, open, onOpenChange, o
           <div className="rounded-md bg-muted/50 px-3 py-2 text-sm">
             <div className="text-xs uppercase tracking-wider text-muted-foreground font-bold">Bill to</div>
             <div className="font-medium">{billToName}</div>
+            {amountPaid > 0 && (
+              <div className="mt-1 text-xs text-muted-foreground">
+                {formatCurrency(amountPaid)} paid · {formatCurrency(isPaid ? 0 : balanceDue)} balance due
+              </div>
+            )}
           </div>
 
           <div className="space-y-1.5">
@@ -129,7 +161,7 @@ export function SendInvoiceDialog({ invoice, businessName, open, onOpenChange, o
               rows={5}
             />
             <p className="text-xs text-muted-foreground">
-              The full invoice (line items and totals) is included automatically below your message.
+              The current invoice, recorded payments, and live balance are included automatically below your message.
             </p>
           </div>
         </div>
@@ -140,7 +172,7 @@ export function SendInvoiceDialog({ invoice, businessName, open, onOpenChange, o
           </Button>
           <Button onClick={handleSend} disabled={!valid || sending} className="gap-2">
             {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
-            Send
+            {isPaid ? "Send paid invoice" : "Send"}
           </Button>
         </DialogFooter>
       </DialogContent>

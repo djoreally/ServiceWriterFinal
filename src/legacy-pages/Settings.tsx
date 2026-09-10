@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Search } from "lucide-react";
 import { EmbedCodeSection } from "@/components/settings/EmbedCodeSection";
 import { getCurrentUser, fetchBusinessProfileDirect, checkSlugDirect } from "@/application/queries/settings-page.query";
@@ -521,59 +521,48 @@ const Settings = () => {
           <p className="text-muted-foreground">Find and manage every part of your business in one place.</p>
         </div>
 
-        {/* Quick Access Dashboard */}
-        <Card>
-          <CardContent className="p-4 space-y-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Search settings (e.g. tax, hours, email, calendar)…"
-                value={sectionSearch}
-                onChange={(e) => setSectionSearch(e.target.value)}
-                className="pl-9"
-              />
+        <div className="grid min-w-0 gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
+          <aside className="min-w-0 lg:sticky lg:top-4 lg:self-start">
+            <div className="rounded-lg border bg-card p-2 shadow-[var(--shadow-card)]">
+              <div className="relative mb-2">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Search settings"
+                  value={sectionSearch}
+                  onChange={(e) => setSectionSearch(e.target.value)}
+                  className="pl-9"
+                  density="compact"
+                />
+              </div>
+              <nav className="space-y-1" aria-label="Settings sections">
+                {filteredTabs.map((t) => {
+                  const Icon = t.icon;
+                  const isActive = activeTab === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => { setActiveTab(t.id); setSectionSearch(""); }}
+                      className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
+                        isActive
+                          ? "bg-[hsl(var(--primary-container))] font-semibold text-[hsl(var(--on-primary-container))]"
+                          : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                      }`}
+                    >
+                      <Icon className="h-4 w-4 shrink-0" />
+                      <span className="truncate">{t.label}</span>
+                    </button>
+                  );
+                })}
+                {filteredTabs.length === 0 && (
+                  <p className="px-3 py-3 text-sm text-muted-foreground">No settings match "{sectionSearch}".</p>
+                )}
+              </nav>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-              {filteredTabs.map((t) => {
-                const Icon = t.icon;
-                const isActive = activeTab === t.id;
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => { setActiveTab(t.id); setSectionSearch(""); }}
-                    className={`flex items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
-                      isActive ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
-                    }`}
-                  >
-                    <div className={`rounded-md p-2 ${isActive ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
-                      <Icon className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium leading-none">{t.label}</p>
-                      <p className="mt-1 text-xs text-muted-foreground line-clamp-2">{t.description}</p>
-                    </div>
-                  </button>
-                );
-              })}
-              {filteredTabs.length === 0 && (
-                <p className="col-span-full text-sm text-muted-foreground py-2">
-                  No settings match "{sectionSearch}".
-                </p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+          </aside>
 
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as SettingsTabId)} className="w-full">
-          <TabsList className="w-full overflow-x-auto justify-start h-auto flex-wrap gap-1 bg-muted/40 p-1">
-            {SETTINGS_TABS.map((t) => (
-              <TabsTrigger key={t.id} value={t.id} className="gap-2">
-                <t.icon className="h-4 w-4" />
-                <span>{t.label}</span>
-              </TabsTrigger>
-            ))}
-          </TabsList>
+          <div className="min-w-0">
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as SettingsTabId)} className="w-full">
 
           {/* ======================== BUSINESS TAB ======================== */}
           <TabsContent value="business" className="space-y-6 mt-6 max-w-3xl">
@@ -1421,7 +1410,9 @@ const Settings = () => {
         {/* GDPR Data Management */}
         <GDPRDataManagement />
           </TabsContent>
-        </Tabs>
+            </Tabs>
+          </div>
+        </div>
 
         {/* Sticky Save Footer */}
         <div className="fixed bottom-0 left-0 right-0 md:left-[var(--sidebar-width,16rem)] z-30 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 px-4 py-3 flex items-center justify-end gap-3">

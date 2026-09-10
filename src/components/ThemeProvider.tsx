@@ -1,6 +1,6 @@
-
 import { useEffect, useState } from "react";
 import { ThemeProviderContext, type Theme } from "@/contexts/ThemeContext";
+import { supabase } from "@/integrations/supabase/client";
 
 const getResolvedTheme = (theme: Theme) => {
   if (typeof window === "undefined") return theme === "dark" ? "dark" : "light";
@@ -15,6 +15,9 @@ const getResolvedTheme = (theme: Theme) => {
   return theme;
 };
 
+const isTheme = (value: string | null): value is Theme =>
+  value === "light" || value === "dark" || value === "system" || value === "auto" || value === "high-contrast";
+
 export function ThemeProvider({
   children,
   defaultTheme = "system",
@@ -24,23 +27,47 @@ export function ThemeProvider({
   defaultTheme?: Theme;
   storageKey?: string;
 }) {
-  const [theme, setTheme] = useState<Theme>(() => {
-    if (typeof window === 'undefined') return defaultTheme;
-    try {
-      return (localStorage.getItem(storageKey) as Theme) || defaultTheme;
-    } catch {
-      return defaultTheme;
-    }
-  });
+  const [theme, setThemeState] = useState<Theme>(defaultTheme);
+  const [accountStorageKey, setAccountStorageKey] = useState<string | null>(null);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    let active = true;
+
+    const applyAccount = (userId: string | null) => {
+      if (!active) return;
+      if (!userId) {
+        setAccountStorageKey(null);
+        setThemeState(defaultTheme);
+        return;
+      }
+
+      const key = `${storageKey}:${userId}`;
+      setAccountStorageKey(key);
+      try {
+        const stored = window.localStorage.getItem(key);
+        setThemeState(isTheme(stored) ? stored : defaultTheme);
+      } catch {
+        setThemeState(defaultTheme);
+      }
+    };
+
+    void supabase.auth.getSession().then(({ data }) => applyAccount(data.session?.user.id ?? null));
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      applyAccount(session?.user.id ?? null);
+    });
+
+    return () => {
+      active = false;
+      listener.subscription.unsubscribe();
+    };
+  }, [defaultTheme, storageKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
     const root = window.document.documentElement;
 
-    root.classList.remove("light", "dark", "high-contrast");
-
     const applyTheme = () => {
-      root.classList.remove("light", "dark");
+      root.classList.remove("light", "dark", "high-contrast");
       root.classList.add(getResolvedTheme(theme));
       root.classList.toggle("high-contrast", theme === "high-contrast");
     };
@@ -61,15 +88,15 @@ export function ThemeProvider({
 
   const value = {
     theme,
-    setTheme: (theme: Theme) => {
-      if (typeof window !== 'undefined') {
+    setTheme: (nextTheme: Theme) => {
+      if (typeof window !== "undefined" && accountStorageKey) {
         try {
-          localStorage.setItem(storageKey, theme);
+          window.localStorage.setItem(accountStorageKey, nextTheme);
         } catch {
-          // ignore storage errors
+          // Browser storage is optional; the active session still receives the change.
         }
       }
-      setTheme(theme);
+      setThemeState(nextTheme);
     },
   };
 

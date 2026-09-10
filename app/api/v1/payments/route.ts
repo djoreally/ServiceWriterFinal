@@ -1,4 +1,4 @@
-import { errorResponse, json, paginationSchema, requireWorkspaceMember } from "@/server/api";
+import { errorResponse, json, paginationSchema, requireWorkspacePaymentsAddon } from "@/server/api";
 import { dispatchPaymentLifecycle, LIFECYCLE_EVENT_KEYS } from "@/server/messaging/quote-payment-events";
 import { z } from "zod";
 
@@ -12,17 +12,22 @@ const paymentSchema = z.object({
   provider: providerSchema.nullable().optional(),
   provider_payment_id: z.string().trim().max(200).nullable().optional(),
   status: paymentStatusSchema.default("pending"),
-  amount: z.number().nonnegative(),
+  amount: z.number().finite().positive(),
   currency_code: z.string().trim().length(3).toUpperCase().default("USD"),
   paid_at: z.string().datetime().nullable().optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
+function metadataString(metadata: Record<string, unknown>, key: string): string | null {
+  const value = metadata[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
 export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const workspaceId = z.string().uuid().parse(url.searchParams.get("workspace_id"));
-    const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
+    const { supabase } = await requireWorkspacePaymentsAddon(workspaceId, undefined, request);
     const { limit, offset } = paginationSchema.parse(Object.fromEntries(url.searchParams));
     const { data, error } = await supabase
       .from("payments")
@@ -40,7 +45,19 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = paymentSchema.parse(await request.json());
-    const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"], request);
+    const { supabase, user } = await requireWorkspacePaymentsAddon(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"], request);
+    const metadata = body.metadata ?? {};
+    const appointmentId = metadataString(metadata, "appointment_id");
+    const paymentType = metadataString(metadata, "payment_type");
+
+    if (!body.invoice_id && !body.customer_id && !body.provider_payment_id && !appointmentId) {
+      return json({
+        error: {
+          code: "payment_provenance_required",
+          message: "Payment must reference an invoice, customer, provider payment, or appointment.",
+        },
+      }, { status: 422 });
+    }
 
     if (body.invoice_id) {
       const { data: invoice, error: invoiceError } = await supabase
@@ -58,6 +75,21 @@ export async function POST(request: Request) {
       }
     }
 
+    if (body.status === "pending" && appointmentId && !body.provider_payment_id) {
+      let duplicateQuery = (supabase.from("payments") as any)
+        .select("*")
+        .eq("workspace_id", body.workspace_id)
+        .eq("status", "pending")
+        .eq("metadata->>appointment_id", appointmentId)
+        .limit(1);
+      if (paymentType) duplicateQuery = duplicateQuery.eq("metadata->>payment_type", paymentType);
+      const { data: duplicate, error: duplicateError } = await duplicateQuery.maybeSingle();
+      if (duplicateError) throw duplicateError;
+      if (duplicate?.id) {
+        return json({ data: duplicate, reused: true });
+      }
+    }
+
     const paidAt = body.status === "succeeded" && !body.paid_at ? new Date().toISOString() : body.paid_at ?? null;
     const { data, error } = await (supabase.from("payments") as any)
       .insert({
@@ -71,7 +103,7 @@ export async function POST(request: Request) {
         currency_code: body.currency_code,
         paid_at: paidAt,
         created_by: user.id,
-        metadata: body.metadata ?? {},
+        metadata,
       })
       .select()
       .single();

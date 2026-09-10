@@ -1,8 +1,5 @@
-/**
- * Provider Snapshot Query
- * Fetches all dashboard KPI data for the provider snapshot widget.
- */
-import { supabase } from "@/integrations/supabase/client";
+/** Provider Snapshot Query — canonical workspace-scoped dashboard KPIs. */
+import { productionSupabase } from "@/integrations/supabase/client";
 import {
   format,
   startOfWeek,
@@ -11,8 +8,9 @@ import {
   addDays,
   parseISO,
 } from "date-fns";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+import { fetchCanonicalCashReceipts } from "@/application/queries/canonical-cash-receipts.query";
 
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface UpcomingAppt {
   id: string;
   title: string;
@@ -43,9 +41,20 @@ export interface SnapshotData {
   serviceTypeRevenue: ServiceTypeRev[];
 }
 
+function object(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function sumCollectedNet(rows: Array<{ net_collected_cents: number | null }> | null): number {
+  return (rows || []).reduce((sum, row) => sum + (Number(row.net_collected_cents) || 0), 0) / 100;
+}
+
 export async function fetchProviderSnapshot(): Promise<SnapshotData | null> {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) return null;
+  const context = await resolveCurrentWorkspace();
+  if (!context) return null;
+  const workspaceId = context.workspaceId;
 
   const now = new Date();
   const weekStart = format(startOfWeek(now, { weekStartsOn: 1 }), "yyyy-MM-dd");
@@ -57,68 +66,100 @@ export async function fetchProviderSnapshot(): Promise<SnapshotData | null> {
   const prevMonthEnd = format(new Date(now.getFullYear(), now.getMonth(), 0), "yyyy-MM-dd");
 
   const [
-    weekPayRes, monthPayRes, ytdPayRes, prevMonthPayRes,
-    completedRes, scheduledRes, upcomingRes, reviewsRes,
-    servicesRes, profileRes, apptServicesRes,
+    weekPayRes,
+    monthPayRes,
+    ytdPayRes,
+    prevMonthPayRes,
+    completedRes,
+    scheduledRes,
+    upcomingRes,
+    servicesRes,
+    settingsRes,
   ] = await Promise.all([
-    supabase.from("cash_collection_receipts_v1").select("net_collected_cents").gte("collected_at", `${weekStart}T00:00:00`),
-    supabase.from("cash_collection_receipts_v1").select("net_collected_cents").gte("collected_at", `${monthStart}T00:00:00`),
-    supabase.from("cash_collection_receipts_v1").select("net_collected_cents").gte("collected_at", `${yearStart}T00:00:00`),
-    supabase.from("cash_collection_receipts_v1").select("net_collected_cents").gte("collected_at", `${prevMonthStart}T00:00:00`).lte("collected_at", `${prevMonthEnd}T23:59:59`),
-    supabase.from("appointments").select("id", { count: "exact", head: true }).gte("scheduled_date", monthStart).eq("status", "completed"),
-    supabase.from("appointments").select("id", { count: "exact", head: true }).gte("scheduled_date", monthStart).in("status", ["confirmed", "pending"]),
-    supabase.from("appointments").select("id, title, scheduled_date, scheduled_time, status, guest_name").gte("scheduled_date", today).lte("scheduled_date", next7).in("status", ["confirmed", "pending"]).order("scheduled_date").order("scheduled_time").limit(25),
-    supabase.from("review_requests").select("status, clicked_at"),
-    supabase.from("services").select("service_type, total_cost, service_date, appointment_id").gte("service_date", monthStart).eq("status", "completed"),
-    supabase.from("business_profiles").select("stripe_payouts_enabled, stripe_account_id").eq("user_id", user.id).single(),
-    // Fetch appointment_services for this month's completed services to derive revenue
-    supabase.from("appointment_services").select("appointment_id, name, price, quantity"),
+    fetchCanonicalCashReceipts({ workspaceId, from: `${weekStart}T00:00:00` }),
+    fetchCanonicalCashReceipts({ workspaceId, from: `${monthStart}T00:00:00` }),
+    fetchCanonicalCashReceipts({ workspaceId, from: `${yearStart}T00:00:00` }),
+    fetchCanonicalCashReceipts({ workspaceId, from: `${prevMonthStart}T00:00:00`, to: `${prevMonthEnd}T23:59:59` }),
+    productionSupabase
+      .from("service_records")
+      .select("id", { count: "exact", head: true })
+      .eq("workspace_id", workspaceId)
+      .eq("status", "completed")
+      .gte("completed_at", `${monthStart}T00:00:00`),
+    productionSupabase
+      .from("appointments")
+      .select("id", { count: "exact", head: true })
+      .eq("workspace_id", workspaceId)
+      .gte("starts_at", `${monthStart}T00:00:00`)
+      .in("status", ["confirmed", "requested"]),
+    productionSupabase
+      .from("appointments")
+      .select("id,starts_at,status,metadata")
+      .eq("workspace_id", workspaceId)
+      .gte("starts_at", `${today}T00:00:00`)
+      .lte("starts_at", `${next7}T23:59:59`)
+      .in("status", ["confirmed", "requested"])
+      .order("starts_at", { ascending: true })
+      .limit(25),
+    productionSupabase
+      .from("service_records")
+      .select("id,total_amount,completed_at,metadata")
+      .eq("workspace_id", workspaceId)
+      .eq("status", "completed")
+      .gte("completed_at", `${monthStart}T00:00:00`),
+    productionSupabase
+      .from("workspace_settings")
+      .select("operational_settings")
+      .eq("workspace_id", workspaceId)
+      .maybeSingle(),
   ]);
 
-  const sumCollectedNet = (
-    rows: Array<{ net_collected_cents: number | null }> | null,
-  ) => (rows || []).reduce((sum, row) => sum + (Number(row.net_collected_cents) || 0), 0) / 100;
-
-  // Service type revenue breakdown
-  // Build a map of appointment_id -> line item totals for fallback when services.total_cost is 0
-  const apptLineItems = (apptServicesRes.data || []) as Array<{
-    appointment_id: string;
-    name: string;
-    price: number;
-    quantity: number;
-  }>;
-  const apptRevenueMap = new Map<string, number>();
-  for (const item of apptLineItems) {
-    const current = apptRevenueMap.get(item.appointment_id) || 0;
-    apptRevenueMap.set(item.appointment_id, current + (Number(item.price) || 0) * (item.quantity || 1));
+  for (const result of [weekPayRes, monthPayRes, ytdPayRes, prevMonthPayRes]) {
+    if (result.error) throw result.error;
+  }
+  for (const result of [completedRes, scheduledRes, upcomingRes, servicesRes, settingsRes]) {
+    if (result.error) throw result.error;
   }
 
-  const typeMap: Record<string, { revenue: number; count: number }> = {};
-  const monthServices = (servicesRes.data || []) as Array<{
-    service_type: string;
-    total_cost: number;
-    appointment_id: string | null;
-  }>;
-  for (const s of monthServices) {
-    const t = s.service_type || "Other";
-    if (!typeMap[t]) typeMap[t] = { revenue: 0, count: 0 };
-    // Use total_cost if populated, otherwise fallback to appointment_services line items
-    let rev = Number(s.total_cost) || 0;
-    if (rev === 0 && s.appointment_id) {
-      rev = apptRevenueMap.get(s.appointment_id) || 0;
-    }
-    typeMap[t].revenue += rev;
-    typeMap[t].count += 1;
+  const typeMap = new Map<string, { revenue: number; count: number }>();
+  for (const row of servicesRes.data ?? []) {
+    const metadata = object(row.metadata);
+    const type = String(metadata.service_type ?? metadata.service_name ?? "Service");
+    const current = typeMap.get(type) ?? { revenue: 0, count: 0 };
+    current.revenue += Number(row.total_amount ?? 0);
+    current.count += 1;
+    typeMap.set(type, current);
   }
-  const serviceTypeRevenue = Object.entries(typeMap)
-    .map(([type, v]) => ({ type, ...v }))
+  const serviceTypeRevenue = Array.from(typeMap.entries())
+    .map(([type, values]) => ({ type, ...values }))
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 6);
 
-  const reviews = reviewsRes.data || [];
+  const upcomingAppointments: UpcomingAppt[] = (upcomingRes.data ?? [])
+    .map((row) => {
+      const metadata = object(row.metadata);
+      const start = new Date(row.starts_at);
+      return {
+        id: row.id,
+        title: String(metadata.title ?? metadata.service_name ?? "Appointment"),
+        scheduled_date: Number.isNaN(start.getTime()) ? "" : format(start, "yyyy-MM-dd"),
+        scheduled_time: Number.isNaN(start.getTime()) ? "" : format(start, "HH:mm"),
+        status: row.status,
+        guest_name: metadata.guest_name == null ? null : String(metadata.guest_name),
+      };
+    })
+    .map((appt) => ({ appt, startsAt: parseISO(`${appt.scheduled_date}T${appt.scheduled_time || "00:00"}`) }))
+    .filter(({ startsAt }) => !Number.isNaN(startsAt.getTime()) && startsAt >= now)
+    .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime())
+    .slice(0, 10)
+    .map(({ appt }) => appt);
+
+  const operational = object(settingsRes.data?.operational_settings);
+  const payoutsEnabled = operational.stripe_payouts_enabled == null
+    ? null
+    : operational.stripe_payouts_enabled === true || operational.stripe_payouts_enabled === "true";
 
   return {
-    // Canonical collection view returns net cents, including refund handling.
     revenueWeek: sumCollectedNet(weekPayRes.data),
     revenueMonth: sumCollectedNet(monthPayRes.data),
     revenueYTD: sumCollectedNet(ytdPayRes.data),
@@ -126,18 +167,10 @@ export async function fetchProviderSnapshot(): Promise<SnapshotData | null> {
     bookingsCompleted: completedRes.count || 0,
     bookingsScheduled: scheduledRes.count || 0,
     pendingPayoutAmount: 0,
-    payoutsEnabled: profileRes.data?.stripe_payouts_enabled ?? null,
-    upcomingAppointments: ((upcomingRes.data || []) as UpcomingAppt[])
-      .map((appt) => ({
-        appt,
-        startsAt: parseISO(`${appt.scheduled_date}T${appt.scheduled_time || "00:00"}`),
-      }))
-      .filter(({ startsAt }) => !Number.isNaN(startsAt.getTime()) && startsAt >= now)
-      .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime())
-      .slice(0, 10)
-      .map(({ appt }) => appt),
-    reviewsSent: reviews.filter((r) => r.status === "sent" || r.status === "completed").length,
-    reviewsClicked: reviews.filter((r) => r.clicked_at).length,
+    payoutsEnabled,
+    upcomingAppointments,
+    reviewsSent: 0,
+    reviewsClicked: 0,
     serviceTypeRevenue,
   };
 }

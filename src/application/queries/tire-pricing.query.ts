@@ -1,10 +1,13 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { TireServicePricingRule } from "@/lib/tire-pricing";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
-// The generated Supabase schema is refreshed separately from migrations in this project.
+// Live production schema is ahead of generated Supabase types; keep this
+// compatibility boundary isolated until types are regenerated from production.
+const db = supabase as any;
 
 interface TirePricingRow {
-  service_catalog_id?: string | null;
+  service_catalog_id: string;
   base_installation_price?: number | null;
   mount_balance_price?: number | null;
   tpms_service_price?: number | null;
@@ -38,8 +41,13 @@ function mapRule(row: TirePricingRow): TireServicePricingRule {
 }
 
 export async function fetchTireServicePricingRules(): Promise<TireServicePricingRule[]> {
-
-  const { data, error } = await (supabase as any).from("tire_service_pricing_rules").select("*").order("created_at");
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("Select a workspace before viewing tire pricing.");
+  const { data, error } = await db
+    .from("tire_service_pricing_rules")
+    .select("service_catalog_id,base_installation_price,mount_balance_price,tpms_service_price,disposal_price,alignment_price,minimum_quantity,maximum_quantity,requires_inventory_selection,requires_fitment_lookup,allows_manual_fitment,allows_staggered_fitment,duration_minutes_per_tire")
+    .eq("workspace_id", context.workspaceId)
+    .order("created_at");
   if (error) throw error;
-  return (data || []).map(mapRule) as TireServicePricingRule[];
+  return (data || []).map((row: TirePricingRow) => mapRule(row));
 }

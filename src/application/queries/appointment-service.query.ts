@@ -13,6 +13,24 @@ async function workspaceId() {
   return context.workspaceId;
 }
 
+async function resendUpdatedConfirmation(appointmentId: string, workspace_id: string) {
+  const { data: { session } } = await productionSupabase.auth.getSession();
+  if (!session?.access_token) return;
+  const response = await fetch(`/api/v1/appointments/${encodeURIComponent(appointmentId)}/confirmation`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ workspace_id }),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as { error?: { message?: string } };
+    throw new Error(body.error?.message || "Updated confirmation could not be sent.");
+  }
+}
+
 export async function fetchActiveServiceCatalog() {
   const id = await workspaceId();
   const result = await productionSupabase.from("service_catalog").select("id,name,description,labor_price")
@@ -28,19 +46,23 @@ export async function fetchActiveServiceCatalog() {
 
 export async function insertAppointmentService(data: AppointmentServiceInput) {
   const id = await workspaceId();
-  return productionSupabase.from("appointment_items").insert({
+  const result = await productionSupabase.from("appointment_items").insert({
     workspace_id: id, appointment_id: data.appointment_id, service_catalog_id: data.service_catalog_id,
     item_type: "service", description: data.name, quantity: data.quantity, unit_price: data.price,
     is_prepaid: data.is_prepaid, added_at_service: data.added_at_service,
     metadata: { source: "appointment_detail", description: data.description },
   } as never).select().single();
+  if (!result.error) await resendUpdatedConfirmation(data.appointment_id, id);
+  return result;
 }
 
 export async function updateAppointmentService(id: string, data: AppointmentServiceInput) {
   const workspace_id = await workspaceId();
-  return productionSupabase.from("appointment_items").update({
+  const result = await productionSupabase.from("appointment_items").update({
     service_catalog_id: data.service_catalog_id, description: data.name, quantity: data.quantity,
     unit_price: data.price, is_prepaid: data.is_prepaid, added_at_service: data.added_at_service,
     metadata: { source: "appointment_detail", description: data.description },
   } as never).eq("workspace_id", workspace_id).eq("id", id).select().single();
+  if (!result.error) await resendUpdatedConfirmation(data.appointment_id, workspace_id);
+  return result;
 }

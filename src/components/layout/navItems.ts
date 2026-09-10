@@ -1,11 +1,11 @@
 import type { LucideIcon } from "lucide-react";
+import type { WorkforceRole } from "@/application/queries/workforce-identity.query";
 import { canAccessRoute } from "@/domain/auth/access-policy";
 
 import {
   LayoutDashboard,
   Calculator,
   Users,
-  UserRoundPlus,
   Car,
   ClipboardList,
   Package,
@@ -37,7 +37,6 @@ import {
   Store,
   Star,
   ContactRound,
-  Upload,
 } from "lucide-react";
 
 export type NavItem = {
@@ -60,7 +59,7 @@ type Terms = {
   quote: string;
 };
 
-export type RoleScope = "admin" | "owner" | "manager" | "dispatcher" | "fleet_manager" | "technician" | null;
+export type RoleScope = WorkforceRole | null;
 
 export const getNavGroups = (terms: Terms, role: RoleScope = "admin"): NavGroup[] => {
   const all = buildAllGroups(terms);
@@ -155,14 +154,7 @@ const buildAllGroups = (terms: Terms): NavGroup[] => [
   {
     label: "Settings",
     items: [
-      { path: "/settings?tab=business", label: "Business Profile", icon: Settings },
-      { path: "/settings?tab=team", label: "Employees", icon: Users },
-      { path: "/invitations", label: "Invitations", icon: UserRoundPlus },
-      { path: "/settings/import", label: "Import Data", icon: Upload },
-      { path: "/settings?tab=integrations", label: "Integrations", icon: Zap },
-      { path: "/settings?tab=payments", label: "Billing", icon: CreditCard },
-      { path: "/settings?tab=comms", label: "Notifications", icon: Mail },
-      { path: "/settings?tab=advanced", label: "Security & Data", icon: LifeBuoy },
+      { path: "/settings", label: "Settings", icon: Settings },
     ],
   },
   {
@@ -181,11 +173,6 @@ export const getPrimaryNavItems = (terms: Terms, role: RoleScope = "admin"): Nav
     group.items.flatMap((item) => (item.children && item.children.length > 0 ? [item, ...item.children] : [item]))
   );
 
-export const footerNavItems: NavItem[] = [
-  { path: "/settings", label: "Settings", icon: Settings },
-];
+export const footerNavItems: NavItem[] = [];
 
-export const getFooterNavItems = (role: RoleScope = "admin"): NavItem[] => {
-  if (!role) return [];
-  return footerNavItems.filter((item) => canAccessRoute(role, item.path));
-};
+export const getFooterNavItems = (_role: RoleScope = "admin"): NavItem[] => [];

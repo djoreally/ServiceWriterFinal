@@ -32,7 +32,14 @@ export function json<T>(data: T, init?: ResponseInit) {
 export function errorResponse(error: unknown) {
   if (error instanceof ApiError) return json({ error: { code: error.code, message: error.message } }, { status: error.status });
 
-  const candidate = error as { code?: string; message?: string; status?: number } | null;
+  const candidate = error as {
+    code?: string;
+    message?: string;
+    status?: number;
+    details?: string;
+    hint?: string;
+    name?: string;
+  } | null;
   const code = candidate?.code;
   if (code === "PGRST116") {
     return json({ error: { code: "not_found", message: "The requested record is no longer available." } }, { status: 404 });
@@ -50,7 +57,19 @@ export function errorResponse(error: unknown) {
     return json({ error: { code: code ?? "request_failed", message: candidate.message ?? "The request could not be completed." } }, { status: candidate.status });
   }
 
-  console.error("[api] unexpected error", error instanceof Error ? error.message : "unknown");
+  const diagnostic = error instanceof Error
+    ? { name: error.name, message: error.message }
+    : candidate && typeof candidate === "object"
+      ? {
+          name: candidate.name,
+          code: candidate.code,
+          message: candidate.message,
+          details: candidate.details,
+          hint: candidate.hint,
+          status: candidate.status,
+        }
+      : { type: typeof error };
+  console.error("[api] unexpected error", diagnostic);
   return json({ error: { code: "internal_error", message: "An unexpected error occurred." } }, { status: 500 });
 }
 
@@ -87,6 +106,21 @@ export async function requireWorkspaceMember(workspaceId: string, roles?: string
   if (!membership) throw new ApiError(403, "You are not a member of this workspace", "forbidden");
   if (roles && !roles.includes(membership.role)) throw new ApiError(403, "Insufficient workspace permissions", "forbidden");
   return { supabase, user, membership };
+}
+
+export async function requireWorkspacePaymentsAddon(workspaceId: string, roles?: string[], request?: Request) {
+  const authorized = await requireWorkspaceMember(workspaceId, roles, request);
+  const { data: billing, error } = await authorized.supabase
+    .from("workspace_billing")
+    .select("payments_addon_active,subscription_status")
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (error) throw error;
+  const subscriptionActive = billing?.subscription_status === "active" || billing?.subscription_status === "trialing";
+  if (!billing?.payments_addon_active || !subscriptionActive) {
+    throw new ApiError(402, "The Payments add-on is required for this workspace", "payments_addon_required");
+  }
+  return { ...authorized, billing };
 }
 
 export const paginationSchema = z.object({

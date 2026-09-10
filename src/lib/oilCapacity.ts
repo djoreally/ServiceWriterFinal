@@ -22,7 +22,12 @@ export function calculateExtraOilQuarts(
 ): number {
   const capacityQuarts = parseOilCapacityToQuarts(capacity);
   if (capacityQuarts == null) return 0;
-  return Math.max(0, Math.ceil(capacityQuarts - baseIncludedQuarts));
+
+  // Specs are often published in liters while billing is in whole quarts.
+  // 5.7 L converts to 6.02 qt; treating that conversion artifact as 7 qt bills
+  // one quart too many. Normalize to the nearest tenth before whole-quart billing.
+  const normalizedCapacityQuarts = Math.round(capacityQuarts * 10) / 10;
+  return Math.max(0, Math.ceil(normalizedCapacityQuarts - baseIncludedQuarts));
 }
 
 export function formatOilQuarts(value: number | null | undefined): string {
