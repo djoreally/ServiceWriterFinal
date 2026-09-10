@@ -2,6 +2,10 @@
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
+// Production Fleet OS was converged to workspace-scoped tables before the
+// generated TypeScript database file caught up. Keep that drift contained here.
+const db = supabase as any;
+
 export interface FleetReportStats {
   totalSpend: number;
   vehicleCount: number;
@@ -55,7 +59,7 @@ export async function fetchFleetReportPageData(_userId: string): Promise<FleetRe
   const context = await resolveCurrentWorkspace();
   if (!context) return EMPTY;
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from("fleet_service_requests")
     .select("vehicle_id,location_id,status,requested_for")
     .eq("workspace_id", context.workspaceId);
