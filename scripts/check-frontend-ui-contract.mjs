@@ -20,10 +20,18 @@ if (!table.includes("tabular-nums")) fail("canonical tables must use tabular num
 const operationalGradientFiles = [
   "src/components/retention/RetentionHeroStrip.tsx",
   "src/components/workflow/TimeClock.tsx",
+  "src/components/dashboard/DashboardCockpit.tsx",
+  "src/legacy-pages/financials/Expenses.tsx",
+  "src/components/fleet/vehicle-import/VehicleImportLanding.tsx",
+  "src/components/customer/UpcomingAppointmentWidget.tsx",
+  "src/legacy-pages/VehicleSpecs.tsx",
+  "src/legacy-pages/Subscriptions.tsx",
+  "src/components/booking/VehicleEntry.tsx",
+  "src/components/marketing/TestimonialManager.tsx",
 ];
 for (const file of operationalGradientFiles) {
   if (fs.existsSync(path.join(root, file)) && read(file).includes("bg-gradient")) {
-    console.warn(`frontend-ui-contract: legacy operational gradient remains in ${file}; migrate when that surface is touched`);
+    fail(`decorative operational gradient detected in ${file}`);
   }
 }
 
