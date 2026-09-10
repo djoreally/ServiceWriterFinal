@@ -74,6 +74,16 @@ function bookingSummary(metadata: Record<string, unknown>) {
   return { vehicleDescription, serviceDescription };
 }
 
+function configuredBookingRecipients(value: unknown): string[] {
+  const settings = asRecord(value);
+  const configured = settings?.booking_notification_emails;
+  if (!Array.isArray(configured)) return [];
+  return configured
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(entry));
+}
+
 export async function sendBookingConfirmation(input: {
   appointment: AppointmentRow;
   workspaceName: string;
@@ -125,32 +135,35 @@ export async function sendBookingConfirmation(input: {
 
   try {
     const admin = createSupabaseAdminClient();
-    const workspace = await admin
-      .from("workspaces")
-      .select("created_by")
-      .eq("id", input.appointment.workspace_id)
-      .single();
+    const [workspace, settings] = await Promise.all([
+      admin.from("workspaces").select("created_by").eq("id", input.appointment.workspace_id).single(),
+      admin.from("workspace_settings").select("operational_settings").eq("workspace_id", input.appointment.workspace_id).maybeSingle(),
+    ]);
     const ownerId = workspace.data?.created_by;
     const owner = ownerId ? await admin.auth.admin.getUserById(ownerId) : null;
-    const ownerEmail = owner?.data?.user?.email;
-    if (ownerEmail && ownerEmail.toLowerCase() !== input.recipientEmail.toLowerCase()) {
-      const staffUrl = new URL(`/appointments/${input.appointment.id}`, input.actionUrl).toString();
-      await dispatchLifecycleEvent({
+    const ownerEmail = owner?.data?.user?.email?.trim().toLowerCase();
+    const recipients = new Set(configuredBookingRecipients(settings.data?.operational_settings));
+    if (ownerEmail) recipients.add(ownerEmail);
+    recipients.delete(input.recipientEmail.trim().toLowerCase());
+
+    const staffUrl = new URL(`/appointments/${input.appointment.id}`, input.actionUrl).toString();
+    await Promise.all(Array.from(recipients).map((recipientEmail) =>
+      dispatchLifecycleEvent({
         workspaceId: input.appointment.workspace_id,
         customerId: input.appointment.customer_id,
-        recipientEmail: ownerEmail,
+        recipientEmail,
         recipientRole: "shop_owner",
         templateKey: LIFECYCLE_EVENT_KEYS.newAppointmentBooked,
-        eventId: `${input.appointment.id}:shop-owner`,
+        eventId: `${input.appointment.id}:shop-notify:${recipientEmail}`,
         variables: {
           ...customerVariables,
           "email.primary_action_url": staffUrl,
         },
         metadata: { appointmentId: input.appointment.id },
-      });
-    }
+      }),
+    ));
   } catch (ownerNotificationError) {
-    console.error("[Lifecycle] shop-owner booking notification enqueue failed", ownerNotificationError);
+    console.error("[Lifecycle] shop booking notification enqueue failed", ownerNotificationError);
   }
 
   return customerResult;
