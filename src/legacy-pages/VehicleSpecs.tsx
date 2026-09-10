@@ -560,7 +560,7 @@ export default function VehicleSpecs() {
 
                   {/* Quick Spec Display */}
                   {(decodedOilSpecs || selectedSpec) && (
-                    <div className="p-4 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/30 dark:to-orange-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
+                    <div className="p-4 bg-warning/5 border border-amber-200 dark:border-amber-800 rounded-lg">
                       <div className="flex items-center gap-2 mb-3">
                         <CheckCircle2 className="h-5 w-5 text-gray-600" />
                         <span className="font-semibold">
@@ -752,7 +752,7 @@ export default function VehicleSpecs() {
               </div>
 
               {plateResult && (
-                <div className="mt-4 p-4 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-950/30 dark:to-teal-950/30 border border-emerald-200 dark:border-emerald-800 rounded-lg">
+                <div className="mt-4 p-4 bg-success/5 border border-emerald-200 dark:border-emerald-800 rounded-lg">
                   <div className="flex items-center gap-2 mb-3">
                     <CheckCircle2 className="h-5 w-5 text-gray-600" />
                     <span className="font-semibold">{plateResult.year} {plateResult.make} {plateResult.model}</span>
