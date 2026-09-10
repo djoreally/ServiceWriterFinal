@@ -1,558 +1,215 @@
-import { useState, useEffect, useCallback } from "react";
-import {
-  fetchPaymentProvider,
-} from "@/application/queries/payment-provider.query";
-import {
-  updatePaymentProvider,
-  initiateStripeOnboarding,
-  initiateSquareOnboarding,
-  completeSquareCallback,
-} from "@/application/commands/payment-provider.command";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Loader2, CreditCard, CheckCircle2, AlertCircle, ExternalLink, ArrowLeft } from "lucide-react";
-import { toast } from "@/components/ui/sonner";
+import { useCallback, useEffect, useState } from "react";
+import { CreditCard, Loader2, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { toast } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
+import { fetchPaymentProvider } from "@/application/queries/payment-provider.query";
+import {
+  completeSquareCallback,
+  completeStripeCallback,
+  initiateSquareOnboarding,
+  initiateStripeOnboarding,
+  refreshStripeConnection,
+  updatePaymentProvider,
+} from "@/application/commands/payment-provider.command";
 
 type PaymentProvider = "stripe" | "square" | "none";
+type StripeStatus = { connected: boolean; chargesEnabled: boolean; payoutsEnabled: boolean; detailsSubmitted: boolean; accountId?: string };
+type SquareStatus = { connected: boolean; chargesEnabled: boolean; merchantId: string | null; locationId: string | null; onboardingComplete: boolean; accountStatus?: string; tokenExpiringSoon?: boolean };
 
-interface StripeStatus {
-  connected: boolean;
-  chargesEnabled: boolean;
-  payoutsEnabled: boolean;
-  detailsSubmitted: boolean;
-  accountId?: string;
-}
+const EMPTY_STRIPE: StripeStatus = { connected: false, chargesEnabled: false, payoutsEnabled: false, detailsSubmitted: false };
+const EMPTY_SQUARE: SquareStatus = { connected: false, chargesEnabled: false, merchantId: null, locationId: null, onboardingComplete: false };
 
-interface SquareStatus {
-  connected: boolean;
-  chargesEnabled: boolean;
-  merchantId: string | null;
-  locationId: string | null;
-  onboardingComplete: boolean;
-  accountStatus?: string;
-  tokenExpiringSoon?: boolean;
+function message(error: unknown, fallback: string) {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 export const PaymentProviderCard = () => {
   const [loading, setLoading] = useState(true);
-  const [connecting, setConnecting] = useState(false);
+  const [working, setWorking] = useState(false);
   const [activeProvider, setActiveProvider] = useState<PaymentProvider>("none");
-  const [stripeStatus, setStripeStatus] = useState<StripeStatus>({
-    connected: false,
-    chargesEnabled: false,
-    payoutsEnabled: false,
-    detailsSubmitted: false,
-  });
-  const [squareStatus, setSquareStatus] = useState<SquareStatus>({
-    connected: false,
-    chargesEnabled: false,
-    merchantId: null,
-    locationId: null,
-    onboardingComplete: false,
-  });
+  const [stripeStatus, setStripeStatus] = useState<StripeStatus>(EMPTY_STRIPE);
+  const [squareStatus, setSquareStatus] = useState<SquareStatus>(EMPTY_SQUARE);
 
-  const fetchStatuses = useCallback(async () => {
+  const load = useCallback(async () => {
     try {
       const result = await fetchPaymentProvider();
       if (!result) return;
-
-      if (result.provider) {
-        setActiveProvider(result.provider as PaymentProvider);
-      }
-      if (result.stripeStatus) {
-        setStripeStatus(result.stripeStatus);
-      }
-      if (result.squareStatus) {
-        setSquareStatus(result.squareStatus);
-      }
+      setActiveProvider((result.provider ?? "none") as PaymentProvider);
+      setStripeStatus(result.stripeStatus ?? EMPTY_STRIPE);
+      setSquareStatus(result.squareStatus ?? EMPTY_SQUARE);
     } catch (error) {
-      console.error("Error fetching payment status:", error);
+      toast.error(message(error, "Unable to load payment provider status"));
     } finally {
       setLoading(false);
     }
   }, []);
 
-
-  const handleSquareCallback = useCallback(async (code: string) => {
+  const finishStripeOAuth = useCallback(async (code: string, state: string) => {
+    setWorking(true);
     try {
-      setConnecting(true);
-      const response = await completeSquareCallback(code);
-
-      if (response.error) {
-        throw new Error(response.error.message || "Failed to complete Square authorization");
-      }
-
-      toast.success("Square account connected successfully!");
-      setActiveProvider("square");
-      setTimeout(fetchStatuses, 1000);
+      await completeStripeCallback(code, state);
+      toast.success("Stripe connected successfully");
+      await load();
     } catch (error) {
-      console.error("Error completing Square OAuth:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to connect Square");
+      toast.error(message(error, "Failed to complete Stripe authorization"));
     } finally {
-      setConnecting(false);
+      setWorking(false);
     }
-  }, [fetchStatuses]);
+  }, [load]);
+
+  const finishSquareOAuth = useCallback(async (code: string, state: string) => {
+    setWorking(true);
+    try {
+      await completeSquareCallback(code, state);
+      toast.success("Square connected successfully");
+      await load();
+    } catch (error) {
+      toast.error(message(error, "Failed to complete Square authorization"));
+    } finally {
+      setWorking(false);
+    }
+  }, [load]);
+
+  useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
-    void Promise.resolve().then(() => fetchStatuses());
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const clean = () => window.history.replaceState({}, "", window.location.pathname);
 
-    if (typeof window !== "undefined") {
-      try {
-        const params = new URLSearchParams(window.location.search);
-
-        // Handle Stripe return
-        if (params.get("stripe_success") === "true") {
-          toast.success("Stripe account setup in progress! Status will update shortly.");
-          window.history.replaceState({}, "", window.location.pathname);
-          void Promise.resolve().then(() => setTimeout(fetchStatuses, 2000));
-        } else if (params.get("stripe_refresh") === "true") {
-          toast.info("Please complete your Stripe account setup.");
-          window.history.replaceState({}, "", window.location.pathname);
-        }
-
-        // Handle Square OAuth callback
-        if (params.get("square_callback") === "true") {
-          const code = params.get("code");
-          const error = params.get("error");
-          window.history.replaceState({}, "", window.location.pathname);
-
-          if (error) {
-            toast.error("Square authorization was cancelled or failed.");
-          } else if (code) {
-            // Exchange code for tokens via edge function
-            void Promise.resolve().then(() => handleSquareCallback(code));
-          }
-        }
-      } catch {
-        // ignore URL parsing errors
-      }
+    if (params.get("stripe_success") === "true") {
+      clean();
+      void (async () => {
+        setWorking(true);
+        try {
+          await refreshStripeConnection();
+          toast.success("Stripe account connected");
+          await load();
+        } catch (error) {
+          toast.error(message(error, "Stripe setup returned but account verification failed"));
+        } finally { setWorking(false); }
+      })();
+      return;
     }
-  }, [fetchStatuses, handleSquareCallback]);
 
-  const handleConnectStripe = async () => {
-    setConnecting(true);
+    if (params.get("stripe_refresh") === "true") {
+      clean();
+      toast.info("Finish the Stripe onboarding steps, then return here.");
+      return;
+    }
+
+    if (params.get("stripe_callback") === "true") {
+      const code = params.get("code");
+      const state = params.get("state");
+      const error = params.get("error");
+      clean();
+      if (error) toast.error(`Stripe authorization failed: ${error}`);
+      else if (code && state) void finishStripeOAuth(code, state);
+      else toast.error("Stripe returned without a valid authorization code and state");
+      return;
+    }
+
+    if (params.get("square_callback") === "true") {
+      const code = params.get("code");
+      const state = params.get("state");
+      const error = params.get("error");
+      clean();
+      if (error) toast.error(`Square authorization failed: ${error}`);
+      else if (code && state) void finishSquareOAuth(code, state);
+      else toast.error("Square returned without a valid authorization code and state");
+    }
+  }, [finishSquareOAuth, finishStripeOAuth, load]);
+
+  const connectStripe = async () => {
+    setWorking(true);
     try {
       const response = await initiateStripeOnboarding();
-
-      if (response.error) {
-        throw new Error(response.error.message || "Failed to start Stripe onboarding");
-      }
-
-      if (response.data?.url) {
-        if (typeof window !== "undefined") {
-          window.location.href = response.data.url;
-        }
-      } else {
-        throw new Error("No onboarding URL received");
-      }
+      const url = response.data?.url;
+      if (!url) throw new Error("Stripe did not return an onboarding URL");
+      window.location.assign(url);
     } catch (error) {
-      console.error("Error connecting to Stripe:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to connect to Stripe");
-    } finally {
-      setConnecting(false);
+      toast.error(message(error, "Failed to start Stripe onboarding"));
+      setWorking(false);
     }
   };
 
-  const handleConnectSquare = async () => {
-    setConnecting(true);
+  const connectSquare = async () => {
+    setWorking(true);
     try {
       const response = await initiateSquareOnboarding();
-
-      if (response.error) {
-        throw new Error(response.error.message || "Failed to start Square onboarding");
-      }
-
-      if (response.data?.url) {
-        if (typeof window !== "undefined") {
-          window.location.href = response.data.url;
-        }
-      } else {
-        throw new Error("No onboarding URL received");
-      }
+      const url = response.data?.url;
+      if (!url) throw new Error("Square did not return an authorization URL");
+      window.location.assign(url);
     } catch (error) {
-      console.error("Error connecting to Square:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to connect to Square");
-    } finally {
-      setConnecting(false);
+      toast.error(message(error, "Failed to start Square onboarding"));
+      setWorking(false);
     }
   };
 
-  const handleProviderChange = async (provider: PaymentProvider) => {
-    // Validate that the selected provider is fully configured
+  const selectProvider = async (provider: PaymentProvider) => {
     if (provider === "stripe" && !stripeStatus.chargesEnabled) {
-      toast.error("Please complete Stripe setup before selecting it as your active provider.");
+      toast.error("Connect an active Stripe account before selecting Stripe.");
       return;
     }
     if (provider === "square" && !squareStatus.chargesEnabled) {
-      toast.error("Please complete Square setup before selecting it as your active provider.");
+      toast.error("Connect an active Square account before selecting Square.");
       return;
     }
-
     try {
       await updatePaymentProvider(provider);
       setActiveProvider(provider);
-      toast.success(`Payment provider set to ${provider === "none" ? "None" : provider === "stripe" ? "Stripe" : "Square"}`);
-      // Re-fetch to ensure UI reflects the persisted state
-      await fetchStatuses();
+      toast.success(provider === "none" ? "Online payments disabled" : `${provider === "stripe" ? "Stripe" : "Square"} selected`);
+      await load();
     } catch (error) {
-      console.error("Error updating provider:", error);
-      toast.error("Failed to update payment provider");
-      // Re-fetch to revert UI to actual DB state
-      await fetchStatuses();
+      toast.error(message(error, "Failed to update payment provider"));
     }
   };
 
-  if (loading) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <CreditCard className="h-5 w-5" />
-            Payment Processing
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin text-primary" />
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
+  if (loading) return <Card><CardContent className="flex min-h-40 items-center justify-center"><Loader2 className="h-5 w-5 animate-spin" /></CardContent></Card>;
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <CreditCard className="h-5 w-5" />
-          Payment Processing
-        </CardTitle>
-        <p className="text-sm text-muted-foreground">
-          Choose a payment provider to accept deposits and payments from customers
-        </p>
+        <CardTitle className="flex items-center gap-2"><CreditCard className="h-5 w-5" />Payment Processing</CardTitle>
+        <p className="text-sm text-muted-foreground">Connect the merchant account this workspace owns. Provider authorization is isolated per workspace.</p>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Active Provider Selection */}
         <div className="space-y-3">
-          <p className="text-sm font-medium">Active Payment Provider</p>
-          <RadioGroup
-            value={activeProvider}
-            onValueChange={(v) => handleProviderChange(v as PaymentProvider)}
-          >
+          <p className="text-sm font-medium">Active payment provider</p>
+          <RadioGroup value={activeProvider} onValueChange={(value) => void selectProvider(value as PaymentProvider)}>
             <div className="grid grid-cols-3 gap-2">
-              <label
-                className={cn(
-                  "flex flex-col items-center gap-1.5 p-3 rounded-lg border cursor-pointer transition-colors text-center",
-                  activeProvider === "stripe" && "border-primary bg-primary/5 ring-2 ring-primary/20"
-                )}
-              >
-                <RadioGroupItem value="stripe" className="sr-only" />
-                <CreditCard className="h-5 w-5" />
-                <span className="font-medium text-sm">Stripe</span>
-                {stripeStatus.connected && (
-                  <Badge variant={stripeStatus.chargesEnabled ? "default" : "secondary"} className="text-[10px] px-1.5">
-                    {stripeStatus.chargesEnabled ? "Active" : "Pending"}
-                  </Badge>
-                )}
-              </label>
-
-              <label
-                className={cn(
-                  "flex flex-col items-center gap-1.5 p-3 rounded-lg border cursor-pointer transition-colors text-center",
-                  activeProvider === "square" && "border-primary bg-primary/5 ring-2 ring-primary/20"
-                )}
-              >
-                <RadioGroupItem value="square" className="sr-only" />
-                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M4.01 2C2.9 2 2 2.9 2 4.01v15.98C2 21.1 2.9 22 4.01 22h15.98C21.1 22 22 21.1 22 19.99V4.01C22 2.9 21.1 2 19.99 2H4.01zm11.13 13.26c-.25.25-.58.39-.93.39H9.8c-.35 0-.68-.14-.93-.39a1.32 1.32 0 0 1-.39-.93V9.67c0-.35.14-.68.39-.93s.58-.39.93-.39h4.41c.35 0 .68.14.93.39s.39.58.39.93v4.66c0 .35-.14.68-.39.93z"/></svg>
-                <span className="font-medium text-sm">Square</span>
-                {squareStatus.connected && (
-                  <Badge variant={squareStatus.chargesEnabled ? "default" : "secondary"} className="text-[10px] px-1.5">
-                    {squareStatus.chargesEnabled ? "Active" : "Pending"}
-                  </Badge>
-                )}
-              </label>
-
-              <label
-                className={cn(
-                  "flex flex-col items-center gap-1.5 p-3 rounded-lg border cursor-pointer transition-colors text-center",
-                  activeProvider === "none" && "border-primary bg-primary/5 ring-2 ring-primary/20"
-                )}
-              >
-                <RadioGroupItem value="none" className="sr-only" />
-                <ArrowLeft className="h-5 w-5 text-muted-foreground" />
-                <span className="font-medium text-sm">None</span>
-              </label>
+              {(["stripe", "square", "none"] as PaymentProvider[]).map((provider) => (
+                <label key={provider} className={cn("flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border p-3 text-center", activeProvider === provider && "border-primary bg-primary/5 ring-2 ring-primary/20")}>
+                  <RadioGroupItem value={provider} className="sr-only" />
+                  <CreditCard className="h-5 w-5" />
+                  <span className="text-sm font-medium">{provider === "none" ? "None" : provider === "stripe" ? "Stripe" : "Square"}</span>
+                </label>
+              ))}
             </div>
           </RadioGroup>
         </div>
 
-        {/* Stripe Setup — always visible */}
-        <div className={cn(
-          "rounded-lg border p-4 space-y-4 transition-colors",
-          activeProvider === "stripe" ? "border-primary/30 bg-primary/[0.02]" : "border-border"
-        )}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <CreditCard className="h-4 w-4" />
-              <h3 className="text-sm font-semibold">Stripe Connect</h3>
-            </div>
-            {activeProvider === "stripe" && (
-              <Badge variant="outline" className="text-[10px] border-primary text-primary">ACTIVE</Badge>
-            )}
-          </div>
-          <StripeSetupSection
-            status={stripeStatus}
-            connecting={connecting}
-            onConnect={handleConnectStripe}
-          />
-        </div>
+        <ProviderPanel title="Stripe" connected={stripeStatus.connected} active={stripeStatus.chargesEnabled} detail={stripeStatus.connected ? `${stripeStatus.chargesEnabled ? "Charges enabled" : "Setup incomplete"}${stripeStatus.payoutsEnabled ? " · Payouts enabled" : ""}` : "No verified Stripe connection is recorded for this workspace."} button="Connect Stripe" working={working} onConnect={connectStripe} />
+        <ProviderPanel title="Square" connected={squareStatus.connected} active={squareStatus.chargesEnabled} detail={squareStatus.connected ? `${squareStatus.chargesEnabled ? "Payments enabled" : "Setup incomplete"}${squareStatus.locationId ? " · Location selected" : ""}` : "No verified Square connection is recorded for this workspace."} button="Connect Square" working={working} onConnect={connectSquare} />
 
-        {/* Square Setup — always visible */}
-        <div className={cn(
-          "rounded-lg border p-4 space-y-4 transition-colors",
-          activeProvider === "square" ? "border-primary/30 bg-primary/[0.02]" : "border-border"
-        )}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor"><path d="M4.01 2C2.9 2 2 2.9 2 4.01v15.98C2 21.1 2.9 22 4.01 22h15.98C21.1 22 22 21.1 22 19.99V4.01C22 2.9 21.1 2 19.99 2H4.01zm11.13 13.26c-.25.25-.58.39-.93.39H9.8c-.35 0-.68-.14-.93-.39a1.32 1.32 0 0 1-.39-.93V9.67c0-.35.14-.68.39-.93s.58-.39.93-.39h4.41c.35 0 .68.14.93.39s.39.58.39.93v4.66c0 .35-.14.68-.39.93z"/></svg>
-              <h3 className="text-sm font-semibold">Square Connect</h3>
-            </div>
-            {activeProvider === "square" && (
-              <Badge variant="outline" className="text-[10px] border-primary text-primary">ACTIVE</Badge>
-            )}
-          </div>
-          <SquareSetupSection
-            status={squareStatus}
-            connecting={connecting}
-            onConnect={handleConnectSquare}
-          />
-        </div>
-
-        {activeProvider === "none" && (
-          <div className="bg-muted/50 rounded-lg p-4 text-sm text-muted-foreground">
-            Online payments are disabled. Customers will only see the "Pay at Time of Service" option when booking.
-          </div>
-        )}
+        <div className="flex justify-end"><Button variant="outline" size="sm" disabled={working} onClick={() => void load()}><RefreshCw className="mr-2 h-4 w-4" />Refresh status</Button></div>
       </CardContent>
     </Card>
   );
 };
 
-// ─── Stripe Setup Sub-Section ─────────────────────────────────────────
-
-function StripeSetupSection({
-  status,
-  connecting,
-  onConnect,
-}: {
-  status: StripeStatus;
-  connecting: boolean;
-  onConnect: () => void;
-}) {
-  if (!status.connected) {
-    return (
-      <div className="space-y-4">
-        <div className="bg-muted/50 rounded-lg p-4 space-y-2">
-          <p className="text-sm">Connect with Stripe to:</p>
-          <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
-            <li>Accept deposits when customers book appointments</li>
-            <li>Process payments securely</li>
-            <li>Get paid directly to your bank account</li>
-          </ul>
-        </div>
-        <Button onClick={onConnect} disabled={connecting} className="gap-2">
-          {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
-          Connect with Stripe
-        </Button>
-      </div>
-    );
-  }
-
+function ProviderPanel({ title, connected, active, detail, button, working, onConnect }: { title: string; connected: boolean; active: boolean; detail: string; button: string; working: boolean; onConnect: () => void }) {
   return (
-    <div className="space-y-4">
-      <div className="bg-muted/50 rounded-lg p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-medium">Stripe Account</span>
-          <Badge variant={status.detailsSubmitted ? "default" : "secondary"}>
-            {status.detailsSubmitted ? "Active" : "Pending Setup"}
-          </Badge>
-        </div>
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 text-sm">
-            {status.chargesEnabled
-              ? <CheckCircle2 className="h-4 w-4 text-gray-600" />
-              : <AlertCircle className="h-4 w-4 text-amber-500" />}
-            <span className={status.chargesEnabled ? "text-foreground" : "text-muted-foreground"}>
-              Accept Payments
-            </span>
-          </div>
-          <div className="flex items-center gap-2 text-sm">
-            {status.payoutsEnabled
-              ? <CheckCircle2 className="h-4 w-4 text-gray-600" />
-              : <AlertCircle className="h-4 w-4 text-amber-500" />}
-            <span className={status.payoutsEnabled ? "text-foreground" : "text-muted-foreground"}>
-              Receive Payouts
-            </span>
-          </div>
-        </div>
+    <div className="space-y-3 rounded-lg border p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div><h3 className="text-sm font-semibold">{title}</h3><p className="mt-1 text-xs text-muted-foreground">{detail}</p></div>
+        <Badge variant={active ? "default" : connected ? "secondary" : "outline"}>{active ? "Active" : connected ? "Pending" : "Not connected"}</Badge>
       </div>
-
-      {!status.detailsSubmitted && (
-        <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-4 space-y-3">
-          <div className="flex items-start gap-2">
-            <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5" />
-            <div>
-              <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Complete Your Setup</p>
-              <p className="text-sm text-amber-700 dark:text-amber-300">
-                Finish setting up your Stripe account to start accepting payments.
-              </p>
-            </div>
-          </div>
-          <Button onClick={onConnect} disabled={connecting} variant="outline" className="gap-2">
-            {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
-            Continue Setup
-          </Button>
-        </div>
-      )}
-
-      {status.detailsSubmitted && status.chargesEnabled && (
-        <div className="bg-green-50 dark:bg-green-950/30 border border-gray-200 dark:border-green-800 rounded-lg p-4">
-          <div className="flex items-start gap-2">
-            <CheckCircle2 className="h-5 w-5 text-gray-600 mt-0.5" />
-            <div>
-              <p className="text-sm font-medium text-gray-800 dark:text-green-200">Ready to Accept Payments</p>
-              <p className="text-sm text-gray-700 dark:text-green-300">
-                Your account is fully set up. Customers can now pay deposits when booking.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => window.open("https://dashboard.stripe.com", "_blank")}
-        className="gap-2"
-      >
-        <ExternalLink className="h-4 w-4" />
-        Open Stripe Dashboard
-      </Button>
-    </div>
-  );
-}
-
-// ─── Square Setup Sub-Section ─────────────────────────────────────────
-
-function SquareSetupSection({
-  status,
-  connecting,
-  onConnect,
-}: {
-  status: SquareStatus;
-  connecting: boolean;
-  onConnect: () => void;
-}) {
-  if (!status.connected) {
-    return (
-      <div className="space-y-4">
-        <div className="bg-muted/50 rounded-lg p-4 space-y-2">
-          <p className="text-sm">Connect with Square to:</p>
-          <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
-            <li>Accept card payments through Square</li>
-            <li>Sync with your Square POS system</li>
-            <li>Manage everything from one dashboard</li>
-          </ul>
-        </div>
-        <Button onClick={onConnect} disabled={connecting} className="gap-2">
-          {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
-          Connect with Square
-        </Button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="bg-muted/50 rounded-lg p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="text-sm font-medium">Square Account</span>
-          <Badge variant={status.chargesEnabled ? "default" : "secondary"}>
-            {status.chargesEnabled ? "Active" : "Pending"}
-          </Badge>
-        </div>
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 text-sm">
-            {status.chargesEnabled
-              ? <CheckCircle2 className="h-4 w-4 text-gray-600" />
-              : <AlertCircle className="h-4 w-4 text-amber-500" />}
-            <span className={status.chargesEnabled ? "text-foreground" : "text-muted-foreground"}>
-              Accept Payments
-            </span>
-          </div>
-          {status.merchantId && (
-            <div className="flex items-center gap-2 text-sm">
-              <CheckCircle2 className="h-4 w-4 text-gray-600" />
-              <span className="text-foreground">
-                Merchant ID: {status.merchantId.substring(0, 8)}...
-              </span>
-            </div>
-          )}
-          {status.locationId && (
-            <div className="flex items-center gap-2 text-sm">
-              <CheckCircle2 className="h-4 w-4 text-gray-600" />
-              <span className="text-foreground">
-                Location: {status.locationId.substring(0, 8)}...
-              </span>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {status.tokenExpiringSoon && (
-        <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-4 space-y-3">
-          <div className="flex items-start gap-2">
-            <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5" />
-            <div>
-              <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Token Expiring Soon</p>
-              <p className="text-sm text-amber-700 dark:text-amber-300">
-                Your Square access token is expiring soon. Please re-authorize to continue accepting payments.
-              </p>
-            </div>
-          </div>
-          <Button onClick={onConnect} disabled={connecting} variant="outline" className="gap-2">
-            {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
-            Re-authorize Square
-          </Button>
-        </div>
-      )}
-
-      {status.chargesEnabled && !status.tokenExpiringSoon && (
-        <div className="bg-green-50 dark:bg-green-950/30 border border-gray-200 dark:border-green-800 rounded-lg p-4">
-          <div className="flex items-start gap-2">
-            <CheckCircle2 className="h-5 w-5 text-gray-600 mt-0.5" />
-            <div>
-              <p className="text-sm font-medium text-gray-800 dark:text-green-200">Ready to Accept Payments</p>
-              <p className="text-sm text-gray-700 dark:text-green-300">
-                Your Square account is connected. Customers can now pay when booking.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => window.open("https://squareup.com/dashboard", "_blank")}
-        className="gap-2"
-      >
-        <ExternalLink className="h-4 w-4" />
-        Manage Square Account
-      </Button>
+      <Button size="sm" onClick={onConnect} disabled={working}>{working ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}{connected ? `Reconnect ${title}` : button}</Button>
     </div>
   );
 }
