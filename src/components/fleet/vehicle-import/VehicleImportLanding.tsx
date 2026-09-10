@@ -33,10 +33,10 @@ export function VehicleImportLanding({ onFileSelected, onPasteImported }: Vehicl
   return (
     <div className="space-y-5">
       <div className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2 border-slate-800 bg-gradient-to-br from-slate-950 via-slate-950 to-slate-900 text-slate-50">
+        <Card className="lg:col-span-2 border-border/80 bg-card text-card-foreground">
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><Upload className="h-4 w-4" /> Import Vehicles</CardTitle>
-            <CardDescription className="text-slate-300">
+            <CardDescription className="text-muted-foreground">
               Upload CSV/XLSX or paste tabular vehicle data. This pipeline validates, decodes VINs through NHTSA,
               detects duplicates, and stages clean records for controlled commit.
             </CardDescription>
