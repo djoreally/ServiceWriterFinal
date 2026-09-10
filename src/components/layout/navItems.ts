@@ -6,7 +6,6 @@ import {
   LayoutDashboard,
   Calculator,
   Users,
-  UserRoundPlus,
   Car,
   ClipboardList,
   Package,
@@ -38,7 +37,6 @@ import {
   Store,
   Star,
   ContactRound,
-  Upload,
 } from "lucide-react";
 
 export type NavItem = {
@@ -156,14 +154,7 @@ const buildAllGroups = (terms: Terms): NavGroup[] => [
   {
     label: "Settings",
     items: [
-      { path: "/settings?tab=business", label: "Business Profile", icon: Settings },
-      { path: "/settings?tab=team", label: "Employees", icon: Users },
-      { path: "/invitations", label: "Invitations", icon: UserRoundPlus },
-      { path: "/settings/import", label: "Import Data", icon: Upload },
-      { path: "/settings?tab=integrations", label: "Integrations", icon: Zap },
-      { path: "/settings?tab=payments", label: "Billing", icon: CreditCard },
-      { path: "/settings?tab=comms", label: "Notifications", icon: Mail },
-      { path: "/settings?tab=advanced", label: "Security & Data", icon: LifeBuoy },
+      { path: "/settings", label: "Settings", icon: Settings },
     ],
   },
   {
@@ -182,8 +173,6 @@ export const getPrimaryNavItems = (terms: Terms, role: RoleScope = "admin"): Nav
     group.items.flatMap((item) => (item.children && item.children.length > 0 ? [item, ...item.children] : [item]))
   );
 
-// Settings has its own navigation group above. Keeping a second footer entry
-// rendered the same destination twice in desktop and mobile navigation.
 export const footerNavItems: NavItem[] = [];
 
 export const getFooterNavItems = (_role: RoleScope = "admin"): NavItem[] => [];
