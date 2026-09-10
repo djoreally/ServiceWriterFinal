@@ -174,7 +174,7 @@ export const TestimonialManager = () => {
 
       {/* Share Link */}
       {testimonialSubmitUrl && (
-        <Card className="bg-gradient-to-r from-primary/5 to-primary/10 border-primary/20">
+        <Card className="bg-primary/5 border-primary/20">
           <CardContent className="pt-6">
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <div>
