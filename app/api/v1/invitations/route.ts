@@ -92,9 +92,15 @@ export async function POST(request: Request) {
     if (error?.code === "23503" && body.customer_id) throw new ApiError(400, "The customer does not belong to this workspace.", "customer_workspace_mismatch");
     if (error) throw error;
 
-    const { error: eventError } = await supabase.from("invitation_events").insert({ invitation_id: data.id, workspace_id: data.workspace_id, event_type: "created", actor_user_id: user.id, metadata: { invited_role: data.invited_role } });
-    if (eventError) throw eventError;
     const admin = createSupabaseAdminClient();
+    const { error: eventError } = await admin.from("invitation_events").insert({
+      invitation_id: data.id,
+      workspace_id: data.workspace_id,
+      event_type: "created",
+      actor_user_id: user.id,
+      metadata: { invited_role: data.invited_role },
+    });
+    if (eventError) throw eventError;
     await recordOperationalAudit({ supabase: admin, request, workspaceId: data.workspace_id, actorUserId: user.id, action: "invitation.created", entityType: "invitation", entityId: data.id, metadata: { invited_role: data.invited_role } });
 
     let delivery: { status: "accepted" | "failed"; provider?: string; provider_message_id?: string; error?: string };
