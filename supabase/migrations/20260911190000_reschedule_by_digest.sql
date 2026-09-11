@@ -33,7 +33,7 @@ begin
     'hex'
   );
 
-  select a.*, t.id
+  select a, t.id
     into v_appointment, v_token_id
   from public.appointment_management_tokens t
   join public.appointments a on a.id = t.appointment_id
