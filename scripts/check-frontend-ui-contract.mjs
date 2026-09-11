@@ -10,12 +10,16 @@ const theme = read("src/components/ThemeProvider.tsx");
 const settings = read("src/legacy-pages/Settings.tsx");
 const bottomNav = read("src/components/layout/BottomNavBar.tsx");
 const table = read("src/components/ui/table.tsx");
+const dashboard = read("src/components/dashboard/DashboardCockpit.tsx");
+const navItems = read("src/components/layout/navItems.ts");
 
 if (!shell.includes('defaultTheme="system"')) fail("new users must default to system theme");
 if (!theme.includes("${storageKey}:${userId}")) fail("theme storage must be scoped to the authenticated user");
 if (settings.includes("<TabsList") || settings.includes("<TabsTrigger")) fail("Settings must use one category navigation surface, not a duplicate tab strip");
 if ((bottomNav.match(/path: "\/settings"/g) || []).length > 0) fail("mobile bottom navigation must not duplicate Settings");
 if (!table.includes("tabular-nums")) fail("canonical tables must use tabular numerals");
+if (dashboard.includes("lucide-react")) fail("dashboard must not use decorative iconography");
+if (/icon:\s*[A-Z]/.test(navItems)) fail("application navigation must not carry decorative icon metadata");
 
 const operationalGradientFiles = [
   "src/components/retention/RetentionHeroStrip.tsx",
