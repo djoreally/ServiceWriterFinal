@@ -4520,6 +4520,7 @@ export type Database = {
       provider_connection_secrets: {
         Row: {
           access_token_encrypted: string | null
+          credential_payload_encrypted: string | null
           created_at: string
           expires_at: string | null
           provider: Database["public"]["Enums"]["integration_provider"]
@@ -4529,6 +4530,7 @@ export type Database = {
         }
         Insert: {
           access_token_encrypted?: string | null
+          credential_payload_encrypted?: string | null
           created_at?: string
           expires_at?: string | null
           provider: Database["public"]["Enums"]["integration_provider"]
@@ -4538,6 +4540,7 @@ export type Database = {
         }
         Update: {
           access_token_encrypted?: string | null
+          credential_payload_encrypted?: string | null
           created_at?: string
           expires_at?: string | null
           provider?: Database["public"]["Enums"]["integration_provider"]

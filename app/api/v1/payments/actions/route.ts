@@ -97,7 +97,7 @@ export async function POST(request: Request) {
 
       const metadata = object(current.metadata);
       const operational = object(settings.operational_settings);
-      const execution = resolveStripeWorkspaceExecution(operational);
+      const execution = await resolveStripeWorkspaceExecution(body.workspace_id, operational);
       const recordedAccountId = text(metadata.stripe_account_id);
       if (recordedAccountId && recordedAccountId !== execution.accountId) {
         return json({ error: { code: "stripe_account_mismatch", message: "This payment belongs to a different Stripe account context." } }, { status: 409 });
