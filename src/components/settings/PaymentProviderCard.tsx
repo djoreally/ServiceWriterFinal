@@ -74,7 +74,7 @@ export const PaymentProviderCard = () => {
     }
   }, [load]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { queueMicrotask(() => { void load(); }); }, [load]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -108,7 +108,7 @@ export const PaymentProviderCard = () => {
       const error = params.get("error");
       clean();
       if (error) toast.error(`Stripe authorization failed: ${error}`);
-      else if (code && state) void finishStripeOAuth(code, state);
+      else if (code && state) queueMicrotask(() => { void finishStripeOAuth(code, state); });
       else toast.error("Stripe returned without a valid authorization code and state");
       return;
     }
