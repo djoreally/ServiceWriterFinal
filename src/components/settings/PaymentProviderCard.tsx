@@ -119,7 +119,7 @@ export const PaymentProviderCard = () => {
       const error = params.get("error");
       clean();
       if (error) toast.error(`Square authorization failed: ${error}`);
-      else if (code && state) void finishSquareOAuth(code, state);
+      else if (code && state) queueMicrotask(() => { void finishSquareOAuth(code, state); });
       else toast.error("Square returned without a valid authorization code and state");
     }
   }, [finishSquareOAuth, finishStripeOAuth, load]);
