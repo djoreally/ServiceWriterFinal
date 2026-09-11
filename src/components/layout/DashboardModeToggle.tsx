@@ -1,4 +1,3 @@
-import { ContactRound, LayoutDashboard } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { canAccessRoute } from "@/domain/auth/access-policy";
@@ -19,13 +18,11 @@ export function DashboardModeToggle({ onNavigate }: { onNavigate?: () => void } 
   };
 
   return (
-    <div className="grid grid-cols-2 gap-1 rounded-xl bg-muted/60 p-1" aria-label="Dashboard workspace">
-      <button type="button" onClick={() => go("/dashboard")} aria-current={!isCrm ? "page" : undefined} className={cn("flex min-h-9 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors", !isCrm ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
-        <LayoutDashboard className="h-3.5 w-3.5" />
+    <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted/60 p-1" aria-label="Dashboard workspace">
+      <button type="button" onClick={() => go("/dashboard")} aria-current={!isCrm ? "page" : undefined} className={cn("min-h-9 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors", !isCrm ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
         Operations
       </button>
-      <button type="button" onClick={() => go("/crm")} aria-current={isCrm ? "page" : undefined} className={cn("flex min-h-9 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors", isCrm ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
-        <ContactRound className="h-3.5 w-3.5" />
+      <button type="button" onClick={() => go("/crm")} aria-current={isCrm ? "page" : undefined} className={cn("min-h-9 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors", isCrm ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
         CRM
       </button>
     </div>
