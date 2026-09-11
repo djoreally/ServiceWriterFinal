@@ -191,6 +191,7 @@ export default tseslint.config(
     // unsubscribe). The application layer intentionally does not wrap
     // `supabase.auth`, so these files are exempt from the data-access ban.
     files: [
+      "src/components/ThemeProvider.tsx",
       "src/components/admin/AdminTrainingRewards.tsx",
       "src/components/ai/AIAssistant.tsx",
       "src/components/pricing/CatalogBenchmarkDialog.tsx",
