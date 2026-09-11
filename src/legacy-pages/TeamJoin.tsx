@@ -7,13 +7,11 @@ import { Card, CardContent } from "@/components/ui/card";
 export default function TeamJoin() {
   const { token = "" } = useParams<{ token: string }>();
   const navigate = useNavigate();
-  const missingTokenError = token ? "" : "This invitation link is incomplete.";\n  const [error, setError] = useState("");
+  const missingTokenError = token ? "" : "This invitation link is incomplete.";
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!token) {
-      setError("This invitation link is incomplete.");
-      return;
-    }
+    if (!token) return;
 
     let cancelled = false;
     void (async () => {
@@ -36,7 +34,9 @@ export default function TeamJoin() {
     return () => { cancelled = true; };
   }, [navigate, token]);
 
-  const displayError = error || missingTokenError;\n\n  if (!displayError) {
+  const displayError = error || missingTokenError;
+
+  if (!displayError) {
     return <main className="flex min-h-screen items-center justify-center bg-muted/30"><div className="text-center"><Loader2 className="mx-auto h-7 w-7 animate-spin text-primary" /><p className="mt-3 text-sm text-muted-foreground">Opening your invitation…</p></div></main>;
   }
 
