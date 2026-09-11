@@ -1,12 +1,5 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  CalendarDays,
-  DollarSign,
-  Receipt,
-  Wrench,
-  TrendingUp,
-} from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -45,14 +38,12 @@ function Kpi({
   label,
   value,
   hint,
-  icon: Icon,
   tone = 'default',
   secondary = false,
 }: {
   label: string;
   value: string | number;
   hint: string;
-  icon: React.ElementType;
   tone?: 'default' | 'warning' | 'danger' | 'success';
   secondary?: boolean;
 }) {
@@ -66,17 +57,10 @@ function Kpi({
   return (
     <Card density="compact" tone={secondary ? 'tertiary' : 'secondary'} className={cn('border shadow-sm', toneClass)}>
       <CardContent>
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              {label}
-            </p>
-            <p className={cn('mt-1 font-bold tabular-nums', secondary ? 'text-lg' : 'text-xl')}>{value}</p>
-            <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
-          </div>
-          <div className="rounded-lg bg-background/80 p-1.5 text-action shadow-sm">
-            <Icon className="h-4 w-4" />
-          </div>
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+          <p className={cn('mt-1 font-bold tabular-nums', secondary ? 'text-lg' : 'text-xl')}>{value}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
         </div>
       </CardContent>
     </Card>
@@ -113,10 +97,10 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           {[...Array(4)].map((_, i) => (
-            <Skeleton key={i} className="h-24 rounded-xl" />
+            <Skeleton key={i} className="h-24 rounded-lg" />
           ))}
         </div>
-        <Skeleton className="h-[420px] rounded-xl" />
+        <Skeleton className="h-[420px] rounded-lg" />
       </div>
     );
   }
@@ -148,29 +132,29 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
         </div>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="secondary" onClick={() => navigate('/appointments')}>
-            <CalendarDays className="mr-1 h-4 w-4" /> Appointments
+            Appointments
           </Button>
           <Button size="sm" variant="secondary" onClick={() => navigate('/quick-service')}>
-            <Wrench className="mr-1 h-4 w-4" /> New Service
+            New Service
           </Button>
           <Button size="sm" variant="secondary" onClick={() => navigate('/invoices')}>
-            <Receipt className="mr-1 h-4 w-4" /> Invoices
+            Invoices
           </Button>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label="Today's Revenue" value={formatCurrency(data.revenueToday)} hint={`Yesterday ${formatCurrency(data.revenueTodayPrev)}`} icon={DollarSign} tone="success" />
-        <Kpi label="Appointments Today" value={data.appointmentsToday} hint={`${data.jobsCompletedToday} completed`} icon={CalendarDays} />
-        <Kpi label="Jobs In Progress" value={data.jobsInProgress} hint="Currently on the shop floor" icon={Wrench} tone={data.jobsInProgress > 0 ? 'success' : 'default'} />
-        <Kpi label="Outstanding Invoices" value={data.unpaidInvoices} hint={formatCurrency(data.outstandingAR)} icon={Receipt} tone={data.unpaidInvoices ? 'warning' : 'default'} />
+        <Kpi label="Today's Revenue" value={formatCurrency(data.revenueToday)} hint={`Yesterday ${formatCurrency(data.revenueTodayPrev)}`} tone="success" />
+        <Kpi label="Appointments Today" value={data.appointmentsToday} hint={`${data.jobsCompletedToday} completed`} />
+        <Kpi label="Jobs In Progress" value={data.jobsInProgress} hint="Currently on the shop floor" tone={data.jobsInProgress > 0 ? 'success' : 'default'} />
+        <Kpi label="Outstanding Invoices" value={data.unpaidInvoices} hint={formatCurrency(data.outstandingAR)} tone={data.unpaidInvoices ? 'warning' : 'default'} />
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label="Revenue Week" value={formatCurrency(data.revenueWeek)} hint="Rolling 7 days" icon={TrendingUp} secondary />
-        <Kpi label="Revenue Month" value={formatCurrency(data.revenueMonth)} hint={`Prev ${formatCurrency(data.revenueMonthPrev)}`} icon={TrendingUp} secondary />
-        <Kpi label="Revenue YTD" value={formatCurrency(data.revenueYTD)} hint="Year to date" icon={TrendingUp} secondary />
-        <Kpi label="Today vs Yesterday" value={`${revenueTrend >= 0 ? '+' : ''}${revenueTrend.toFixed(1)}%`} hint="Revenue trend" icon={TrendingUp} tone={revenueTrend >= 0 ? 'success' : 'warning'} secondary />
+        <Kpi label="Revenue Week" value={formatCurrency(data.revenueWeek)} hint="Rolling 7 days" secondary />
+        <Kpi label="Revenue Month" value={formatCurrency(data.revenueMonth)} hint={`Prev ${formatCurrency(data.revenueMonthPrev)}`} secondary />
+        <Kpi label="Revenue YTD" value={formatCurrency(data.revenueYTD)} hint="Year to date" secondary />
+        <Kpi label="Today vs Yesterday" value={`${revenueTrend >= 0 ? '+' : ''}${revenueTrend.toFixed(1)}%`} hint="Revenue trend" tone={revenueTrend >= 0 ? 'success' : 'warning'} secondary />
       </div>
 
       <div className="grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
@@ -178,9 +162,9 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
           <CardHeader><CardTitle className="text-base">Today's Appointments</CardTitle></CardHeader>
           <CardContent className="space-y-2">
             {data.todaysAppointments.length === 0 ? (
-              <p className="rounded-xl border bg-muted/40 p-3 text-sm text-muted-foreground">No appointments scheduled today.</p>
+              <p className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">No appointments scheduled today.</p>
             ) : data.todaysAppointments.map((a) => (
-              <div key={a.id} className="flex items-center justify-between gap-3 rounded-xl border p-3 text-sm">
+              <div key={a.id} className="flex items-center justify-between gap-3 rounded-lg border p-3 text-sm">
                 <div className="flex items-center gap-3">
                   <b className="tabular-nums">{a.scheduled_time ? formatTime(a.scheduled_time) : '—'}</b>
                   <span className="font-medium">{a.title}</span>
@@ -199,9 +183,9 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
           <CardHeader><CardTitle className="text-base">Jobs In Progress</CardTitle></CardHeader>
           <CardContent className="space-y-2">
             {data.jobsInProgressList.length === 0 ? (
-              <p className="rounded-xl border bg-muted/40 p-3 text-sm text-muted-foreground">No jobs currently in progress.</p>
+              <p className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">No jobs currently in progress.</p>
             ) : data.jobsInProgressList.map((job) => (
-              <div key={job.id} className="rounded-xl border p-3 text-sm">
+              <div key={job.id} className="rounded-lg border p-3 text-sm">
                 <p className="font-semibold">{job.service_type}</p>
                 <p className="text-muted-foreground">{job.customer_name}{job.vehicle ? ` · ${job.vehicle}` : ''}</p>
               </div>
@@ -214,11 +198,11 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
         <CardHeader><CardTitle className="text-base">Service Revenue (Month to Date)</CardTitle></CardHeader>
         <CardContent>
           {data.serviceTypeRevenueMTD.length === 0 ? (
-            <p className="rounded-xl border bg-muted/40 p-3 text-sm text-muted-foreground">No completed services recorded this month.</p>
+            <p className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">No completed services recorded this month.</p>
           ) : (
             <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
               {data.serviceTypeRevenueMTD.map((row) => (
-                <div key={row.type} className="rounded-xl border p-3">
+                <div key={row.type} className="rounded-lg border p-3">
                   <p className="text-xs font-semibold uppercase text-muted-foreground">{row.type}</p>
                   <p className="mt-1 text-lg font-bold tabular-nums">{formatCurrency(row.revenue)}</p>
                   <p className="text-xs text-muted-foreground">{row.count} jobs</p>
