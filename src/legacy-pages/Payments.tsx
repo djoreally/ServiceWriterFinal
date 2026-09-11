@@ -97,7 +97,7 @@ const Payments = () => {
   };
 
   useEffect(() => {
-    void Promise.all([loadPayments(), loadStripe()]);
+    queueMicrotask(() => { void Promise.all([loadPayments(), loadStripe()]); });
   }, []);
 
   const handleRefresh = async () => {
@@ -112,8 +112,10 @@ const Payments = () => {
   );
 
   useEffect(() => {
-    setPage(1);
-    setSelectedPaymentIds([]);
+    queueMicrotask(() => {
+      setPage(1);
+      setSelectedPaymentIds([]);
+    });
   }, [statusFilter, pageSize]);
 
   const pagedPayments = usePageSlice(filteredPayments, page, pageSize);
