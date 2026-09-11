@@ -43,6 +43,21 @@ interface CampaignBusinessProfile {
   booking_slug: string | null;
 }
 
+interface CampaignCustomerRow {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  company_name: string | null;
+  email: string | null;
+}
+
+interface AppointmentCustomerRow {
+  customer_id: string | null;
+}
+
+type DbResult<T> = { data: T | null; error: Error | null };
+type MutationResult = { error: Error | null };
+
 export class CampaignValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -51,13 +66,13 @@ export class CampaignValidationError extends Error {
 }
 
 async function fetchCanonicalCustomers(workspaceId: string): Promise<CampaignRecipient[]> {
-  const { data, error } = await supabase
+  const result = await supabase
     .from("customers")
     .select("id,first_name,last_name,company_name,email")
     .eq("workspace_id", workspaceId)
-    .not("email", "is", null);
-  if (error) throw error;
-  return (data ?? [])
+    .not("email", "is", null) as unknown as DbResult<CampaignCustomerRow[]>;
+  if (result.error) throw result.error;
+  return (result.data ?? [])
     .filter((row) => Boolean(row.email))
     .map((row) => ({
       id: String(row.id),
@@ -78,14 +93,14 @@ export async function resolveRecipients(
       );
     }
     const workspaceId = await requireWorkspaceId();
-    const { data, error } = await supabase
+    const result = await supabase
       .from("customers")
       .select("id,first_name,last_name,company_name,email")
       .eq("workspace_id", workspaceId)
       .in("id", overrideIds)
-      .not("email", "is", null);
-    if (error) throw error;
-    const recipients: CampaignRecipient[] = (data ?? []).filter((row) => Boolean(row.email)).map((row) => ({
+      .not("email", "is", null) as unknown as DbResult<CampaignCustomerRow[]>;
+    if (result.error) throw result.error;
+    const recipients: CampaignRecipient[] = (result.data ?? []).filter((row) => Boolean(row.email)).map((row) => ({
       id: String(row.id),
       name: [row.first_name, row.last_name].filter(Boolean).join(" ") || row.company_name || "Customer",
       email: String(row.email),
@@ -118,13 +133,13 @@ async function fetchCampaignRecipients(recipientType: string): Promise<CampaignR
     customers = customers.filter((customer) => matchingIds.has(customer.id));
   } else if (recipientType === "recent" || recipientType === "inactive") {
     const cutoff = subMonths(new Date(), recipientType === "recent" ? 3 : 6).toISOString();
-    const { data, error } = await supabase
+    const result = await supabase
       .from("appointments")
       .select("customer_id")
       .eq("workspace_id", workspaceId)
-      .gte("starts_at", cutoff);
-    if (error) throw error;
-    const activeIds = new Set((data ?? []).map((row) => row.customer_id).filter(Boolean));
+      .gte("starts_at", cutoff) as unknown as DbResult<AppointmentCustomerRow[]>;
+    if (result.error) throw result.error;
+    const activeIds = new Set((result.data ?? []).map((row) => row.customer_id).filter((id): id is string => Boolean(id)));
     customers = recipientType === "recent"
       ? customers.filter((customer) => activeIds.has(customer.id))
       : customers.filter((customer) => !activeIds.has(customer.id));
@@ -134,13 +149,13 @@ async function fetchCampaignRecipients(recipientType: string): Promise<CampaignR
 }
 
 async function fetchCampaignBusinessProfile(userId: string): Promise<CampaignBusinessProfile | null> {
-  const { data, error } = await supabase
+  const result = await supabase
     .from("business_profiles")
     .select("business_name, email, booking_slug")
     .eq("user_id", userId)
-    .maybeSingle();
-  if (error) throw error;
-  return data;
+    .maybeSingle() as unknown as DbResult<CampaignBusinessProfile>;
+  if (result.error) throw result.error;
+  return result.data;
 }
 
 async function filterSuppressedMarketingRecipients(
@@ -158,22 +173,22 @@ function assertMarketingEmailEntitlement(
 
 export async function createCampaign(payload: CreateCampaignPayload): Promise<void> {
   const user = await requireUser();
-  const { error } = await supabase
+  const result = await supabase
     .from("email_marketing_campaigns")
     .insert({
       user_id: user.id,
       ...payload,
       status: payload.scheduled_at ? CampaignStatus.Scheduled : CampaignStatus.Draft,
-    });
-  if (error) throw error;
+    }) as unknown as MutationResult;
+  if (result.error) throw result.error;
 }
 
 export async function deleteCampaign(campaignId: string): Promise<void> {
-  const { error } = await supabase
+  const result = await supabase
     .from("email_marketing_campaigns")
     .delete()
-    .eq("id", campaignId);
-  if (error) throw error;
+    .eq("id", campaignId) as unknown as MutationResult;
+  if (result.error) throw result.error;
 }
 
 export async function sendCampaign(campaign: CampaignRow): Promise<number> {
@@ -212,13 +227,14 @@ export async function sendCampaign(campaign: CampaignRow): Promise<number> {
     },
   }));
 
-  const { error: queueError } = await supabase.from("email_queue").insert(emailQueue);
-  if (queueError) throw queueError;
+  const queueResult = await supabase.from("email_queue").insert(emailQueue) as unknown as MutationResult;
+  if (queueResult.error) throw queueResult.error;
 
-  await supabase
+  const campaignUpdate = await supabase
     .from("email_marketing_campaigns")
     .update({ status: CampaignStatus.Sent, sent_at: new Date().toISOString(), recipient_count: deliverableCustomers.length })
-    .eq("id", campaign.id);
+    .eq("id", campaign.id) as unknown as MutationResult;
+  if (campaignUpdate.error) throw campaignUpdate.error;
 
   return deliverableCustomers.length;
 }
@@ -245,6 +261,6 @@ export async function sendCampaignTest(campaign: CampaignRow, to: string): Promi
       serviceDescription: campaign.content,
       bookingSlug: businessProfile?.booking_slug || undefined,
     },
-  });
+  }) as unknown as MutationResult;
   if (response.error) throw response.error;
 }
