@@ -60,8 +60,8 @@ async function fetchCanonicalCustomers(workspaceId: string): Promise<CampaignRec
     .not("email", "is", null);
   if (error) throw error;
   return (data ?? [])
-    .filter((row: any) => Boolean(row.email))
-    .map((row: any) => ({
+    .filter((row) => Boolean(row.email))
+    .map((row) => ({
       id: String(row.id),
       name: [row.first_name, row.last_name].filter(Boolean).join(" ") || row.company_name || "Customer",
       email: String(row.email),
@@ -87,7 +87,7 @@ export async function resolveRecipients(
       .in("id", overrideIds)
       .not("email", "is", null);
     if (error) throw error;
-    const recipients: CampaignRecipient[] = (data ?? []).filter((row: any) => Boolean(row.email)).map((row: any) => ({
+    const recipients: CampaignRecipient[] = (data ?? []).filter((row) => Boolean(row.email)).map((row) => ({
       id: String(row.id),
       name: [row.first_name, row.last_name].filter(Boolean).join(" ") || row.company_name || "Customer",
       email: String(row.email),
@@ -126,7 +126,7 @@ async function fetchCampaignRecipients(recipientType: string): Promise<CampaignR
       .eq("workspace_id", workspaceId)
       .gte("starts_at", cutoff);
     if (error) throw error;
-    const activeIds = new Set((data ?? []).map((row: any) => row.customer_id).filter(Boolean));
+    const activeIds = new Set((data ?? []).map((row) => row.customer_id).filter(Boolean));
     customers = recipientType === "recent"
       ? customers.filter((customer) => activeIds.has(customer.id))
       : customers.filter((customer) => !activeIds.has(customer.id));
