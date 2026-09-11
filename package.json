@@ -28,7 +28,7 @@
     "lint": "eslint . --quiet",
     "lint:strict": "eslint . --max-warnings=0",
     "start": "next start",
-    "buildos:check": "npx --yes git+https://github.com/djoreally/buildos-app-forge.git#2046266d8844d4eb7ae0ef54e2a0a967f555029d check"
+    "buildos:check": "node tools/buildos/bin/buildos.js check"
   },
   "playwright": {
     "config": "./e2e/playwright.config.ts"
