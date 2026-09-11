@@ -28,7 +28,8 @@
     "lint": "eslint . --quiet",
     "lint:strict": "eslint . --max-warnings=0",
     "start": "next start",
-    "buildos:check": "node tools/buildos/bin/buildos.js check"
+    "buildos:check": "node tools/buildos/bin/buildos.js check",
+    "test:hardening": "jest --runInBand src/server/security src/server/payments/stripe-secret-boundary.test.ts"
   },
   "playwright": {
     "config": "./e2e/playwright.config.ts"
