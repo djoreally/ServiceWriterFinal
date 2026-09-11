@@ -4,17 +4,12 @@ import { cn } from "@/lib/utils";
 import { useTerminology } from "@/contexts/TerminologyContext";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ChevronRight } from "lucide-react";
 import { getNavGroups, getFooterNavItems, type NavItem } from "./navItems";
 import { filterGroupsForMode, groupContainsPath, navItemMatchesPath, type SidebarMode } from "./navUtils";
 import { useTeamRole } from "@/hooks/useTeamRole";
 import { useWorkspaceBrand } from "@/hooks/useWorkspaceBrand";
-import { ProgressiveImage } from "@/components/media/ProgressiveImage";
 import { DashboardModeToggle } from "./DashboardModeToggle";
 
 interface MobileNavProps {
@@ -38,29 +33,23 @@ export const MobileNav = ({ open, onClose }: MobileNavProps) => {
   const isActive = (item: NavItem) => navItemMatchesPath(item, location.pathname);
 
   const renderNavItem = (item: NavItem, nested = false) => {
-    const Icon = item.icon;
     const active = isActive(item);
     const hasChildren = (item.children?.length ?? 0) > 0;
     const childHasActive = item.children?.some((child) => isActive(child)) ?? false;
 
     if (hasChildren) {
       return (
-        <Collapsible key={item.path} defaultOpen={active || childHasActive} className="rounded-xl">
-          <CollapsibleTrigger
-            className={cn(
-              "flex items-center justify-between w-full gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all",
-              active || childHasActive
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground",
-            )}
-          >
-            <span className="flex min-w-0 items-center gap-3">
-              <Icon className="h-5 w-5 shrink-0" />
-              <span className="truncate">{item.label}</span>
-            </span>
+        <Collapsible key={item.path} defaultOpen={active || childHasActive}>
+          <CollapsibleTrigger className={cn(
+            "group flex w-full items-center justify-between rounded-md px-3 py-2.5 text-left text-sm font-medium transition-colors",
+            active || childHasActive
+              ? "bg-[hsl(var(--primary-container))] text-[hsl(var(--on-primary-container))]"
+              : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+          )}>
+            <span className="truncate">{item.label}</span>
             <ChevronRight className="h-3.5 w-3.5 shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-90" />
           </CollapsibleTrigger>
-          <CollapsibleContent className="mt-1 space-y-0.5 pl-6">
+          <CollapsibleContent className="mt-1 space-y-0.5 pl-3">
             {item.children?.map((child) => renderNavItem(child, true))}
           </CollapsibleContent>
         </Collapsible>
@@ -73,14 +62,13 @@ export const MobileNav = ({ open, onClose }: MobileNavProps) => {
         to={item.path}
         onClick={onClose}
         className={cn(
-          "flex items-center rounded-xl font-medium transition-all",
-          nested ? "gap-2 px-3 py-2 text-xs" : "gap-3 px-4 py-3 text-sm",
+          "block rounded-md font-medium transition-colors",
+          nested ? "px-3 py-2 text-xs" : "px-3 py-2.5 text-sm",
           active
-            ? "bg-primary/10 text-primary"
-            : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            ? "bg-[hsl(var(--primary-container))] text-[hsl(var(--on-primary-container))]"
+            : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
         )}
       >
-        <Icon className={cn("shrink-0", nested ? "h-3.5 w-3.5" : "h-5 w-5")} />
         <span className="truncate">{item.label}</span>
       </Link>
     );
@@ -88,37 +76,25 @@ export const MobileNav = ({ open, onClose }: MobileNavProps) => {
 
   return (
     <Sheet open={open} onOpenChange={onClose}>
-      <SheetContent side="left" className="w-64 flex flex-col p-0">
-        <SheetHeader className="p-4 border-b border-border">
-          <SheetTitle className="flex items-center gap-3">
-            <ProgressiveImage
-              src={brand.logoUrl || "/logo.png"}
-              alt={`${brand.name} logo`}
-              className="h-8 w-8 rounded object-cover"
-              placeholderClassName="h-8 w-8 rounded"
-            />
-            <div className="text-left min-w-0">
-              <p className="font-bold truncate">{brand.name}</p>
-              <p className="text-xs text-muted-foreground font-normal truncate">{brand.tagline}</p>
-            </div>
+      <SheetContent side="left" className="flex w-64 flex-col p-0">
+        <SheetHeader className="border-b border-border p-4">
+          <SheetTitle className="text-left">
+            <p className="truncate text-base font-semibold">{brand.name}</p>
+            {brand.tagline && <p className="mt-0.5 truncate text-xs font-normal text-muted-foreground">{brand.tagline}</p>}
           </SheetTitle>
           <div className="mt-4"><DashboardModeToggle onNavigate={onClose} /></div>
         </SheetHeader>
         <ScrollArea className="flex-1">
-          <nav className="p-3 space-y-1">
+          <nav className="space-y-1 p-3">
             {navGroups.map((group) => {
               const groupHasActive = groupContainsPath(group, location.pathname);
               return (
-                <Collapsible
-                  key={group.label}
-                  defaultOpen={groupHasActive}
-                  className="border-b border-border/40 pb-1 last:border-b-0"
-                >
-                  <CollapsibleTrigger className="flex items-center justify-between w-full px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors rounded-lg hover:bg-muted/50 group">
+                <Collapsible key={group.label} defaultOpen={groupHasActive} className="border-b border-border/40 pb-1 last:border-b-0">
+                  <CollapsibleTrigger className="group flex w-full items-center justify-between rounded-md px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground">
                     <span>{group.label}</span>
                     <ChevronRight className="h-3.5 w-3.5 transition-transform duration-200 group-data-[state=open]:rotate-90" />
                   </CollapsibleTrigger>
-                  <CollapsibleContent className="mt-0.5 space-y-0.5 pl-1">
+                  <CollapsibleContent className="mt-0.5 space-y-0.5">
                     {group.items.map((item) => renderNavItem(item))}
                   </CollapsibleContent>
                 </Collapsible>
@@ -126,36 +102,9 @@ export const MobileNav = ({ open, onClose }: MobileNavProps) => {
             })}
           </nav>
         </ScrollArea>
-
-        {/* Footer */}
         {footerItems.length > 0 && (
-          <div className="p-4 border-t border-border shrink-0 space-y-1">
-            {footerItems.map((item) => {
-              const Icon = item.icon;
-              const active = isActive(item);
-              const className = cn(
-                "flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all w-full",
-                active
-                  ? "bg-primary/10 text-primary"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              );
-
-              if (item.onClick) {
-                return (
-                  <button key={item.label} onClick={() => { item.onClick?.(); onClose(); }} className={className}>
-                    <Icon className="h-5 w-5" />
-                    {item.label}
-                  </button>
-                );
-              }
-
-              return (
-                <Link key={item.label} to={item.path} onClick={onClose} className={className}>
-                  <Icon className="h-5 w-5" />
-                  {item.label}
-                </Link>
-              );
-            })}
+          <div className="space-y-1 border-t border-border p-3">
+            {footerItems.map((item) => renderNavItem(item))}
           </div>
         )}
       </SheetContent>
