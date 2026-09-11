@@ -12,7 +12,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node scripts/check-architecture-contract.mjs && node scripts/check-identity-contract.mjs && node scripts/check-frontend-ui-contract.mjs",
+    "prebuild": "npm run buildos:check && node scripts/check-architecture-contract.mjs && node scripts/check-identity-contract.mjs && node scripts/check-frontend-ui-contract.mjs",
     "build": "next build",
     "typecheck": "tsc --noEmit",
     "test": "jest --runInBand",
@@ -27,7 +27,8 @@
     "verify:release": "node scripts/verify-release-readiness.mjs",
     "lint": "eslint . --quiet",
     "lint:strict": "eslint . --max-warnings=0",
-    "start": "next start"
+    "start": "next start",
+    "buildos:check": "npx --yes github:djoreally/buildos-app-forge#2046266d8844d4eb7ae0ef54e2a0a967f555029d check"
   },
   "playwright": {
     "config": "./e2e/playwright.config.ts"
