@@ -10,8 +10,6 @@ import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { fetchCustomerAnalytics } from "@/application/queries/reports-tabs.query";
 
-const db = supabase as any;
-
 async function requireUser() {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("Authentication required");
@@ -53,7 +51,7 @@ export class CampaignValidationError extends Error {
 }
 
 async function fetchCanonicalCustomers(workspaceId: string): Promise<CampaignRecipient[]> {
-  const { data, error } = await db
+  const { data, error } = await supabase
     .from("customers")
     .select("id,first_name,last_name,company_name,email")
     .eq("workspace_id", workspaceId)
@@ -80,7 +78,7 @@ export async function resolveRecipients(
       );
     }
     const workspaceId = await requireWorkspaceId();
-    const { data, error } = await db
+    const { data, error } = await supabase
       .from("customers")
       .select("id,first_name,last_name,company_name,email")
       .eq("workspace_id", workspaceId)
@@ -120,7 +118,7 @@ async function fetchCampaignRecipients(recipientType: string): Promise<CampaignR
     customers = customers.filter((customer) => matchingIds.has(customer.id));
   } else if (recipientType === "recent" || recipientType === "inactive") {
     const cutoff = subMonths(new Date(), recipientType === "recent" ? 3 : 6).toISOString();
-    const { data, error } = await db
+    const { data, error } = await supabase
       .from("appointments")
       .select("customer_id")
       .eq("workspace_id", workspaceId)
