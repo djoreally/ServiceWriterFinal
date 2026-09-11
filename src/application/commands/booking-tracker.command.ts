@@ -56,41 +56,21 @@ export async function trackBookingProgress(
     last_attempted_at: new Date().toISOString(),
   };
 
-  // NOTE: The uniqueness we need is enforced by *partial* unique indexes
-  // (recovered=false), which PostgREST cannot target via ON CONFLICT.
-  // So we emulate upsert: look up the active row, then update or insert.
-  let existingId: string | null = null;
-  {
-    let q = supabase
-      .from("abandoned_bookings")
-      .select("id")
-      .eq("user_id", input.businessUserId)
-      .eq("recovered", false);
-    if (email) q = q.ilike("guest_email", email);
-    else q = q.eq("session_id", sessionId as string);
-    const { data: found, error: findErr } = await q.maybeSingle();
-    if (findErr && findErr.code !== "PGRST116") {
-      return { error: { message: findErr.message } };
-    }
-    existingId = found?.id ?? null;
-  }
+  if (!sessionId) return { error: null };
 
-  const { data, error } = existingId
-    ? await supabase
-        .from("abandoned_bookings")
-        .update(payload as never)
-        .eq("id", existingId)
-        .select("id")
-        .single()
-    : await supabase
-        .from("abandoned_bookings")
-        .insert(payload as never)
-        .select("id")
-        .single();
+  const { error } = await (supabase as any).rpc("public_track_abandoned_booking_v1", {
+    p_business_user_id: payload.user_id,
+    p_session_id: sessionId,
+    p_guest_email: payload.guest_email,
+    p_guest_name: payload.guest_name,
+    p_guest_phone: payload.guest_phone,
+    p_last_step: payload.last_step,
+    p_service_catalog_id: payload.service_catalog_id,
+    p_scheduled_date: payload.scheduled_date,
+    p_scheduled_time: payload.scheduled_time,
+    p_metadata: payload.metadata,
+  });
 
-  if (!error && data?.id) {
-    void supabase.rpc("notify_abandoned_booking", { row_id: data.id });
-  }
   return { error: error ? { message: error.message } : null };
 }
 
@@ -100,29 +80,14 @@ export async function trackBookingProgress(
  */
 export async function markBookingRecovered(
   businessUserId: string,
-  guestEmail: string | null,
+  _guestEmail: string | null,
   sessionId?: string | null,
 ): Promise<{ error: { message: string } | null }> {
-  const email = guestEmail?.trim().toLowerCase() || null;
-  if (!email && !sessionId) return { error: null };
+  if (!sessionId) return { error: null };
 
-  let query = supabase
-    .from("abandoned_bookings")
-    .update({
-      recovered: true,
-      status: "recovered",
-      recovered_at: new Date().toISOString(),
-    } as never)
-    .eq("user_id", businessUserId)
-    .in("status", ["pending", "processing", "emailed"])
-    .eq("recovered", false);
-
-  if (email) {
-    query = query.ilike("guest_email", email);
-  } else if (sessionId) {
-    query = query.eq("session_id", sessionId);
-  }
-
-  const { error } = await query;
+  const { error } = await (supabase as any).rpc("public_recover_abandoned_booking_v1", {
+    p_business_user_id: businessUserId,
+    p_session_id: sessionId,
+  });
   return { error: error ? { message: error.message } : null };
 }
