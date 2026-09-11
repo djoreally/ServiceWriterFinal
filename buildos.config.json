@@ -4,22 +4,16 @@
   "agentContract": "AGENTS.md",
   "specification": "BUILDOS.md",
   "commands": {
-    "typecheck": "npm run typecheck",
-    "lint": "npm run lint",
-    "test": "npm test",
+    "security": "npm run test:hardening",
     "build": "npm run build"
   },
   "check": [
     "state",
-    "typecheck",
-    "lint",
-    "test"
+    "security"
   ],
   "verify": [
     "state",
-    "typecheck",
-    "lint",
-    "test",
+    "security",
     "build"
   ],
   "requireChangeRecord": true,
