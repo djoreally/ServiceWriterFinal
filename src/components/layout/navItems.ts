@@ -1,48 +1,7 @@
-import type { LucideIcon } from "lucide-react";
 import type { WorkforceRole } from "@/application/queries/workforce-identity.query";
-import { canAccessRoute } from "@/domain/auth/access-policy";
-
-import {
-  LayoutDashboard,
-  Calculator,
-  Users,
-  Car,
-  ClipboardList,
-  Package,
-  PackageOpen,
-  FileText,
-  Settings,
-  BookOpen,
-  CalendarClock,
-  Clock,
-  CreditCard,
-  Megaphone,
-  Database,
-  BadgeDollarSign,
-  LifeBuoy,
-  TrendingUp,
-  Zap,
-  Mail,
-  MessageSquare,
-  GraduationCap,
-  Video,
-  Sparkles,
-  CircleGauge,
-  Signal,
-  Radio,
-  Receipt,
-  CloudRain,
-  FolderOpen,
-  Tag,
-  Store,
-  Star,
-  ContactRound,
-} from "lucide-react";
-
 export type NavItem = {
   path: string;
   label: string;
-  icon: LucideIcon;
   onClick?: () => void;
   children?: NavItem[];
 };
@@ -73,97 +32,97 @@ const buildAllGroups = (terms: Terms): NavGroup[] => [
   {
     label: "Dashboard",
     items: [
-      { path: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-      { path: "/command-center", label: "Dispatch", icon: Radio },
-      { path: "/reports", label: "Reports", icon: FileText },
+      { path: "/dashboard", label: "Dashboard" },
+      { path: "/command-center", label: "Dispatch" },
+      { path: "/reports", label: "Reports" },
     ],
   },
   {
     label: "Operations",
     items: [
-      { path: "/appointments", label: "Appointments", icon: CalendarClock },
-      { path: "/availability", label: "Availability", icon: Clock },
-      { path: "/weather-guard", label: "Weather Alerts", icon: CloudRain },
-      { path: "/services", label: "Work Orders & History", icon: ClipboardList },
-      { path: "/team-os", label: "Technician Hub", icon: Zap },
+      { path: "/appointments", label: "Appointments" },
+      { path: "/availability", label: "Availability" },
+      { path: "/weather-guard", label: "Weather Alerts" },
+      { path: "/services", label: "Work Orders & History" },
+      { path: "/team-os", label: "Technician Hub" },
     ],
   },
   {
     label: "Customers",
     items: [
-      { path: "/customers", label: terms.customer + "s", icon: Users },
-      { path: "/vehicles", label: terms.vehicle + "s", icon: Car },
-      { path: "/vehicle-specs", label: "Customer Data", icon: Database },
+      { path: "/customers", label: terms.customer + "s" },
+      { path: "/vehicles", label: terms.vehicle + "s" },
+      { path: "/vehicle-specs", label: "Customer Data" },
     ],
   },
   {
     label: "Services",
     items: [
-      { path: "/service-catalog", label: terms.service + " Catalog", icon: BookOpen },
-      { path: "/service-packages", label: "Service Packages", icon: PackageOpen },
-      { path: "/tire-pricing", label: "Tire Pricing", icon: CircleGauge },
-      { path: "/detailing-pricing", label: "Detailing Pricing", icon: Sparkles },
-      { path: "/subscriptions", label: "Memberships", icon: BadgeDollarSign },
+      { path: "/service-catalog", label: terms.service + " Catalog" },
+      { path: "/service-packages", label: "Service Packages" },
+      { path: "/tire-pricing", label: "Tire Pricing" },
+      { path: "/detailing-pricing", label: "Detailing Pricing" },
+      { path: "/subscriptions", label: "Memberships" },
     ],
   },
   {
     label: "Finance",
     items: [
-      { path: "/quotes", label: terms.quote + "s", icon: FileText },
-      { path: "/invoices", label: "Invoices", icon: FileText },
-      { path: "/payments", label: "Payments", icon: CreditCard },
-      { path: "/expenses", label: "Expenses", icon: Receipt },
-      { path: "/inventory", label: "Inventory", icon: Package },
-      { path: "/settings?tab=payments&subtab=coupons", label: "Coupons", icon: Tag },
-      { path: "/financials", label: "Financial Analytics", icon: TrendingUp },
-      { path: "/pricing-tool", label: "Job Pricing", icon: Calculator },
+      { path: "/quotes", label: terms.quote + "s" },
+      { path: "/invoices", label: "Invoices" },
+      { path: "/payments", label: "Payments" },
+      { path: "/expenses", label: "Expenses" },
+      { path: "/inventory", label: "Inventory" },
+      { path: "/settings?tab=payments&subtab=coupons", label: "Coupons" },
+      { path: "/financials", label: "Financial Analytics" },
+      { path: "/pricing-tool", label: "Job Pricing" },
     ],
   },
   {
     label: "Marketplace",
     items: [
-      { path: "/marketplace", label: "Marketplace Dashboard", icon: Store },
-      { path: "/marketplace/listing", label: "Marketplace Listing", icon: Store },
-      { path: "/marketplace/leads", label: "Booking Requests", icon: Users },
-      { path: "/marketplace/reviews", label: "Reviews", icon: Star },
-      { path: "/marketplace/analytics", label: "Marketplace Analytics", icon: TrendingUp },
+      { path: "/marketplace", label: "Marketplace Dashboard" },
+      { path: "/marketplace/listing", label: "Marketplace Listing" },
+      { path: "/marketplace/leads", label: "Booking Requests" },
+      { path: "/marketplace/reviews", label: "Reviews" },
+      { path: "/marketplace/analytics", label: "Marketplace Analytics" },
     ],
   },
   {
     label: "CRM",
     items: [
-      { path: "/crm", label: "CRM Dashboard", icon: ContactRound },
+      { path: "/crm", label: "CRM Dashboard" },
     ],
   },
   {
     label: "Marketing",
     items: [
-      { path: "/growth-tools", label: "Growth Tools", icon: Megaphone },
-      { path: "/retention-engine", label: "Retention Engine", icon: Signal },
-      { path: "/newsletter", label: "Newsletters", icon: Mail },
+      { path: "/growth-tools", label: "Growth Tools" },
+      { path: "/retention-engine", label: "Retention Engine" },
+      { path: "/newsletter", label: "Newsletters" },
     ],
   },
   {
     label: "Communications",
     items: [
-      { path: "/messages", label: "Messages", icon: MessageSquare },
-      { path: "/receptionist", label: "AI Receptionist", icon: Radio },
-      { path: "/assets", label: "Media Library", icon: FolderOpen },
+      { path: "/messages", label: "Messages" },
+      { path: "/receptionist", label: "AI Receptionist" },
+      { path: "/assets", label: "Media Library" },
     ],
   },
   {
     label: "Settings",
     items: [
-      { path: "/settings", label: "Settings", icon: Settings },
+      { path: "/settings", label: "Settings" },
     ],
   },
   {
     label: "Help",
     items: [
-      { path: "/knowledge-base", label: "Knowledge Base", icon: GraduationCap },
-      { path: "/tutorials", label: "Video Tutorials", icon: Video },
-      { path: "/whats-new", label: "What's New", icon: Sparkles },
-      { path: "/support", label: "Contact Support", icon: LifeBuoy },
+      { path: "/knowledge-base", label: "Knowledge Base" },
+      { path: "/tutorials", label: "Video Tutorials" },
+      { path: "/whats-new", label: "What's New" },
+      { path: "/support", label: "Contact Support" },
     ],
   },
 ];
