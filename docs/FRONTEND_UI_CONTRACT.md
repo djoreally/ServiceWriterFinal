@@ -14,7 +14,7 @@ This is the canonical frontend styling contract for the authenticated Service Wr
 8. **Empty/loading/error states are deliberate.** No blank panels. Every empty state says what is missing and, when actionable, offers one clear next action.
 9. **Mobile is recomposed.** Do not merely squeeze desktop layouts. Preserve 44px touch targets, readable totals, safe-area spacing, and intentional table overflow/card transformations.
 10. **Theme is personal.** Theme preference is scoped to the authenticated user. New users default to the operating-system preference.
-11. **One icon per action/destination.** Do not duplicate a destination in the same navigation surface or stack redundant decorative icons around the same label.
+11. **Text and data are the focal point.** Authenticated operational UI does not use decorative icons beside field names, card titles, navigation labels, or ordinary actions. Icons are reserved for meaning that text alone does not express efficiently: directional trends, disclosure/chevrons, status, warnings, and universally understood utility controls.
 12. **Frontend is replaceable.** Business rules and data access do not belong in styling primitives. A future frontend can be replaced without changing the canonical backend contracts.
 
 ## Canonical primitives
