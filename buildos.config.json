@@ -4,15 +4,18 @@
   "agentContract": "AGENTS.md",
   "specification": "BUILDOS.md",
   "commands": {
+    "lint": "npm run lint",
     "security": "npm run test:hardening",
     "build": "npm run build"
   },
   "check": [
     "state",
+    "lint",
     "security"
   ],
   "verify": [
     "state",
+    "lint",
     "security",
     "build"
   ],
