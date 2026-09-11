@@ -146,9 +146,6 @@ export async function saveStripeDirectCredentials(
       workspace_id: workspaceId,
       provider: "stripe",
       credential_payload_encrypted: encodeDirectCredentialBundle({ accountId, apiKey, webhookSecret }),
-      access_token_encrypted: null,
-      refresh_token_encrypted: null,
-      expires_at: null,
       updated_at: new Date().toISOString(),
     }, { onConflict: "workspace_id,provider" });
   if (error) throw error;
@@ -158,7 +155,10 @@ export async function deleteStripeDirectCredentials(workspaceId: string) {
   const admin = createSupabaseAdminClient();
   const { error } = await admin
     .from("provider_connection_secrets")
-    .delete()
+    .update({
+      credential_payload_encrypted: null,
+      updated_at: new Date().toISOString(),
+    })
     .eq("workspace_id", workspaceId)
     .eq("provider", "stripe");
   if (error) throw error;
