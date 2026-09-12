@@ -34,6 +34,7 @@ import { fetchVehicleOverviewFromOffline } from "@/application/queries/vehicles.
 import { isOfflineEligibleForCurrentUser } from "@/offline/rollout";
 import { createVehicle, updateVehicle, deleteVehicle } from "@/application/commands";
 import { ListPagination, usePageSlice, DEFAULT_PAGE_SIZE } from "@/components/ui/list-pagination";
+import { ResponsiveRecord } from "@/components/data-table/ResponsiveRecord";
 
 import type { Vehicle, Customer } from "@/shared/types";
 
@@ -422,9 +423,49 @@ const Vehicles = () => {
         </Card>
 
         {/* Table */}
-        <Card className="border border-border/50">
+        <Card className="border border-border/50 [container-type:inline-size]">
           <CardContent className="p-0">
-            <div className="overflow-x-auto">
+            <div className="space-y-2 p-3 @min-[700px]:hidden">
+              {vehiclesLoading ? (
+                <div className="py-12 text-center"><Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" /></div>
+              ) : vehiclesError ? (
+                <div className="rounded-lg bg-destructive/5 p-4 text-center text-destructive">{vehiclesError}</div>
+              ) : pagedVehicles.length === 0 ? (
+                <div className="py-10 text-center text-muted-foreground">No {terms.vehicle.toLowerCase()}s found</div>
+              ) : (
+                pagedVehicles.map((v) => {
+                  const owner = v.customer_id ? customerNames[v.customer_id] || "Unknown owner" : "Unassigned";
+                  const vehicleTitle = [v.year, v.make, v.model].filter(Boolean).join(" ");
+                  return (
+                    <ResponsiveRecord
+                      key={v.id}
+                      primary={vehicleTitle}
+                      secondary={owner}
+                      slot={v.license_plate || "No plate"}
+                      status={<Badge className="bg-gray-500/10 text-gray-600 hover:bg-gray-500/20">Ready</Badge>}
+                      meta={lastServiceDates[v.id] ? `Last ${terms.service.toLowerCase()} ${format(parseISO(lastServiceDates[v.id]), "MMM d, yyyy")}` : `No ${terms.service.toLowerCase()} history`}
+                      details={[
+                        { label: "VIN", value: v.vin || "—" },
+                        { label: "License", value: v.license_plate || "—" },
+                        { label: "Owner", value: owner },
+                        { label: "Color", value: v.color || "—" },
+                        { label: "Mileage", value: v.mileage ?? "—" },
+                        { label: `Last ${terms.service}`, value: lastServiceDates[v.id] ? format(parseISO(lastServiceDates[v.id]), "MMM d, yyyy") : "—" },
+                      ]}
+                      actions={
+                        <div className="flex gap-1">
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => navigate(`/vehicles/${v.id}`)}><Eye className="h-4 w-4" /></Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditDialog(v)}><Edit className="h-4 w-4" /></Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleDelete(v.id)}><Trash2 className="h-4 w-4" /></Button>
+                        </div>
+                      }
+                      onOpen={() => navigate(`/vehicles/${v.id}`)}
+                    />
+                  );
+                })
+              )}
+            </div>
+            <div className="hidden overflow-x-auto @min-[700px]:block">
             <Table density="compact">
               <TableHeader>
                 <TableRow className="border-border/50">
