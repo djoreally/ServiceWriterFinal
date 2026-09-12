@@ -1,7 +1,6 @@
 import { createSupabaseAdminClient } from "@/lib/supabase";
 import { EnginemailerEmailAdapter } from "@/server/messaging/enginemailer";
 import { ResendEmailAdapter } from "@/server/messaging/resend";
-import { reconcileResendDeliveryStatuses } from "@/server/messaging/resend-reconciliation";
 import { type LifecycleVariables } from "@/server/messaging/lifecycle-templates";
 import type { LifecyclePurpose } from "@/server/messaging/lifecycle-templates";
 import { renderLifecycleEmailForDelivery } from "@/server/messaging/render-lifecycle-email";
@@ -74,6 +73,10 @@ export async function enqueueLifecycleEmail(input: LifecycleSendInput & {
       customerId: input.customerId ?? null,
       renderedSubject: rendered.subject,
       renderedText: rendered.text,
+      renderedHtml: rendered.html,
+      renderedPurpose: rendered.purpose,
+      fromName: typeof input.variables["business.name"] === "string" ? String(input.variables["business.name"]) : "Service Writer",
+      replyTo: typeof input.variables["business.email"] === "string" && /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(String(input.variables["business.email"])) ? String(input.variables["business.email"]) : null,
     },
   });
   if (error || !data) throw error ?? new Error("Lifecycle event enqueue returned no id");
@@ -210,33 +213,8 @@ export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ p
   return sent;
 }
 
-async function reconcileCrmProjection(): Promise<number> {
-  const supabase = createSupabaseAdminClient();
-  const { data, error } = await supabase.rpc("reconcile_crm_profiles_v1", {
-    p_workspace_id: null,
-  });
-  if (error) throw error;
-  return Number(data ?? 0);
-}
-
 export async function processLifecycleEventOutbox(limit = 50, workerId = `vercel:${crypto.randomUUID()}`) {
   const supabase = createSupabaseAdminClient();
-
-  try {
-    const inserted = await reconcileCrmProjection();
-    if (inserted > 0) console.info("[CRM] reconciled missing customer profiles", { inserted });
-  } catch (crmError) {
-    console.error("[CRM] projection reconciliation failed", crmError);
-  }
-
-  try {
-    const reconciled = await reconcileResendDeliveryStatuses(Math.max(10, Math.min(limit, 50)));
-    if (reconciled > 0) console.info("[Lifecycle] reconciled Resend delivery statuses", { reconciled });
-  } catch (reconciliationError) {
-    console.error("[Lifecycle] Resend delivery reconciliation pass failed", {
-      message: reconciliationError instanceof Error ? reconciliationError.message : "unknown",
-    });
-  }
 
   const { data: claimed, error } = await supabase.rpc("claim_lifecycle_events", {
     p_limit: Math.max(1, Math.min(limit, 200)),

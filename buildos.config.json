@@ -1,0 +1,47 @@
+{
+  "$schema": "https://raw.githubusercontent.com/djoreally/buildos-app-forge/main/packages/cli/schema/buildos-config.schema.json",
+  "version": 1,
+  "stateDirectory": ".buildos",
+  "agentContract": "AGENTS.md",
+  "specification": "BUILDOS.md",
+  "commands": {
+    "typecheck": "npm run typecheck",
+    "lint": "npm run lint:strict",
+    "test": "npm test",
+    "build": "npm run build",
+    "architecture": "npm run verify:architecture",
+    "identity": "npm run verify:identity",
+    "frontend": "npm run verify:frontend-ui",
+    "release": "npm run verify:release"
+  },
+  "check": [
+    "state",
+    "runtime",
+    "architecture",
+    "identity",
+    "frontend",
+    "typecheck",
+    "lint",
+    "test"
+  ],
+  "verify": [
+    "state",
+    "runtime",
+    "architecture",
+    "identity",
+    "frontend",
+    "typecheck",
+    "lint",
+    "test",
+    "build",
+    "release"
+  ],
+  "requireChangeRecord": true,
+  "runtime": {
+    "requireEnvironmentParity": false
+  },
+  "release": {
+    "requireCleanTree": true,
+    "requireExactSha": true
+  }
+}

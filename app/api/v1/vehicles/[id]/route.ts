@@ -27,6 +27,14 @@ const vehicleUpdateSchema = z.object({
 
 const writeRoles = ["owner", "admin", "manager", "service_advisor", "receptionist", "technician"] as const;
 
+function normalizeVin(value: string | null | undefined): string {
+  return String(value ?? "").toUpperCase().replace(/[^A-HJ-NPR-Z0-9]/g, "");
+}
+
+function validVin(value: string): boolean {
+  return /^[A-HJ-NPR-Z0-9]{17}$/.test(value);
+}
+
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
@@ -69,19 +77,66 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (Object.prototype.hasOwnProperty.call(body, "plate_state") && !Object.prototype.hasOwnProperty.call(body, "plate_region")) {
       patch.plate_region = plate_state ?? null;
     }
-    if (Object.prototype.hasOwnProperty.call(body, "odometer_measure")) {
+
+    const needsCurrent = Object.prototype.hasOwnProperty.call(body, "odometer_measure")
+      || Object.prototype.hasOwnProperty.call(body, "vin");
+    let currentMetadata: Record<string, unknown> = {};
+    let previousVin = "";
+    if (needsCurrent) {
       const { data: current, error: currentError } = await supabase
         .from("vehicles")
-        .select("metadata")
+        .select("vin,metadata")
         .eq("workspace_id", workspace_id)
         .eq("id", id)
         .maybeSingle();
       if (currentError) throw currentError;
       if (!current) throw new Error("Vehicle does not belong to this workspace.");
-      const metadata = current.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata)
+      previousVin = normalizeVin(current.vin);
+      currentMetadata = current.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata)
         ? current.metadata as Record<string, unknown>
         : {};
-      patch.metadata = { ...metadata, odometer_measure: odometer_measure ?? null };
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, "odometer_measure")) {
+      patch.metadata = { ...currentMetadata, odometer_measure: odometer_measure ?? null };
+    }
+
+    const nextVin = Object.prototype.hasOwnProperty.call(body, "vin") ? normalizeVin(body.vin) : previousVin;
+    const vinChanged = Object.prototype.hasOwnProperty.call(body, "vin") && nextVin !== previousVin;
+    let decoded: {
+      year?: number | null;
+      make?: string | null;
+      model?: string | null;
+      trim?: string | null;
+      engine?: string | null;
+      oilSpecs?: { oilType?: string | null; oilCapacity?: string | null; oilFilter?: string | null } | null;
+    } | null = null;
+    let vinDecodeStatus: "not_changed" | "decoded" | "failed" | "invalid" = "not_changed";
+
+    if (vinChanged) {
+      if (validVin(nextVin)) {
+        const result = await supabase.functions.invoke("vin-decode", { body: { vin: nextVin } });
+        if (!result.error && result.data) {
+          decoded = result.data as typeof decoded;
+          vinDecodeStatus = "decoded";
+          patch.vin = nextVin;
+          if (decoded?.year != null) patch.year = decoded.year;
+          if (decoded?.make) patch.make = decoded.make;
+          if (decoded?.model) patch.model = decoded.model;
+          if (decoded?.trim) patch.trim = decoded.trim;
+        } else {
+          vinDecodeStatus = "failed";
+        }
+      } else if (nextVin) {
+        vinDecodeStatus = "invalid";
+      }
+
+      patch.metadata = {
+        ...currentMetadata,
+        ...(patch.metadata && typeof patch.metadata === "object" ? patch.metadata as Record<string, unknown> : {}),
+        vin_decode_status: vinDecodeStatus,
+        vin_decode_checked_at: new Date().toISOString(),
+      };
     }
 
     let vehicle: unknown;
@@ -106,7 +161,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       vehicle = data;
     }
 
-    if ([engine, oil_type, oil_capacity, oil_filter].some((value) => value !== undefined)) {
+    if (vinChanged || [engine, oil_type, oil_capacity, oil_filter].some((value) => value !== undefined)) {
       const { data: currentSpecs, error: currentSpecsError } = await supabase
         .from("vehicle_service_specs")
         .select("engine,oil_type,oil_capacity,oil_filter,metadata")
@@ -114,15 +169,24 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         .eq("vehicle_id", id)
         .maybeSingle();
       if (currentSpecsError) throw currentSpecsError;
+
+      const decodedOil = decoded?.oilSpecs ?? null;
       const { error: specsError } = await supabase.from("vehicle_service_specs").upsert({
         workspace_id,
         vehicle_id: id,
-        engine: engine !== undefined ? engine : currentSpecs?.engine ?? null,
-        oil_type: oil_type !== undefined ? oil_type : currentSpecs?.oil_type ?? null,
-        oil_capacity: oil_capacity !== undefined ? oil_capacity : currentSpecs?.oil_capacity ?? null,
-        oil_filter: oil_filter !== undefined ? oil_filter : currentSpecs?.oil_filter ?? null,
-        source: "service_writer",
-        metadata: currentSpecs?.metadata ?? {},
+        engine: engine !== undefined ? engine : vinChanged ? decoded?.engine ?? null : currentSpecs?.engine ?? null,
+        oil_type: oil_type !== undefined ? oil_type : vinChanged ? decodedOil?.oilType ?? null : currentSpecs?.oil_type ?? null,
+        oil_capacity: oil_capacity !== undefined ? oil_capacity : vinChanged ? decodedOil?.oilCapacity ?? null : currentSpecs?.oil_capacity ?? null,
+        oil_filter: oil_filter !== undefined ? oil_filter : vinChanged ? decodedOil?.oilFilter ?? null : currentSpecs?.oil_filter ?? null,
+        source: vinChanged ? (vinDecodeStatus === "decoded" ? "vin_decode" : "vin_changed_pending_decode") : "service_writer",
+        metadata: {
+          ...(currentSpecs?.metadata ?? {}),
+          ...(vinChanged ? {
+            vin: nextVin || null,
+            vin_decode_status: vinDecodeStatus,
+            vin_decode_checked_at: new Date().toISOString(),
+          } : {}),
+        },
       } as never, { onConflict: "workspace_id,vehicle_id" });
       if (specsError) throw specsError;
     }
