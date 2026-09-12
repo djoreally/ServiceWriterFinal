@@ -174,9 +174,24 @@ export const nextApi = {
     updateStatus: (quoteId: string, payload: { workspace_id: string; status: "approved" | "declined"; expected_updated_at?: string | null }) => request<{ data: unknown }>(`/v1/quotes/${encodeURIComponent(quoteId)}/status`, { method: "POST", body: JSON.stringify(payload) }),
   },
   appointments: {
-    listWindow: (workspaceId: string, options: { from: string; to: string; limit?: number }) => {
-      const params = new URLSearchParams({ workspace_id: workspaceId, from: options.from, to: options.to, limit: String(options.limit ?? 100), offset: "0" });
-      return request<{ data: unknown[] }>(`/v1/appointments?${params.toString()}`);
+    listWindow: async (workspaceId: string, options: { from: string; to: string; pageSize?: number }) => {
+      const pageSize = Math.min(Math.max(options.pageSize ?? 100, 1), 100);
+      const data: unknown[] = [];
+      let offset = 0;
+      for (;;) {
+        const params = new URLSearchParams({
+          workspace_id: workspaceId,
+          from: options.from,
+          to: options.to,
+          limit: String(pageSize),
+          offset: String(offset),
+        });
+        const response = await request<{ data: unknown[] }>(`/v1/appointments?${params.toString()}`);
+        data.push(...response.data);
+        if (response.data.length < pageSize) break;
+        offset += pageSize;
+      }
+      return { data };
     },
     list: async (workspaceId: string) => {
       // The appointments API is paginated. Loading only its default first page
