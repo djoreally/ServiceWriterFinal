@@ -12,7 +12,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node scripts/check-architecture-contract.mjs && node scripts/check-identity-contract.mjs && node scripts/check-frontend-ui-contract.mjs",
+    "prebuild": "node scripts/check-architecture-contract.mjs && node scripts/check-identity-contract.mjs && node scripts/check-frontend-ui-contract.mjs && npm run verify:booking-reliability",
     "build": "next build",
     "typecheck": "tsc --noEmit",
     "test": "jest --runInBand",
@@ -31,7 +31,8 @@
     "buildos:doctor": "npx buildos doctor",
     "buildos:check": "npx buildos check",
     "buildos:verify": "npx buildos verify",
-    "buildos:release": "npx buildos release"
+    "buildos:release": "npx buildos release",
+    "verify:booking-reliability": "node scripts/check-booking-reliability-contract.mjs"
   },
   "playwright": {
     "config": "./e2e/playwright.config.ts"
