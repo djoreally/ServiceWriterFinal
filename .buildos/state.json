@@ -8,25 +8,54 @@
     "Supabase provider secrets not yet provisioned for new lifecycle worker",
     "legacy staging environment is not canonical enough for full parity certification"
   ],
-  "updatedAt": "2026-09-12T04:20:00Z",
+  "updatedAt": "2026-09-12T04:30:00Z",
   "protocolVersion": "1.0",
   "currentMilestone": "operational-reliability",
   "currentTask": {
     "shot": 1,
     "totalShots": 12,
     "name": "Booking reliability",
-    "status": "in_progress"
+    "status": "verified"
   },
-  "history": [],
+  "history": [
+    {
+      "shot": 1,
+      "name": "Booking reliability",
+      "status": "verified",
+      "commitSha": "2bc8aaefbd5dbdb5ab22747d9e4675d72f9265f8",
+      "evidence": {
+        "bookingPrebuild": "PASS",
+        "architectureContract": "PASS",
+        "identityRbacContract": "PASS",
+        "frontendUiContract": "PASS",
+        "typescriptBuild": "PASS",
+        "vercelDeployment": "READY",
+        "productionHealth": "200",
+        "productionBookingRequests": "200",
+        "recentPublicBookings30d": 10,
+        "recentPublicBookings7d": 5,
+        "obviousDuplicateActiveBookings30d": 0,
+        "missingCustomerLinks30d": 0,
+        "missingWorkspaceLinks30d": 0,
+        "missingStartTimes30d": 0,
+        "missingVehicleLinks30d": 0
+      },
+      "limitations": [
+        "Candidate SHA is not merged to main, so status is verified rather than green.",
+        "GitHub Actions jobs are infrastructure-red with empty step data/log blobs and did not provide executable CI evidence.",
+        "BuildOS standalone npm distribution is not yet available for the repository workflow's npx invocation."
+      ]
+    }
+  ],
   "gates": {
-    "runtime": "pending",
-    "architecture": "pending",
-    "identity": "pending",
-    "frontend": "pending",
+    "runtime": "passed",
+    "architecture": "passed",
+    "identity": "passed",
+    "frontend": "passed",
     "typecheck": "pending",
     "lint": "pending",
     "test": "pending",
-    "build": "pending",
+    "build": "passed",
     "release": "pending"
   },
   "openGates": [
