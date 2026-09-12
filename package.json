@@ -27,7 +27,11 @@
     "verify:release": "node scripts/verify-release-readiness.mjs",
     "lint": "eslint . --quiet",
     "lint:strict": "eslint . --max-warnings=0",
-    "start": "next start"
+    "start": "next start",
+    "buildos:doctor": "npx buildos doctor",
+    "buildos:check": "npx buildos check",
+    "buildos:verify": "npx buildos verify",
+    "buildos:release": "npx buildos release"
   },
   "playwright": {
     "config": "./e2e/playwright.config.ts"
