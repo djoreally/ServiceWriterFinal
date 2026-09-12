@@ -113,7 +113,7 @@ export async function fetchAppointmentsPageData(options: { initialOnly?: boolean
   const sevenDaysOut = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
   const appointmentRequest = options.fullHistory
     ? nextApi.appointments.list(context.workspaceId)
-    : nextApi.appointments.listWindow(context.workspaceId, { from: now.toISOString(), to: sevenDaysOut.toISOString(), limit: 100 });
+    : nextApi.appointments.listWindow(context.workspaceId, { from: now.toISOString(), to: sevenDaysOut.toISOString(), pageSize: 100 });
 
   const [appointmentsResult, workspaceResult] = await Promise.allSettled([
     appointmentRequest,
