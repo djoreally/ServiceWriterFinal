@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
@@ -119,7 +119,7 @@ const AppointmentsPage = () => {
     navigate(location.pathname, { replace: true, state: null });
   }, [location.pathname, navigate, prefillStateRef]);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = async () => {
     setAppointmentsLoading(true);
     setAppointmentsError(null);
 
@@ -192,11 +192,11 @@ const AppointmentsPage = () => {
       setVehiclesLoading(false);
       setCatalogLoading(false);
     }
-  }, [prefillStateRef, setAppointments, setEditingAppointment, setIsPrefillNew, setDialogOpen]);
+  };
 
   const { isRefreshing, containerRef } = usePullToRefresh({ onRefresh: fetchData });
 
-  const handleSourceFilterChange = useCallback(async (next: "all" | "upcoming") => {
+  const handleSourceFilterChange = async (next: "all" | "upcoming") => {
     setSourceFilter(next);
     setAppointmentsLoading(true);
     setAppointmentsError(null);
@@ -211,7 +211,7 @@ const AppointmentsPage = () => {
     } finally {
       setAppointmentsLoading(false);
     }
-  }, [setAppointments]);
+  };
 
   // Filter appointments based on source tab
   const filteredAppointments = useMemo(() => {
@@ -224,7 +224,7 @@ const AppointmentsPage = () => {
           appointment: apt,
           date: new Date(`${apt.scheduled_date}T${apt.scheduled_time || "00:00"}`),
         }))
-        .filter(({ date }) => !Number.isNaN(date.getTime()) && date >= now && date <= sevenDaysOut)
+        .filter(({ date }) => !Number.isNaN(date.getTime()) && date.getTime() >= now.getTime() && date.getTime() <= sevenDaysOut.getTime())
         .sort((a, b) => a.date.getTime() - b.date.getTime())
         .map(({ appointment }) => appointment);
 
@@ -234,7 +234,7 @@ const AppointmentsPage = () => {
     return appointments;
   }, [appointments, sourceFilter]);
 
-  const handleExportAppointments = useCallback(() => {
+  const handleExportAppointments = () => {
     downloadCsv("appointments", [
       { header: "Title", value: (appointment) => appointment.title || "" },
       { header: "Date", value: (appointment) => appointment.scheduled_date || "" },
@@ -248,11 +248,13 @@ const AppointmentsPage = () => {
       { header: "Source", value: (appointment) => appointment.source || "" },
       { header: "Notes", value: (appointment) => appointment.notes || "" },
     ], filteredAppointments);
-  }, [filteredAppointments]);
+  };
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    void fetchData();
+    // Initial load is intentionally one-shot; refreshes and filter changes are explicit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSelectAppointment = (appointment: Appointment) => {
     navigate(`/appointments/${appointment.id}`);
