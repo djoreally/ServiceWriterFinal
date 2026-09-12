@@ -1,0 +1,26 @@
+name: BuildOS
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    continue-on-error: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Verify with BuildOS
+        run: npx buildos verify
+      - name: Expose BuildOS repair context
+        if: failure()
+        run: if [ -f .buildos/repair/latest.json ]; then cat .buildos/repair/latest.json; fi
