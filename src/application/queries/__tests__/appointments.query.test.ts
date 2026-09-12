@@ -113,7 +113,7 @@ describe("fetchAppointmentsPageData retail boundary", () => {
 
     const result = await fetchAppointmentsPageData();
 
-    expect(nextApi.appointments.listWindow).toHaveBeenCalledWith("workspace-1", expect.objectContaining({ limit: 100 }));
+    expect(nextApi.appointments.listWindow).toHaveBeenCalledWith("workspace-1", expect.objectContaining({ pageSize: 100 }));
     expect(result.appointments.map((a) => a.id)).toEqual(["a1"]);
   });
 });
