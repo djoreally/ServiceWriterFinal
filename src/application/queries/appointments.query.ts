@@ -26,6 +26,7 @@ const appointmentApiSchema = z.object({
   starts_at: z.string(), ends_at: z.string(), status: z.string(), assigned_user_id: z.string().nullable().optional(),
   source: z.string(), notes: z.string().nullable().optional(), metadata: z.unknown().optional(),
   customers: z.union([customerApiSchema, z.array(customerApiSchema)]).nullable().optional(),
+  vehicles: z.union([vehicleApiSchema, z.array(vehicleApiSchema)]).nullable().optional(),
 }).passthrough();
 
 type CustomerApiRow = z.infer<typeof customerApiSchema>;
@@ -62,6 +63,7 @@ function localDateTime(iso: string, timezone: string): { date: string; time: str
 function optionalString(value: unknown): string | undefined { return typeof value === "string" && value ? value : undefined; }
 function metadataObject(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function relatedCustomer(row: AppointmentApiRow): CustomerApiRow | null { return Array.isArray(row.customers) ? row.customers[0] ?? null : row.customers ?? null; }
+function relatedVehicle(row: AppointmentApiRow): VehicleApiRow | null { return Array.isArray(row.vehicles) ? row.vehicles[0] ?? null : row.vehicles ?? null; }
 function hhmm(value: unknown, fallback: string): string {
   const match = /^(\d{1,2}):(\d{2})/.exec(String(value ?? ""));
   return match ? `${match[1].padStart(2, "0")}:${match[2]}` : fallback;
@@ -85,7 +87,8 @@ function mapAppointment(row: AppointmentApiRow, customerMap: Map<string, Custome
   const metadata = metadataObject(row.metadata);
   const customerFromRelation = relatedCustomer(row);
   const customer = row.customer_id ? customerMap.get(row.customer_id) ?? (customerFromRelation ? mapCustomer(customerFromRelation) : null) : (customerFromRelation ? mapCustomer(customerFromRelation) : null);
-  const vehicle = row.vehicle_id ? vehicleMap.get(row.vehicle_id) ?? null : null;
+  const vehicleFromRelation = relatedVehicle(row);
+  const vehicle = row.vehicle_id ? vehicleMap.get(row.vehicle_id) ?? (vehicleFromRelation ? mapVehicle(vehicleFromRelation) : null) : (vehicleFromRelation ? mapVehicle(vehicleFromRelation) : null);
   const start = localDateTime(row.starts_at, timezone);
   const duration = Math.max(15, Math.round((Date.parse(row.ends_at) - Date.parse(row.starts_at)) / 60000));
   const guestName = optionalString(metadata.guest_name);
@@ -98,7 +101,7 @@ function mapAppointment(row: AppointmentApiRow, customerMap: Map<string, Custome
     source: row.source, intake_responses: metadata };
 }
 
-export async function fetchAppointmentsPageData(): Promise<AppointmentsPageData> {
+export async function fetchAppointmentsPageData(options: { initialOnly?: boolean; fullHistory?: boolean } = {}): Promise<AppointmentsPageData> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("You must be logged in to manage appointments.");
   const context = await resolveCurrentWorkspace();
@@ -106,14 +109,39 @@ export async function fetchAppointmentsPageData(): Promise<AppointmentsPageData>
 
   const errors: AppointmentsPageErrors = {};
   const db = productionSupabase as any;
-  const [appointmentsResult, customersResult, vehiclesResult, settingsResult, catalogResult, scheduleResult, workspaceResult] = await Promise.allSettled([
-    nextApi.appointments.list(context.workspaceId),
+  const now = new Date();
+  const sevenDaysOut = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const appointmentRequest = options.fullHistory
+    ? nextApi.appointments.list(context.workspaceId)
+    : nextApi.appointments.listWindow(context.workspaceId, { from: now.toISOString(), to: sevenDaysOut.toISOString(), limit: 100 });
+
+  const [appointmentsResult, workspaceResult] = await Promise.allSettled([
+    appointmentRequest,
+    db.from("workspaces").select("timezone").eq("id", context.workspaceId).maybeSingle(),
+  ]);
+
+  const customerRowsForInitial: unknown[] = [];
+  const vehicleRowsForInitial: unknown[] = [];
+  if (options.initialOnly) {
+    const appointmentRows = appointmentsResult.status === "fulfilled" ? appointmentsResult.value.data : [];
+    if (appointmentsResult.status === "rejected") errors.appointments = appointmentsResult.reason instanceof Error ? appointmentsResult.reason.message : "Failed to load appointments";
+    const timezone = workspaceResult.status === "fulfilled" && workspaceResult.value.data?.timezone ? String(workspaceResult.value.data.timezone) : DEFAULT_TIMEZONE;
+    const customers = z.array(customerApiSchema).parse(customerRowsForInitial).map(mapCustomer);
+    const vehicles = z.array(vehicleApiSchema).parse(vehicleRowsForInitial).map(mapVehicle);
+    const customerMap = new Map(customers.map((customer) => [customer.id, customer]));
+    const vehicleMap = new Map(vehicles.map((vehicle) => [vehicle.id, vehicle]));
+    const appointments = z.array(appointmentApiSchema).parse(appointmentRows)
+      .filter((row) => row.source !== "fleet_work_order" && !metadataObject(row.metadata).fleet_work_order_id)
+      .map((row) => mapAppointment(row, customerMap, vehicleMap, timezone));
+    return { userId: user.id, appointments, customers: [], vehicles: [], serviceCatalog: [], scheduleVans: [], businessHours: DEFAULT_BUSINESS_HOURS, errors, providerName: "Service Writer", providerEmail: null };
+  }
+
+  const [customersResult, vehiclesResult, settingsResult, catalogResult, scheduleResult] = await Promise.allSettled([
     nextApi.customers.list(context.workspaceId),
     nextApi.vehicles.list(context.workspaceId),
     fetchBusinessSettings(),
     productionSupabase.from("service_catalog").select("*").eq("workspace_id", context.workspaceId).eq("is_active", true).order("name"),
     db.from("workspace_settings").select("opening_time,closing_time,working_days,day_hours,slot_duration_minutes,min_lead_time_hours,buffer_time_before,buffer_time_after").eq("workspace_id", context.workspaceId).maybeSingle(),
-    db.from("workspaces").select("timezone").eq("id", context.workspaceId).maybeSingle(),
   ]);
 
   const customerRows = customersResult.status === "fulfilled" ? customersResult.value.data : [];
