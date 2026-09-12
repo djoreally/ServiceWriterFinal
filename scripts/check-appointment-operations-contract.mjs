@@ -28,7 +28,7 @@ requireText(detailRoute,'status:"cancelled"',"soft cancellation");
 requireText(detailRoute,'dispatchAppointmentLifecycle',"lifecycle notification dispatch");
 
 for(const text of [dashboard,provider]){
-  requireText(text,'.eq("workspace_id", workspaceId)',"workspace-scoped appointment/dashboard reads");
+  if(!/\.eq\(['"]workspace_id['"],\s*workspaceId\)/.test(text)) fail("workspace-scoped appointment/dashboard reads");
   if(!/limit\(\d+\)/.test(text))fail("dashboard appointment lists must stay bounded");
 }
 
