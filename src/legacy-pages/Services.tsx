@@ -231,7 +231,7 @@ const Services = () => {
               )}
             </div>
             <div className="hidden @min-[700px]:block">
-              filteredServices.map((s) => (
+              {filteredServices.map((s) => (
                   <Card key={s.id} className="border border-border/50" onClick={() => navigate(`/services/${s.id}`)}>
                     <CardContent className="p-4">
                       <div className="flex justify-between items-start mb-2">
@@ -255,8 +255,7 @@ const Services = () => {
                       </div>
                     </CardContent>
                   </Card>
-                ))
-              )}
+                ))}
             </div>
           ) : (
             <Card className="border border-border/50">
