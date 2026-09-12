@@ -3,10 +3,23 @@ import { cn } from "@/lib/utils";
 
 type TableDensity = "compact" | "standard" | "comfortable";
 const TableDensityContext = React.createContext<TableDensity>("standard");
-export interface TableProps extends React.HTMLAttributes<HTMLTableElement> { density?: TableDensity }
+export interface TableProps extends React.HTMLAttributes<HTMLTableElement> {
+  density?: TableDensity;
+  containerClassName?: string;
+}
 
-const Table = React.forwardRef<HTMLTableElement, TableProps>(({ className, density = "standard", ...props }, ref) => (
-  <TableDensityContext.Provider value={density}><div className="relative w-full overflow-x-auto overscroll-x-contain"><table ref={ref} data-density={density} className={cn("w-full caption-bottom text-sm tabular-nums", className)} {...props} /></div></TableDensityContext.Provider>
+const Table = React.forwardRef<HTMLTableElement, TableProps>(({ className, containerClassName, density = "standard", ...props }, ref) => (
+  <TableDensityContext.Provider value={density}>
+    <div className={cn("relative w-full overflow-x-auto overscroll-x-contain [container-type:inline-size]", containerClassName)}>
+      <table
+        ref={ref}
+        data-density={density}
+        data-responsive-table
+        className={cn("w-full caption-bottom text-sm tabular-nums", className)}
+        {...props}
+      />
+    </div>
+  </TableDensityContext.Provider>
 ));
 Table.displayName = "Table";
 const TableHeader = React.forwardRef<HTMLTableSectionElement, React.HTMLAttributes<HTMLTableSectionElement>>(({ className, ...props }, ref) => <thead ref={ref} className={cn("bg-muted/25 [&_tr]:border-b", className)} {...props} />);
