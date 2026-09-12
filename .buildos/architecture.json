@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "web": "Next.js",
+  "runtime": "Node 24",
+  "database": "Supabase Postgres",
+  "auth": "Supabase Auth",
+  "authorization": "workspace-scoped server/database enforcement with RLS/RPC contracts",
+  "backgroundProcessing": "Supabase-native queues/cron/Edge Functions as target control plane; legacy host cron may exist only as a migration bridge",
+  "payments": "Stripe",
+  "messaging": [
+    "Resend email",
+    "web push"
+  ],
+  "deployment": "Vercel-compatible frontend plus portable standalone container",
+  "sourceControl": "GitHub",
+  "observability": [
+    "application/runtime logs",
+    "queue/worker state",
+    "BuildOS evidence"
+  ],
+  "canonicalBackend": "Supabase/Postgres"
+}
