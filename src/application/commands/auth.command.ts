@@ -228,6 +228,18 @@ export async function signInWithGoogleOAuth(
   });
 }
 
+
+/** Sign in through the shared Northstar Truth Stack identity provider.
+ * Supabase still owns the resulting Service Writer session and RLS authorization.
+ */
+export async function signInWithNorthstar(redirectTo: string) {
+  const provider = "custom:northstar" as Parameters<typeof authSupabase.auth.signInWithOAuth>[0]["provider"];
+  return authSupabase.auth.signInWithOAuth({
+    provider,
+    options: { redirectTo, skipBrowserRedirect: true },
+  });
+}
+
 /** Refresh the current Supabase auth session (e.g. to prevent idle expiry). */
 export async function refreshAuthSession() {
   return authSupabase.auth.refreshSession();
