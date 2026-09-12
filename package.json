@@ -12,7 +12,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node scripts/check-architecture-contract.mjs && node scripts/check-identity-contract.mjs && node scripts/check-frontend-ui-contract.mjs && npm run verify:booking-reliability && npm run verify:appointment-operations && npm run verify:notification-reliability && npm run verify:payment-closeout && npm run verify:customer-vehicle-integrity",
+    "prebuild": "node scripts/check-architecture-contract.mjs && node scripts/check-identity-contract.mjs && node scripts/check-frontend-ui-contract.mjs && npm run verify:booking-reliability && npm run verify:appointment-operations && npm run verify:notification-reliability && npm run verify:payment-closeout && npm run verify:customer-vehicle-integrity && npm run verify:technician-workflow",
     "build": "next build",
     "typecheck": "tsc --noEmit",
     "test": "jest --runInBand",
@@ -36,7 +36,8 @@
     "verify:appointment-operations": "node scripts/check-appointment-operations-contract.mjs",
     "verify:notification-reliability": "node scripts/check-notification-reliability-contract.mjs",
     "verify:payment-closeout": "node scripts/check-payment-closeout-contract.mjs",
-    "verify:customer-vehicle-integrity": "node scripts/check-customer-vehicle-integrity-contract.mjs"
+    "verify:customer-vehicle-integrity": "node scripts/check-customer-vehicle-integrity-contract.mjs",
+    "verify:technician-workflow": "node scripts/check-technician-workflow-contract.mjs"
   },
   "playwright": {
     "config": "./e2e/playwright.config.ts"
