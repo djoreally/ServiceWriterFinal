@@ -18,7 +18,8 @@ import type { AppointmentFormState, CustomerFormData, VehicleFormData } from "@/
 import { AppointmentForm } from "@/components/appointments/AppointmentForm";
 // ENTERPRISE: Booking confirmation emails are now server-side via DB triggers → email_queue → transactional-email-worker
 import {
-  fetchAppointmentsPageData,
+  fetchAppointmentsListData,
+  fetchAppointmentFormReferenceData,
   type AppointmentWithSource,
 } from "@/application/queries";
 import {
@@ -51,7 +52,7 @@ const AppointmentsPage = () => {
   const isMobile = useMediaQuery("(max-width: 768px)");
   const [userId, setUserId] = useState<string | undefined>();
   const [viewMode, setViewMode] = useState<"list" | "calendar" | "month">("list");
-  const [sourceFilter, setSourceFilter] = useState<"all" | "upcoming">("all");
+  const [sourceFilter, setSourceFilter] = useState<"all" | "upcoming">("upcoming");
   const [activeTab, setActiveTab] = useState<"appointments" | "dispatch">("appointments");
 
   // Real-time workflow updates
@@ -119,55 +120,59 @@ const AppointmentsPage = () => {
   }, [location.pathname, navigate, prefillStateRef]);
 
   const fetchData = useCallback(async () => {
+    setAppointmentsLoading(true);
+    setAppointmentsError(null);
+
     try {
-      setAppointmentsLoading(true);
-      setCustomersLoading(true);
-      setVehiclesLoading(true);
-      setCatalogLoading(true);
-      setAppointmentsError(null);
-      setCustomersError(null);
-      setVehiclesError(null);
-      setCatalogError(null);
+      const listData = await fetchAppointmentsListData();
 
-      const data = await fetchAppointmentsPageData();
-
-      // Store userId for realtime filtering
-      setUserId(data.userId);
-
-      setAppointments(data.appointments);
-      setCustomers(data.customers);
-      setVehicles(data.vehicles);
-      setServiceCatalog(data.serviceCatalog);
-      setScheduleResources(data.scheduleVans.map((van) => ({ id: van.id, name: van.name })));
-      setBusinessHours(data.businessHours);
-      setProviderName(data.providerName);
-      setProviderEmail(data.providerEmail);
-
+      setUserId(listData.userId);
+      setAppointments(listData.appointments);
+      setBusinessHours(listData.businessHours);
+      setProviderName(listData.providerName);
+      setProviderEmail(listData.providerEmail);
+      setAppointmentsError(listData.errors.appointments ?? null);
       setAppointmentsLoading(false);
-      setCustomersLoading(false);
-      setVehiclesLoading(false);
-      setCatalogLoading(false);
       setLoading(false);
+    } catch (error) {
+      console.error("Failed to load appointment list", error);
+      setAppointmentsLoading(false);
+      setLoading(false);
+      setAppointmentsError(error instanceof Error ? error.message : "Failed to load appointments");
+      toast.error(error instanceof Error ? error.message : "Failed to load appointments");
+      return;
+    }
 
-      // After data loads, open prefill dialog with full customer + vehicle info
+    setCustomersLoading(true);
+    setVehiclesLoading(true);
+    setCatalogLoading(true);
+    setCustomersError(null);
+    setVehiclesError(null);
+    setCatalogError(null);
+
+    try {
+      const referenceData = await fetchAppointmentFormReferenceData();
+      setCustomers(referenceData.customers);
+      setVehicles(referenceData.vehicles);
+      setServiceCatalog(referenceData.serviceCatalog);
+      setCustomersError(referenceData.errors.customers ?? null);
+      setVehiclesError(referenceData.errors.vehicles ?? null);
+      setCatalogError(referenceData.errors.catalog ?? null);
+
       if (prefillStateRef) {
-        const allCustomers = data.customers ?? [];
-        const allVehicles = data.vehicles ?? [];
-      const customer = prefillStateRef.prefillCustomerId
-        ? allCustomers.find(c => c.id === prefillStateRef.prefillCustomerId)
-        : undefined;
-      const vehicle = prefillStateRef.prefillVehicleId
-        ? allVehicles.find(v => v.id === prefillStateRef.prefillVehicleId)
-        : undefined;
+        const customer = prefillStateRef.prefillCustomerId
+          ? referenceData.customers.find((item) => item.id === prefillStateRef.prefillCustomerId)
+          : undefined;
+        const vehicle = prefillStateRef.prefillVehicleId
+          ? referenceData.vehicles.find((item) => item.id === prefillStateRef.prefillVehicleId)
+          : undefined;
 
         setEditingAppointment({
           vehicle_id: vehicle?.id ?? null,
           customer_id: customer?.id ?? null,
-          // Pre-populate guest fields from customer record
           guest_name: customer?.name ?? "",
           guest_phone: customer?.phone ?? "",
           guest_email: customer?.email ?? "",
-          // Pre-populate vehicle fields
           vehicle_year: vehicle?.year ? String(vehicle.year) : "",
           vehicle_make: vehicle?.make ?? "",
           vehicle_model: vehicle?.model ?? "",
@@ -177,17 +182,15 @@ const AppointmentsPage = () => {
         setDialogOpen(true);
       }
     } catch (error) {
-      console.error("Failed to load appointments page data", error);
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "Failed to load appointments page data",
-      );
-      setAppointmentsLoading(false);
+      console.error("Failed to hydrate appointment form references", error);
+      const message = error instanceof Error ? error.message : "Appointment form data is still loading.";
+      setCustomersError(message);
+      setVehiclesError(message);
+      setCatalogError(message);
+    } finally {
       setCustomersLoading(false);
       setVehiclesLoading(false);
       setCatalogLoading(false);
-      setLoading(false);
     }
   }, [prefillStateRef, setAppointments, setEditingAppointment, setIsPrefillNew, setDialogOpen]);
 
