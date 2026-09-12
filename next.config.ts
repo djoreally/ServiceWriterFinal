@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 import path from "node:path";
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  ...(process.env.SELF_HOSTED_BUILD === "1" ? { output: "standalone" as const } : {}),
   outputFileTracingRoot: path.join(__dirname),
   outputFileTracingIncludes: {
     "/api/v1/public-vehicle-catalog": [
