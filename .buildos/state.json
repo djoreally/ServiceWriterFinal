@@ -8,14 +8,14 @@
     "Supabase provider secrets not yet provisioned for new lifecycle worker",
     "legacy staging environment is not canonical enough for full parity certification"
   ],
-  "updatedAt": "2026-09-12T04:30:00Z",
+  "updatedAt": "2026-09-12T04:36:00Z",
   "protocolVersion": "1.0",
   "currentMilestone": "operational-reliability",
   "currentTask": {
-    "shot": 1,
+    "shot": 2,
     "totalShots": 12,
-    "name": "Booking reliability",
-    "status": "verified"
+    "name": "Appointment operations",
+    "status": "in_progress"
   },
   "history": [
     {
@@ -60,7 +60,8 @@
   },
   "openGates": [
     "Provision Supabase provider secrets before activating lifecycle worker.",
-    "Replace temporary Vercel-owned critical cron paths after Supabase workers are proven."
+    "Replace temporary Vercel-owned critical cron paths after Supabase workers are proven.",
+    "Appointment operations exact candidate must pass prebuild contract and production-style build."
   ],
   "knownRisks": [
     "Legacy staging environment is not canonical enough for full parity certification.",
