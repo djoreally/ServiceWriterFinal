@@ -15,7 +15,7 @@ jest.mock("@/application/queries/settings.query", () => ({
 
 jest.mock("@/lib/nextApiClient", () => ({
   nextApi: {
-    appointments: { list: jest.fn() },
+    appointments: { list: jest.fn(), listWindow: jest.fn() },
     customers: { list: jest.fn() },
     vehicles: { list: jest.fn() },
   },
@@ -77,7 +77,7 @@ describe("fetchAppointmentsPageData retail boundary", () => {
 
   it("excludes fleet_work_order source rows from retail appointments query", async () => {
     mockGetUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
-    (nextApi.appointments.list as jest.Mock).mockResolvedValue({
+    (nextApi.appointments.listWindow as jest.Mock).mockResolvedValue({
       data: [
         { id: "a1", source: "manual", starts_at: "2026-08-25T09:00:00.000Z", ends_at: "2026-08-25T10:00:00.000Z", status: "confirmed", customer_id: "customer-1", vehicle_id: "vehicle-1", metadata: null },
         { id: "a2", source: "fleet_work_order", starts_at: "2026-08-25T10:00:00.000Z", ends_at: "2026-08-25T11:00:00.000Z", status: "confirmed", customer_id: "customer-2", vehicle_id: "vehicle-2", metadata: null },
@@ -113,7 +113,7 @@ describe("fetchAppointmentsPageData retail boundary", () => {
 
     const result = await fetchAppointmentsPageData();
 
-    expect(nextApi.appointments.list).toHaveBeenCalledWith("workspace-1");
+    expect(nextApi.appointments.listWindow).toHaveBeenCalledWith("workspace-1", expect.objectContaining({ limit: 100 }));
     expect(result.appointments.map((a) => a.id)).toEqual(["a1"]);
   });
 });
