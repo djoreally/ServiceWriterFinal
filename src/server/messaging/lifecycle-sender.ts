@@ -73,6 +73,10 @@ export async function enqueueLifecycleEmail(input: LifecycleSendInput & {
       customerId: input.customerId ?? null,
       renderedSubject: rendered.subject,
       renderedText: rendered.text,
+      renderedHtml: rendered.html,
+      renderedPurpose: rendered.purpose,
+      fromName: typeof input.variables["business.name"] === "string" ? String(input.variables["business.name"]) : "Service Writer",
+      replyTo: typeof input.variables["business.email"] === "string" && /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(String(input.variables["business.email"])) ? String(input.variables["business.email"]) : null,
     },
   });
   if (error || !data) throw error ?? new Error("Lifecycle event enqueue returned no id");
