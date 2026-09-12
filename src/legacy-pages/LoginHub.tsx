@@ -1,7 +1,10 @@
 import { Link, useSearchParams } from "react-router-dom";
+import { useState } from "react";
 import { safeNextPath } from "@/lib/auth/next-path";
 import { Briefcase, Wrench, Radio, Shield, ChevronRight } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { signInWithNorthstar } from "@/application/commands/auth.command";
 
 const ROLES = [
   {
@@ -34,6 +37,15 @@ export default function LoginHub() {
   const [params] = useSearchParams();
   const nextPath = safeNextPath(params.toString());
   const withNext = (to: string) => (nextPath ? `${to}?next=${encodeURIComponent(nextPath)}` : to);
+  const [ssoError, setSsoError] = useState<string | null>(null);
+  const [ssoBusy, setSsoBusy] = useState(false);
+  const continueWithNorthstar = async () => {
+    setSsoError(null); setSsoBusy(true);
+    const redirectTo = `${window.location.origin}${nextPath || "/dashboard"}`;
+    const { data, error } = await signInWithNorthstar(redirectTo);
+    if (error || !data?.url) { setSsoError(error?.message || "Northstar sign-in is not configured yet."); setSsoBusy(false); return; }
+    window.location.assign(data.url);
+  };
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
@@ -41,6 +53,13 @@ export default function LoginHub() {
         <div className="mb-8 text-center">
           <h1 className="text-3xl font-bold tracking-tight">Sign in to Service Writer</h1>
           <p className="mt-2 text-muted-foreground">Choose the option that matches your role.</p>
+        </div>
+        <div className="mb-5 rounded-xl border bg-card p-4 text-center">
+          <Button type="button" className="w-full" onClick={() => void continueWithNorthstar()} disabled={ssoBusy}>
+            {ssoBusy ? "Opening Northstar…" : "Continue with Northstar"}
+          </Button>
+          <p className="mt-2 text-xs text-muted-foreground">One Truth Stack identity. Service Writer still enforces its own workspace roles and permissions.</p>
+          {ssoError ? <p role="alert" className="mt-2 text-sm text-destructive">{ssoError}</p> : null}
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           {ROLES.map(({ to, icon: Icon, title, description }) => (
