@@ -22,9 +22,9 @@ import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { getServiceStatusBadgeClass, getServiceStatusLabel } from "@/lib/statusStyles";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { WorkflowStatusIndicator } from "@/components/workflow/WorkflowStatusIndicator";
-import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { TableSkeleton } from "@/components/loading/PageSkeletons";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ResponsiveRecord } from "@/components/data-table/ResponsiveRecord";
 
 type Service = ServiceRecordRow;
 
@@ -35,7 +35,6 @@ const Services = () => {
   const navigate = useNavigate();
   const { terms } = useTerminology();
   const { formatCurrency, formatDate } = useRegionalSettings();
-  const isMobile = useMediaQuery("(max-width: 768px)");
   const [services, setServices] = useState<Service[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -190,18 +189,49 @@ const Services = () => {
             </CardContent>
           </Card>
 
-          {isMobile ? (
-            <div className="space-y-3">
+          <div className="[container-type:inline-size]">
+            <div className="space-y-3 @min-[700px]:hidden">
               {servicesLoading ? (
                 <div className="space-y-3" aria-busy="true" aria-label="Loading service records">
                   {Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-28 rounded-xl" />)}
                 </div>
               ) : servicesError ? (
-                <div className="text-center py-8 text-red-700 bg-red-50 rounded p-4">{servicesError}</div>
+                <div className="rounded-lg bg-destructive/5 p-4 text-center text-destructive">{servicesError}</div>
               ) : filteredServices.length === 0 ? (
-                <div className="text-center py-12 text-muted-foreground">No records found</div>
+                <div className="py-12 text-center text-muted-foreground">No records found</div>
               ) : (
                 filteredServices.map((s) => (
+                  <ResponsiveRecord
+                    key={s.id}
+                    primary={s.service_type || "Service record"}
+                    secondary={getVehicleInfo(s.vehicle_id)}
+                    slot={formatCurrency(s.total_cost)}
+                    status={getStatusBadge(s.status)}
+                    meta={`${getCustomerName(s.customer_id)} · Serviced ${formatDate(s.service_date)}`}
+                    details={[
+                      { label: "Record", value: `#${s.id.slice(0, 8)}` },
+                      { label: terms.customer, value: getCustomerName(s.customer_id) },
+                      { label: terms.vehicle, value: getVehicleInfo(s.vehicle_id) },
+                      { label: "Service date", value: formatDate(s.service_date) },
+                      { label: "Total", value: formatCurrency(s.total_cost) },
+                      ...(s.technician ? [{ label: "Technician", value: s.technician }] : []),
+                      ...(s.notes ? [{ label: "Notes", value: s.notes }] : []),
+                    ]}
+                    actions={
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => navigate(`/services/${s.id}`)}><Eye className="h-4 w-4" /></Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setInvoiceService(s)}><FileText className="h-4 w-4" /></Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditDialog(s)}><Edit className="h-4 w-4" /></Button>
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleDelete(s.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                      </div>
+                    }
+                    onOpen={() => navigate(`/services/${s.id}`)}
+                  />
+                ))
+              )}
+            </div>
+            <div className="hidden @min-[700px]:block">
+              filteredServices.map((s) => (
                   <Card key={s.id} className="border border-border/50" onClick={() => navigate(`/services/${s.id}`)}>
                     <CardContent className="p-4">
                       <div className="flex justify-between items-start mb-2">
@@ -271,7 +301,8 @@ const Services = () => {
                     )}
                 </div>
             </Card>
-          )}
+            </div>
+          </div>
         </div>
         {invoiceService && <ServiceInvoice serviceId={invoiceService.id} customerId={invoiceService.customer_id} vehicleId={invoiceService.vehicle_id} onClose={() => setInvoiceService(null)} />}
         
