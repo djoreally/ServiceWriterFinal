@@ -196,6 +196,23 @@ const AppointmentsPage = () => {
 
   const { isRefreshing, containerRef } = usePullToRefresh({ onRefresh: fetchData });
 
+  const handleSourceFilterChange = useCallback(async (next: "all" | "upcoming") => {
+    setSourceFilter(next);
+    setAppointmentsLoading(true);
+    setAppointmentsError(null);
+    try {
+      const listData = await fetchAppointmentsListData(next);
+      setAppointments(listData.appointments);
+      setAppointmentsError(listData.errors.appointments ?? null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to load appointments";
+      setAppointmentsError(message);
+      toast.error(message);
+    } finally {
+      setAppointmentsLoading(false);
+    }
+  }, [setAppointments]);
+
   // Filter appointments based on source tab
   const filteredAppointments = useMemo(() => {
     if (sourceFilter === "upcoming") {
@@ -578,7 +595,7 @@ const AppointmentsPage = () => {
 
         <TabsContent value="appointments" className="mt-4">
           {/* Source Filter Tabs */}
-          <Tabs value={sourceFilter} onValueChange={(v) => setSourceFilter(v as "all" | "upcoming")} className="mb-4">
+          <Tabs value={sourceFilter} onValueChange={(v) => { void handleSourceFilterChange(v as "all" | "upcoming"); }} className="mb-4">
             <TabsList className="flex w-full justify-start gap-2">
               <TabsTrigger value="upcoming" className="gap-2">
                 <Calendar className="h-4 w-4" />
