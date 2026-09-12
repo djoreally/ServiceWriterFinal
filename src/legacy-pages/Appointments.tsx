@@ -13,7 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Appointment, Customer, Vehicle, ServiceCatalogItem, BusinessHours } from "@/shared/types";
 import type { ScheduleResource } from "@/components/schedule/CurbeeScheduleBoard";
-import type { AppointmentFormState, CustomerFormData, VehicleFormData } from "@/shared/types/forms";
+import type { AppointmentFormState } from "@/shared/types/forms";
 
 import { AppointmentForm } from "@/components/appointments/AppointmentForm";
 // ENTERPRISE: Booking confirmation emails are now server-side via DB triggers → email_queue → transactional-email-worker
@@ -365,15 +365,6 @@ const AppointmentsPage = () => {
     }
   };
   
-  const handleCreateCustomer = async (_data: CustomerFormData): Promise<Customer | null> => {
-    // Implementation to be added
-    return null;
-  }
-  
-  const handleCreateVehicle = async (_data: VehicleFormData): Promise<Vehicle | null> => {
-    // Implementation to be added
-    return null;
-  }
   
   // Handle completing an appointment (opens dialog to add service record details)
   const handleCompleteAppointment = (appointment: Appointment) => {
@@ -632,9 +623,6 @@ const AppointmentsPage = () => {
         businessHours={businessHours}
         saving={saving}
         isEditing={!!editingAppointment && !isPrefillNew}
-        onCreateCustomer={handleCreateCustomer}
-        onCreateVehicle={handleCreateVehicle}
-        businessUserId={userId}
       />
       <CompleteAppointmentDialog
         open={completeDialogOpen}

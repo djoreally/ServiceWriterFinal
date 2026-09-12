@@ -11,16 +11,36 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    continue-on-error: false
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout ServiceWriter
+        uses: actions/checkout@v4
+        with:
+          path: servicewriter
+      - name: Checkout pinned BuildOS source
+        uses: actions/checkout@v4
+        with:
+          repository: djoreally/buildos-app-forge
+          ref: e5627fa85c995f59f446b0fc7127081601e7d604
+          path: buildos-tool
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
-      - name: Verify with BuildOS
-        run: npx buildos verify
+          cache-dependency-path: |
+            servicewriter/package-lock.json
+            buildos-tool/package-lock.json
+      - name: Install ServiceWriter
+        working-directory: servicewriter
+        run: npm ci
+      - name: Install BuildOS
+        working-directory: buildos-tool
+        run: npm ci
+      - name: Verify with pinned BuildOS source
+        working-directory: servicewriter
+        env:
+          BUILDOS_CLI_PATH: ../buildos-tool/packages/cli/bin/buildos.js
+        run: npm run buildos:verify
       - name: Expose BuildOS repair context
         if: failure()
+        working-directory: servicewriter
         run: if [ -f .buildos/repair/latest.json ]; then cat .buildos/repair/latest.json; fi
