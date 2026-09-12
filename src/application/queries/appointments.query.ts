@@ -118,7 +118,7 @@ export interface AppointmentFormReferenceData {
   errors: AppointmentsPageErrors;
 }
 
-export async function fetchAppointmentsListData(): Promise<AppointmentsListData> {
+export async function fetchAppointmentsListData(mode: "upcoming" | "all" = "upcoming"): Promise<AppointmentsListData> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("You must be logged in to manage appointments.");
   const context = await resolveCurrentWorkspace();
@@ -126,8 +126,19 @@ export async function fetchAppointmentsListData(): Promise<AppointmentsListData>
 
   const errors: AppointmentsPageErrors = {};
   const db = productionSupabase as any;
+  const now = new Date();
+  const sevenDaysOut = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const appointmentRequest = mode === "upcoming"
+    ? nextApi.appointments.list(context.workspaceId, {
+        startsFrom: now.toISOString(),
+        startsTo: sevenDaysOut.toISOString(),
+        pageSize: 200,
+        maxPages: 1,
+      })
+    : nextApi.appointments.list(context.workspaceId);
+
   const [appointmentsResult, settingsResult, scheduleResult, workspaceResult] = await Promise.allSettled([
-    nextApi.appointments.list(context.workspaceId),
+    appointmentRequest,
     fetchBusinessSettings(),
     db.from("workspace_settings").select("opening_time,closing_time,working_days,day_hours,slot_duration_minutes,min_lead_time_hours,buffer_time_before,buffer_time_after").eq("workspace_id", context.workspaceId).maybeSingle(),
     db.from("workspaces").select("timezone").eq("id", context.workspaceId).maybeSingle(),
