@@ -12,7 +12,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node scripts/check-architecture-contract.mjs && node scripts/check-identity-contract.mjs && node scripts/check-frontend-ui-contract.mjs && npm run verify:booking-reliability && npm run verify:appointment-operations && npm run verify:notification-reliability && npm run verify:payment-closeout && npm run verify:customer-vehicle-integrity && npm run verify:technician-workflow && npm run verify:service-pricing-integrity && npm run verify:data-recovery && npm run verify:performance-mobile",
+    "prebuild": "node scripts/check-architecture-contract.mjs && node scripts/check-identity-contract.mjs && node scripts/check-frontend-ui-contract.mjs && npm run verify:booking-reliability && npm run verify:appointment-operations && npm run verify:notification-reliability && npm run verify:payment-closeout && npm run verify:customer-vehicle-integrity && npm run verify:technician-workflow && npm run verify:service-pricing-integrity && npm run verify:data-recovery && npm run verify:performance-mobile && npm run verify:buildos-production-guardrail",
     "build": "next build",
     "typecheck": "tsc --noEmit",
     "test": "jest --runInBand",
@@ -24,7 +24,7 @@
     "verify:deployment": "node scripts/verify-deployment.mjs",
     "verify:integrations": "node scripts/verify-production-integrations.mjs",
     "verify:env": "node scripts/verify-env-manifest.mjs",
-    "verify:release": "node scripts/verify-release-readiness.mjs",
+    "verify:release": "node scripts/verify-release-readiness.mjs && npm run verify:production-operations",
     "lint": "eslint . --quiet",
     "lint:strict": "eslint . --max-warnings=0",
     "start": "next start",
@@ -40,7 +40,9 @@
     "verify:technician-workflow": "node scripts/check-technician-workflow-contract.mjs",
     "verify:service-pricing-integrity": "node scripts/check-service-pricing-integrity-contract.mjs",
     "verify:data-recovery": "node scripts/check-data-recovery-contract.mjs",
-    "verify:performance-mobile": "node scripts/check-performance-mobile-contract.mjs"
+    "verify:performance-mobile": "node scripts/check-performance-mobile-contract.mjs",
+    "verify:production-operations": "node scripts/verify-production-operations.mjs",
+    "verify:buildos-production-guardrail": "node scripts/check-buildos-production-guardrail-contract.mjs"
   },
   "playwright": {
     "config": "./e2e/playwright.config.ts"

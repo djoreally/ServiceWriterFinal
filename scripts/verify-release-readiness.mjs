@@ -8,6 +8,9 @@ const warnings = [];
 const run = (command, args) => execFileSync(command, args, { cwd: process.cwd(), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 
 const sha = run("git", ["rev-parse", "HEAD"]);
+const expectedSha = (process.env.EXPECTED_RELEASE_SHA || "").trim();
+if (environment === "production" && !expectedSha) failures.push("EXPECTED_RELEASE_SHA is required for production certification.");
+if (expectedSha && sha !== expectedSha) failures.push(`Release SHA mismatch: checkout=${sha} expected=${expectedSha}`);
 const status = run("git", ["status", "--porcelain"]);
 if (status && !(process.env.ALLOW_DIRTY_RELEASE === "true" && environment !== "production")) failures.push("Working tree is not clean; release artifacts must be committed before promotion.");
 if (status && process.env.ALLOW_DIRTY_RELEASE === "true" && environment === "production") failures.push("ALLOW_DIRTY_RELEASE is forbidden in production.");
