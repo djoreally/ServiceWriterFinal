@@ -51,7 +51,7 @@ const AppointmentsPage = () => {
   const isMobile = useMediaQuery("(max-width: 768px)");
   const [userId, setUserId] = useState<string | undefined>();
   const [viewMode, setViewMode] = useState<"list" | "calendar" | "month">("list");
-  const [sourceFilter, setSourceFilter] = useState<"all" | "upcoming">("all");
+  const [sourceFilter, setSourceFilter] = useState<"all" | "upcoming">("upcoming");
   const [activeTab, setActiveTab] = useState<"appointments" | "dispatch">("appointments");
 
   // Real-time workflow updates
@@ -129,11 +129,17 @@ const AppointmentsPage = () => {
       setVehiclesError(null);
       setCatalogError(null);
 
-      const data = await fetchAppointmentsPageData();
+      const initial = await fetchAppointmentsPageData({ initialOnly: true, fullHistory: false });
 
-      // Store userId for realtime filtering
+      // Render the bounded operational window before heavy form datasets hydrate.
+      setUserId(initial.userId);
+      setAppointments(initial.appointments);
+      setAppointmentsLoading(false);
+      setLoading(false);
+
+      const data = await fetchAppointmentsPageData({ fullHistory: sourceFilter === "all" });
+
       setUserId(data.userId);
-
       setAppointments(data.appointments);
       setCustomers(data.customers);
       setVehicles(data.vehicles);
@@ -143,13 +149,11 @@ const AppointmentsPage = () => {
       setProviderName(data.providerName);
       setProviderEmail(data.providerEmail);
 
-      setAppointmentsLoading(false);
       setCustomersLoading(false);
       setVehiclesLoading(false);
       setCatalogLoading(false);
-      setLoading(false);
 
-      // After data loads, open prefill dialog with full customer + vehicle info
+      // After secondary data loads, open prefill dialog with full customer + vehicle info.
       if (prefillStateRef) {
         const allCustomers = data.customers ?? [];
         const allVehicles = data.vehicles ?? [];
@@ -189,7 +193,7 @@ const AppointmentsPage = () => {
       setCatalogLoading(false);
       setLoading(false);
     }
-  }, [prefillStateRef, setAppointments, setEditingAppointment, setIsPrefillNew, setDialogOpen]);
+  }, [prefillStateRef, sourceFilter, setAppointments, setEditingAppointment, setIsPrefillNew, setDialogOpen]);
 
   const { isRefreshing, containerRef } = usePullToRefresh({ onRefresh: fetchData });
 
