@@ -8,14 +8,14 @@
     "Supabase provider secrets not yet provisioned for new lifecycle worker",
     "legacy staging environment is not canonical enough for full parity certification"
   ],
-  "updatedAt": "2026-09-12T04:36:00Z",
+  "updatedAt": "2026-09-12T05:40:00Z",
   "protocolVersion": "1.0",
-  "currentMilestone": "operational-reliability",
+  "currentMilestone": "revenue-ready-operational-reliability",
   "currentTask": {
-    "shot": 2,
+    "shot": 12,
     "totalShots": 12,
-    "name": "Appointment operations",
-    "status": "in_progress"
+    "name": "Production cleanup",
+    "status": "built"
   },
   "history": [
     {
@@ -59,12 +59,29 @@
     "release": "pending"
   },
   "openGates": [
-    "Provision Supabase provider secrets before activating lifecycle worker.",
-    "Replace temporary Vercel-owned critical cron paths after Supabase workers are proven.",
-    "Appointment operations exact candidate must pass prebuild contract and production-style build."
+    "Run one full exact-head BuildOS/ServiceWriter verification pass after publishing the batch branch head.",
+    "Provision Supabase provider secrets before switching lifecycle/push scheduling away from the temporary Vercel cron bridge.",
+    "Perform a safe database restore drill before production certification can claim restore-proven.",
+    "First real MOMS work order remains the live proof event for technician/work-order execution."
   ],
   "knownRisks": [
-    "Legacy staging environment is not canonical enough for full parity certification.",
-    "Critical background work is still in migration from Vercel cron to Supabase-native scheduling."
-  ]
+    "Temporary Vercel cron bridge remains intentionally active until Supabase-native workers have provider secrets and live proof.",
+    "GitHub Actions availability has previously shown startup-failure behavior; BuildOS source workflow is now pinned and must be re-run.",
+    "Production Supabase security advisor backlog remains for later security hardening; current batch does not silently classify those advisories as resolved."
+  ],
+  "batchCandidate": "480acf5f5fac825e0f34f5b7c80e7df65fbf899f",
+  "sprintStatus": {
+    "1_booking_reliability": "verified",
+    "2_appointment_operations": "built",
+    "3_notification_reliability": "built",
+    "4_payments_financial_closeout": "built",
+    "5_customer_vehicle_integrity": "built",
+    "6_technician_shop_workflow": "built_requires_first_live_work_order_proof",
+    "7_services_inventory_pricing": "built",
+    "8_data_safety_recovery": "built_restore_drill_pending",
+    "9_performance_mobile": "built",
+    "10_buildos_production_guardrail": "built",
+    "11_daily_use_simulation": "built_pending_final_test_run",
+    "12_production_cleanup": "built"
+  }
 }
