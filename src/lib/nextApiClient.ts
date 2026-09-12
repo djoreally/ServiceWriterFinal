@@ -174,20 +174,29 @@ export const nextApi = {
     updateStatus: (quoteId: string, payload: { workspace_id: string; status: "approved" | "declined"; expected_updated_at?: string | null }) => request<{ data: unknown }>(`/v1/quotes/${encodeURIComponent(quoteId)}/status`, { method: "POST", body: JSON.stringify(payload) }),
   },
   appointments: {
-    list: async (workspaceId: string) => {
-      // The appointments API is paginated. Loading only its default first page
-      // returned the 25 oldest records, which made newly-created public
-      // bookings disappear from both the appointment list and calendar.
-      const pageSize = 100;
+    list: async (
+      workspaceId: string,
+      options: { startsFrom?: string; startsTo?: string; pageSize?: number; maxPages?: number } = {},
+    ) => {
+      const pageSize = options.pageSize ?? 100;
       const data: unknown[] = [];
       let offset = 0;
+      let page = 0;
 
       for (;;) {
-        const response = await request<{ data: unknown[] }>(
-          `/v1/appointments?workspace_id=${encodeURIComponent(workspaceId)}&limit=${pageSize}&offset=${offset}`,
-        );
+        const params = new URLSearchParams({
+          workspace_id: workspaceId,
+          limit: String(pageSize),
+          offset: String(offset),
+        });
+        if (options.startsFrom) params.set("starts_from", options.startsFrom);
+        if (options.startsTo) params.set("starts_to", options.startsTo);
+
+        const response = await request<{ data: unknown[] }>(`/v1/appointments?${params.toString()}`);
         data.push(...response.data);
+        page += 1;
         if (response.data.length < pageSize) break;
+        if (options.maxPages && page >= options.maxPages) break;
         offset += pageSize;
       }
 
