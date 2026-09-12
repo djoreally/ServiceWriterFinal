@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "status": "in_progress",
+  "currentFocus": "runtime consolidation and operational reliability",
+  "lastCertifiedSha": null,
+  "productionSha": null,
+  "blockers": [
+    "Supabase provider secrets not yet provisioned for new lifecycle worker",
+    "legacy staging environment is not canonical enough for full parity certification"
+  ],
+  "updatedAt": "2026-09-12T04:10:00Z"
+}
