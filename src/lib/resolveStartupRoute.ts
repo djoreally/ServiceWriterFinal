@@ -1,8 +1,11 @@
+import { roleLandingPath } from "@/domain/auth/role-landing";
+import type { WorkforceRole } from "@/application/queries/workforce-identity.query";
+
 interface ResolveStartupRouteArgs {
   isAuthenticated: boolean;
   currentPath: string;
   persistedIntendedPath: string | null;
-  role?: string | null;
+  role?: WorkforceRole | null;
   requiresOnboarding?: boolean;
   requiresPlan?: boolean;
 }
@@ -57,15 +60,15 @@ export function resolveStartupRoute({
   // Dispatchers and managers live on the dispatch board. Concrete deep links
   // are preserved (RequireAuth + access-policy remain the authorization
   // boundary); only generic startup routes land on the board.
-  if (role === "dispatcher" || role === "manager") {
+  if (role === "dispatcher" || role === "manager" || role === "service_advisor" || role === "receptionist") {
     if (!isStartupDecisionPath(currentPath)) return currentPath;
-    return "/dispatch";
+    return roleLandingPath(role);
   }
 
   // Fleet managers land in Fleet OS, which is their canonical authorized home.
   if (role === "fleet_manager") {
     if (!isStartupDecisionPath(currentPath)) return currentPath;
-    return "/fleet-os";
+    return roleLandingPath(role);
   }
 
   // 3) Owner gates (admin / unresolved owner identity).
@@ -75,6 +78,13 @@ export function resolveStartupRoute({
 
   if (requiresPlan) {
     return currentPath === "/plans" ? currentPath : "/plans";
+  }
+
+  // An authenticated session is not proof of a workforce role. Return to the
+  // workforce login resolver instead of treating an unknown identity as an
+  // owner and exposing the owner dashboard shell.
+  if (!role) {
+    return "/login";
   }
 
   // 4) Preserve deep links for authenticated users.

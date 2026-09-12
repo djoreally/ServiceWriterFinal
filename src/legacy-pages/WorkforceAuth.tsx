@@ -16,6 +16,7 @@ import { errorMessage } from "@/lib/error-message";
 import { beginAuthInteraction } from "@/lib/authInteractionLock";
 import { withOperationTimeout } from "@/lib/operation-timeout";
 import { fetchWorkforceIdentity, selectActiveWorkspace, type WorkforceMembership } from "@/application/queries/workforce-identity.query";
+import { roleLandingPath } from "@/domain/auth/role-landing";
 
 type Intent = "login" | "signup";
 type Variant = "default" | "business" | "dispatch" | "technician";
@@ -52,32 +53,13 @@ const VARIANT_ROLES: Record<Variant, WorkforceRole[] | null> = {
   technician: ["technician"],
 };
 
-const ROLE_LANDING: Record<WorkforceRole, string> = {
-  admin: "/dashboard",
-  owner: "/dashboard",
-  viewer: "/dashboard",
-  manager: "/dispatch",
-  dispatcher: "/dispatch",
-  fleet_manager: "/fleet-os",
-  service_advisor: "/dashboard",
-  receptionist: "/dashboard",
-  technician: "/tech-app",
-};
-
 const IDENTITY_RESOLUTION_TIMEOUT_MS = 10_000;
 const DEMO_LOGIN_ENABLED = process.env.NEXT_PUBLIC_ENABLE_DEMO_LOGIN === "true";
 const DEMO_EMAIL = (process.env.NEXT_PUBLIC_DEMO_EMAIL || "demo@servicewriter.app").trim();
 const DEMO_PASSWORD = process.env.NEXT_PUBLIC_DEMO_PASSWORD || "";
 
-const VARIANT_FALLBACK_LANDING: Record<Variant, string> = {
-  default: "/dashboard",
-  business: "/dashboard",
-  dispatch: "/dispatch",
-  technician: "/tech-app",
-};
-
 const landingPathFor = (membership: WorkforceMembership) =>
-  ROLE_LANDING[membership.role] ?? membership.landingPath ?? "/dashboard";
+  roleLandingPath(membership.role);
 
 const filterByVariant = (memberships: WorkforceMembership[], variant: Variant) => {
   const allowed = VARIANT_ROLES[variant];
@@ -97,6 +79,7 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
   const [loading, setLoading] = useState(false);
   const [memberships, setMemberships] = useState<WorkforceMembership[] | null>(null);
   const [roleMismatch, setRoleMismatch] = useState(false);
+  const [identityError, setIdentityError] = useState<string | null>(null);
 
   const isSignup = intent === "signup";
   const copy = VARIANT_COPY[variant];
@@ -120,6 +103,7 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
   }, [memberships, navigate, nextPath, queryClient]);
 
   const routeIdentity = useCallback(async () => {
+    setIdentityError(null);
     await withOperationTimeout(
       (async () => {
         const identity = await fetchWorkforceIdentity();
@@ -140,14 +124,13 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
   }, [activateWorkspace, variant]);
 
   const continueWithoutIdentity = useCallback((error: unknown) => {
-    const destination = nextPath ?? VARIANT_FALLBACK_LANDING[variant];
     console.error("[workforce-auth] identity resolution failed", error);
-    toast.warning("Opening your workspace without a confirmed role", {
-      description: errorMessage(error, "Retry from the banner if something looks off."),
+    const message = errorMessage(error, "We couldn't confirm your workspace role.");
+    setIdentityError(message);
+    toast.error("We couldn't open your workspace", {
+      description: "Retry the role check. You have not been sent to another dashboard.",
     });
-    setIntendedPath(destination);
-    navigate(destination, { replace: true });
-  }, [navigate, nextPath, setIntendedPath, variant]);
+  }, []);
 
   useEffect(() => {
     if (isSignup || authLoading || !session || loading || autoRouteRef.current) return;
@@ -214,6 +197,18 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
     }
   };
 
+  const retryIdentity = async () => {
+    setLoading(true);
+    try {
+      await routeIdentity();
+    } catch (error) {
+      continueWithoutIdentity(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (identityError) return <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4"><Card className="w-full max-w-md"><CardHeader className="text-center"><CardTitle>We couldn&apos;t confirm your role</CardTitle><CardDescription>{identityError} For your security, Service Writer did not open a dashboard without a verified workspace role.</CardDescription></CardHeader><CardContent className="space-y-3"><Button className="w-full" disabled={loading} onClick={() => void retryIdentity()}>{loading ? "Checking…" : "Retry role check"}</Button><Button className="w-full" variant="outline" disabled={loading} onClick={() => { setIdentityError(null); void supabase.auth.signOut(); }}>Use a different account</Button></CardContent></Card></main>;
   if (roleMismatch) return <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4"><Card className="w-full max-w-md"><CardHeader className="text-center"><CardTitle>Wrong sign-in for this account</CardTitle><CardDescription>This account isn't set up as {copy.badge}. Pick the option that matches your role and sign in there.</CardDescription></CardHeader><CardContent className="space-y-3"><Button className="w-full" onClick={() => navigate("/login")}>Choose a different role</Button><Button className="w-full" variant="outline" disabled={loading} onClick={() => { setRoleMismatch(false); void supabase.auth.signOut(); }}>Use a different account</Button></CardContent></Card></main>;
   if (memberships) return <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4"><Card className="w-full max-w-md"><CardHeader className="text-center"><CardTitle>Choose a workspace</CardTitle><CardDescription>You belong to more than one workspace. Choose where you want to work.</CardDescription></CardHeader><CardContent className="space-y-3">{memberships.map((membership) => <Button key={`${membership.workspaceUserId}-${membership.role}`} className="h-auto w-full justify-between p-4 text-left" variant="outline" disabled={loading} onClick={() => void chooseWorkspace(membership)}><span><span className="block font-semibold">{membership.workspaceName}</span><span className="text-xs capitalize text-muted-foreground">{membership.role}</span></span><ChevronRight className="h-4 w-4" /></Button>)}</CardContent></Card></main>;
   return <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4"><Card className="w-full max-w-md"><CardHeader className="text-center"><div className="mx-auto mb-2 inline-flex items-center justify-center rounded-md bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-primary">{copy.badge}</div><div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">{isSignup ? <UserPlus className="h-6 w-6" /> : <LogIn className="h-6 w-6" />}</div><CardTitle>{isSignup ? "Create your business account" : copy.title}</CardTitle><CardDescription>{isSignup ? "For business owners creating a new Service Writer workspace." : copy.description}</CardDescription></CardHeader><CardContent>{!isSignup && <><Button className="w-full" type="button" variant="outline" disabled={loading} onClick={handleGoogleSignIn}>Continue with Google</Button><div className="my-4 flex items-center gap-3"><div className="h-px flex-1 bg-border" /><span className="text-xs uppercase text-muted-foreground">or</span><div className="h-px flex-1 bg-border" /></div></>}{!isSignup && DEMO_LOGIN_ENABLED && DEMO_EMAIL && DEMO_PASSWORD && <Button className="mb-4 w-full" type="button" variant="secondary" disabled={loading} onClick={() => { setEmail(DEMO_EMAIL); setPassword(DEMO_PASSWORD); toast.info("Demo credentials loaded. Press Sign in to continue."); }}>Use demo credentials</Button>}<form onSubmit={submit} className="space-y-4"><div className="space-y-2"><Label htmlFor="workforce-email">Email</Label><Input id="workforce-email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></div><div className="space-y-2"><Label htmlFor="workforce-password">Password</Label><Input id="workforce-password" type="password" autoComplete={isSignup ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} required minLength={isSignup ? 6 : undefined} /></div><Button className="w-full" type="submit" disabled={loading}>{loading ? "Please wait…" : isSignup ? "Create account" : "Sign in"}</Button></form>{!isSignup && <div className="mt-3 flex items-center justify-between text-sm"><Link className="text-primary hover:underline" to="/login/magic-link">Email me a magic link</Link><Link className="text-primary hover:underline" to="/forgot-password">Forgot password?</Link></div>}<div className="mt-4 text-center text-xs text-muted-foreground"><Link to="/login" className="hover:underline">← Choose a different role</Link></div><div className="mt-6 border-t pt-4 text-center text-sm text-muted-foreground">{isSignup ? <>Already have an account? <Link className="font-medium text-primary" to="/login">Sign in</Link></> : <>New business owner? <Link className="font-medium text-primary" to="/signup">Create an account</Link></>}</div></CardContent></Card></main>;

@@ -22,12 +22,13 @@ describe("resolveStartupRoute", () => {
     ).toBe("/dashboard");
   });
 
-  it("sends authenticated onboarded root visits to dashboard", () => {
+  it("sends authenticated owners from root to dashboard", () => {
     expect(
       resolveStartupRoute({
         currentPath: "/",
         isAuthenticated: true,
         persistedIntendedPath: null,
+        role: "owner",
       }),
     ).toBe("/dashboard");
   });
@@ -38,8 +39,20 @@ describe("resolveStartupRoute", () => {
         currentPath: "/",
         isAuthenticated: true,
         persistedIntendedPath: "/settings",
+        role: "owner",
       }),
     ).toBe("/dashboard");
+  });
+
+  it("never treats an unresolved workforce identity as an owner", () => {
+    expect(
+      resolveStartupRoute({
+        currentPath: "/",
+        isAuthenticated: true,
+        persistedIntendedPath: null,
+        role: null,
+      }),
+    ).toBe("/login");
   });
 
   it("sends authenticated technicians to the field app from generic startup routes", () => {
@@ -92,6 +105,7 @@ describe("resolveStartupRoute", () => {
         currentPath: "/customers",
         isAuthenticated: true,
         persistedIntendedPath: null,
+        role: "owner",
       }),
     ).toBe("/customers");
   });
@@ -119,6 +133,20 @@ describe("resolveStartupRoute", () => {
       }),
     ).toBe("/dispatch");
   });
+
+  it.each(["dispatcher", "manager", "service_advisor", "receptionist"])(
+    "routes %s to daily operations instead of the owner dashboard",
+    (role) => {
+      expect(
+        resolveStartupRoute({
+          currentPath: "/",
+          isAuthenticated: true,
+          persistedIntendedPath: null,
+          role,
+        }),
+      ).toBe("/dispatch");
+    },
+  );
 
   it("routes fleet managers to Fleet OS instead of the owner dashboard", () => {
     expect(
