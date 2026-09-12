@@ -38,6 +38,7 @@ import { PayoutsDashboard } from "@/components/payments/PayoutsDashboard";
 import { ManualPaymentDialog } from "@/components/payments/ManualPaymentDialog";
 import { PaymentLinkDialog } from "@/components/payments/PaymentLinkDialog";
 import { ListPagination, usePageSlice, DEFAULT_PAGE_SIZE } from "@/components/ui/list-pagination";
+import { ResponsiveRecord } from "@/components/data-table/ResponsiveRecord";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import {
   fetchPaymentRecords,
@@ -271,7 +272,7 @@ const Payments = () => {
               </div>
             )}
 
-            <Card>
+            <Card className="[container-type:inline-size]">
               <CardHeader className="pb-3">
                 <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
                   <CardTitle className="flex items-center gap-2 text-lg"><CreditCard className="h-5 w-5" />Transaction History</CardTitle>
@@ -286,7 +287,40 @@ const Payments = () => {
                   <div className="py-12 text-center text-muted-foreground">No transactions found.</div>
                 ) : (
                   <>
-                    <div className="overflow-x-auto">
+                    <div className="space-y-2 @min-[700px]:hidden">
+                      {pagedPayments.map((payment) => (
+                        <ResponsiveRecord
+                          key={payment.id}
+                          primary={payment.customer_name || "Unknown customer"}
+                          secondary={payment.customer_email || payment.payment_type.replace(/_/g, " ")}
+                          slot={formatCentsAsCurrency(payment.amount, payment.currency)}
+                          status={getStatusBadge(payment.status || "pending")}
+                          meta={`Paid/created ${format(new Date(payment.created_at), "MMM d, yyyy · h:mm a")}`}
+                          details={[
+                            { label: "Type", value: payment.payment_type.replace(/_/g, " ") },
+                            { label: "Subtotal", value: formatCentsAsCurrency(payment.subtotal ?? (payment.amount - (payment.tax_amount || 0)), payment.currency) },
+                            { label: "Tax", value: (payment.tax_amount || 0) > 0 ? formatCentsAsCurrency(payment.tax_amount || 0, payment.currency) : "—" },
+                            { label: "Total", value: formatCentsAsCurrency(payment.amount, payment.currency) },
+                            { label: "Reference", value: payment.stripe_payment_intent_id?.slice(-8).toUpperCase() || "—" },
+                          ]}
+                          actions={
+                            <div className="flex items-center gap-1">
+                              <Checkbox checked={selectedPaymentIds.includes(payment.id)} onCheckedChange={() => togglePaymentSelection(payment.id)} aria-label={`Select payment for ${payment.customer_name || "customer"}`} />
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem onClick={() => handleSendInvoice(payment)} disabled={sendingInvoice === payment.id}>{sendingInvoice === payment.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}Send invoice</DropdownMenuItem>
+                                  {payment.status !== "succeeded" && payment.customer_email && <DropdownMenuItem onClick={() => handleSendPaymentLink(payment)} disabled={sendingPaymentLink === payment.id}>{sendingPaymentLink === payment.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Link2 className="mr-2 h-4 w-4" />}Send payment link</DropdownMenuItem>}
+                                  {payment.status !== "succeeded" && <><DropdownMenuSeparator /><DropdownMenuItem onClick={() => { setManualPaymentRecord(payment); setManualPaymentDialogOpen(true); }}><Banknote className="mr-2 h-4 w-4" />Record manual payment</DropdownMenuItem></>}
+                                  {payment.status === "succeeded" && <DropdownMenuItem onClick={() => openRefundDialog(payment)}><RotateCcw className="mr-2 h-4 w-4" />Issue refund</DropdownMenuItem>}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          }
+                        />
+                      ))}
+                    </div>
+                    <div className="hidden overflow-x-auto @min-[700px]:block">
                       <Table density="compact">
                         <TableHeader><TableRow><TableHead className="w-10"><Checkbox checked={allPageSelected} onCheckedChange={toggleCurrentPage} /></TableHead><TableHead>Date</TableHead><TableHead>Customer</TableHead><TableHead>Type</TableHead><TableHead>Subtotal</TableHead><TableHead>Tax</TableHead><TableHead>Total</TableHead><TableHead>Status</TableHead><TableHead>Reference</TableHead><TableHead className="w-12" /></TableRow></TableHeader>
                         <TableBody>
