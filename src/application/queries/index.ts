@@ -148,9 +148,13 @@ export {
 
 export {
   fetchAppointmentsPageData,
+  fetchAppointmentsListData,
+  fetchAppointmentFormReferenceData,
   type AppointmentWithSource,
   type AppointmentsPageData,
   type AppointmentsPageErrors,
+  type AppointmentsListData,
+  type AppointmentFormReferenceData,
 } from './appointments.query';
 
 export {

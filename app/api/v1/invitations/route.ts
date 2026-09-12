@@ -18,9 +18,10 @@ const invitationSelect = "id,workspace_id,customer_id,invited_email,invited_role
 const digest = (token: string) => createHash("sha256").update(token, "utf8").digest("hex");
 const exposeToken = process.env.INVITATION_EXPOSE_RAW_TOKEN === "true" && process.env.NODE_ENV !== "production";
 
-async function assertSendRateLimit(supabase: Awaited<ReturnType<typeof requireWorkspaceMember>>["supabase"], workspaceId: string, email: string) {
+async function assertSendRateLimit(workspaceId: string, email: string) {
   const now = Date.now();
-  const { data, error } = await supabase
+  const admin = createSupabaseAdminClient();
+  const { data, error } = await admin
     .from("invitation_delivery_attempts")
     .select("id,created_at")
     .eq("workspace_id", workspaceId)
@@ -79,7 +80,7 @@ export async function POST(request: Request) {
       throw new ApiError(403, "Only a workspace owner can invite another owner.", "owner_role_required");
     }
     if (body.invited_role === "customer" && !body.customer_id) return json({ error: { code: "customer_required", message: "customer_id is required for customer invitations" } }, { status: 400 });
-    await assertSendRateLimit(supabase, body.workspace_id, body.invited_email);
+    await assertSendRateLimit(body.workspace_id, body.invited_email);
     const { data: existing, error: existingError } = await supabase.from("invitations").select("id").eq("workspace_id", body.workspace_id).ilike("invited_email", body.invited_email).is("accepted_at", null).is("revoked_at", null).gt("expires_at", new Date().toISOString()).limit(1);
     if (existingError) throw existingError;
     if (existing?.length) return json({ error: { code: "invitation_pending", message: "An active invitation already exists for this email." } }, { status: 409 });
@@ -92,9 +93,15 @@ export async function POST(request: Request) {
     if (error?.code === "23503" && body.customer_id) throw new ApiError(400, "The customer does not belong to this workspace.", "customer_workspace_mismatch");
     if (error) throw error;
 
-    const { error: eventError } = await supabase.from("invitation_events").insert({ invitation_id: data.id, workspace_id: data.workspace_id, event_type: "created", actor_user_id: user.id, metadata: { invited_role: data.invited_role } });
-    if (eventError) throw eventError;
     const admin = createSupabaseAdminClient();
+    const { error: eventError } = await admin.from("invitation_events").insert({
+      invitation_id: data.id,
+      workspace_id: data.workspace_id,
+      event_type: "created",
+      actor_user_id: user.id,
+      metadata: { invited_role: data.invited_role },
+    });
+    if (eventError) throw eventError;
     await recordOperationalAudit({ supabase: admin, request, workspaceId: data.workspace_id, actorUserId: user.id, action: "invitation.created", entityType: "invitation", entityId: data.id, metadata: { invited_role: data.invited_role } });
 
     let delivery: { status: "accepted" | "failed"; provider?: string; provider_message_id?: string; error?: string };

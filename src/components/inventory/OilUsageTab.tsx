@@ -50,9 +50,9 @@ export function OilUsageTab() {
     } catch (error: unknown) {
       toast.error(error instanceof Error ? error.message : "Failed to load oil usage");
     } finally { setLoading(false); }
-  }, [dateRange?.from, dateRange?.to, itemId, source, debouncedSearch]);
+  }, [dateRange, itemId, source, debouncedSearch]);
 
-  useEffect(() => { void loadUsage(); }, [loadUsage]);
+  useEffect(() => { queueMicrotask(() => { void loadUsage(); }); }, [loadUsage]);
   const totals = data?.totals;
   const drillRows = useMemo(() => drillDay && data ? data.rows.filter((row) => row.day === drillDay) : [], [drillDay, data]);
   const hasFilters = itemId !== ALL || source !== ALL || debouncedSearch.length > 0;

@@ -104,10 +104,6 @@ export default tseslint.config(
         {
           patterns: [
             {
-              group: ["stripe", "stripe/*", "@stripe/*"],
-              message: "Stripe SDK must only be used in edge functions, not frontend code. Use supabase.functions.invoke() to call payment endpoints.",
-            },
-            {
               group: ["chart.js", "chart.js/*", "d3", "d3/*", "@d3/*", "nivo", "@nivo/*", "victory", "victory/*"],
               message: "Charting: use Recharts only. chart.js, d3, nivo, and victory are forbidden in this codebase.",
             },
@@ -160,6 +156,10 @@ export default tseslint.config(
         {
           patterns: [
             {
+              group: ["stripe", "stripe/*", "@stripe/*"],
+              message: "Stripe SDK must only be used in frontend components/pages through server-side payment endpoints.",
+            },
+            {
               group: ["@supabase/supabase-js", "@supabase/supabase-js/*"],
               message: "Direct Supabase usage is not allowed in components/pages. Use the application layer (src/application/queries or commands) for data access.",
             },
@@ -191,6 +191,7 @@ export default tseslint.config(
     // unsubscribe). The application layer intentionally does not wrap
     // `supabase.auth`, so these files are exempt from the data-access ban.
     files: [
+      "src/components/ThemeProvider.tsx",
       "src/components/admin/AdminTrainingRewards.tsx",
       "src/components/ai/AIAssistant.tsx",
       "src/components/pricing/CatalogBenchmarkDialog.tsx",

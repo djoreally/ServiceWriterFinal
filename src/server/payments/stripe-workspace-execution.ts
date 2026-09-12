@@ -1,7 +1,14 @@
 import crypto from "node:crypto";
 import Stripe from "stripe";
+import { createSupabaseAdminClient } from "@/lib/supabase";
 
 export type StripePaymentMode = "connect" | "direct";
+
+type StripeDirectCredentialBundle = {
+  accountId: string;
+  apiKey: string;
+  webhookSecret: string;
+};
 
 function object(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -53,6 +60,114 @@ export function decryptPaymentCredential(envelope: string): string {
   ]).toString("utf8");
 }
 
+function encodeDirectCredentialBundle(bundle: StripeDirectCredentialBundle): string {
+  return encryptPaymentCredential(JSON.stringify(bundle));
+}
+
+function decodeDirectCredentialBundle(envelope: string): StripeDirectCredentialBundle {
+  const parsed = JSON.parse(decryptPaymentCredential(envelope)) as Partial<StripeDirectCredentialBundle>;
+  if (
+    typeof parsed.accountId !== "string" ||
+    !parsed.accountId.startsWith("acct_") ||
+    typeof parsed.apiKey !== "string" ||
+    !parsed.apiKey.startsWith("sk_") ||
+    typeof parsed.webhookSecret !== "string" ||
+    !parsed.webhookSecret.startsWith("whsec_")
+  ) {
+    throw new Error("Stored Stripe direct credential payload is invalid");
+  }
+  return parsed as StripeDirectCredentialBundle;
+}
+
+function withoutLegacyDirectSecrets(operationalSettings: unknown): Record<string, unknown> {
+  const next = { ...object(operationalSettings) };
+  delete next.stripe_direct_secret_encrypted;
+  delete next.stripe_direct_webhook_secret_encrypted;
+  return next;
+}
+
+async function loadStoredDirectCredential(workspaceId: string): Promise<StripeDirectCredentialBundle | null> {
+  const admin = createSupabaseAdminClient();
+  const { data, error } = await admin
+    .from("provider_connection_secrets")
+    .select("credential_payload_encrypted")
+    .eq("workspace_id", workspaceId)
+    .eq("provider", "stripe")
+    .maybeSingle();
+  if (error) throw error;
+  const encrypted = text(data?.credential_payload_encrypted);
+  return encrypted ? decodeDirectCredentialBundle(encrypted) : null;
+}
+
+async function migrateLegacyDirectCredential(
+  workspaceId: string,
+  operationalSettings: unknown,
+): Promise<StripeDirectCredentialBundle | null> {
+  const operational = object(operationalSettings);
+  const accountId = text(operational.stripe_direct_account_id);
+  const encryptedApiKey = text(operational.stripe_direct_secret_encrypted);
+  const encryptedWebhookSecret = text(operational.stripe_direct_webhook_secret_encrypted);
+  if (!accountId || !encryptedApiKey || !encryptedWebhookSecret) return null;
+
+  const bundle: StripeDirectCredentialBundle = {
+    accountId,
+    apiKey: decryptPaymentCredential(encryptedApiKey),
+    webhookSecret: decryptPaymentCredential(encryptedWebhookSecret),
+  };
+  await saveStripeDirectCredentials(workspaceId, bundle.accountId, bundle.apiKey, bundle.webhookSecret);
+
+  const admin = createSupabaseAdminClient();
+  const { error } = await admin
+    .from("workspace_settings")
+    .update({ operational_settings: withoutLegacyDirectSecrets(operationalSettings) })
+    .eq("workspace_id", workspaceId);
+  if (error) throw error;
+  return bundle;
+}
+
+async function directCredentialBundle(
+  workspaceId: string,
+  operationalSettings: unknown,
+): Promise<StripeDirectCredentialBundle | null> {
+  return await loadStoredDirectCredential(workspaceId)
+    ?? await migrateLegacyDirectCredential(workspaceId, operationalSettings);
+}
+
+export async function saveStripeDirectCredentials(
+  workspaceId: string,
+  accountId: string,
+  apiKey: string,
+  webhookSecret: string,
+) {
+  const admin = createSupabaseAdminClient();
+  const { error } = await admin
+    .from("provider_connection_secrets")
+    .upsert({
+      workspace_id: workspaceId,
+      provider: "stripe",
+      credential_payload_encrypted: encodeDirectCredentialBundle({ accountId, apiKey, webhookSecret }),
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "workspace_id,provider" });
+  if (error) throw error;
+}
+
+export async function deleteStripeDirectCredentials(workspaceId: string) {
+  const admin = createSupabaseAdminClient();
+  const { error } = await admin
+    .from("provider_connection_secrets")
+    .update({
+      credential_payload_encrypted: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("workspace_id", workspaceId)
+    .eq("provider", "stripe");
+  if (error) throw error;
+}
+
+export async function hasStripeDirectCredentials(workspaceId: string, operationalSettings: unknown): Promise<boolean> {
+  return Boolean(await directCredentialBundle(workspaceId, operationalSettings));
+}
+
 export interface StripeWorkspaceExecution {
   mode: StripePaymentMode;
   stripe: Stripe;
@@ -65,23 +180,28 @@ export function stripePaymentMode(operationalSettings: unknown): StripePaymentMo
   return operational.stripe_payment_mode === "direct" ? "direct" : "connect";
 }
 
-export function directWebhookSecret(operationalSettings: unknown): string | null {
-  const operational = object(operationalSettings);
-  const encrypted = text(operational.stripe_direct_webhook_secret_encrypted);
-  return encrypted ? decryptPaymentCredential(encrypted) : null;
+export async function directWebhookSecret(workspaceId: string, operationalSettings: unknown): Promise<string | null> {
+  const bundle = await directCredentialBundle(workspaceId, operationalSettings);
+  return bundle?.webhookSecret ?? null;
 }
 
-export function resolveStripeWorkspaceExecution(operationalSettings: unknown): StripeWorkspaceExecution {
+export async function resolveStripeWorkspaceExecution(
+  workspaceId: string,
+  operationalSettings: unknown,
+): Promise<StripeWorkspaceExecution> {
   const operational = object(operationalSettings);
   const mode = stripePaymentMode(operational);
 
   if (mode === "direct") {
-    const encryptedSecret = text(operational.stripe_direct_secret_encrypted);
     const accountId = text(operational.stripe_direct_account_id);
-    if (!encryptedSecret || !accountId) {
+    const bundle = await directCredentialBundle(workspaceId, operationalSettings);
+    if (!bundle || !accountId) {
       throw new Error("Stripe direct mode is selected but the workspace credential is not configured.");
     }
-    const stripe = new Stripe(decryptPaymentCredential(encryptedSecret));
+    if (bundle.accountId !== accountId) {
+      throw new Error("Stored Stripe direct credentials do not match the configured account.");
+    }
+    const stripe = new Stripe(bundle.apiKey);
     return {
       mode,
       stripe,

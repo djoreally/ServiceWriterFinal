@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "status": "built",
+  "lastCertifiedSha": null,
+  "productionSha": null,
+  "currentReleaseCandidate": "release/acquisition-hardening-shots-1-24",
+  "note": "Shots 1-24 reconciled; awaiting executable pre-flight and exact-SHA deployment verification."
+}

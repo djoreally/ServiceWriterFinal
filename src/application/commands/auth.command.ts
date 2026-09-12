@@ -179,8 +179,9 @@ export async function fetchOwnerDisplayName(): Promise<string | null> {
       membershipQuery = membershipQuery.eq("workspace_id", selectedWorkspaceId);
     }
 
-    let { data: membership, error: membershipError } = await membershipQuery.limit(1).maybeSingle();
-    if (membershipError) throw membershipError;
+    const membershipResult = await membershipQuery.limit(1).maybeSingle();
+    if (membershipResult.error) throw membershipResult.error;
+    let membership = membershipResult.data;
 
     if (!membership && selectedWorkspaceId) {
       const fallback = await productionSupabase

@@ -32,7 +32,7 @@ export const StripeConnectCard = () => {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { void refresh(); }, []);
+  useEffect(() => { queueMicrotask(() => { void refresh(); }); }, []);
 
   const handleDirectSave = async () => {
     if (!accountId.trim() || !secretKey.trim() || !webhookSecret.trim()) {

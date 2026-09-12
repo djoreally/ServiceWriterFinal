@@ -328,7 +328,7 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
       setError(err instanceof Error ? err.message : 'Unable to open subscription management');
       return null;
     }
-  }, [session, subscription?.workspace_id]);
+  }, [session, subscription]);
 
   const trackUsage = useCallback(async () => { await fetchSubscription(true); }, [fetchSubscription]);
 
