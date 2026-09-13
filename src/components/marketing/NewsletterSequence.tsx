@@ -486,7 +486,7 @@ export function NewsletterSequence() {
     if (!template.id) return;
     try {
       await toggleNewsletterTemplateActive(template.id, !template.is_active);
-      toast.success(`${getMonthName(template.month_number)} template ${!template.is_active ? "activated" : "deactivated"}`);
+      toast.success(`${getTemplateLabel(template.month_number)} template ${!template.is_active ? "activated" : "deactivated"}`);
       loadTemplates(selectedSequence!);
     } catch (error) {
       console.error("Error toggling template:", error);
@@ -513,10 +513,13 @@ export function NewsletterSequence() {
     }
   };
 
-  const getMonthName = (monthNum: number) => {
+  const selectedSequenceRecord = sequences.find((sequence) => sequence.id === selectedSequence);
+  const isWeeklySequence = templates.length > 12 || selectedSequenceRecord?.name.includes("52-Week") === true;
+  const getTemplateLabel = (position: number) => {
+    if (isWeeklySequence) return `Week ${position}`;
     const months = ["January", "February", "March", "April", "May", "June",
                    "July", "August", "September", "October", "November", "December"];
-    return months[monthNum - 1];
+    return months[position - 1] || `Email ${position}`;
   };
 
   const getMonthIcon = (monthNum: number) => {
@@ -534,7 +537,7 @@ export function NewsletterSequence() {
       Gift,        // Nov - Thanksgiving
       Snowflake    // Dec - Christmas
     ];
-    const IconComponent = icons[monthNum - 1];
+    const IconComponent = icons[(Math.max(monthNum, 1) - 1) % icons.length] || Mail;
     return <IconComponent className="h-4 w-4" />;
   };
 
@@ -549,7 +552,7 @@ export function NewsletterSequence() {
         <div>
           <h1 className="text-3xl font-bold">Newsletter Sequence Manager</h1>
           <p className="text-muted-foreground mt-1">
-            12-month automated newsletter campaign with holiday & seasonal content
+            Welcome email plus automated weekly or monthly customer newsletter sequences
           </p>
         </div>
         <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
@@ -648,7 +651,7 @@ export function NewsletterSequence() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Templates Ready</p>
-                <p className="text-2xl font-bold">{templates.filter(t => t.is_active).length}/12</p>
+                <p className="text-2xl font-bold">{templates.filter(t => t.is_active).length}/{templates.length || 0}</p>
               </div>
               <Mail className="h-8 w-8 text-primary" />
             </div>
@@ -695,9 +698,9 @@ export function NewsletterSequence() {
           {/* Templates Grid */}
           <Card>
             <CardHeader>
-              <CardTitle>12 Monthly Email Templates</CardTitle>
+              <CardTitle>{isWeeklySequence ? `${templates.length}-Week Email Calendar` : "Monthly Email Templates"}</CardTitle>
               <CardDescription>
-                Pre-configured with holidays, seasonal themes, and proven content
+                Click any email to preview or edit the exact customer-facing message
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -709,7 +712,7 @@ export function NewsletterSequence() {
                         <div className="flex items-center gap-2">
                           {getMonthIcon(template.month_number)}
                           <CardTitle className="text-base">
-                            {getMonthName(template.month_number)}
+                            {getTemplateLabel(template.month_number)}
                           </CardTitle>
                         </div>
                         <Switch
@@ -768,7 +771,7 @@ export function NewsletterSequence() {
           <DialogHeader>
             <DialogTitle className="flex items-center justify-between">
               <span>
-                {selectedTemplate && `${getMonthName(selectedTemplate.month_number)} Preview`}
+                {selectedTemplate && `${getTemplateLabel(selectedTemplate.month_number)} Preview`}
               </span>
               <div className="flex items-center gap-2 text-sm font-normal">
                 <Label htmlFor="personalize-toggle" className="cursor-pointer">
@@ -826,7 +829,7 @@ export function NewsletterSequence() {
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {editingTemplate && `Edit ${getMonthName(editingTemplate.month_number)} Template`}
+              {editingTemplate && `Edit ${getTemplateLabel(editingTemplate.month_number)} Template`}
             </DialogTitle>
           </DialogHeader>
           {editingTemplate && (
