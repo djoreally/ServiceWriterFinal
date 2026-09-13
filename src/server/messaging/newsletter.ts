@@ -165,6 +165,45 @@ export async function processDueNewsletterSubscribers(limit = 25) {
       const workspace = await admin.from("workspaces").select("name").eq("id", row.workspace_id).single();
       if (workspace.error || !workspace.data) throw workspace.error ?? new Error("Newsletter workspace missing");
 
+      // A transient provider failure during booking must not skip the welcome.
+      // The weekly worker retries it first, then starts Week 1 seven days later.
+      if (!row.welcome_sent_at) {
+        const welcome = await sendLifecycleEmail({
+          workspaceId: row.workspace_id,
+          recipientEmail: row.email,
+          templateKey: "newsletter.welcome",
+          idempotencyKey: `newsletter:welcome:${row.id}:retry`,
+          variables: {
+            "business.name": String(workspace.data.name),
+            "email.recipient_name": "",
+            "email.recipient_role": "customer",
+            "email.primary_action_url": bookingUrl(row.booking_slug || "www"),
+            "email.preferences_url": preferenceUrl(row.unsubscribe_token),
+          },
+          metadata: { newsletterSubscriberId: row.id, bookingSlug: row.booking_slug || "" },
+        });
+
+        if (welcome.status === "suppressed") {
+          await admin.from("newsletter_subscribers").update({
+            status: "unsubscribed",
+            unsubscribed_at: new Date().toISOString(),
+            next_send_at: null,
+            updated_at: new Date().toISOString(),
+          }).eq("id", row.id);
+          results.suppressed += 1;
+          continue;
+        }
+
+        await admin.from("newsletter_subscribers").update({
+          welcome_sent_at: new Date().toISOString(),
+          welcome_message_id: welcome.providerMessageId ?? null,
+          next_issue_number: 1,
+          next_send_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+          updated_at: new Date().toISOString(),
+        }).eq("id", row.id);
+        continue;
+      }
+
       let sequenceQuery = admin.from("newsletter_sequences").select("id")
         .eq("workspace_id", row.workspace_id).eq("is_active", true);
       if (row.booking_slug === "momsoilchange") {
