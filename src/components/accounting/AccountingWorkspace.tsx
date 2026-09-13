@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
+import { BookkeepingTools } from "@/components/accounting/BookkeepingTools";
 import {
   ACCOUNTING_CLASSIFICATIONS,
   normalizeBankRows,
@@ -337,6 +338,21 @@ export function AccountingWorkspace() {
           </Card>
         </div>
       </div>
+
+      <BookkeepingTools
+        facts={{
+          cashIn: summary.cashIn,
+          cashOut: summary.cashOut,
+          netCashChange: summary.netCashChange,
+          revenue: summary.revenue,
+          operatingExpenses: summary.operatingExpenses,
+          operatingProfit: summary.operatingProfit,
+          ownerDraws: summary.ownerDraws,
+          investorCapital: summary.investorCapital,
+          unresolvedAmount: summary.unresolvedAmount,
+          unresolvedCount: summary.unresolvedCount,
+        }}
+      />
     </div>
   );
 }
