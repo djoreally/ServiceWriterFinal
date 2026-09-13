@@ -30,7 +30,7 @@ export interface CustomerAppointment {
   status: string;
   estimated_cost: number | null;
   guest_name: string | null;
-  management_token: string | null;
+  can_manage: boolean;
   location_address: string | null;
   notes: string | null;
   description: string | null;
@@ -191,7 +191,7 @@ export function CustomerAppointmentsTab({ account }: Props) {
             />
           </div>
 
-          {isUpcoming && appt.management_token && (
+          {isUpcoming && appt.can_manage && (
             <div className="flex gap-2 mt-4 pt-4 border-t border-border/50">
               <Button
                 variant="outline"

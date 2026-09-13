@@ -25,12 +25,12 @@ async function loadWorkspaceStripe(workspaceId: string) {
   if (stripePaymentMode(settings.operational_settings) !== "direct") {
     throw new Error("Workspace is not configured for direct Stripe mode");
   }
-  const secret = directWebhookSecret(settings.operational_settings);
+  const secret = await directWebhookSecret(workspaceId, settings.operational_settings);
   if (!secret) throw new Error("Direct Stripe webhook secret is not configured");
   return {
     admin,
     secret,
-    execution: resolveStripeWorkspaceExecution(settings.operational_settings),
+    execution: await resolveStripeWorkspaceExecution(workspaceId, settings.operational_settings),
   };
 }
 

@@ -36,6 +36,7 @@ import { createCustomer, updateCustomer, deleteCustomer } from "@/application/co
 import { fetchCustomerOverviewFromNextApi } from "@/application/queries/customers.query";
 import { useWorkspaceSelection } from "@/hooks/useWorkspaceSelection";
 import { ListPagination, usePageSlice, DEFAULT_PAGE_SIZE } from "@/components/ui/list-pagination";
+import { ResponsiveRecord } from "@/components/data-table/ResponsiveRecord";
 
 interface Customer {
   id: string;
@@ -327,9 +328,44 @@ const Customers = () => {
         </Card>
 
         {/* Table */}
-        <Card density="compact" className="-mt-4 rounded-t-none border-border/50">
+        <Card density="compact" className="-mt-4 rounded-t-none border-border/50 [container-type:inline-size]">
           <CardContent className="p-0">
-            <div className="overflow-x-auto">
+            <div className="space-y-2 p-3 @min-[700px]:hidden">
+              {customersLoading ? (
+                Array.from({ length: 5 }).map((_, idx) => <Skeleton key={`mobile-skeleton-${idx}`} className="h-28 w-full" />)
+              ) : customersError ? (
+                <div className="rounded-lg bg-destructive/5 p-4 text-center text-destructive">{customersError}</div>
+              ) : pagedCustomers.length === 0 ? (
+                <div className="py-10 text-center text-muted-foreground">No {terms.customer.toLowerCase()}s found</div>
+              ) : (
+                pagedCustomers.map((customer) => (
+                  <ResponsiveRecord
+                    key={customer.id}
+                    primary={customer.name}
+                    secondary={customer.email || customer.phone || "No contact information"}
+                    slot={`${vehicleCounts[customer.id] || 0} ${terms.vehicle}${(vehicleCounts[customer.id] || 0) === 1 ? "" : "s"}`}
+                    status={<Badge variant="outline">Active</Badge>}
+                    meta={lastServiceDates[customer.id] ? `Last ${terms.service.toLowerCase()} ${formatDateLabel(lastServiceDates[customer.id], "MMM dd, yyyy")}` : `No ${terms.service.toLowerCase()} history`}
+                    details={[
+                      { label: "Phone", value: customer.phone ? <ClickablePhone phone={customer.phone} showIcon={false} /> : "—" },
+                      { label: "Email", value: customer.email ? <ClickableEmail email={customer.email} showIcon={false} /> : "—" },
+                      { label: `${terms.vehicle}s`, value: vehicleCounts[customer.id] || 0 },
+                      { label: `Last ${terms.service}`, value: lastServiceDates[customer.id] ? formatDateLabel(lastServiceDates[customer.id], "MMM dd, yyyy") : "—" },
+                      ...(customer.address ? [{ label: "Address", value: customer.address }] : []),
+                    ]}
+                    actions={
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="iconXs" onClick={() => navigate(`/customers/${customer.id}`)}><Eye className="h-4 w-4" /></Button>
+                        <Button variant="ghost" size="iconXs" onClick={() => openEditDialog(customer)}><Edit className="h-4 w-4" /></Button>
+                        <Button variant="ghost" size="iconXs" onClick={() => handleDelete(customer.id)}><Trash2 className="h-4 w-4" /></Button>
+                      </div>
+                    }
+                    onOpen={() => navigate(`/customers/${customer.id}`)}
+                  />
+                ))
+              )}
+            </div>
+            <div className="hidden overflow-x-auto @min-[700px]:block">
             <Table density="compact">
               <TableHeader>
                 <TableRow className="border-border/50">

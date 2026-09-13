@@ -56,18 +56,16 @@ export async function fetchCustomerAccountById(accountId: string) {
 
 // ── Customer bookings ──────────────────────────────────────────────
 
-export async function fetchCustomerBookings(accountId: string, email: string) {
-  const escapedEmail = email.replace(/,/g, "\\,");
-  return supabase
-    .from("appointments")
-    .select(`
-      id, title, scheduled_date, scheduled_time, duration_minutes,
-      status, estimated_cost, guest_name, management_token,
-      service_catalog:service_catalog(name), user_id
-    `)
-    .or(`customer_account_id.eq.${accountId},guest_email.ilike.${escapedEmail}`)
-    .order("scheduled_date", { ascending: false })
-    .order("scheduled_time", { ascending: false });
+export async function fetchCustomerBookings(_accountId: string, _email: string) {
+  const { data, error } = await (supabase as any).rpc("get_customer_portal_appointments_v2");
+  if (error) return { data: null, error };
+  const rows = ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+    ...row,
+    title: String(row.title ?? ""),
+    can_manage: row.can_manage === true,
+    service_catalog: row.service_catalog_name ? { name: String(row.service_catalog_name) } : null,
+  }));
+  return { data: rows, error: null };
 }
 
 // ── Cancel appointment by token ────────────────────────────────────

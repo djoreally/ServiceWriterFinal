@@ -7,13 +7,11 @@ import { Card, CardContent } from "@/components/ui/card";
 export default function TeamJoin() {
   const { token = "" } = useParams<{ token: string }>();
   const navigate = useNavigate();
+  const missingTokenError = token ? "" : "This invitation link is incomplete.";
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!token) {
-      setError("This invitation link is incomplete.");
-      return;
-    }
+    if (!token) return;
 
     let cancelled = false;
     void (async () => {
@@ -36,9 +34,11 @@ export default function TeamJoin() {
     return () => { cancelled = true; };
   }, [navigate, token]);
 
-  if (!error) {
+  const displayError = error || missingTokenError;
+
+  if (!displayError) {
     return <main className="flex min-h-screen items-center justify-center bg-muted/30"><div className="text-center"><Loader2 className="mx-auto h-7 w-7 animate-spin text-primary" /><p className="mt-3 text-sm text-muted-foreground">Opening your invitation…</p></div></main>;
   }
 
-  return <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4"><Card className="w-full max-w-md"><CardContent className="space-y-4 p-6 text-center"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-muted">{error ? <XCircle className="h-6 w-6 text-destructive" /> : <Link2 className="h-6 w-6" />}</div><h1 className="text-xl font-semibold">Invitation unavailable</h1><p className="text-sm text-muted-foreground">{error}</p><Button type="button" onClick={() => navigate("/login", { replace: true })}>Go to sign in</Button></CardContent></Card></main>;
+  return <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4"><Card className="w-full max-w-md"><CardContent className="space-y-4 p-6 text-center"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-muted">{displayError ? <XCircle className="h-6 w-6 text-destructive" /> : <Link2 className="h-6 w-6" />}</div><h1 className="text-xl font-semibold">Invitation unavailable</h1><p className="text-sm text-muted-foreground">{displayError}</p><Button type="button" onClick={() => navigate("/login", { replace: true })}>Go to sign in</Button></CardContent></Card></main>;
 }

@@ -1,0 +1,49 @@
+name: BuildOS Preflight
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  buildos-preflight:
+    name: BuildOS preflight / check / verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      NODE_VERSION: 24.x
+      CI: true
+      NEXT_PUBLIC_SUPABASE_URL: ${{ vars.NEXT_PUBLIC_SUPABASE_URL || 'https://example.supabase.co' }}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || 'ci-placeholder-publishable-key' }}
+      NEXT_PUBLIC_SUPABASE_PROJECT_ID: ${{ vars.NEXT_PUBLIC_SUPABASE_PROJECT_ID || 'servicewriterfinal-ci' }}
+      NEXT_PUBLIC_API_BASE_URL: /api
+    steps:
+      - name: Check out release candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install ServiceWriter dependencies
+        run: npm ci
+
+      - name: BuildOS preflight discovery
+        run: npx --yes github:djoreally/buildos-app-forge init
+
+      - name: BuildOS doctor
+        run: npx --yes github:djoreally/buildos-app-forge doctor
+
+      - name: BuildOS check
+        run: npx --yes github:djoreally/buildos-app-forge check
+
+      - name: BuildOS verify
+        run: npx --yes github:djoreally/buildos-app-forge verify

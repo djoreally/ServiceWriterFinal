@@ -93,7 +93,7 @@ export function useVehicleSpecs(options: UseVehicleSpecsOptions = {}) {
 
   useEffect(() => {
     let cancelled = false;
-    setYearsLoading(true);
+    queueMicrotask(() => setYearsLoading(true));
     void fetchVehicleSpecYears().then(({ data }) => { if (!cancelled) setYears((data ?? []).map((row) => row.year)); })
       .finally(() => { if (!cancelled) setYearsLoading(false); });
     return () => { cancelled = true; };
@@ -101,9 +101,9 @@ export function useVehicleSpecs(options: UseVehicleSpecsOptions = {}) {
 
   useEffect(() => {
     let cancelled = false;
-    setMakes([]); setModels([]); setEngines([]); setMatchedSpec(null);
+    queueMicrotask(() => { setMakes([]); setModels([]); setEngines([]); setMatchedSpec(null); });
     if (!options.year) return () => { cancelled = true; };
-    setMakesLoading(true);
+    queueMicrotask(() => setMakesLoading(true));
     void fetchVehicleSpecMakes(Number(options.year)).then(({ data }) => { if (!cancelled) setMakes((data ?? []).map((row) => row.make)); })
       .finally(() => { if (!cancelled) setMakesLoading(false); });
     return () => { cancelled = true; };
@@ -111,9 +111,9 @@ export function useVehicleSpecs(options: UseVehicleSpecsOptions = {}) {
 
   useEffect(() => {
     let cancelled = false;
-    setModels([]); setEngines([]); setMatchedSpec(null);
+    queueMicrotask(() => { setModels([]); setEngines([]); setMatchedSpec(null); });
     if (!options.year || !options.make) return () => { cancelled = true; };
-    setModelsLoading(true);
+    queueMicrotask(() => setModelsLoading(true));
     void fetchVehicleSpecModels(Number(options.year), options.make).then(({ data }) => { if (!cancelled) setModels((data ?? []).map((row) => row.model)); })
       .finally(() => { if (!cancelled) setModelsLoading(false); });
     return () => { cancelled = true; };
@@ -121,9 +121,9 @@ export function useVehicleSpecs(options: UseVehicleSpecsOptions = {}) {
 
   useEffect(() => {
     let cancelled = false;
-    setEngines([]); setMatchedSpec(null);
+    queueMicrotask(() => { setEngines([]); setMatchedSpec(null); });
     if (!options.year || !options.make || !options.model) return () => { cancelled = true; };
-    setSpecsLoading(true);
+    queueMicrotask(() => setSpecsLoading(true));
     void fetchVehicleSpecEngines(Number(options.year), options.make, options.model).then(({ data }) => {
       if (cancelled) return;
       const specs = (data ?? []).map(mapSpec);
@@ -159,8 +159,8 @@ export function useVehicleSpecLookup(year?: string, make?: string, model?: strin
   const [loading, setLoading] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    if (!year || !make || !model) { setSpec(null); return () => { cancelled = true; }; }
-    setLoading(true);
+    if (!year || !make || !model) { queueMicrotask(() => setSpec(null)); return () => { cancelled = true; }; }
+    queueMicrotask(() => setLoading(true));
     void fetchVehicleSpecSingle(Number(year), make, model, engine).then(({ data }) => { if (!cancelled) setSpec(data?.[0] ? mapSpec(data[0]) : null); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };

@@ -12,7 +12,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node scripts/check-architecture-contract.mjs && node scripts/check-identity-contract.mjs && node scripts/check-frontend-ui-contract.mjs",
+    "prebuild": "node scripts/check-architecture-contract.mjs && npm run buildos:check && node scripts/check-identity-contract.mjs && node scripts/check-frontend-ui-contract.mjs",
     "build": "next build",
     "typecheck": "tsc --noEmit",
     "test": "jest --runInBand",
@@ -27,7 +27,9 @@
     "verify:release": "node scripts/verify-release-readiness.mjs",
     "lint": "eslint . --quiet",
     "lint:strict": "eslint . --max-warnings=0",
-    "start": "next start"
+    "start": "next start",
+    "buildos:check": "node tools/buildos/bin/buildos.js check",
+    "test:hardening": "jest --runInBand src/server/security src/server/payments/stripe-secret-boundary.test.ts"
   },
   "playwright": {
     "config": "./e2e/playwright.config.ts"

@@ -27,6 +27,7 @@ import { fetchInventoryOverview } from "@/application/queries";
 import { createInventoryItem, updateInventoryItem, deleteInventoryItem, transferInventoryToVan, uploadInventoryImage } from "@/application/commands";
 import { bankersRound } from "@/lib/financialMath";
 import { DataTableEnhancementToolbar } from "@/components/data-table/DataTableEnhancementToolbar";
+import { ResponsiveRecord } from "@/components/data-table/ResponsiveRecord";
 import { TableSkeleton } from "@/components/loading/PageSkeletons";
 
 import type { InventoryItem, Van, VanInventoryLink } from "@/application/queries";
@@ -455,9 +456,52 @@ const Inventory = () => {
             )}
 
             {/* Table */}
-            <Card className="border border-border/50">
+            <Card className="border border-border/50 [container-type:inline-size]">
               <CardContent className="p-0">
-                <div className="overflow-x-auto">
+                <div className="space-y-2 p-3 @min-[700px]:hidden">
+                  {filteredItems.length === 0 ? (
+                    <div className="py-10 text-center text-muted-foreground">No items found</div>
+                  ) : (
+                    filteredItems.map((item) => {
+                      const vanStock = getVanStockForItem(item.id);
+                      const totalVanQty = vanStock.reduce((sum, entry) => sum + entry.quantity, 0);
+                      const itemReserved = reservations
+                        .filter((reservation) => reservation.inventory_item_id === item.id)
+                        .reduce((sum, reservation) => sum + (reservation.quantity || 0), 0);
+                      const warehouseAvailable = item.quantity - itemReserved;
+                      const lowStock = warehouseAvailable <= item.low_stock_threshold;
+                      return (
+                        <ResponsiveRecord
+                          key={item.id}
+                          primary={item.name}
+                          secondary={item.sku || item.category || "Inventory item"}
+                          slot={`${item.quantity} ${getInventoryUnit(item)}`}
+                          status={lowStock ? <Badge variant="outline" className="text-yellow-700">Low stock</Badge> : <Badge variant="outline">In stock</Badge>}
+                          meta={`Warehouse available ${warehouseAvailable} · Van stock ${totalVanQty}`}
+                          details={[
+                            { label: "SKU", value: item.sku || "—" },
+                            { label: "Category", value: item.category || "—" },
+                            { label: "Warehouse", value: item.quantity },
+                            { label: "Reserved", value: itemReserved },
+                            { label: "Van stock", value: totalVanQty },
+                            { label: "Unit cost", value: formatCurrency(item.unit_cost) },
+                            { label: "Sell price", value: formatCurrency(item.sell_price) },
+                            ...(item.description ? [{ label: "Description", value: item.description }] : []),
+                          ]}
+                          actions={
+                            <div className="flex items-center gap-1">
+                              <Checkbox checked={selectedItemIds.includes(item.id)} onCheckedChange={() => toggleItemSelection(item.id)} aria-label={`Select inventory item ${item.name}`} />
+                              {vans.length > 0 && <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openTransferDialog(item.id)}><ArrowRightLeft className="h-4 w-4" /></Button>}
+                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditDialog(item)}><Edit className="h-4 w-4" /></Button>
+                              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleDelete(item.id)}><Trash2 className="h-4 w-4" /></Button>
+                            </div>
+                          }
+                        />
+                      );
+                    })
+                  )}
+                </div>
+                <div className="hidden overflow-x-auto @min-[700px]:block">
                 <Table density="compact">
                   <TableHeader>
                     <TableRow className="border-border/50">

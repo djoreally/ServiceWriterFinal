@@ -2,6 +2,7 @@ import { z } from "zod";
 import { createSupabaseAdminClient } from "@/lib/supabase";
 import { errorResponse, json } from "@/server/api";
 import { sendBookingConfirmation } from "@/server/messaging/booking-confirmation";
+import { issueAppointmentManagementToken } from "@/server/appointments/management-token";
 
 const slugSchema = z.string().trim().min(1).max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/i);
 const bodySchema = z.object({
@@ -90,12 +91,22 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
       if (consentResult.error) throw consentResult.error;
     }
 
+    const tokenExpiresAt = new Date(new Date(appointment.starts_at).getTime() + 30 * 86_400_000).toISOString();
+    const managementToken = await issueAppointmentManagementToken(
+      appointment.id,
+      appointment.workspace_id,
+      tokenExpiresAt,
+    );
+    const actionUrl = new URL(`/booking/${slug}/confirmation`, request.url);
+    actionUrl.searchParams.set("appointment_id", appointment.id);
+    actionUrl.searchParams.set("management_token", managementToken);
+
     const result = await sendBookingConfirmation({
       appointment,
       workspaceName: workspaceResult.data.name,
       workspaceTimezone: workspaceResult.data.timezone,
       recipientEmail: body.email.toLowerCase(),
-      actionUrl: new URL(`/booking/${slug}/confirmation?appointment_id=${appointment.id}`, request.url).toString(),
+      actionUrl: actionUrl.toString(),
     });
     return json({ data: { status: result.status, provider_message_id: result.providerMessageId } }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

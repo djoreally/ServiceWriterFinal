@@ -40,7 +40,7 @@ interface CustomerBooking {
   status: string;
   estimated_cost: number | null;
   guest_name: string | null;
-  management_token: string | null;
+  can_manage: boolean;
   service_catalog?: {
     name: string;
   } | null;
@@ -211,7 +211,7 @@ export default function MyBookings() {
                   ${formatMoney(booking.estimated_cost)}
                 </span>
               )}
-              {isUpcoming && booking.management_token && booking.status !== "cancelled" && booking.status !== "completed" && (
+              {isUpcoming && booking.can_manage && booking.status !== "cancelled" && booking.status !== "completed" && (
                 <Button
                   variant="outline"
                   size="sm"

@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "id": "2026-09-11-acquisition-hardening-shots-1-24",
+  "type": "security-hardening-release",
+  "status": "built",
+  "affected": [
+    "payments",
+    "provider secrets",
+    "OAuth",
+    "public booking",
+    "customer portal",
+    "RBAC",
+    "audit evidence",
+    "messaging",
+    "loyalty",
+    "appointment management tokens"
+  ],
+  "authorization": "workspace RLS + explicit management roles + server-only secret/evidence boundaries",
+  "schemaChange": true,
+  "acceptance": [
+    "BuildOS check passes on exact release candidate",
+    "TypeScript passes",
+    "ESLint passes",
+    "Jest passes",
+    "Next.js build passes",
+    "Vercel preview for exact candidate is READY",
+    "Production migrations remain unapplied until merge/release gate"
+  ],
+  "sourceContractSha": "93cebdaeaa71c4e1ab245a3800c0039ac5c94599",
+  "productionVerification": "pending"
+}

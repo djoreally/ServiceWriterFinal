@@ -109,12 +109,15 @@ export function useRBAC() {
   useEffect(() => {
     let active = true;
     if (!user?.id) {
-      setRoles([]);
-      setLoading(false);
+      queueMicrotask(() => {
+        if (!active) return;
+        setRoles([]);
+        setLoading(false);
+      });
       return () => { active = false; };
     }
 
-    setLoading(true);
+    queueMicrotask(() => { if (active) setLoading(true); });
     void supabase
       .from("user_roles")
       .select("role")

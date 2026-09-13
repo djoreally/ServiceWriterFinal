@@ -157,7 +157,7 @@ export async function syncCanonicalInvoiceToStripe(params: {
   if (provider !== "stripe") return { provider, status: "skipped" };
 
   const operational = object(settings?.operational_settings);
-  const execution = resolveStripeWorkspaceExecution(operational);
+  const execution = await resolveStripeWorkspaceExecution(params.workspaceId, operational);
   const account = await retrieveExecutionAccount(execution);
   await refreshStripeWorkspaceState(params.supabase, params.workspaceId, operational, execution, account);
   if (!account.charges_enabled) {
@@ -356,7 +356,7 @@ export async function markStripeInvoicePaidOutOfBand(params: {
   if (settings?.payment_provider !== "stripe") return { status: "skipped" };
 
   const operational = object(settings.operational_settings);
-  const execution = resolveStripeWorkspaceExecution(operational);
+  const execution = await resolveStripeWorkspaceExecution(params.workspaceId, operational);
   const metadata = object(invoice.metadata);
   const stripeInvoiceId = asStripeInvoiceId(metadata);
   if (!stripeInvoiceId || text(metadata.stripe_account_id) !== execution.accountId) {

@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "name": "ServiceWriter",
+  "purpose": "Multi-tenant automotive service operations platform for scheduling, customers, vehicles, service, payments, messaging, CRM, and customer self-service.",
+  "audience": [
+    "automotive service businesses",
+    "fleet operators",
+    "service advisors",
+    "technicians",
+    "customers"
+  ],
+  "coreObjects": [
+    "workspace",
+    "appointment",
+    "customer",
+    "vehicle",
+    "service",
+    "invoice",
+    "payment",
+    "message",
+    "provider connection"
+  ],
+  "primaryJourney": "book → schedule → service → invoice → payment → follow-up"
+}

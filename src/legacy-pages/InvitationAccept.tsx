@@ -38,11 +38,13 @@ export default function InvitationAccept() {
   const [preview, setPreview] = useState<InvitationPreview | null>(null);
   const [password, setPassword] = useState("");
   const [invitation, setInvitation] = useState<InvitationRecord | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(invitationId && token));
   const [submitting, setSubmitting] = useState(false);
   const [accepted, setAccepted] = useState(false);
+  const missingLinkError = invitationId && token ? "" : "This invitation link is incomplete.";
   const [error, setError] = useState("");
   const [matchingSession, setMatchingSession] = useState(false);
+  const displayError = error || missingLinkError;
 
   async function finishAcceptance(_previewData: InvitationPreview) {
     const response = await nextApi.invitations.accept(invitationId, token);
@@ -58,11 +60,7 @@ export default function InvitationAccept() {
   }
 
   useEffect(() => {
-    if (!invitationId || !token) {
-      setError("This invitation link is incomplete.");
-      setLoading(false);
-      return;
-    }
+    if (!invitationId || !token) return;
 
     let cancelled = false;
     void (async () => {
@@ -138,7 +136,7 @@ export default function InvitationAccept() {
   }
 
   if (loading || (matchingSession && submitting)) return <div className="flex min-h-screen items-center justify-center bg-muted/30"><div className="text-center"><Loader2 className="mx-auto h-7 w-7 animate-spin text-primary" /><p className="mt-3 text-sm text-muted-foreground">Finishing your invitation…</p></div></div>;
-  if (error && !preview) return <StateCard icon={<Link2 className="h-7 w-7" />} title="Invalid invitation link" message={error} />;
+  if (displayError && !preview) return <StateCard icon={<Link2 className="h-7 w-7" />} title="Invalid invitation link" message={displayError} />;
   if (accepted) return <StateCard icon={<CheckCircle2 className="h-8 w-8 text-emerald-600" />} title="You're in" message={`Your ${invitation?.invited_role.replaceAll("_", " ")} access is ready. Redirecting to your workspace…`} />;
   if (!preview) return <StateCard icon={<Link2 className="h-7 w-7" />} title="Invalid invitation link" message="This invitation could not be loaded." />;
 
@@ -175,7 +173,7 @@ export default function InvitationAccept() {
               <p className="text-xs text-muted-foreground">Minimum 8 characters.</p>
             </div>
 
-            {error && <div role="alert" className="flex gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"><XCircle className="mt-0.5 h-4 w-4 shrink-0" />{error}</div>}
+            {displayError && <div role="alert" className="flex gap-2 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"><XCircle className="mt-0.5 h-4 w-4 shrink-0" />{displayError}</div>}
             <Button type="submit" className="w-full gap-2" disabled={submitting}><ShieldCheck className="h-4 w-4" />{submitting ? "Securing access…" : mode === "signin" ? "Sign in & accept" : "Create account & accept"}</Button>
           </form>
         </CardContent>

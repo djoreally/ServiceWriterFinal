@@ -68,7 +68,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       .single();
     if (error) throw error;
 
-    const { error: eventError } = await supabase.from("invitation_events").insert({
+    const { error: eventError } = await admin.from("invitation_events").insert({
       invitation_id: id,
       workspace_id: data.workspace_id,
       event_type: "resent",

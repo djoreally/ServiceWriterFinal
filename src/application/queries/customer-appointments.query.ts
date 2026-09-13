@@ -20,7 +20,7 @@ export interface CustomerAppointmentRow {
   status: string;
   estimated_cost: number | null;
   guest_name: string | null;
-  management_token: string | null;
+  can_manage: boolean;
   location_address: string | null;
   notes: string | null;
   description: string | null;
@@ -41,7 +41,7 @@ export async function fetchCustomerAppointments(
   } = await getCurrentAuthUser();
   if (!user) return [];
 
-  const { data, error } = await canonicalSupabase.rpc("get_customer_portal_appointments_v1");
+  const { data, error } = await canonicalSupabase.rpc("get_customer_portal_appointments_v2");
 
   if (error) {
     console.error("[fetchCustomerAppointments] rpc error", error);
@@ -57,7 +57,7 @@ export async function fetchCustomerAppointments(
     status: string;
     estimated_cost: number | null;
     guest_name: string | null;
-    management_token: string | null;
+    can_manage: boolean;
     location_address: string | null;
     notes: string | null;
     description: string | null;
@@ -78,7 +78,7 @@ export async function fetchCustomerAppointments(
     status: r.status,
     estimated_cost: r.estimated_cost,
     guest_name: r.guest_name,
-    management_token: r.management_token,
+    can_manage: r.can_manage,
     location_address: r.location_address,
     notes: r.notes,
     description: r.description,
