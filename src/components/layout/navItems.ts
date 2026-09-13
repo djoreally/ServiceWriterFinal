@@ -1,3 +1,4 @@
+import { canAccessRoute } from "@/domain/auth/access-policy";
 import type { WorkforceRole } from "@/application/queries/workforce-identity.query";
 export type NavItem = {
   path: string;
