@@ -165,9 +165,12 @@ export async function processDueNewsletterSubscribers(limit = 25) {
       const workspace = await admin.from("workspaces").select("name").eq("id", row.workspace_id).single();
       if (workspace.error || !workspace.data) throw workspace.error ?? new Error("Newsletter workspace missing");
 
-      const sequence = await admin.from("newsletter_sequences").select("id")
-        .eq("workspace_id", row.workspace_id).eq("is_active", true)
-        .order("created_at", { ascending: true }).limit(1).maybeSingle();
+      let sequenceQuery = admin.from("newsletter_sequences").select("id")
+        .eq("workspace_id", row.workspace_id).eq("is_active", true);
+      if (row.booking_slug === "momsoilchange") {
+        sequenceQuery = sequenceQuery.eq("name", "MOMS 52-Week Newsletter");
+      }
+      const sequence = await sequenceQuery.order("created_at", { ascending: true }).limit(1).maybeSingle();
       if (sequence.error || !sequence.data?.id) throw sequence.error ?? new Error("No active newsletter sequence");
 
       const template = await admin.from("newsletter_templates")
