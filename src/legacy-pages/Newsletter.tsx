@@ -11,7 +11,7 @@ const Newsletter = () => {
           <div>
             <h2 className="text-3xl font-bold mb-2">Newsletter Sequences</h2>
             <p className="text-muted-foreground">
-              Manage automated monthly newsletter campaigns with seasonal and holiday themes
+              Manage automated welcome and weekly newsletter campaigns, subscribers, and email sequences
             </p>
           </div>
           
