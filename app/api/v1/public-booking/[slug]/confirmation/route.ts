@@ -2,6 +2,7 @@ import { z } from "zod";
 import { createSupabaseAdminClient } from "@/lib/supabase";
 import { errorResponse, json } from "@/server/api";
 import { sendBookingConfirmation } from "@/server/messaging/booking-confirmation";
+import { enrollNewsletterFromBooking } from "@/server/messaging/newsletter";
 
 const slugSchema = z.string().trim().min(1).max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/i);
 const bodySchema = z.object({
@@ -37,7 +38,7 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
     }
 
     const workspaceResult = await admin.from("workspaces")
-      .select("id,name,timezone")
+      .select("id,name,timezone,created_by")
       .eq("id", bookingSettingsResult.data.workspace_id)
       .eq("is_active", true)
       .single();
@@ -88,6 +89,21 @@ export async function POST(request: Request, context: { params: Promise<{ slug: 
         ? await admin.from("messaging_consents").update(values).eq("id", existing.data.id)
         : await admin.from("messaging_consents").insert(values);
       if (consentResult.error) throw consentResult.error;
+    }
+
+    if (body.marketing_email_consent === true) {
+      try {
+        await enrollNewsletterFromBooking({
+          workspaceId: appointment.workspace_id,
+          ownerUserId: String(workspaceResult.data.created_by),
+          customerId: appointment.customer_id,
+          email: body.email,
+          bookingSlug: slug,
+          businessName: workspaceResult.data.name,
+        });
+      } catch (newsletterError) {
+        console.error("[Newsletter] booking enrollment failed", newsletterError instanceof Error ? newsletterError.message : "unknown");
+      }
     }
 
     const result = await sendBookingConfirmation({
