@@ -170,3 +170,11 @@ begin
   );
 end;
 $function$;
+
+
+-- Keep appointment closeout idempotent even if this repair migration is applied
+-- independently of the earlier canonical closeout migration.
+create unique index if not exists payments_workspace_closeout_appointment_pending_uidx
+  on public.payments (workspace_id, ((metadata ->> 'appointment_id')))
+  where status = 'pending'::public.payment_status
+    and (metadata ->> 'source') = 'appointment_completion';
