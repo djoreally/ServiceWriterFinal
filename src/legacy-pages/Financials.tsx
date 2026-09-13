@@ -19,11 +19,13 @@ import {
   Users,
   FileText,
   Receipt,
+  Landmark,
 } from "lucide-react";
 import { ExpensesTab } from "@/legacy-pages/financials/Expenses";
 import { InvoicesTab } from "@/legacy-pages/financials/Invoices";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { CustomerLifetimeValue } from "@/components/marketing/CustomerLifetimeValue";
+import { AccountingWorkspace } from "@/components/accounting/AccountingWorkspace";
 import { getCurrentUserId, fetchSucceededPayments, fetchPendingPayments, fetchAppointmentStatuses, fetchCompletedServices } from "@/application/queries/financials.query";
 import { format, subMonths, subWeeks, parseISO, startOfMonth, endOfMonth, startOfWeek, addDays } from "date-fns";
 import { toDollars, aggregatePayments } from "@/lib/currencyUtils";
@@ -532,6 +534,10 @@ const Financials: React.FC = () => {
               <Receipt className="h-4 w-4" />
               Expenses
             </TabsTrigger>
+            <TabsTrigger value="accounting" className="gap-2">
+              <Landmark className="h-4 w-4" />
+              Accounting
+            </TabsTrigger>
             <TabsTrigger value="ltv" className="gap-2">
               <Users className="h-4 w-4" />
               Customer LTV
@@ -548,6 +554,10 @@ const Financials: React.FC = () => {
 
           <TabsContent value="expenses">
             <ExpensesTab />
+          </TabsContent>
+
+          <TabsContent value="accounting">
+            <AccountingWorkspace />
           </TabsContent>
 
           <TabsContent value="ltv">
