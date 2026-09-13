@@ -123,6 +123,8 @@ export const ContactPaymentStep = memo(function ContactPaymentStep({
   setPaymentChoice,
   transactionalSmsConsent,
   setTransactionalSmsConsent,
+  marketingEmailConsent = false,
+  setMarketingEmailConsent,
   processingPayment,
   paymentsEnabled,
   paymentProviderName,
@@ -299,7 +301,7 @@ export const ContactPaymentStep = memo(function ContactPaymentStep({
                   transactional messages required to service the appointment.
                   Marketing consent is collected separately, never bundled here.
                 */}
-                <div className="rounded-lg border bg-muted/30 p-4">
+                <div className="rounded-lg border bg-muted/30 p-4 space-y-4">
                   <label className="flex items-start gap-3 text-sm">
                     <Checkbox
                       checked={transactionalSmsConsent}
@@ -319,6 +321,20 @@ export const ContactPaymentStep = memo(function ContactPaymentStep({
                       {businessName || "this business"} by email and text. Msg &amp; data rates may apply. Reply STOP to opt out.
                     </span>
                   </label>
+                  <div className="border-t pt-4">
+                    <label className="flex items-start gap-3 text-sm">
+                      <Checkbox
+                        checked={marketingEmailConsent}
+                        onCheckedChange={(checked) => setMarketingEmailConsent?.(checked === true)}
+                        aria-label="Join weekly newsletter"
+                      />
+                      <span>
+                        <strong>Join the {businessName || "shop"} family newsletter.</strong>{" "}
+                        Send me one useful email each week with car-care tips, maintenance reminders, safety information, and occasional offers.
+                        I can unsubscribe or change this preference at any time.
+                      </span>
+                    </label>
+                  </div>
                 </div>
               </CardContent>
             </Card>
