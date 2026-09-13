@@ -98,6 +98,13 @@ create policy financial_import_batches_insert_finance on public.financial_import
     public.has_workspace_role(workspace_id, array['owner','admin','manager','service_advisor']::public.member_role[])
     and coalesce(created_by, auth.uid()) = auth.uid()
   );
+create policy financial_import_batches_update_finance on public.financial_import_batches
+  for update to authenticated
+  using (public.has_workspace_role(workspace_id, array['owner','admin','manager','service_advisor']::public.member_role[]))
+  with check (
+    public.has_workspace_role(workspace_id, array['owner','admin','manager','service_advisor']::public.member_role[])
+    and coalesce(created_by, auth.uid()) = auth.uid()
+  );
 create policy bank_transactions_insert_finance on public.bank_transactions
   for insert to authenticated with check (
     public.has_workspace_role(workspace_id, array['owner','admin','manager','service_advisor']::public.member_role[])
@@ -111,6 +118,6 @@ create policy accounting_period_snapshots_write_finance on public.accounting_per
   using (public.has_workspace_role(workspace_id, array['owner','admin','manager','service_advisor']::public.member_role[]))
   with check (public.has_workspace_role(workspace_id, array['owner','admin','manager','service_advisor']::public.member_role[]));
 
-grant select, insert on public.financial_import_batches to authenticated;
+grant select, insert, update on public.financial_import_batches to authenticated;
 grant select, insert, update on public.bank_transactions to authenticated;
 grant select, insert, update, delete on public.accounting_period_snapshots to authenticated;
