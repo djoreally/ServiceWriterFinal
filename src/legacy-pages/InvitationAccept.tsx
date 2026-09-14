@@ -38,10 +38,11 @@ export default function InvitationAccept() {
   const [preview, setPreview] = useState<InvitationPreview | null>(null);
   const [password, setPassword] = useState("");
   const [invitation, setInvitation] = useState<InvitationRecord | null>(null);
-  const [loading, setLoading] = useState(true);
+  const invalidInvitationLink = !invitationId || !token;
+  const [loading, setLoading] = useState(() => !invalidInvitationLink);
   const [submitting, setSubmitting] = useState(false);
   const [accepted, setAccepted] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(() => invalidInvitationLink ? "This invitation link is incomplete." : "");
   const [matchingSession, setMatchingSession] = useState(false);
 
   async function finishAcceptance(_previewData: InvitationPreview) {
@@ -58,11 +59,7 @@ export default function InvitationAccept() {
   }
 
   useEffect(() => {
-    if (!invitationId || !token) {
-      setError("This invitation link is incomplete.");
-      setLoading(false);
-      return;
-    }
+    if (!invitationId || !token) return;
 
     let cancelled = false;
     void (async () => {
