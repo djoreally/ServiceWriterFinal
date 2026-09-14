@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { productionSupabase, supabase } from "@/integrations/supabase/client";
 import { fetchTechnicianIdByAuthUserId, getCurrentAuthUserId } from "@/application/queries/tech-app.query";
 import { buildTransitionIdempotencyKey } from "@/lib/offline-transition-policy";
 import { sendJobThreadHumanMessage } from "@/application/commands/job-thread.command";
@@ -24,7 +24,7 @@ export async function saveTechNotificationPreferences(preferences: Partial<Techn
     ? normalizeTechNotificationPreferences({ pushNotificationsEnabled: preferences })
     : normalizeTechNotificationPreferences(preferences);
 
-  const client = supabase as any;
+  const client = productionSupabase;
   const { error } = await client
     .from("technician_notification_preferences")
     .upsert(
@@ -61,7 +61,7 @@ export async function recordVanInventoryMovement(params: {
   note?: string | null;
 }) {
   const idempotencyKey = params.idempotencyKey ?? crypto.randomUUID();
-  const { data, error } = await (supabase as any).rpc("record_inventory_movement_v1", {
+  const { data, error } = await productionSupabase.rpc("record_inventory_movement_v1", {
     p_van_inventory_id: params.vanInventoryId,
     p_entry_type: params.entryType,
     p_quantity: params.quantity,
@@ -83,7 +83,7 @@ export async function requestVanRestock(params: {
   items: Array<{ van_inventory_id: string; name: string; quantity: number }>;
   note?: string | null;
 }) {
-  const { data, error } = await (supabase as any).rpc("create_inventory_restock_request_v1", {
+  const { data, error } = await productionSupabase.rpc("create_inventory_restock_request_v1", {
     p_van_id: params.vanId,
     p_items: params.items,
     p_note: params.note ?? null,
@@ -170,7 +170,7 @@ export async function updateTechJobDispatchStatus(
     expectedUpdatedAt: options?.expectedUpdatedAt ?? null,
   });
 
-  const { data, error } = await (supabase as any).rpc("technician_transition_job_v1", {
+  const { data, error } = await productionSupabase.rpc("technician_transition_job_v1", {
     p_job_id: jobId,
     p_source: isFleet ? "fleet_work_order" : "appointment",
     p_next_status: nextStatus,
@@ -344,7 +344,7 @@ export async function advanceJobExecutionStep(params: {
   evidenceUrl?: string | null;
   notes?: string | null;
 }): Promise<{ error: string | null }> {
-  const { error } = await (supabase as any).rpc("advance_job_execution_step_v1", {
+  const { error } = await productionSupabase.rpc("advance_job_execution_step_v1", {
     p_step_id: params.stepId,
     p_status: params.status,
     p_evidence_url: params.evidenceUrl ?? null,
