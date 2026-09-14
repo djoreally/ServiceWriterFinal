@@ -105,7 +105,7 @@ export async function fetchAppointmentsPageData(): Promise<AppointmentsPageData>
   if (!context) throw new Error("No active workspace is available.");
 
   const errors: AppointmentsPageErrors = {};
-  const db = productionSupabase as any;
+  const db = productionSupabase;
   const [appointmentsResult, customersResult, vehiclesResult, settingsResult, catalogResult, scheduleResult, workspaceResult] = await Promise.allSettled([
     nextApi.appointments.list(context.workspaceId),
     nextApi.customers.list(context.workspaceId),
@@ -160,7 +160,7 @@ export interface AppointmentPickerOption { id: string; title: string | null; sta
 async function workspaceTimezone(): Promise<string> {
   const context = await resolveCurrentWorkspace();
   if (!context) return DEFAULT_TIMEZONE;
-  const { data } = await (productionSupabase as any).from("workspaces").select("timezone").eq("id", context.workspaceId).maybeSingle();
+  const { data } = await (productionSupabase).from("workspaces").select("timezone").eq("id", context.workspaceId).maybeSingle();
   return data?.timezone || DEFAULT_TIMEZONE;
 }
 
