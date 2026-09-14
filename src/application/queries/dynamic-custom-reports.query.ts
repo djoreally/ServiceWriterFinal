@@ -1,10 +1,10 @@
-import { supabase } from "@/integrations/supabase/client";
+import { productionSupabase } from "@/integrations/supabase/client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { type DimensionSchema, type MeasureSchema, type DynamicReportConfig } from "@/types/reporting";
 import { format } from "date-fns";
 
 // Explicit compatibility boundary over the live canonical schema.
-const db = supabase as any;
+const db = productionSupabase;
 
 export interface UnifiedReportingRecord {
   appointment_id: string | null;
@@ -55,7 +55,8 @@ function numeric(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function paymentNetDollars(row: Record<string, any>): number {
+type PaymentLedgerRow = { amount: number | string | null; status: string; metadata: unknown };
+function paymentNetDollars(row: PaymentLedgerRow): number {
   const amount = Math.max(numeric(row.amount), 0);
   const metadata = objectValue(row.metadata);
   if (row.status === "refunded") {
@@ -125,7 +126,7 @@ export async function fetchRawReportingRecords(
   const { data: appointments, error: appointmentError } = await appointmentQuery;
   if (appointmentError) throw appointmentError;
 
-  const appointmentRows = (appointments ?? []) as Array<Record<string, any>>;
+  const appointmentRows = appointments ?? [];
   const appointmentIds = appointmentRows.map((row) => row.id).filter(Boolean);
   const appointmentIdSet = new Set(appointmentIds);
   const assignedUserIds = Array.from(new Set(
@@ -161,10 +162,11 @@ export async function fetchRawReportingRecords(
   if (profileResult.error) throw profileResult.error;
   if (paymentResult.error) throw paymentResult.error;
 
-  const serviceRows = (serviceResult.data ?? []) as Array<Record<string, any>>;
-  const profileRows = (profileResult.data ?? []) as Array<Record<string, any>>;
-  const paymentRows = (paymentResult.data ?? []) as Array<Record<string, any>>;
-  const servicesByAppointment = new Map<string, Record<string, any>>();
+  const serviceRows = serviceResult.data ?? [];
+  const profileRows = profileResult.data ?? [];
+  const paymentRows = paymentResult.data ?? [];
+  type ServiceRow = (typeof serviceRows)[number];
+  const servicesByAppointment = new Map<string, ServiceRow>();
   for (const service of serviceRows) {
     if (!service.appointment_id || servicesByAppointment.has(service.appointment_id)) continue;
     servicesByAppointment.set(service.appointment_id, service);
