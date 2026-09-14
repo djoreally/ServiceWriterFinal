@@ -32,9 +32,11 @@ export async function fetchFollowUpAutomationData(): Promise<FollowUpAutomationD
   if (rulesRes.error) throw rulesRes.error;
   if (scheduledRes.error) throw scheduledRes.error;
   if (segmentRes.error) throw segmentRes.error;
-  const scheduledFollowUps = (scheduledRes.data ?? []).map((row: any) => {
-    const customer = one<any>(row.customers);
-    const rule = one<any>(row.follow_up_rules);
+  type CustomerRef = { first_name: string | null; last_name: string | null; company_name: string | null };
+  type RuleRef = { name: string | null };
+  const scheduledFollowUps = (scheduledRes.data ?? []).map((row) => {
+    const customer = one<CustomerRef>(row.customers);
+    const rule = one<RuleRef>(row.follow_up_rules);
     return {
       ...row,
       customer_name: customer ? ([customer.first_name, customer.last_name].filter(Boolean).join(" ") || customer.company_name || "Unknown") : "Unknown",
@@ -44,6 +46,6 @@ export async function fetchFollowUpAutomationData(): Promise<FollowUpAutomationD
   return {
     rules: (rulesRes.data ?? []) as FollowUpRule[],
     scheduledFollowUps,
-    segments: (segmentRes.data ?? []).flatMap((row: any) => row.name ? [String(row.name)] : []),
+    segments: (segmentRes.data ?? []).flatMap((row) => row.name ? [String(row.name)] : []),
   };
 }
