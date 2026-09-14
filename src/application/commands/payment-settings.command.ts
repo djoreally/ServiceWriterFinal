@@ -4,7 +4,7 @@ import type { PaymentSettingsData } from "@/application/queries/payment-settings
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 
-const db = productionSupabase as any;
+const db = productionSupabase;
 
 async function requireContext() {
   const { data: { user } } = await getCurrentAuthUser();
