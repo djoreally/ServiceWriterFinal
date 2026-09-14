@@ -4,7 +4,7 @@ import { getOfflineDatabase } from '@/offline/database';
 import { isOfflineEligibleForCurrentUser } from '@/offline/rollout';
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
-const db = productionSupabase as any;
+const db = productionSupabase;
 
 export interface CatalogItem {
   id: string; name: string; description: string | null; category: string | null; category_id: string | null; default_price: number;
