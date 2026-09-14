@@ -33,12 +33,14 @@ jobs:
         with:
           repository: djoreally/buildos-app-forge
           path: .buildos-tool
-          ref: main
+          ref: 2ce5bddaa164e3b221835e820fdc6db9508fb463
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Install BuildOS hooks
+        run: node .buildos-tool/packages/cli/bin/buildos.js install-hooks
       - name: BuildOS doctor
         run: node .buildos-tool/packages/cli/bin/buildos.js doctor
       - name: BuildOS verify
@@ -54,3 +56,41 @@ jobs:
           test -n "$NORTHSTAR_ATTESTATION_INGEST_TOKEN" || (echo "NORTHSTAR_ATTESTATION_INGEST_TOKEN is required on main" && exit 1)
           test -n "$NORTHSTAR_ORGANIZATION_ID" || (echo "NORTHSTAR_ORGANIZATION_ID is required on main" && exit 1)
           test -n "$NORTHSTAR_PROJECT_ID" || (echo "NORTHSTAR_PROJECT_ID is required on main" && exit 1)
+
+  production-certify:
+    name: production-certify
+    if: github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_PROJECT_ID: prj_LwYh6HJuUsB2LZG9eoKs23hDoJuw
+      VERCEL_TEAM_ID: team_TVsn1EJ6DUqcEbCqWTNsUhYD
+      SERVICEWRITER_PRODUCTION_URL: https://servicewriter.xyz
+      NORTHSTAR_ATTESTATION_ENDPOINT: ${{ secrets.NORTHSTAR_ATTESTATION_ENDPOINT }}
+      NORTHSTAR_ATTESTATION_INGEST_TOKEN: ${{ secrets.NORTHSTAR_ATTESTATION_INGEST_TOKEN }}
+      NORTHSTAR_ORGANIZATION_ID: ${{ secrets.NORTHSTAR_ORGANIZATION_ID }}
+      NORTHSTAR_PROJECT_ID: ${{ secrets.NORTHSTAR_PROJECT_ID }}
+      NORTHSTAR_OBJECTIVE_ID: ${{ secrets.NORTHSTAR_OBJECTIVE_ID }}
+      NORTHSTAR_REQUIREMENT_ID: ${{ secrets.NORTHSTAR_REQUIREMENT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: djoreally/buildos-app-forge
+          path: .buildos-tool
+          ref: 2ce5bddaa164e3b221835e820fdc6db9508fb463
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Require production certification credentials
+        run: |
+          test -n "$VERCEL_TOKEN" || (echo "VERCEL_TOKEN is required" && exit 1)
+          test -n "$NORTHSTAR_ATTESTATION_ENDPOINT" || (echo "NORTHSTAR_ATTESTATION_ENDPOINT is required" && exit 1)
+          test -n "$NORTHSTAR_ATTESTATION_INGEST_TOKEN" || (echo "NORTHSTAR_ATTESTATION_INGEST_TOKEN is required" && exit 1)
+      - name: Verify exact production deployment and create GREEN release
+        run: node scripts/buildos-certify-production.mjs
+      - name: Submit exact-SHA BuildOS attestation to Northstar
+        run: node .buildos-tool/packages/cli/bin/buildos.js attest --release .buildos/releases/${GITHUB_SHA}.json --submit
