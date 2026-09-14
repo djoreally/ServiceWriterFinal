@@ -30,7 +30,7 @@ export async function searchCommandPalette(_userId: string, query: string) {
   if (customersRes.error) throw customersRes.error;
   if (appointmentsRes.error) throw appointmentsRes.error;
 
-  const customers = (customersRes.data ?? []).map((customer: any) => ({
+  const customers = (customersRes.data ?? []).map((customer) => ({
     id: customer.id,
     name: [customer.first_name, customer.last_name].filter(Boolean).join(" ") || "Customer",
     email: customer.email,
@@ -39,7 +39,7 @@ export async function searchCommandPalette(_userId: string, query: string) {
 
   const lower = q.toLowerCase();
   const appointments = (appointmentsRes.data ?? [])
-    .filter((appointment: any) => {
+    .filter((appointment) => {
       const metadata = appointment.metadata && typeof appointment.metadata === "object" ? appointment.metadata : {};
       const searchable = [
         appointment.status,
@@ -54,7 +54,7 @@ export async function searchCommandPalette(_userId: string, query: string) {
       return searchable.includes(lower);
     })
     .slice(0, 8)
-    .map((appointment: any) => {
+    .map((appointment) => {
       const startsAt = appointment.starts_at ? new Date(appointment.starts_at) : null;
       const metadata = appointment.metadata && typeof appointment.metadata === "object" ? appointment.metadata : {};
       return {
