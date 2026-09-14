@@ -30,7 +30,7 @@ function normalizeCatalogBehavior(row: Record<string, unknown>): CatalogBehavior
     allows_manual_fitment: Boolean(row.allows_manual_fitment ?? vertical === "tires"), configuration_schema_version: Number(row.configuration_schema_version || 1),
   };
 }
-function mapCatalogRow(row: Record<string, any>): CatalogItem {
+function mapCatalogRow(row: Record<string, unknown>): CatalogItem {
   const metadata = metadataObject(row.metadata); const category = typeof row.category === "string" ? row.category : null;
   const categoryId = typeof metadata.category_id === "string" && metadata.category_id ? metadata.category_id : (category || "service").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
   return {
@@ -71,7 +71,7 @@ export function invalidateCatalogItems(workspaceId?: string): void {
 async function loadCatalogItems(workspaceId: string): Promise<CatalogItem[]> {
   const { data, error } = await db.from('service_catalog').select('id,workspace_id,name,description,category,estimated_minutes,labor_price,is_active,created_at,metadata').eq('workspace_id', workspaceId).order('name');
   if (error) { if (await isOfflineEligibleForCurrentUser()) return fetchCatalogItemsFromOffline(); throw error; }
-  return (data ?? []).map((row: any) => mapCatalogRow(row)).sort((a: CatalogItem, b: CatalogItem) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+  return (data ?? []).map((row) => mapCatalogRow(row as Record<string, unknown>)).sort((a: CatalogItem, b: CatalogItem) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
 }
 
 export async function fetchCatalogItems(): Promise<CatalogItem[]> {
