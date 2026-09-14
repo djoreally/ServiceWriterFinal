@@ -6,13 +6,27 @@
   "commands": {
     "typecheck": "npm run typecheck",
     "lint": "npm run lint:strict",
-    "test": "npm test -- --runInBand",
+    "test": "npm test",
     "build": "npm run build",
     "architecture": "npm run verify:architecture",
     "identity": "npm run verify:identity"
   },
-  "check": ["state", "typecheck", "lint", "architecture", "identity"],
-  "verify": ["state", "typecheck", "lint", "architecture", "identity", "test", "build"],
+  "check": [
+    "state",
+    "typecheck",
+    "lint",
+    "architecture",
+    "identity"
+  ],
+  "verify": [
+    "state",
+    "typecheck",
+    "lint",
+    "architecture",
+    "identity",
+    "test",
+    "build"
+  ],
   "requireChangeRecord": true,
   "release": {
     "requireCleanTree": true,
