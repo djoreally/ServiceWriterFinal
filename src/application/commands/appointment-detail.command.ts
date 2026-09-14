@@ -5,7 +5,7 @@ import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { trackAppointmentStatusChanged } from "@/lib/posthog/analytics";
 import { nextApi } from "@/lib/nextApiClient";
 
-const db = productionSupabase as any;
+const db = productionSupabase;
 
 async function readCurrentStatus(workspaceId: string, id: string): Promise<string | undefined> {
   const { data } = await db
