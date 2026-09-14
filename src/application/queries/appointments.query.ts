@@ -137,7 +137,7 @@ export async function fetchAppointmentsPageData(): Promise<AppointmentsPageData>
 
   const legacySettings = settingsResult.status === "fulfilled" ? settingsResult.value : null;
   const scheduling = scheduleResult.status === "fulfilled" ? scheduleResult.value.data : null;
-  const rawDayHours = scheduling?.day_hours && typeof scheduling.day_hours === "object" && !Array.isArray(scheduling.day_hours) ? scheduling.day_hours as Record<string, any> : {};
+  const rawDayHours = scheduling?.day_hours && typeof scheduling.day_hours === "object" && !Array.isArray(scheduling.day_hours) ? scheduling.day_hours as Record<string, unknown> : {};
   const configuredWorkingDays = Object.entries(rawDayHours)
     .filter(([, value]) => value && typeof value === "object" && (value as { is_open?: boolean }).is_open === true)
     .map(([day]) => day.charAt(0).toUpperCase() + day.slice(1));
