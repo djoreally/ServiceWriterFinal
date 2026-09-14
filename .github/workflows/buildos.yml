@@ -1,0 +1,56 @@
+name: BuildOS
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: buildos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    env:
+      BUILDOS_TOKEN: ${{ secrets.BUILDOS_TOKEN }}
+      NORTHSTAR_CONTROL_URL: ${{ secrets.NORTHSTAR_CONTROL_URL }}
+      NORTHSTAR_ATTESTATION_ENDPOINT: ${{ secrets.NORTHSTAR_ATTESTATION_ENDPOINT }}
+      NORTHSTAR_ATTESTATION_INGEST_TOKEN: ${{ secrets.NORTHSTAR_ATTESTATION_INGEST_TOKEN }}
+      NORTHSTAR_ORGANIZATION_ID: ${{ secrets.NORTHSTAR_ORGANIZATION_ID }}
+      NORTHSTAR_PROJECT_ID: ${{ secrets.NORTHSTAR_PROJECT_ID }}
+      NORTHSTAR_OBJECTIVE_ID: ${{ secrets.NORTHSTAR_OBJECTIVE_ID }}
+      NORTHSTAR_REQUIREMENT_ID: ${{ secrets.NORTHSTAR_REQUIREMENT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: djoreally/buildos-app-forge
+          path: .buildos-tool
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: BuildOS doctor
+        run: node .buildos-tool/packages/cli/bin/buildos.js doctor
+      - name: BuildOS verify
+        run: node .buildos-tool/packages/cli/bin/buildos.js verify
+      - name: Sync BuildOS evidence
+        if: always() && env.BUILDOS_TOKEN != ''
+        run: node .buildos-tool/packages/cli/bin/buildos.js sync --status ${{ job.status == 'success' && 'passed' || 'failed' }}
+      - name: Require Northstar wiring on main
+        if: github.ref == 'refs/heads/main'
+        run: |
+          test -n "$NORTHSTAR_CONTROL_URL" || (echo "NORTHSTAR_CONTROL_URL is required on main" && exit 1)
+          test -n "$NORTHSTAR_ATTESTATION_ENDPOINT" || (echo "NORTHSTAR_ATTESTATION_ENDPOINT is required on main" && exit 1)
+          test -n "$NORTHSTAR_ATTESTATION_INGEST_TOKEN" || (echo "NORTHSTAR_ATTESTATION_INGEST_TOKEN is required on main" && exit 1)
+          test -n "$NORTHSTAR_ORGANIZATION_ID" || (echo "NORTHSTAR_ORGANIZATION_ID is required on main" && exit 1)
+          test -n "$NORTHSTAR_PROJECT_ID" || (echo "NORTHSTAR_PROJECT_ID is required on main" && exit 1)
