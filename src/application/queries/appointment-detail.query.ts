@@ -4,7 +4,7 @@ import { getCurrentAuthUser as resolveCurrentAuthUser } from "@/lib/auth/current
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { nextApi } from "@/lib/nextApiClient";
 
-const db = productionSupabase as any;
+const db = productionSupabase;
 
 export async function getCurrentAuthUser() {
   const { data: { user } } = await resolveCurrentAuthUser();
