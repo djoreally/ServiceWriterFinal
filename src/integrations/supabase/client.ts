@@ -76,9 +76,14 @@ function isOperationalSupabaseRequest(url: string): boolean {
   }
 }
 
+export function operationalSupabaseProxyUrl(path: string): string {
+  if (!path.startsWith("/")) throw new Error("Supabase proxy path must start with /");
+  return `/api/v1/supabase-proxy?path=${encodeURIComponent(path)}`;
+}
+
 function sameOriginSupabaseProxyUrl(url: string): string {
   const requestUrl = new URL(url);
-  return `/api/v1/supabase-proxy?path=${encodeURIComponent(requestUrl.pathname + requestUrl.search)}`;
+  return operationalSupabaseProxyUrl(requestUrl.pathname + requestUrl.search);
 }
 
 function isInteractiveAuthRequest(url: string): boolean {
