@@ -10,13 +10,15 @@
     "build": "npm run build",
     "architecture": "npm run verify:architecture",
     "identity": "npm run verify:identity",
-    "frontend-ui": "npm run verify:frontend-ui"
+    "frontend-ui": "npm run verify:frontend-ui",
+    "data-boundary": "node scripts/check-data-boundary.mjs"
   },
   "check": [
     "state",
     "typecheck",
     "lint",
     "architecture",
+    "data-boundary",
     "identity",
     "frontend-ui",
     "test"
@@ -26,6 +28,7 @@
     "typecheck",
     "lint",
     "architecture",
+    "data-boundary",
     "identity",
     "frontend-ui",
     "test",
