@@ -17,7 +17,7 @@ export function CustomerPaymentsTab({ account }: Props) {
   const [loading,setLoading] = useState(true);
   const [payments,setPayments] = useState<PaymentRow[]>([]);
   const fetchPayments = useCallback(async () => { setLoading(true); try { setPayments(await fetchCustomerPaymentHistory(account.id)); } catch (error) { console.error("[CustomerPaymentsTab] Failed to load payments", error); } finally { setLoading(false); } },[account.id]);
-  useEffect(() => { void fetchPayments(); },[fetchPayments]);
+  useEffect(() => { const task = window.setTimeout(() => { void fetchPayments(); }, 0); return () => window.clearTimeout(task); },[fetchPayments]);
 
   const totalPaid = payments.filter((p)=>p.payment_status==="paid").reduce((sum,p)=>sum+(p.estimated_cost||0),0);
   const totalPending = payments.filter((p)=>p.payment_status==="pending"||p.payment_status==="unpaid").reduce((sum,p)=>sum+(p.estimated_cost||0),0);
