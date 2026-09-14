@@ -1,7 +1,7 @@
 /** Newsletter Sequence Queries — workspace-scoped reads. */
 import { productionSupabase } from "@/integrations/supabase/client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
-const db = productionSupabase as any;
+const db = productionSupabase;
 
 export interface NewsletterSequenceRow { id: string; name: string; description: string; is_active: boolean; start_date: string; }
 export interface NewsletterTemplateRow { id?: string; month_number: number; subject: string; preview_text: string; content: string; holiday_theme: string; seasonal_theme: string; is_active: boolean; }
