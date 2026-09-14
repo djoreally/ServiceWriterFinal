@@ -78,13 +78,12 @@ export const PaymentProviderCard = () => {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const task = window.setTimeout(() => {
-      const params = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(window.location.search);
       const clean = () => window.history.replaceState({}, "", window.location.pathname);
 
       if (params.get("stripe_success") === "true") {
       clean();
-      void (async () => {
+      queueMicrotask(() => { void (async () => {
         setWorking(true);
         try {
           await refreshStripeConnection();
@@ -93,7 +92,7 @@ export const PaymentProviderCard = () => {
         } catch (error) {
           toast.error(message(error, "Stripe setup returned but account verification failed"));
         } finally { setWorking(false); }
-      })();
+      })(); });
       return;
     }
 
@@ -109,7 +108,7 @@ export const PaymentProviderCard = () => {
       const error = params.get("error");
       clean();
       if (error) toast.error(`Stripe authorization failed: ${error}`);
-      else if (code && state) void finishStripeOAuth(code, state);
+      else if (code && state) queueMicrotask(() => { void finishStripeOAuth(code, state); });
       else toast.error("Stripe returned without a valid authorization code and state");
       return;
     }
@@ -120,7 +119,7 @@ export const PaymentProviderCard = () => {
       const error = params.get("error");
       clean();
       if (error) toast.error(`Square authorization failed: ${error}`);
-      else if (code && state) void finishSquareOAuth(code, state);
+      else if (code && state) queueMicrotask(() => { void finishSquareOAuth(code, state); });
       else toast.error("Square returned without a valid authorization code and state");
     }
   }, [finishSquareOAuth, finishStripeOAuth, load]);
