@@ -1,11 +1,13 @@
 import Stripe from "stripe";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/integrations/supabase/types.production";
 import {
   resolveStripeWorkspaceExecution,
   stripePaymentMode,
   type StripeWorkspaceExecution,
 } from "@/server/payments/stripe-workspace-execution";
 
-type SupabaseClientLike = any;
+type SupabaseClientLike = SupabaseClient<Database>;
 
 export interface StripeInvoiceSyncResult {
   provider: string;
@@ -82,7 +84,7 @@ async function ensureStripeCustomer(params: {
   execution: StripeWorkspaceExecution;
   supabase: SupabaseClientLike;
   workspaceId: string;
-  customer: Record<string, any>;
+  customer: Pick<Database["public"]["Tables"]["customers"]["Row"], "id" | "first_name" | "last_name" | "company_name" | "email" | "phone" | "address_line1" | "address_line2" | "city" | "region" | "postal_code" | "country_code" | "metadata">;
 }): Promise<string> {
   const metadata = object(params.customer.metadata);
   let customerId = asStripeCustomerId(metadata);
