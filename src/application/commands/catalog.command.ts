@@ -4,7 +4,7 @@ import { resolveCurrentWorkspace } from '@/application/queries/settings.query';
 import { getCurrentAuthUser } from '@/lib/auth/current-user';
 import { invalidateCatalogItems } from '@/application/queries/service-catalog.query';
 
-const db = productionSupabase as any;
+const db = productionSupabase;
 
 export interface CatalogItemWritePayload {
   name: string;
