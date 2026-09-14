@@ -14,16 +14,32 @@ export async function adoptServiceTemplates(adoptions: TemplateAdoption[]): Prom
   const context = await resolveCurrentWorkspace();
   if (!context) throw new Error("No active workspace is available.");
 
-  const rows = adoptions.map(({ template, price }) => ({
+  for (const { template, price } of adoptions) {
+    const resolvedPrice = Number.isFinite(price as number) && Number(price) >= 0 ? Number(price) : template.defaultPrice;
+    if (template.pricingMode === "quote_required" && resolvedPrice <= 0) {
+      throw new Error(`Set a price for ${template.name} before adding it to your catalog.`);
+    }
+  }
+
+  const rows = adoptions.map(({ template, price }) => {
+    const resolvedPrice = Number.isFinite(price as number) && Number(price) >= 0 ? Number(price) : template.defaultPrice;
+    const bookingRequirements = ["basic_vehicle"];
+    if (template.name.includes("Oil Change")) bookingRequirements.push("oil_fitment");
+    if (template.serviceVertical === "tires") bookingRequirements.push("tire_fitment");
+    if (template.requiresTireQuantity || template.requiresInventorySelection) bookingRequirements.push("tire_quantity");
+    if (template.serviceVertical === "detailing") bookingRequirements.push("detailing_assessment");
+
+    return ({
     workspace_id: context.workspaceId,
     name: template.name,
     description: template.description,
     category: template.categoryId === "fleet_mobile" ? "Fleet / Mobile-Specific" : template.categoryId === "tire" ? "Tire" : template.categoryId === "detailing" ? "Detailing" : "Automotive",
     estimated_minutes: template.durationMinutes,
-    labor_price: Number.isFinite(price as number) ? Number(price) : template.defaultPrice,
+    labor_price: resolvedPrice,
     is_active: true,
     metadata: {
       template_id: template.id,
+      booking_requirements: bookingRequirements,
       category_id: template.categoryId,
       suggested_price: template.suggestedPrice,
       duration_label: template.durationLabel,
@@ -41,7 +57,8 @@ export async function adoptServiceTemplates(adoptions: TemplateAdoption[]): Prom
       configuration_schema_version: 1,
       sort_order: template.sortOrder,
     },
-  }));
+  });
+  });
 
   const { error } = await (productionSupabase as any).from("service_catalog").insert(rows);
   if (error) throw error;
