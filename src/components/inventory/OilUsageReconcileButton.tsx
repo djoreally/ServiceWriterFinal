@@ -35,7 +35,9 @@ export function OilUsageReconcileButton({
   );
 
   useEffect(() => {
-    if (exactMatch && !selected) setSelected(exactMatch.id);
+    if (!exactMatch || selected) return;
+    const task = window.setTimeout(() => setSelected(exactMatch.id), 0);
+    return () => window.clearTimeout(task);
   }, [exactMatch, selected]);
 
   async function reconcile() {
