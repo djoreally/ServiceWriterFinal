@@ -106,7 +106,7 @@ export function useRealTimeTechStatus(technician_id?: string) {
     }
   }, [technician_id]);
 
-  useEffect(() => { void fetchTechState(); }, [fetchTechState]);
+  useEffect(() => { const task = window.setTimeout(() => { void fetchTechState(); }, 0); return () => window.clearTimeout(task); }, [fetchTechState]);
 
   const handleRealTimeUpdate = useCallback((update: RealTimeUpdate) => {
     void fetchTechState();
