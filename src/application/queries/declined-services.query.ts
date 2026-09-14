@@ -1,7 +1,7 @@
 /** Declined Services Queries — canonical workspace reads. */
 import { productionSupabase } from "@/integrations/supabase/client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
-const db = productionSupabase as any;
+const db = productionSupabase;
 
 export interface DeclinedServiceRow {
   id: string; customer_id: string; customer_name?: string; customer_email?: string; customer_phone?: string;
