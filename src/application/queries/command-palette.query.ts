@@ -10,7 +10,7 @@ export async function searchCommandPalette(_userId: string, query: string) {
   const context = await resolveCurrentWorkspace();
   if (!context) return { customers: [], appointments: [] };
 
-  const db = productionSupabase as any;
+  const db = productionSupabase;
   const [customersRes, appointmentsRes] = await Promise.all([
     db
       .from("customers")
