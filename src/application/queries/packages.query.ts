@@ -34,8 +34,15 @@ export async function fetchServicePackages(): Promise<ServicePackageRow[]> {
       package_price: Number(pkg.package_price ?? 0),
       discount_value: Number(pkg.discount_value ?? 0),
       estimated_duration: pkg.estimated_duration == null ? null : Number(pkg.estimated_duration),
-      items: (items ?? []).map((item: any) => {
-        const service = one<Record<string, any>>(item.service_catalog);
+      items: (items ?? []).map((item) => {
+        const service = one<{
+          id: string;
+          name: string;
+          description: string | null;
+          labor_price: number;
+          estimated_minutes: number | null;
+          category: string | null;
+        }>(item.service_catalog);
         return {
           id: item.id,
           service_catalog_id: item.service_catalog_id,
@@ -63,7 +70,7 @@ export async function fetchPackageServiceCatalog(): Promise<PackageServiceItem[]
     .select("id,name,description,labor_price,estimated_minutes,category")
     .eq("workspace_id", context.workspaceId).eq("is_active", true).order("name");
   if (error) throw error;
-  return (data ?? []).map((row: any) => ({
+  return (data ?? []).map((row) => ({
     id: row.id,
     name: row.name,
     description: row.description,
