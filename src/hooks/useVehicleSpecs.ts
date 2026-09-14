@@ -93,44 +93,56 @@ export function useVehicleSpecs(options: UseVehicleSpecsOptions = {}) {
 
   useEffect(() => {
     let cancelled = false;
-    setYearsLoading(true);
-    void fetchVehicleSpecYears().then(({ data }) => { if (!cancelled) setYears((data ?? []).map((row) => row.year)); })
-      .finally(() => { if (!cancelled) setYearsLoading(false); });
-    return () => { cancelled = true; };
+    const task = window.setTimeout(() => {
+      if (cancelled) return;
+      setYearsLoading(true);
+      void fetchVehicleSpecYears().then(({ data }) => { if (!cancelled) setYears((data ?? []).map((row) => row.year)); })
+        .finally(() => { if (!cancelled) setYearsLoading(false); });
+    }, 0);
+    return () => { cancelled = true; window.clearTimeout(task); };
   }, []);
 
   useEffect(() => {
     let cancelled = false;
-    setMakes([]); setModels([]); setEngines([]); setMatchedSpec(null);
-    if (!options.year) return () => { cancelled = true; };
-    setMakesLoading(true);
-    void fetchVehicleSpecMakes(Number(options.year)).then(({ data }) => { if (!cancelled) setMakes((data ?? []).map((row) => row.make)); })
-      .finally(() => { if (!cancelled) setMakesLoading(false); });
-    return () => { cancelled = true; };
+    const task = window.setTimeout(() => {
+      if (cancelled) return;
+      setMakes([]); setModels([]); setEngines([]); setMatchedSpec(null);
+      if (!options.year) return;
+      setMakesLoading(true);
+      void fetchVehicleSpecMakes(Number(options.year)).then(({ data }) => { if (!cancelled) setMakes((data ?? []).map((row) => row.make)); })
+        .finally(() => { if (!cancelled) setMakesLoading(false); });
+    }, 0);
+    return () => { cancelled = true; window.clearTimeout(task); };
   }, [options.year]);
 
   useEffect(() => {
     let cancelled = false;
-    setModels([]); setEngines([]); setMatchedSpec(null);
-    if (!options.year || !options.make) return () => { cancelled = true; };
-    setModelsLoading(true);
-    void fetchVehicleSpecModels(Number(options.year), options.make).then(({ data }) => { if (!cancelled) setModels((data ?? []).map((row) => row.model)); })
-      .finally(() => { if (!cancelled) setModelsLoading(false); });
-    return () => { cancelled = true; };
+    const task = window.setTimeout(() => {
+      if (cancelled) return;
+      setModels([]); setEngines([]); setMatchedSpec(null);
+      if (!options.year || !options.make) return;
+      setModelsLoading(true);
+      void fetchVehicleSpecModels(Number(options.year), options.make).then(({ data }) => { if (!cancelled) setModels((data ?? []).map((row) => row.model)); })
+        .finally(() => { if (!cancelled) setModelsLoading(false); });
+    }, 0);
+    return () => { cancelled = true; window.clearTimeout(task); };
   }, [options.year, options.make]);
 
   useEffect(() => {
     let cancelled = false;
-    setEngines([]); setMatchedSpec(null);
-    if (!options.year || !options.make || !options.model) return () => { cancelled = true; };
-    setSpecsLoading(true);
-    void fetchVehicleSpecEngines(Number(options.year), options.make, options.model).then(({ data }) => {
+    const task = window.setTimeout(() => {
       if (cancelled) return;
-      const specs = (data ?? []).map(mapSpec);
-      setEngines(specs.filter((spec) => spec.engine).map((spec) => ({ engine: spec.engine!, spec })));
-      setMatchedSpec(specs[0] ?? null);
-    }).finally(() => { if (!cancelled) setSpecsLoading(false); });
-    return () => { cancelled = true; };
+      setEngines([]); setMatchedSpec(null);
+      if (!options.year || !options.make || !options.model) return;
+      setSpecsLoading(true);
+      void fetchVehicleSpecEngines(Number(options.year), options.make, options.model).then(({ data }) => {
+        if (cancelled) return;
+        const specs = (data ?? []).map(mapSpec);
+        setEngines(specs.filter((spec) => spec.engine).map((spec) => ({ engine: spec.engine!, spec })));
+        setMatchedSpec(specs[0] ?? null);
+      }).finally(() => { if (!cancelled) setSpecsLoading(false); });
+    }, 0);
+    return () => { cancelled = true; window.clearTimeout(task); };
   }, [options.year, options.make, options.model]);
 
   return {
@@ -159,11 +171,14 @@ export function useVehicleSpecLookup(year?: string, make?: string, model?: strin
   const [loading, setLoading] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    if (!year || !make || !model) { setSpec(null); return () => { cancelled = true; }; }
-    setLoading(true);
-    void fetchVehicleSpecSingle(Number(year), make, model, engine).then(({ data }) => { if (!cancelled) setSpec(data?.[0] ? mapSpec(data[0]) : null); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+    const task = window.setTimeout(() => {
+      if (cancelled) return;
+      if (!year || !make || !model) { setSpec(null); return; }
+      setLoading(true);
+      void fetchVehicleSpecSingle(Number(year), make, model, engine).then(({ data }) => { if (!cancelled) setSpec(data?.[0] ? mapSpec(data[0]) : null); })
+        .finally(() => { if (!cancelled) setLoading(false); });
+    }, 0);
+    return () => { cancelled = true; window.clearTimeout(task); };
   }, [year, make, model, engine]);
   return useMemo(() => ({ spec, loading }), [spec, loading]);
 }
