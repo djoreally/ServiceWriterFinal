@@ -3,7 +3,7 @@ import { productionSupabase } from "@/integrations/supabase/client";
 import { resolveOilPricePerQuart } from "@/lib/oilPricing";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
-const db = productionSupabase as any;
+const db = productionSupabase;
 
 export interface PaymentSettingsData {
   accept_deposits: boolean;
