@@ -2,7 +2,8 @@
  * Campaign Commands — Write operations for email marketing campaigns.
  * Customer audience resolution is canonical and workspace-scoped.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { productionSupabase, supabase } from "@/integrations/supabase/client";
+import type { Database as ProductionDatabase } from "@/integrations/supabase/types.production";
 import { subMonths } from "date-fns";
 import { CampaignStatus, EmailQueueStatus } from "@/lib/enums";
 import type { CampaignRow } from "@/application/queries/campaigns.query";
@@ -10,7 +11,9 @@ import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { fetchCustomerAnalytics } from "@/application/queries/reports-tabs.query";
 
-const db = supabase as any;
+type CustomerRow = Pick<ProductionDatabase["public"]["Tables"]["customers"]["Row"], "id" | "first_name" | "last_name" | "company_name" | "email">;
+type AppointmentCustomerRow = Pick<ProductionDatabase["public"]["Tables"]["appointments"]["Row"], "customer_id">;
+const db = productionSupabase;
 
 async function requireUser() {
   const { data: { user } } = await getCurrentAuthUser();
@@ -60,8 +63,8 @@ async function fetchCanonicalCustomers(workspaceId: string): Promise<CampaignRec
     .not("email", "is", null);
   if (error) throw error;
   return (data ?? [])
-    .filter((row: any) => Boolean(row.email))
-    .map((row: any) => ({
+    .filter((row: CustomerRow) => Boolean(row.email))
+    .map((row: CustomerRow) => ({
       id: String(row.id),
       name: [row.first_name, row.last_name].filter(Boolean).join(" ") || row.company_name || "Customer",
       email: String(row.email),
@@ -87,7 +90,7 @@ export async function resolveRecipients(
       .in("id", overrideIds)
       .not("email", "is", null);
     if (error) throw error;
-    const recipients: CampaignRecipient[] = (data ?? []).filter((row: any) => Boolean(row.email)).map((row: any) => ({
+    const recipients: CampaignRecipient[] = (data ?? []).filter((row: CustomerRow) => Boolean(row.email)).map((row: CustomerRow) => ({
       id: String(row.id),
       name: [row.first_name, row.last_name].filter(Boolean).join(" ") || row.company_name || "Customer",
       email: String(row.email),
@@ -126,7 +129,7 @@ async function fetchCampaignRecipients(recipientType: string): Promise<CampaignR
       .eq("workspace_id", workspaceId)
       .gte("starts_at", cutoff);
     if (error) throw error;
-    const activeIds = new Set((data ?? []).map((row: any) => row.customer_id).filter(Boolean));
+    const activeIds = new Set((data ?? []).map((row: AppointmentCustomerRow) => row.customer_id).filter((id): id is string => Boolean(id)));
     customers = recipientType === "recent"
       ? customers.filter((customer) => activeIds.has(customer.id))
       : customers.filter((customer) => !activeIds.has(customer.id));
