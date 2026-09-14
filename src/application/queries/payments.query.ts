@@ -1,7 +1,7 @@
 import { productionSupabase, supabase } from "@/integrations/supabase/client";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
-const productionDb = productionSupabase as any;
+const productionDb = productionSupabase;
 
 export interface TaxBreakdownItem {
   jurisdiction: string;
