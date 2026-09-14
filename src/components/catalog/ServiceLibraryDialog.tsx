@@ -56,7 +56,8 @@ export function ServiceLibraryDialog({ adoptedTemplateIds, onAdopted }: ServiceL
     const term = search.trim().toLowerCase();
     const matches = templates.filter((template) => {
       if (vertical === "fleet" && template.categoryId !== "fleet_mobile") return false;
-      if (vertical !== "all" && vertical !== "fleet" && template.serviceVertical !== vertical) return false;
+      if (vertical === "general" && template.categoryId !== "automotive") return false;
+      if (vertical !== "all" && vertical !== "fleet" && vertical !== "general" && template.serviceVertical !== vertical) return false;
       if (!term) return true;
       return template.name.toLowerCase().includes(term) || (template.description ?? "").toLowerCase().includes(term);
     });
@@ -128,7 +129,7 @@ export function ServiceLibraryDialog({ adoptedTemplateIds, onAdopted }: ServiceL
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search services" className="pl-8" />
           </div>
-          <div className="flex gap-1 rounded-md border bg-muted/30 p-0.5">
+          <div className="flex max-w-full flex-wrap gap-1 rounded-md border bg-muted/30 p-0.5">
             {VERTICAL_FILTERS.map((filter) => (
               <Button
                 key={filter.value}
