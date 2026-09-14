@@ -1,6 +1,6 @@
 /** Real-time technician status against canonical workspace membership, presence, and appointment state. */
 import { useCallback, useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { productionSupabase, supabase } from "@/integrations/supabase/client";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 import { toast } from "@/components/ui/sonner";
 import {
@@ -20,7 +20,7 @@ import {
   type TechnicianOperationalStatus,
 } from "@/lib/dispatch-state";
 
-const db = supabase as any;
+const db = productionSupabase;
 
 export interface TechOperationalState {
   technician_id: string;
@@ -73,7 +73,7 @@ export function useRealTimeTechStatus(technician_id?: string) {
         .limit(20);
       if (appointmentError) throw appointmentError;
 
-      const appointment = (appointments ?? []).find((row: any) => {
+      const appointment = (appointments ?? []).find((row) => {
         const dispatch = deriveDispatchStatusFromAppointment(row.status, metadataDispatchStatus(row.metadata));
         return dispatch === "in_progress" || dispatch === "arrived" || dispatch === "en_route" || dispatch === "acknowledged" || dispatch === "assigned";
       }) ?? null;
