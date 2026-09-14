@@ -51,12 +51,13 @@ The sequence is:
 
 `app/[[...path]]/page.tsx` exists only so Next.js resolves deep links before the client compatibility router selects the screen.
 
-The browser may perform reviewed, tenant-scoped low-risk reads and Realtime subscriptions. Frontend route guards are UX controls, not the authoritative security boundary.
+The browser may manage UI state, navigation, Supabase Auth/session state, and reviewed Realtime subscriptions. **It may not send operational REST/RPC, Edge Function, or Storage HTTP requests directly to Supabase.** Those requests must traverse `app/api/**`, which is the canonical server boundary. Frontend route guards are UX controls, not the authoritative security boundary.
 
 ## 3. Server boundary
 
 `app/api/**` is the only canonical application server API. Server routes own:
 
+- all operational Supabase REST/RPC, Edge Function, and Storage HTTP traffic from the browser;
 - authenticated workspace membership and role checks;
 - privileged or consequential mutations;
 - provider calls and credentials;
@@ -134,6 +135,7 @@ The following are not valid production architecture:
 - an Express adapter competing with `app/api/**`;
 - runtime `VITE_*` variables or `import.meta.env`;
 - direct privileged provider calls from browser code;
+- direct operational Supabase REST/RPC, Edge Function, or Storage HTTP calls from browser code;
 - client-visible service-role/provider secrets.
 
 Historical source files or compatibility components may remain only when they are not independently deployed and do not create a competing business-data or authorization path.
@@ -153,7 +155,7 @@ An architecture-safe release requires all of the following:
 3. Production and preview use the reviewed Next.js environment contract.
 4. All production Supabase configuration points to the intended project for that environment.
 5. `workspace_id` remains the canonical tenant key.
-6. Browser code has no service-role or provider secret path.
+6. Browser code has no service-role or provider secret path and no direct operational Supabase HTTP path.
 7. `app/api/**` remains the canonical server API.
 8. Resend remains the transactional email owner; Enginemailer remains growth/marketing plus controlled fallback.
 9. Architecture and schema-contract CI gates pass.
