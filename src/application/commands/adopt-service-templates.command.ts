@@ -60,7 +60,7 @@ export async function adoptServiceTemplates(adoptions: TemplateAdoption[]): Prom
   });
   });
 
-  const { error } = await (productionSupabase as any).from("service_catalog").insert(rows);
+  const { error } = await (productionSupabase).from("service_catalog").insert(rows);
   if (error) throw error;
   invalidateCatalogItems(context.workspaceId);
   return rows.length;
