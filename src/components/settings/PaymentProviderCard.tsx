@@ -74,14 +74,15 @@ export const PaymentProviderCard = () => {
     }
   }, [load]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { const task = window.setTimeout(() => { void load(); }, 0); return () => window.clearTimeout(task); }, [load]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    const clean = () => window.history.replaceState({}, "", window.location.pathname);
+    const task = window.setTimeout(() => {
+      const params = new URLSearchParams(window.location.search);
+      const clean = () => window.history.replaceState({}, "", window.location.pathname);
 
-    if (params.get("stripe_success") === "true") {
+      if (params.get("stripe_success") === "true") {
       clean();
       void (async () => {
         setWorking(true);
