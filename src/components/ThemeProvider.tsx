@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ThemeProviderContext, type Theme } from "@/contexts/ThemeContext";
-import { supabase } from "@/integrations/supabase/client";
+import { fetchCurrentSessionUserId, subscribeCurrentSessionUserId } from "@/application/queries/auth-session.query";
 
 const getResolvedTheme = (theme: Theme) => {
   if (typeof window === "undefined") return theme === "dark" ? "dark" : "light";
@@ -51,14 +51,12 @@ export function ThemeProvider({
       }
     };
 
-    void supabase.auth.getSession().then(({ data }) => applyAccount(data.session?.user.id ?? null));
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      applyAccount(session?.user.id ?? null);
-    });
+    void fetchCurrentSessionUserId().then(applyAccount);
+    const unsubscribe = subscribeCurrentSessionUserId(applyAccount);
 
     return () => {
       active = false;
-      listener.subscription.unsubscribe();
+      unsubscribe();
     };
   }, [defaultTheme, storageKey]);
 
