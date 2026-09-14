@@ -1,4 +1,4 @@
-import { productionSupabase, supabase } from "@/integrations/supabase/client";
+import { productionSupabase } from "@/integrations/supabase/client";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
 const productionDb = productionSupabase;
@@ -173,7 +173,7 @@ export async function fetchPaymentRecords(): Promise<PaymentRecord[]> {
   const rows: PaymentApiRow[] = [];
 
   for (let offset = 0; ; offset += pageSize) {
-    const { data, error } = await (supabase.from("payments") as any)
+    const { data, error } = await productionDb.from("payments")
       .select("id,amount,currency_code,status,provider,provider_payment_id,created_at,metadata,invoice_id,customer_id,customers(first_name,last_name,email)")
       .eq("workspace_id", id)
       .order("created_at", { ascending: false })
