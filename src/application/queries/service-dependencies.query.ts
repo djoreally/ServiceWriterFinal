@@ -1,12 +1,13 @@
 /**
- * Service Dependencies Query — Fetches service template dependencies
+ * Service Dependencies Query
+ *
+ * The legacy service template dependency library was retired from production.
+ * Return the historical empty result shape so callers remain stable.
  */
-
-import { supabase } from "@/integrations/supabase/client";
 
 export async function fetchServiceDependenciesData() {
   return Promise.all([
-    supabase.from("service_template_dependencies").select("*"),
-    supabase.from("service_templates").select("id, name, default_price").eq("is_active", true),
+    Promise.resolve({ data: [], error: null }),
+    Promise.resolve({ data: [], error: null }),
   ]);
 }
