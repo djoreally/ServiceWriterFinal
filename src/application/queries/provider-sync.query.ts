@@ -1,4 +1,4 @@
-import { SUPABASE_URL_RESOLVED } from "@/integrations/supabase/client";
+import { operationalSupabaseProxyUrl } from "@/integrations/supabase/client";
 /**
  * Provider Sync Query — Read operations for the payment-provider sync pipeline.
  * Backed by the `provider-sync-manager` edge function.
@@ -55,7 +55,7 @@ async function authHeaders() {
 
 export async function fetchProviderSyncSummary(): Promise<ProviderSyncSummary> {
   const headers = await authHeaders();
-  const url = `${SUPABASE_URL_RESOLVED}/functions/v1/provider-sync-manager?action=summary`;
+  const url = operationalSupabaseProxyUrl("/functions/v1/provider-sync-manager?action=summary");
   const res = await fetch(url, { headers });
   if (!res.ok) throw new Error(`Failed to load sync summary (${res.status})`);
   return res.json();
@@ -68,7 +68,7 @@ export async function fetchProviderSyncRecords(
   const params = new URLSearchParams({ action: "list" });
   if (options.status) params.set("status", options.status);
   if (options.limit) params.set("limit", String(options.limit));
-  const url = `${SUPABASE_URL_RESOLVED}/functions/v1/provider-sync-manager?${params}`;
+  const url = operationalSupabaseProxyUrl(`/functions/v1/provider-sync-manager?${params}`);
   const res = await fetch(url, { headers });
   if (!res.ok) throw new Error(`Failed to load sync records (${res.status})`);
   const data = await res.json();
