@@ -1,8 +1,8 @@
-import { SUPABASE_URL_RESOLVED } from "@/integrations/supabase/client";
+import { operationalSupabaseProxyUrl } from "@/integrations/supabase/client";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
-const FN_BASE = `${SUPABASE_URL_RESOLVED}/functions/v1/newsletter-unsubscribe`;
+const FN_BASE = operationalSupabaseProxyUrl("/functions/v1/newsletter-unsubscribe");
 
 export default function Unsubscribe() {
   const [params] = useSearchParams();
