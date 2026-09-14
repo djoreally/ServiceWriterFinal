@@ -89,7 +89,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     const { workspace_id, updated_at: _ignoredOptimisticHint, ...patch } = body;
 
-    const { error } = await (supabase as any).rpc("patch_work_order_v1", {
+    const { error } = await productionSupabase.rpc("patch_work_order_v1", {
       p_workspace_id: workspace_id,
       p_work_order_id: id,
       p_patch: patch,
