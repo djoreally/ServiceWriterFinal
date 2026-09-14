@@ -83,7 +83,8 @@ export function AccountingWorkspace() {
   }, []);
 
   useEffect(() => {
-    void load();
+    const task = window.setTimeout(() => { void load(); }, 0);
+    return () => window.clearTimeout(task);
   }, [load]);
 
   const summary = useMemo(() => summarizeAccounting(storedToSummaryRows(transactions)), [transactions]);
