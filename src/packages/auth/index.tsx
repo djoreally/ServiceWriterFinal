@@ -103,18 +103,11 @@ export function useAuth(): AuthContextValue {
  */
 export function useRBAC() {
   const { user } = useAuth();
-  const [roles, setRoles] = useState<AppRole[]>([]);
-  const [loading, setLoading] = useState(Boolean(user));
+  const [roleState, setRoleState] = useState<{ userId: string | null; roles: AppRole[] }>({ userId: null, roles: [] });
 
   useEffect(() => {
+    if (!user?.id) return;
     let active = true;
-    if (!user?.id) {
-      setRoles([]);
-      setLoading(false);
-      return () => { active = false; };
-    }
-
-    setLoading(true);
     void supabase
       .from("user_roles")
       .select("role")
@@ -123,19 +116,19 @@ export function useRBAC() {
         if (!active) return;
         if (error) {
           console.warn("[rbac] Failed to load platform roles", { code: error.code });
-          setRoles([]);
+          setRoleState({ userId: user.id, roles: [] });
         } else {
           const nextRoles = (data ?? [])
             .map((row) => String(row.role))
             .filter((role): role is AppRole => role === "admin" || role === "moderator" || role === "user");
-          setRoles([...new Set(nextRoles)]);
+          setRoleState({ userId: user.id, roles: [...new Set(nextRoles)] });
         }
-        setLoading(false);
       });
-
     return () => { active = false; };
   }, [user?.id]);
 
+  const roles = user?.id && roleState.userId === user.id ? roleState.roles : [];
+  const loading = Boolean(user?.id && roleState.userId !== user.id);
   const hasRole = useCallback((role: AppRole) => roles.includes(role), [roles]);
   const isAdmin = useCallback(() => roles.includes("admin"), [roles]);
   const can = useCallback((_action: Action, _resource: Resource, _attributes?: Record<string, unknown>) => Boolean(user), [user]);
