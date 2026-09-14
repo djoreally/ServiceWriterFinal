@@ -25,8 +25,9 @@ export async function fetchDeclinedServicesData(): Promise<DeclinedServicesDataR
   if (declinedRes.error) throw declinedRes.error;
   if (customerRes.error) throw customerRes.error;
   if (vehicleRes.error) throw vehicleRes.error;
-  const formattedData = (declinedRes.data ?? []).map((d: any) => {
-    const customer = one<any>(d.customers); const vehicle = one<any>(d.vehicles);
+  const formattedData = (declinedRes.data ?? []).map((d) => {
+    const customer = one<{ first_name:string|null; last_name:string|null; company_name:string|null; email:string|null; phone:string|null }>(d.customers);
+    const vehicle = one<{ year:number|null; make:string|null; model:string|null }>(d.vehicles);
     return {
       ...d,
       customer_name: customer ? ([customer.first_name, customer.last_name].filter(Boolean).join(" ") || customer.company_name || "Unknown") : "Unknown",
@@ -42,7 +43,7 @@ export async function fetchDeclinedServicesData(): Promise<DeclinedServicesDataR
   return {
     services: formattedData,
     metrics: { totalDeclined: formattedData.length, totalLostRevenue, pendingFollowUps, converted, conversionRate: formattedData.length ? converted / formattedData.length * 100 : 0, recoveredRevenue },
-    customers: (customerRes.data ?? []).map((c: any) => ({ id: c.id, name: [c.first_name, c.last_name].filter(Boolean).join(" ") || c.company_name || "Customer" })),
-    vehicles: (vehicleRes.data ?? []).map((v: any) => ({ id: v.id, info: [v.year, v.make, v.model].filter(Boolean).join(" "), customer_id: v.customer_id })),
+    customers: (customerRes.data ?? []).map((c) => ({ id: c.id, name: [c.first_name, c.last_name].filter(Boolean).join(" ") || c.company_name || "Customer" })),
+    vehicles: (vehicleRes.data ?? []).map((v) => ({ id: v.id, info: [v.year, v.make, v.model].filter(Boolean).join(" "), customer_id: v.customer_id })),
   };
 }
