@@ -1,4 +1,4 @@
-import { SUPABASE_URL_RESOLVED } from "@/integrations/supabase/client";
+import { operationalSupabaseProxyUrl } from "@/integrations/supabase/client";
 /**
  * GDPR Data Management Component
  * Sprint 3 Story 3.2.1 - Data Export UI
@@ -48,7 +48,7 @@ export function GDPRDataManagement() {
 
       // Call the GDPR data export edge function
       const response = await fetch(
-        `${SUPABASE_URL_RESOLVED}/functions/v1/gdpr-data-export`,
+        operationalSupabaseProxyUrl("/functions/v1/gdpr-data-export"),
         {
           method: "POST",
           headers: {
@@ -106,7 +106,7 @@ export function GDPRDataManagement() {
 
       // Call the GDPR account deletion edge function
       const response = await fetch(
-        `${SUPABASE_URL_RESOLVED}/functions/v1/gdpr-account-deletion`,
+        operationalSupabaseProxyUrl("/functions/v1/gdpr-account-deletion"),
         {
           method: "POST",
           headers: {

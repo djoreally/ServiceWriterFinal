@@ -1,4 +1,4 @@
-import { SUPABASE_URL_RESOLVED } from "@/integrations/supabase/client";
+import { operationalSupabaseProxyUrl } from "@/integrations/supabase/client";
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -53,7 +53,7 @@ declare global {
   }
 }
 
-const CHAT_URL = `${SUPABASE_URL_RESOLVED}/functions/v1/ai-assistant`;
+const CHAT_URL = operationalSupabaseProxyUrl("/functions/v1/ai-assistant");
 
 export function AIAssistant() {
   const { session } = useAuth();

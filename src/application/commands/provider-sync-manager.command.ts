@@ -1,4 +1,4 @@
-import { SUPABASE_URL_RESOLVED } from "@/integrations/supabase/client";
+import { operationalSupabaseProxyUrl } from "@/integrations/supabase/client";
 /**
  * Provider Sync Manager Commands — Retry actions on the sync pipeline.
  */
@@ -8,7 +8,7 @@ async function postManager(body: Record<string, unknown>) {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error("Not authenticated");
   const res = await fetch(
-    `${SUPABASE_URL_RESOLVED}/functions/v1/provider-sync-manager`,
+    operationalSupabaseProxyUrl("/functions/v1/provider-sync-manager"),
     {
       method: "POST",
       headers: {

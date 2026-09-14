@@ -1,4 +1,4 @@
-import { SUPABASE_PUBLISHABLE_KEY_RESOLVED, SUPABASE_URL_RESOLVED, supabase } from "@/integrations/supabase/client";
+import { operationalSupabaseProxyUrl, supabase } from "@/integrations/supabase/client";
 
 export type ProviderSyncMode = "appointment_created" | "payment_pending" | "payment_succeeded" | "manual_resync";
 export type ProviderSyncName = "stripe" | "square";
@@ -30,12 +30,11 @@ export async function requestAppointmentProviderSync(
       return { data: null, error: new Error("You must be signed in to sync this appointment.") };
     }
 
-    const url = `${SUPABASE_URL_RESOLVED}/functions/v1/sync-appointment-to-provider`;
+    const url = operationalSupabaseProxyUrl("/functions/v1/sync-appointment-to-provider");
     const res = await fetch(url, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${session.access_token}`,
-        apikey: SUPABASE_PUBLISHABLE_KEY_RESOLVED,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({

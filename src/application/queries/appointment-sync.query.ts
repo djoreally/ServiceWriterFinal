@@ -1,4 +1,4 @@
-import { SUPABASE_URL_RESOLVED } from "@/integrations/supabase/client";
+import { operationalSupabaseProxyUrl } from "@/integrations/supabase/client";
 /**
  * Appointment-scoped provider sync queries.
  * Used by the AppointmentSyncCard to hydrate initial state and
@@ -17,7 +17,7 @@ export async function fetchAppointmentSyncRecords(
   appointmentId: string,
 ): Promise<ProviderSyncRecord[]> {
   const headers = await authHeaders();
-  const url = `${SUPABASE_URL_RESOLVED}/functions/v1/provider-sync-manager?action=for_appointment&appointment_id=${encodeURIComponent(appointmentId)}`;
+  const url = operationalSupabaseProxyUrl(`/functions/v1/provider-sync-manager?action=for_appointment&appointment_id=${encodeURIComponent(appointmentId)}`);
   const res = await fetch(url, { headers });
   if (!res.ok) throw new Error(`Failed to load appointment sync (${res.status})`);
   const data = await res.json();
@@ -28,7 +28,7 @@ export async function fetchAppointmentSyncLogs(
   recordId: string,
 ): Promise<ProviderSyncLog[]> {
   const headers = await authHeaders();
-  const url = `${SUPABASE_URL_RESOLVED}/functions/v1/provider-sync-manager?action=logs&record_id=${encodeURIComponent(recordId)}`;
+  const url = operationalSupabaseProxyUrl(`/functions/v1/provider-sync-manager?action=logs&record_id=${encodeURIComponent(recordId)}`);
   const res = await fetch(url, { headers });
   if (!res.ok) throw new Error(`Failed to load logs (${res.status})`);
   const data = await res.json();

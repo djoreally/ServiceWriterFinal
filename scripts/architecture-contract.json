@@ -1,6 +1,6 @@
 {
-  "version": 1,
-  "certification_date": "2026-09-03",
+  "version": 2,
+  "certification_date": "2026-09-14",
   "application": {
     "repository": "djoreally/ServiceWriterFinal",
     "runtime": "Next.js App Router",
@@ -8,9 +8,18 @@
     "deployment_model": "single Vercel project",
     "vercel_project": "servicewriter.xyx",
     "vercel_project_id": "prj_LwYh6HJuUsB2LZG9eoKs23hDoJuw",
-    "production_domains": ["servicewriter.xyz", "www.servicewriter.xyz", "*.servicewriter.xyz"],
+    "production_domains": [
+      "servicewriter.xyz",
+      "www.servicewriter.xyz",
+      "*.servicewriter.xyz"
+    ],
     "server_api": "app/api/**",
-    "browser_shell": ["app/layout.tsx", "src/ClientOnlyShell.tsx", "src/NextClientShell.tsx", "src/App.tsx"],
+    "browser_shell": [
+      "app/layout.tsx",
+      "src/ClientOnlyShell.tsx",
+      "src/NextClientShell.tsx",
+      "src/App.tsx"
+    ],
     "client_navigation": "React Router compatibility layer inside the single Next.js browser shell"
   },
   "data_platform": {
@@ -24,8 +33,8 @@
     "authorization": "workspace membership/RBAC plus database RLS"
   },
   "runtime_boundaries": {
-    "browser": "UI, client navigation, session state, low-risk tenant-scoped reads and reviewed realtime subscriptions",
-    "server": "authorization orchestration, privileged writes, provider calls, webhooks, idempotency, background workers and audit-sensitive operations",
+    "browser": "UI, client navigation, and Supabase Auth/session only; all operational Supabase REST, RPC, Function, and Storage HTTP traffic must traverse app/api/**",
+    "server": "app/api/** is the canonical operational data boundary for authorization, Supabase data/function/storage traffic, provider calls, webhooks, idempotency, background workers and audit-sensitive operations",
     "database": "canonical business state, workspace tenancy, RLS, transactional RPCs and durable outboxes"
   },
   "provider_ownership": {
@@ -35,7 +44,7 @@
     "payments": "Stripe adapter/server boundary",
     "sms": "server-side messaging adapter/approved provider",
     "calendar": "server-side Google Calendar integration",
-    "vehicle_catalog": "public Supabase Edge Function only for intentionally public catalog reads"
+    "vehicle_catalog": "server-routed Supabase Edge Function for intentionally public catalog reads"
   },
   "forbidden_competing_architecture": [
     "Vite production runtime or Vite deployment",
@@ -45,6 +54,7 @@
     "VITE_* environment variables in runtime code",
     "import.meta.env in runtime code",
     "direct privileged provider calls from browser code",
-    "service-role credentials in client-visible variables"
+    "service-role credentials in client-visible variables",
+    "direct operational Supabase HTTP calls from browser code"
   ]
 }

@@ -1,3 +1,4 @@
+import { operationalSupabaseProxyUrl } from "@/integrations/supabase/client";
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -80,7 +81,7 @@ function DeploymentStatusCard({ variant }: { variant: McpConnectPanelProps["vari
     let cancelled = false;
     async function check() {
       try {
-        const res = await fetch(`${MCP_SERVER_URL}/.well-known/oauth-protected-resource`, {
+        const res = await fetch(operationalSupabaseProxyUrl("/functions/v1/agent-api/.well-known/oauth-protected-resource"), {
           method: "GET",
           headers: { Accept: "application/json" },
         });

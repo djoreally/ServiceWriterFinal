@@ -1,4 +1,4 @@
-import { SUPABASE_PUBLISHABLE_KEY_RESOLVED, SUPABASE_URL_RESOLVED } from "@/integrations/supabase/client";
+import { operationalSupabaseProxyUrl } from "@/integrations/supabase/client";
 /**
  * Hits the public GET probe of the `sync-appointment-to-provider` edge function.
  * Used by the AppointmentSyncCard so we can confirm the deployed function
@@ -13,11 +13,10 @@ export interface SyncFunctionVersion {
 }
 
 export async function fetchSyncFunctionVersion(): Promise<SyncFunctionVersion> {
-  const url = `${SUPABASE_URL_RESOLVED}/functions/v1/sync-appointment-to-provider`;
+  const url = operationalSupabaseProxyUrl("/functions/v1/sync-appointment-to-provider");
   const res = await fetch(url, {
     method: "GET",
     headers: {
-      apikey: SUPABASE_PUBLISHABLE_KEY_RESOLVED,
     },
   });
   if (!res.ok) {

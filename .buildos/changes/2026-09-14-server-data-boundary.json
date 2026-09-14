@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "status": "built",
+  "type": "architecture-boundary",
+  "summary": "Restore and hard-enforce the canonical server data boundary so browser operational Supabase REST/RPC, Edge Function, and Storage HTTP traffic always traverses app/api/**.",
+  "affected": [
+    "browser data transport",
+    "Supabase operational access",
+    "Next.js API boundary",
+    "BuildOS architecture enforcement"
+  ],
+  "acceptance": [
+    "Supabase Auth/session may remain browser-direct",
+    "Operational Supabase REST/RPC, Functions, and Storage HTTP requests are routed through /api/v1/supabase-proxy",
+    "Direct operational Supabase URLs in runtime source fail the architecture gate",
+    "The architecture contract explicitly forbids browser-direct operational Supabase traffic",
+    "Production build runs the architecture gate before release"
+  ]
+}

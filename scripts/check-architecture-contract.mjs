@@ -14,6 +14,7 @@ const vercel = JSON.parse(read("vercel.json"));
 assert(contract.application?.runtime === "Next.js App Router", "Architecture contract must declare Next.js App Router.");
 assert(contract.application?.deployment_model === "single Vercel project", "Architecture contract must declare one Vercel production project.");
 assert(contract.data_platform?.tenant_key === "workspace_id", "Canonical tenant key must be workspace_id.");
+assert(contract.runtime_boundaries?.browser?.includes("all operational Supabase REST, RPC, Function, and Storage HTTP traffic must traverse app/api/**"), "Browser runtime contract must forbid direct operational Supabase traffic.");
 assert(contract.provider_ownership?.transactional_email === "Resend", "Transactional email must be owned by Resend.");
 assert(contract.provider_ownership?.growth_marketing_email === "Enginemailer", "Growth/marketing email must be owned by Enginemailer.");
 
@@ -27,7 +28,7 @@ assert(Boolean(pkg.dependencies?.next), "Next.js must be a production dependency
 assert(vercel.framework === "nextjs", "vercel.json must declare framework=nextjs.");
 assert(vercel.buildCommand === "npm run build", "Vercel must use the canonical Next.js build command.");
 
-for (const file of ["app/layout.tsx", "app/[[...path]]/page.tsx", "src/ClientOnlyShell.tsx", "src/NextClientShell.tsx", "src/App.tsx"]) {
+for (const file of ["app/layout.tsx", "app/[[...path]]/page.tsx", "src/ClientOnlyShell.tsx", "src/NextClientShell.tsx", "src/App.tsx", "app/api/v1/supabase-proxy/route.ts"]) {
   assert(exists(file), `Missing canonical application surface: ${file}`);
 }
 for (const forbidden of ["vite.config.ts", "vite.config.js", "vite.config.mjs", "apps/web-next", "apps/api"]) {
@@ -52,6 +53,24 @@ for (const file of [...walk("app"), ...walk("src"), ...walk("packages"), "next.c
   const content = read(file);
   if (/\bimport\.meta\.env\b/.test(content)) failures.push(`${file}: import.meta.env is forbidden in canonical runtime code.`);
   if (/\bprocess\.env\.VITE_[A-Z0-9_]+\b/.test(content)) failures.push(`${file}: direct VITE_* environment access is forbidden.`);
+}
+
+const supabaseClient = read("src/integrations/supabase/client.ts");
+assert(supabaseClient.includes('"/api/v1/supabase-proxy?path="'), "Browser Supabase client must route operational traffic through the same-origin Next API proxy.");
+assert(supabaseClient.includes("isOperationalSupabaseRequest"), "Browser Supabase client must classify operational Supabase requests before transport.");
+
+const supabaseProxy = read("app/api/v1/supabase-proxy/route.ts");
+assert(supabaseProxy.includes('"/rest/v1/"') && supabaseProxy.includes('"/functions/v1/"') && supabaseProxy.includes('"/storage/v1/"'),
+  "Supabase proxy must cover REST/RPC, Functions, and Storage HTTP traffic.");
+assert(supabaseProxy.includes("upstreamUrl.origin !== new URL(SUPABASE_URL_RESOLVED).origin"),
+  "Supabase proxy must pin forwarding to the canonical Supabase origin.");
+
+for (const file of [...walk("src")]) {
+  if (file === "src/lib/mcpConnection.ts") continue;
+  const content = read(file);
+  if (/https:\/\/[^"'\s]+\.supabase\.co\/(?:rest|functions|storage)\/v1\//.test(content)) {
+    failures.push(`${file}: direct operational Supabase URL is forbidden in browser/runtime source.`);
+  }
 }
 
 const runtimeEnv = read("src/lib/runtime-env.ts");
@@ -91,4 +110,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log("Architecture contract passed: single Next.js/Vercel runtime, workspace tenancy, and provider ownership are consistent.");
+console.log("Architecture contract passed: single Next.js/Vercel runtime, server-owned Supabase operational traffic, workspace tenancy, and provider ownership are consistent.");

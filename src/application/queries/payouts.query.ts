@@ -1,21 +1,19 @@
-import { SUPABASE_PROJECT_ID_RESOLVED, SUPABASE_PUBLISHABLE_KEY_RESOLVED } from "@/integrations/supabase/client";
 /**
  * Payouts Query — Abstracts Stripe payouts edge function
  */
 
 import { supabase } from "@/integrations/supabase/client";
 
-const PROJECT_ID = SUPABASE_PROJECT_ID_RESOLVED;
-const FN_BASE = `https://${PROJECT_ID}.supabase.co/functions/v1/stripe-payouts`;
+const FN_PATH = "/functions/v1/stripe-payouts";
 
 async function authedGet(path = "") {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) return null;
-  const res = await fetch(`${FN_BASE}${path}`, {
+  const proxyPath = `${FN_PATH}${path}`;
+  const res = await fetch(`/api/v1/supabase-proxy?path=${encodeURIComponent(proxyPath)}`, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${session.access_token}`,
-      apikey: SUPABASE_PUBLISHABLE_KEY_RESOLVED,
     },
   });
   if (!res.ok) {
