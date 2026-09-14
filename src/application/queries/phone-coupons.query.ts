@@ -24,7 +24,7 @@ export async function fetchPhoneCouponData(): Promise<PhoneCouponData | null> {
   ]);
   if (customerRes.error) throw customerRes.error;
   if (overrideRes.error) throw overrideRes.error;
-  const customers = (customerRes.data ?? []).map((row: any) => ({
+  const customers = (customerRes.data ?? []).map((row) => ({
     id: row.id,
     name: [row.first_name, row.last_name].filter(Boolean).join(" ") || row.company_name || "Customer",
     email: row.email ?? null,
