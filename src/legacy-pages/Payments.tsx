@@ -97,7 +97,8 @@ const Payments = () => {
   };
 
   useEffect(() => {
-    void Promise.all([loadPayments(), loadStripe()]);
+    const task = window.setTimeout(() => { void Promise.all([loadPayments(), loadStripe()]); }, 0);
+    return () => window.clearTimeout(task);
   }, []);
 
   const handleRefresh = async () => {
@@ -112,8 +113,11 @@ const Payments = () => {
   );
 
   useEffect(() => {
-    setPage(1);
-    setSelectedPaymentIds([]);
+    const task = window.setTimeout(() => {
+      setPage(1);
+      setSelectedPaymentIds([]);
+    }, 0);
+    return () => window.clearTimeout(task);
   }, [statusFilter, pageSize]);
 
   const pagedPayments = usePageSlice(filteredPayments, page, pageSize);
