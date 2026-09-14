@@ -16,6 +16,7 @@ const VERTICAL_FILTERS = [
   { value: "general", label: "Automotive" },
   { value: "detailing", label: "Detailing" },
   { value: "tires", label: "Tires" },
+  { value: "fleet", label: "Fleet / Mobile" },
 ] as const;
 
 type VerticalFilter = (typeof VERTICAL_FILTERS)[number]["value"];
@@ -54,7 +55,9 @@ export function ServiceLibraryDialog({ adoptedTemplateIds, onAdopted }: ServiceL
     const categoryName = (id: string | null) => categories.find((category) => category.id === id)?.name ?? "Other";
     const term = search.trim().toLowerCase();
     const matches = templates.filter((template) => {
-      if (vertical !== "all" && template.serviceVertical !== vertical) return false;
+      if (vertical === "fleet" && template.categoryId !== "fleet_mobile") return false;
+      if (vertical === "general" && template.categoryId !== "automotive") return false;
+      if (vertical !== "all" && vertical !== "fleet" && vertical !== "general" && template.serviceVertical !== vertical) return false;
       if (!term) return true;
       return template.name.toLowerCase().includes(term) || (template.description ?? "").toLowerCase().includes(term);
     });
@@ -117,7 +120,7 @@ export function ServiceLibraryDialog({ adoptedTemplateIds, onAdopted }: ServiceL
         <DialogHeader>
           <DialogTitle>Service library</DialogTitle>
           <DialogDescription>
-            Pre-built services for every category. Pick what you offer, set your price, and they're live in your catalog and booking page.
+            Pre-built starter services by category. Suggested ranges and durations are benchmarks — choose what you offer, adjust the price, then add it to your catalog.
           </DialogDescription>
         </DialogHeader>
 
@@ -126,7 +129,7 @@ export function ServiceLibraryDialog({ adoptedTemplateIds, onAdopted }: ServiceL
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search services" className="pl-8" />
           </div>
-          <div className="flex gap-1 rounded-md border bg-muted/30 p-0.5">
+          <div className="flex max-w-full flex-wrap gap-1 rounded-md border bg-muted/30 p-0.5">
             {VERTICAL_FILTERS.map((filter) => (
               <Button
                 key={filter.value}
@@ -174,8 +177,9 @@ export function ServiceLibraryDialog({ adoptedTemplateIds, onAdopted }: ServiceL
                             </div>
                             {template.description && <p className="mt-0.5 text-xs text-muted-foreground">{template.description}</p>}
                             <p className="mt-1 text-xs text-muted-foreground">
-                              {template.durationMinutes ? `${template.durationMinutes} min` : "Duration varies"}
+                              {template.durationLabel}
                               {template.skillLevel ? ` · ${template.skillLevel}` : ""}
+                              {` · Suggested ${template.suggestedPrice}`}
                             </p>
                           </div>
                           <div className="w-28 shrink-0">
@@ -204,7 +208,7 @@ export function ServiceLibraryDialog({ adoptedTemplateIds, onAdopted }: ServiceL
 
         <div className="flex items-center justify-between gap-2 border-t pt-3">
           <p className="text-xs text-muted-foreground">
-            {selectedCount === 0 ? "Prices are editable now and any time after." : `${selectedCount} selected`}
+            {selectedCount === 0 ? "Adjust prices to your market and actual costs before publishing." : `${selectedCount} selected · prices remain editable after adding`}
           </p>
           <div className="flex gap-2">
             <Button variant="ghost" onClick={() => setOpen(false)} disabled={saving}>Cancel</Button>

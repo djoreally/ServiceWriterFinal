@@ -417,7 +417,7 @@ const ServiceCatalog = () => {
         <div className="flex gap-2">
           <ServiceLibraryDialog
             adoptedTemplateIds={services.map((service) => service.template_id).filter((id): id is string => Boolean(id))}
-            onAdopted={fetchServices}
+            onAdopted={() => { void Promise.all([fetchServices(), fetchCats()]); }}
           />
           <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
             <DialogTrigger asChild>

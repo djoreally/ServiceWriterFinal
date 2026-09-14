@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "stateDirectory": ".buildos",
+  "agentContract": "AGENTS.md",
+  "specification": "BUILDOS.md",
+  "commands": {
+    "typecheck": "npm run typecheck",
+    "lint": "npm run lint:strict",
+    "test": "npm test",
+    "build": "npm run build",
+    "architecture": "npm run verify:architecture",
+    "identity": "npm run verify:identity",
+    "frontend-ui": "npm run verify:frontend-ui"
+  },
+  "check": [
+    "state",
+    "typecheck",
+    "lint",
+    "architecture",
+    "identity",
+    "frontend-ui",
+    "test"
+  ],
+  "verify": [
+    "state",
+    "typecheck",
+    "lint",
+    "architecture",
+    "identity",
+    "frontend-ui",
+    "test",
+    "build"
+  ],
+  "requireChangeRecord": true,
+  "release": {
+    "requireCleanTree": true,
+    "requireExactSha": true
+  }
+}

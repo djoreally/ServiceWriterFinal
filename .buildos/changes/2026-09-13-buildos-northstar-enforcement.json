@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "status": "built",
+  "type": "release-control",
+  "summary": "Install the BuildOS harness in Service Writer, enforce it in CI, sync build evidence to BuildOS Cloud, and connect BuildOS policy/attestation flow to Northstar.",
+  "affected": ["repository policy", "CI", "release verification", "Northstar"],
+  "acceptance": [
+    "PR verification fails closed when BuildOS gates fail",
+    "main verification emits BuildOS evidence",
+    "Northstar control policy is consumed when configured",
+    "Northstar release attestation is only submitted from exact GREEN production evidence"
+  ]
+}

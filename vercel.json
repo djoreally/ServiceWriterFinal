@@ -16,5 +16,11 @@
       "path": "/api/internal/newsletter/weekly",
       "schedule": "0 15 * * *"
     }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "*": false,
+      "main": true
+    }
+  }
 }

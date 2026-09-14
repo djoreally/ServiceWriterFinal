@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "name": "Service Writer",
+  "purpose": "Multi-tenant automotive service operations platform for booking, dispatch, service, fleet, inventory, communications and financial workflows.",
+  "audience": ["automotive service businesses", "mobile service operators", "fleet service teams"],
+  "coreObjects": ["workspace", "customer", "vehicle", "service_catalog", "appointment", "work_order", "invoice", "payment", "inventory"],
+  "primaryJourney": "signup → configure workspace → publish booking → book customer → perform service → invoice/pay → retain customer"
+}
