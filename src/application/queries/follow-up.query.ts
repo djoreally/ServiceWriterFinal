@@ -1,7 +1,7 @@
 /** Follow-Up Automation Query — canonical workspace reads. */
 import { productionSupabase } from "@/integrations/supabase/client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
-const db = productionSupabase as any;
+const db = productionSupabase;
 
 export interface FollowUpRule {
   id: string; name: string; description: string | null; trigger_type: string; trigger_days: number;
