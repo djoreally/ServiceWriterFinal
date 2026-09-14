@@ -1,7 +1,7 @@
 /**
  * Campaign Queries — Read operations for email marketing campaigns.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { productionSupabase, supabase } from "@/integrations/supabase/client";
 import { CampaignStatus } from "@/lib/enums";
 import type { Database } from "@/integrations/supabase/types";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
@@ -64,8 +64,7 @@ export async function fetchCampaigns(): Promise<CampaignRow[]> {
 export async function fetchCampaignCustomerCount(): Promise<number> {
   const context = await resolveCurrentWorkspace();
   if (!context) return 0;
-  const db = supabase as any;
-  const { count, error } = await db
+  const { count, error } = await productionSupabase
     .from("customers")
     .select("id", { count: "exact", head: true })
     .eq("workspace_id", context.workspaceId)
