@@ -3,7 +3,7 @@ import { productionSupabase } from "@/integrations/supabase/client";
 import type { FollowUpRule } from "@/application/queries/follow-up.query";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
-const db = productionSupabase as any;
+const db = productionSupabase;
 
 async function requireContext() {
   const { data: { user } } = await getCurrentAuthUser();
