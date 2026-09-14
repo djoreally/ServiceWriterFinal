@@ -1,7 +1,7 @@
 /** Service package read operations backed by canonical workspace tables. */
 import { productionSupabase } from "@/integrations/supabase/client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
-const db = productionSupabase as any;
+const db = productionSupabase;
 
 export interface PackageServiceItem {
   id: string; name: string; description: string | null; default_price: number; estimated_duration: number | null; category: string | null;
