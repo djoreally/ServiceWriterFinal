@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "id": "2026-09-12-sprint-1-booking-reliability",
+  "title": "Sprint 1 — Booking Reliability",
+  "status": "verified",
+  "commitSha": "2bc8aaefbd5dbdb5ab22747d9e4675d72f9265f8",
+  "deploymentId": "dpl_3ksB9gD9M8cxrf1GQeSW2eZqLVPq",
+  "productionReferenceSha": "e64ba2e87a7e96a3a9bad392813571859924ea85",
+  "checks": {
+    "canonicalSections": [
+      "profile",
+      "settings",
+      "catalog",
+      "slots",
+      "blocked_dates"
+    ],
+    "forbiddenSections": [
+      "config",
+      "availability"
+    ],
+    "bookingPrebuild": "passed",
+    "productionHealth": "passed",
+    "persistenceIntegrity": "passed",
+    "duplicateScan": "passed",
+    "cancelRescheduleContracts": "present"
+  },
+  "findings": {
+    "publicBookingsLast30Days": 10,
+    "publicBookingsLast7Days": 5,
+    "duplicateActiveBookingGroupsLast30Days": 0,
+    "missingCoreLinkageLast30Days": 0
+  },
+  "infrastructureEvidence": {
+    "githubActions": "infra_red",
+    "reason": "Jobs expose empty step data and unavailable log blobs; no code-failure conclusion is drawn from those runs."
+  },
+  "conclusion": "Booking Reliability is verified for the candidate. It is not production-green until the exact candidate is merged/deployed and reverified."
+}

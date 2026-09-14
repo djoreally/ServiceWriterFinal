@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "name": "ServiceWriter",
+  "category": "multi-tenant shop operations SaaS",
+  "primaryObjective": "Reliable daily-use product that shops can pay for without missed appointments, lost data, silent notification failures, duplicate charges, or founder-only intervention.",
+  "canonicalJourneys": [
+    "public booking to persisted appointment and confirmation",
+    "appointment management and calendar/list reconciliation",
+    "technician/work-order execution to completion",
+    "invoice and payment closeout",
+    "customer and vehicle history",
+    "durable notification delivery and retry"
+  ],
+  "nonGoals": [
+    "infrastructure work that does not improve reliability or operability",
+    "false GREEN based only on successful build or deployment"
+  ]
+}

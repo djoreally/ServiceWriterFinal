@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "status": "in_progress",
+  "currentFocus": "runtime consolidation and operational reliability",
+  "lastCertifiedSha": null,
+  "productionSha": null,
+  "blockers": [
+    "Supabase provider secrets not yet provisioned for new lifecycle worker",
+    "legacy staging environment is not canonical enough for full parity certification"
+  ],
+  "updatedAt": "2026-09-12T05:40:00Z",
+  "protocolVersion": "1.0",
+  "currentMilestone": "revenue-ready-operational-reliability",
+  "currentTask": {
+    "shot": 12,
+    "totalShots": 12,
+    "name": "Production cleanup",
+    "status": "built"
+  },
+  "history": [
+    {
+      "shot": 1,
+      "name": "Booking reliability",
+      "status": "verified",
+      "commitSha": "2bc8aaefbd5dbdb5ab22747d9e4675d72f9265f8",
+      "evidence": {
+        "bookingPrebuild": "PASS",
+        "architectureContract": "PASS",
+        "identityRbacContract": "PASS",
+        "frontendUiContract": "PASS",
+        "typescriptBuild": "PASS",
+        "vercelDeployment": "READY",
+        "productionHealth": "200",
+        "productionBookingRequests": "200",
+        "recentPublicBookings30d": 10,
+        "recentPublicBookings7d": 5,
+        "obviousDuplicateActiveBookings30d": 0,
+        "missingCustomerLinks30d": 0,
+        "missingWorkspaceLinks30d": 0,
+        "missingStartTimes30d": 0,
+        "missingVehicleLinks30d": 0
+      },
+      "limitations": [
+        "Candidate SHA is not merged to main, so status is verified rather than green.",
+        "GitHub Actions jobs are infrastructure-red with empty step data/log blobs and did not provide executable CI evidence.",
+        "BuildOS standalone npm distribution is not yet available for the repository workflow's npx invocation."
+      ]
+    }
+  ],
+  "gates": {
+    "runtime": "passed",
+    "architecture": "passed",
+    "identity": "passed",
+    "frontend": "passed",
+    "typecheck": "pending",
+    "lint": "pending",
+    "test": "pending",
+    "build": "passed",
+    "release": "pending"
+  },
+  "openGates": [
+    "Run one full exact-head BuildOS/ServiceWriter verification pass after publishing the batch branch head.",
+    "Provision Supabase provider secrets before switching lifecycle/push scheduling away from the temporary Vercel cron bridge.",
+    "Perform a safe database restore drill before production certification can claim restore-proven.",
+    "First real MOMS work order remains the live proof event for technician/work-order execution."
+  ],
+  "knownRisks": [
+    "Temporary Vercel cron bridge remains intentionally active until Supabase-native workers have provider secrets and live proof.",
+    "GitHub Actions availability has previously shown startup-failure behavior; BuildOS source workflow is now pinned and must be re-run.",
+    "Production Supabase security advisor backlog remains for later security hardening; current batch does not silently classify those advisories as resolved."
+  ],
+  "batchCandidate": "480acf5f5fac825e0f34f5b7c80e7df65fbf899f",
+  "sprintStatus": {
+    "1_booking_reliability": "verified",
+    "2_appointment_operations": "built",
+    "3_notification_reliability": "built",
+    "4_payments_financial_closeout": "built",
+    "5_customer_vehicle_integrity": "built",
+    "6_technician_shop_workflow": "built_requires_first_live_work_order_proof",
+    "7_services_inventory_pricing": "built",
+    "8_data_safety_recovery": "built_restore_drill_pending",
+    "9_performance_mobile": "built",
+    "10_buildos_production_guardrail": "built",
+    "11_daily_use_simulation": "built_pending_final_test_run",
+    "12_production_cleanup": "built"
+  }
+}

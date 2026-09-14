@@ -1,0 +1,87 @@
+{
+  "version": 7,
+  "generatedAt": "2026-09-12T04:12:00Z",
+  "canonicalSource": "BuildOS",
+  "sources": [
+    {
+      "agent": "buildos",
+      "path": "AGENTS.md",
+      "format": "markdown",
+      "scope": "repository",
+      "active": true,
+      "enforcementLevel": "canonical"
+    }
+  ],
+  "canonicalPolicy": {
+    "tests-before-deploy": "require",
+    "bypass-gate": "deny",
+    "secrets-in-source": "deny",
+    "runtime-ownership": "require",
+    "exact-sha-certification": "require"
+  },
+  "normalizedRules": [
+    {
+      "id": "buildos:servicewriter:booking",
+      "sourceAgent": "buildos",
+      "sourcePath": "AGENTS.md",
+      "instruction": "Canonical public booking endpoints and appointment persistence must remain consistent and verified.",
+      "scope": "repository",
+      "active": true,
+      "enforcementLevel": "canonical",
+      "topic": "booking-reliability",
+      "polarity": "require",
+      "conflicts": [],
+      "provenance": {
+        "sourcePath": "AGENTS.md"
+      }
+    },
+    {
+      "id": "buildos:servicewriter:runtime",
+      "sourceAgent": "buildos",
+      "sourcePath": "AGENTS.md",
+      "instruction": "Durable lifecycle work must not depend solely on a disposable frontend host.",
+      "scope": "repository",
+      "active": true,
+      "enforcementLevel": "canonical",
+      "topic": "runtime-ownership",
+      "polarity": "require",
+      "conflicts": [],
+      "provenance": {
+        "sourcePath": "AGENTS.md"
+      }
+    },
+    {
+      "id": "buildos:servicewriter:secrets",
+      "sourceAgent": "buildos",
+      "sourcePath": "AGENTS.md",
+      "instruction": "Secrets must live in approved secret stores or environment variables and never in source.",
+      "scope": "repository",
+      "active": true,
+      "enforcementLevel": "canonical",
+      "topic": "secrets-in-source",
+      "polarity": "deny",
+      "conflicts": [],
+      "provenance": {
+        "sourcePath": "AGENTS.md"
+      }
+    },
+    {
+      "id": "buildos:servicewriter:release",
+      "sourceAgent": "buildos",
+      "sourcePath": "AGENTS.md",
+      "instruction": "Tests and verification must pass before deployment or release certification.",
+      "scope": "repository",
+      "active": true,
+      "enforcementLevel": "canonical",
+      "topic": "tests-before-deploy",
+      "polarity": "require",
+      "conflicts": [],
+      "provenance": {
+        "sourcePath": "AGENTS.md"
+      }
+    }
+  ],
+  "conflicts": [],
+  "activeConflicts": [],
+  "unresolvedConflicts": []
+}

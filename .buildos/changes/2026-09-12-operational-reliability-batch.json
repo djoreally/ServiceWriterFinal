@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "id": "2026-09-12-operational-reliability-batch",
+  "status": "built",
+  "candidateSha": "480acf5f5fac825e0f34f5b7c80e7df65fbf899f",
+  "standard": "daily-use revenue-ready reliability",
+  "sprints": [
+    {
+      "id": 1,
+      "name": "Booking Reliability",
+      "status": "verified"
+    },
+    {
+      "id": 2,
+      "name": "Appointment Operations",
+      "status": "built"
+    },
+    {
+      "id": 3,
+      "name": "Notification Reliability",
+      "status": "built"
+    },
+    {
+      "id": 4,
+      "name": "Payments & Financial Closeout",
+      "status": "built"
+    },
+    {
+      "id": 5,
+      "name": "Customer & Vehicle Integrity",
+      "status": "built"
+    },
+    {
+      "id": 6,
+      "name": "Technician & Shop Workflow",
+      "status": "built",
+      "limitation": "No MOMS production work orders yet; first live work order is still required for production proof."
+    },
+    {
+      "id": 7,
+      "name": "Services, Inventory & Pricing",
+      "status": "built"
+    },
+    {
+      "id": 8,
+      "name": "Data Safety & Recovery",
+      "status": "built",
+      "limitation": "Restore drill requires a safe disposable target and remains unproven."
+    },
+    {
+      "id": 9,
+      "name": "Performance & Mobile",
+      "status": "built"
+    },
+    {
+      "id": 10,
+      "name": "BuildOS Production Guardrail",
+      "status": "built"
+    },
+    {
+      "id": 11,
+      "name": "Full Daily-Use Simulation",
+      "status": "built"
+    },
+    {
+      "id": 12,
+      "name": "Production Cleanup",
+      "status": "built"
+    }
+  ],
+  "finalGate": "Exact-head typecheck, strict lint, Jest, daily-use simulation, all prebuild contracts, Next production build, BuildOS source verify, migration review, then one merge and one production verification."
+}

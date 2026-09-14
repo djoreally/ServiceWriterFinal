@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { addDays, addMinutes, format, parse } from "date-fns";
 import { Calendar, Car, Plus, Search, Users } from "lucide-react";
 import type { Appointment, BusinessHours, Customer, ServiceCatalogItem, Vehicle } from "@/shared/types";
-import type { AppointmentFormState, CustomerFormData, VehicleFormData } from "@/shared/types/forms";
+import type { AppointmentFormState } from "@/shared/types/forms";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -25,7 +25,6 @@ interface Props {
   open:boolean; onOpenChange:(open:boolean)=>void; onSubmit:(data:AppointmentFormState)=>Promise<void>;
   initialData?:Partial<Appointment>|null; customers:Customer[]; vehicles:Vehicle[]; serviceCatalog:ServiceCatalogItem[];
   businessHours:BusinessHours; saving:boolean; isEditing:boolean;
-  onCreateCustomer:(data:CustomerFormData)=>Promise<Customer|null>; onCreateVehicle:(data:VehicleFormData)=>Promise<Vehicle|null>; businessUserId?:string;
 }
 const hm=(v:string|undefined)=>{const m=/^(\d{1,2}):(\d{2})/.exec(v||"");return m?`${m[1].padStart(2,"0")}:${m[2]}`:"";};
 const splitName=(name:string)=>{const p=name.trim().split(/\s+/);return{first_name:p.shift()||"Customer",last_name:p.join(" ")};};

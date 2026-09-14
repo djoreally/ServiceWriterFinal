@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BuildOS Agent State",
+  "type": "object",
+  "required": [
+    "protocolVersion",
+    "status",
+    "currentTask",
+    "gates"
+  ],
+  "properties": {
+    "protocolVersion": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    },
+    "currentTask": {
+      "type": "object"
+    },
+    "history": {
+      "type": "array"
+    },
+    "gates": {
+      "type": "object"
+    }
+  }
+}

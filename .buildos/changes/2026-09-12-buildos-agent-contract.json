@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "id": "2026-09-12-buildos-agent-contract",
+  "title": "Install BuildOS repository contract for ServiceWriter",
+  "status": "in_progress",
+  "intent": "Make ServiceWriter's operational invariants and release standards machine-discoverable by BuildOS.",
+  "affectedJourneys": [
+    "release verification",
+    "production reliability",
+    "all core operational journeys"
+  ],
+  "risk": "medium",
+  "humanGates": [
+    "production database changes",
+    "production deployment",
+    "provider secret provisioning"
+  ],
+  "evidenceRequired": [
+    "BuildOS policy discovery",
+    "BuildOS check",
+    "BuildOS verify",
+    "exact-SHA deployment verification"
+  ]
+}
