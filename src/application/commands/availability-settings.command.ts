@@ -17,7 +17,7 @@ function integer(value: unknown, fallback: number): number {
 
 export async function saveAvailabilitySettings(_userId: string, payload: Record<string, unknown>): Promise<void> {
   const id = await workspaceId();
-  const db = supabase as any;
+  const db = productionSupabase;
   const { error } = await db.rpc("update_workspace_scheduling_settings_v1", {
     p_workspace_id: id,
     p_day_hours: payload.day_hours ?? {},
@@ -41,7 +41,7 @@ export async function saveAvailabilitySettings(_userId: string, payload: Record<
 export async function blockDate(_userId: string, date: string, reason: string | null): Promise<void> {
   const id = await workspaceId();
   const { data: { user } } = await supabase.auth.getUser();
-  const db = supabase as any;
+  const db = productionSupabase;
   const { error } = await db.from("workspace_blackout_dates").upsert({
     workspace_id: id,
     blocked_date: date,
@@ -54,7 +54,7 @@ export async function blockDate(_userId: string, date: string, reason: string | 
 
 export async function unblockDate(id: string): Promise<void> {
   const workspace = await workspaceId();
-  const db = supabase as any;
+  const db = productionSupabase;
   const { error } = await db.from("workspace_blackout_dates").delete().eq("workspace_id", workspace).eq("id", id);
   if (error) throw error;
 }
@@ -72,7 +72,7 @@ export async function upsertIntakeQuestion(
 ): Promise<void> {
   const workspace = await workspaceId();
   const { data: { user } } = await supabase.auth.getUser();
-  const db = supabase as any;
+  const db = productionSupabase;
   const values = {
     workspace_id: workspace,
     question_text: question.question_text.trim(),
@@ -103,14 +103,14 @@ export async function upsertIntakeQuestion(
 
 export async function deleteIntakeQuestion(id: string): Promise<void> {
   const workspace = await workspaceId();
-  const db = supabase as any;
+  const db = productionSupabase;
   const { error } = await db.from("workspace_intake_questions").delete().eq("workspace_id", workspace).eq("id", id);
   if (error) throw error;
 }
 
 export async function toggleIntakeQuestionActive(id: string, isActive: boolean): Promise<void> {
   const workspace = await workspaceId();
-  const db = supabase as any;
+  const db = productionSupabase;
   const { error } = await db
     .from("workspace_intake_questions")
     .update({ is_active: isActive, updated_at: new Date().toISOString() })
