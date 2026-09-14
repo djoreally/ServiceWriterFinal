@@ -2,7 +2,7 @@
  * Vehicle Parts Registry Query — per-vehicle part numbers for fleet and retail vehicles,
  * plus suggestion resolution (assigned parts first, shared spec reference as fallback).
  */
-import { supabase } from "@/integrations/supabase/client";
+import { productionSupabase, supabase } from "@/integrations/supabase/client";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export type VehicleKind = "fleet" | "retail";
@@ -59,7 +59,7 @@ export async function fetchVehiclePartAssignments(
   vehicleId: string,
 ): Promise<VehiclePartAssignment[]> {
   const column = kind === "fleet" ? "fleet_vehicle_id" : "vehicle_id";
-  const { data, error } = await (supabase as any)
+  const { data, error } = await productionSupabase
     .from("vehicle_part_assignments")
     .select("*")
     .eq(column, vehicleId)
@@ -74,7 +74,7 @@ export async function fetchVehiclePartSuggestions(
   kind: VehicleKind,
   vehicleId: string,
 ): Promise<PartSuggestion[]> {
-  const { data, error } = await (supabase as any).rpc("get_vehicle_part_suggestions_v1", {
+  const { data, error } = await productionSupabase.rpc("get_vehicle_part_suggestions_v1", {
     p_vehicle_kind: kind,
     p_vehicle_id: vehicleId,
   });
@@ -96,7 +96,7 @@ export interface StockOption {
 export async function fetchStockOptions(): Promise<StockOption[]> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return [];
-  const { data, error } = await (supabase as any)
+  const { data, error } = await productionSupabase
     .from("inventory_items")
     .select("id, name, sku, category, unit, quantity, sell_price, unit_cost")
     .eq("user_id", user.id)
@@ -156,7 +156,7 @@ export interface WorkOrderPartLine {
 }
 
 export async function fetchWorkOrderPartLines(workOrderId: string): Promise<WorkOrderPartLine[]> {
-  const { data, error } = await (supabase as any)
+  const { data, error } = await productionSupabase
     .from("fleet_work_order_line_items")
     .select("id, description, part_number, quantity, unit_price, total, inventory_item_id, van_id, fleet_vehicle_id")
     .eq("fleet_work_order_id", workOrderId)
@@ -176,7 +176,7 @@ export interface PartReservationRow {
 }
 
 export async function fetchWorkOrderPartReservations(workOrderId: string): Promise<PartReservationRow[]> {
-  const { data, error } = await (supabase as any)
+  const { data, error } = await productionSupabase
     .from("inventory_reservations")
     .select("id, inventory_item_id, quantity, status, van_id, notes")
     .eq("work_order_id", workOrderId)
