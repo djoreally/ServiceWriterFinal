@@ -2,9 +2,9 @@
  * Oil usage reporting. Completed service records are authoritative for actual
  * oil consumed; inventory is optional reconciliation only.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { productionSupabase } from "@/integrations/supabase/client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
-const db = supabase as any;
+const db = productionSupabase;
 
 export interface UsageRow { id:string; consumed_at:string; day:string; inventory_item_id:string; item_name:string; item_category:string|null; quantity:number; unit:string; qty_in_qts:number; source:"completed_service"|"inventory_reconciled"; van_id:string|null; van_name:string|null; appointment_id:string|null; customer_name:string|null; vehicle_label:string|null }
 export interface UsageDayBucket { day:string; qty_qt:number; service_count:number }
@@ -33,11 +33,16 @@ export async function fetchOilUsage(params:FetchOilUsageParams):Promise<FetchOil
     db.from("inventory_movements").select("service_record_id").eq("workspace_id",workspaceId).eq("movement_type","consumption").in("service_record_id",serviceIds),
   ]);
   for(const result of [customersRes,vehiclesRes,specsRes,appointmentsRes,movementsRes])if(result.error)throw new Error(result.error.message);
-  const customerMap=new Map<string,any>(((customersRes.data??[]) as any[]).map((r:any)=>[r.id,r]));
-  const vehicleMap=new Map<string,any>(((vehiclesRes.data??[]) as any[]).map((r:any)=>[r.id,r]));
-  const specMap=new Map<string,string|null>(((specsRes.data??[]) as any[]).map((r:any)=>[r.vehicle_id,(r.oil_type as string|null)??null]));
-  const appointmentMap=new Map<string,unknown>(((appointmentsRes.data??[]) as any[]).map((r:any)=>[r.id,r.metadata]));
-  const reconciled=new Set<string>(((movementsRes.data??[]) as any[]).map((r:any)=>String(r.service_record_id)));
+  type CustomerRef = { id:string; first_name:string|null; last_name:string|null; company_name:string|null };
+  type VehicleRef = { id:string; year:number|null; make:string|null; model:string|null };
+  type SpecRef = { vehicle_id:string; oil_type:string|null };
+  type AppointmentRef = { id:string; metadata:unknown };
+  type MovementRef = { service_record_id:string|null };
+  const customerMap=new Map<string,CustomerRef>((customersRes.data??[]).map((r:CustomerRef)=>[r.id,r]));
+  const vehicleMap=new Map<string,VehicleRef>((vehiclesRes.data??[]).map((r:VehicleRef)=>[r.id,r]));
+  const specMap=new Map<string,string|null>((specsRes.data??[]).map((r:SpecRef)=>[r.vehicle_id,r.oil_type??null]));
+  const appointmentMap=new Map<string,unknown>((appointmentsRes.data??[]).map((r:AppointmentRef)=>[r.id,r.metadata]));
+  const reconciled=new Set<string>((movementsRes.data??[]).map((r:MovementRef)=>String(r.service_record_id)));
   const allRows:UsageRow[]=services.map(r=>{ const qty=Number(r.oil_quarts_used??0), customer=r.customer_id?customerMap.get(r.customer_id):null, vehicle=r.vehicle_id?vehicleMap.get(r.vehicle_id):null, appointmentMetadata=r.appointment_id?appointmentMap.get(r.appointment_id):null; const oilType=(r.vehicle_id?specMap.get(r.vehicle_id):null)||bookingOilType(appointmentMetadata)||bookingOilType(r.metadata)||"Oil type not captured"; const customerName=customer?(customer.company_name||`${customer.first_name??""} ${customer.last_name??""}`.trim()||null):null, vehicleLabel=vehicle?`${vehicle.year??""} ${vehicle.make??""} ${vehicle.model??""}`.trim()||null:null, consumedAt=r.completed_at||new Date(0).toISOString(); return {id:r.id,consumed_at:consumedAt,day:localDay(consumedAt),inventory_item_id:oilType,item_name:oilType,item_category:"Oil",quantity:qty,unit:"qt",qty_in_qts:qty,source:reconciled.has(r.id)?"inventory_reconciled":"completed_service",van_id:null,van_name:null,appointment_id:r.appointment_id,customer_name:customerName,vehicle_label:vehicleLabel}; });
   const itemFilter=params.itemIds?.length?new Set(params.itemIds):null, q=(params.search??"").trim().toLowerCase();
   const rows=allRows.filter(r=>(!itemFilter||itemFilter.has(r.inventory_item_id))&&(!params.source||r.source===params.source)&&(!q||`${r.item_name} ${r.customer_name??""} ${r.vehicle_label??""}`.toLowerCase().includes(q)));
