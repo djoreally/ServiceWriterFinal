@@ -27,7 +27,11 @@
     "verify:release": "node scripts/verify-release-readiness.mjs",
     "lint": "eslint . --quiet",
     "lint:strict": "eslint . --max-warnings=0",
-    "start": "next start"
+    "start": "next start",
+    "buildos:doctor": "npx --yes github:djoreally/buildos-app-forge#2ce5bddaa164e3b221835e820fdc6db9508fb463 doctor",
+    "buildos:check": "npx --yes github:djoreally/buildos-app-forge#2ce5bddaa164e3b221835e820fdc6db9508fb463 check",
+    "buildos:verify": "npx --yes github:djoreally/buildos-app-forge#2ce5bddaa164e3b221835e820fdc6db9508fb463 verify",
+    "buildos:sync": "npx --yes github:djoreally/buildos-app-forge#2ce5bddaa164e3b221835e820fdc6db9508fb463 sync"
   },
   "playwright": {
     "config": "./e2e/playwright.config.ts"
