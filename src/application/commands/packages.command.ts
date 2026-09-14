@@ -1,5 +1,5 @@
 /** Service package writes through canonical workspace-scoped RPCs. */
-import { supabase } from "@/integrations/supabase/client";
+import { productionSupabase, supabase } from "@/integrations/supabase/client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 export interface PackageFormPayload {
@@ -20,7 +20,7 @@ async function workspaceId(): Promise<string> {
 
 export async function createServicePackage(payload: PackageFormPayload, items: PackageItemPayload[]): Promise<string> {
   const id = await workspaceId();
-  const { data, error } = await (supabase as any).rpc("upsert_service_package", {
+  const { data, error } = await productionSupabase.rpc("upsert_service_package", {
     p_workspace_id: id,
     p_name: payload.name,
     p_description: payload.description,
@@ -37,7 +37,7 @@ export async function createServicePackage(payload: PackageFormPayload, items: P
 
 export async function updateServicePackage(packageId: string, payload: PackageFormPayload, items: PackageItemPayload[]): Promise<void> {
   const id = await workspaceId();
-  const { error } = await (supabase as any).rpc("upsert_service_package", {
+  const { error } = await productionSupabase.rpc("upsert_service_package", {
     p_workspace_id: id,
     p_package_id: packageId,
     p_name: payload.name,
@@ -54,19 +54,19 @@ export async function updateServicePackage(packageId: string, payload: PackageFo
 
 export async function deleteServicePackage(packageId: string): Promise<void> {
   const id = await workspaceId();
-  const { error } = await (supabase as any).from("service_packages").delete().eq("workspace_id", id).eq("id", packageId);
+  const { error } = await productionSupabase.from("service_packages").delete().eq("workspace_id", id).eq("id", packageId);
   if (error) throw error;
 }
 
 export async function toggleServicePackageActive(packageId: string, isActive: boolean): Promise<void> {
   const id = await workspaceId();
-  const { error } = await (supabase as any).from("service_packages").update({ is_active: isActive, updated_at: new Date().toISOString() }).eq("workspace_id", id).eq("id", packageId);
+  const { error } = await productionSupabase.from("service_packages").update({ is_active: isActive, updated_at: new Date().toISOString() }).eq("workspace_id", id).eq("id", packageId);
   if (error) throw error;
 }
 
 export async function loadTemplatePackages(): Promise<number> {
   const id = await workspaceId();
-  const { data, error } = await (supabase as any).rpc("populate_workspace_service_packages", { p_workspace_id: id });
+  const { data, error } = await productionSupabase.rpc("populate_workspace_service_packages", { p_workspace_id: id });
   if (error) throw error;
   return Number(data ?? 0);
 }
