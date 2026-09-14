@@ -52,9 +52,9 @@ export function OilUsageTab() {
     } finally { setLoading(false); }
   }, [dateRange?.from, dateRange?.to, itemId, source, debouncedSearch]);
 
-  useEffect(() => { void loadUsage(); }, [loadUsage]);
+  useEffect(() => { const task = window.setTimeout(() => { void loadUsage(); }, 0); return () => window.clearTimeout(task); }, [loadUsage]);
   const totals = data?.totals;
-  const drillRows = useMemo(() => drillDay && data ? data.rows.filter((row) => row.day === drillDay) : [], [drillDay, data]);
+  const drillRows = drillDay && data ? data.rows.filter((row) => row.day === drillDay) : [];
   const hasFilters = itemId !== ALL || source !== ALL || debouncedSearch.length > 0;
 
   return <div className="space-y-6">
@@ -72,7 +72,7 @@ export function OilUsageTab() {
 
     <div className="grid grid-cols-2 gap-4 md:grid-cols-4"><StatCard title="Total Quarts" value={loading ? "…" : (totals?.total_qt ?? 0).toFixed(2)} icon={Droplets} subtitle="Completed service usage" iconBgColor="bg-primary/10" iconColor="text-primary" /><StatCard title="Total Gallons" value={loading ? "…" : (totals?.total_gal ?? 0).toFixed(2)} icon={Gauge} subtitle="qt ÷ 4" iconBgColor="bg-blue-500/10" iconColor="text-blue-600" /><StatCard title="Services" value={loading ? "…" : (totals?.service_count ?? 0)} icon={Wrench} subtitle="Jobs with oil quantity" iconBgColor="bg-emerald-500/10" iconColor="text-emerald-600" /><StatCard title="Top Oil" value={loading ? "…" : (totals?.top_item_name ?? "—")} icon={Trophy} subtitle={totals?.top_item_qt ? `${totals.top_item_qt.toFixed(2)} qt` : "No usage yet"} iconBgColor="bg-amber-500/10" iconColor="text-amber-600" /></div>
 
-    <Card><CardContent className="p-4"><p className="mb-3 text-sm font-medium">Quarts consumed per day</p><div className="h-64">{data?.byDay.length ? <ResponsiveContainer width="100%" height="100%"><BarChart data={data.byDay}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="day" tickFormatter={(d) => format(new Date(d), "MMM d")} fontSize={12} /><YAxis fontSize={12} /><Tooltip labelFormatter={(d) => format(new Date(d as string), "M/d/yyyy")} formatter={(v: number) => [`${Number(v).toFixed(2)} qt`, "Used"]} /><Bar dataKey="qty_qt" fill="hsl(var(--primary))" radius={[4,4,0,0]} onClick={(d: any) => setDrillDay(d.day)} style={{ cursor: "pointer" }} /></BarChart></ResponsiveContainer> : <div className="flex h-full items-center justify-center text-sm text-muted-foreground">{loading ? "Loading…" : "No completed jobs with oil entered in this range"}</div>}</div></CardContent></Card>
+    <Card><CardContent className="p-4"><p className="mb-3 text-sm font-medium">Quarts consumed per day</p><div className="h-64">{data?.byDay.length ? <ResponsiveContainer width="100%" height="100%"><BarChart data={data.byDay}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="day" tickFormatter={(d) => format(new Date(d), "MMM d")} fontSize={12} /><YAxis fontSize={12} /><Tooltip labelFormatter={(d) => format(new Date(d as string), "M/d/yyyy")} formatter={(v: number) => [`${Number(v).toFixed(2)} qt`, "Used"]} /><Bar dataKey="qty_qt" fill="hsl(var(--primary))" radius={[4,4,0,0]} onClick={(d: { day?: string }) => { if (d.day) setDrillDay(d.day); }} style={{ cursor: "pointer" }} /></BarChart></ResponsiveContainer> : <div className="flex h-full items-center justify-center text-sm text-muted-foreground">{loading ? "Loading…" : "No completed jobs with oil entered in this range"}</div>}</div></CardContent></Card>
 
     {data?.byItem.length ? <Card><CardContent className="p-0"><div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>OIL TYPE</TableHead><TableHead className="text-right">QUARTS USED</TableHead><TableHead className="text-right">RECORDED QTY</TableHead></TableRow></TableHeader><TableBody>{data.byItem.map((item) => <TableRow key={item.inventory_item_id}><TableCell className="font-medium">{item.name}</TableCell><TableCell className="text-right">{item.qty_qt.toFixed(2)} qt</TableCell><TableCell className="text-right">{item.raw_qty.toFixed(2)} qt</TableCell></TableRow>)}</TableBody></Table></div></CardContent></Card> : null}
 
