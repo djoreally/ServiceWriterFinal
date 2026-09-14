@@ -153,7 +153,7 @@ export async function POST(request: Request) {
       metadata,
     };
 
-    const { data: createdId, error } = await (supabase as any).rpc("create_invoice_v1", {
+    const { data: createdId, error } = await productionSupabase.rpc("create_invoice_v1", {
       p_workspace_id: body.workspace_id,
       p_header: header,
       p_lines: lineRows(body.line_items, body.vehicle_id ?? null),
