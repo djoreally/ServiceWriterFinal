@@ -13,15 +13,20 @@ async function requireContext() {
 }
 function metadataObject(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 export interface UpsellItem { id: string; name: string; description: string | null; default_price: number; is_active: boolean; is_upsell: boolean; }
+type UpsellCandidate = UpsellItem & { sort_order: number };
 
 export async function fetchUpsells(): Promise<UpsellItem[]> {
   const { workspaceId } = await requireContext();
   const { data, error } = await db.from("service_catalog").select("id,name,description,labor_price,is_active,metadata").eq("workspace_id", workspaceId).order("name");
   if (error) throw error;
-  return (data ?? []).map((row: any) => {
+  const candidates: UpsellCandidate[] = (data ?? []).map((row) => {
     const metadata = metadataObject(row.metadata);
     return { id: row.id, name: row.name, description: row.description, default_price: Number(row.labor_price ?? 0), is_active: row.is_active, is_upsell: metadata.is_upsell === true, sort_order: Number(metadata.sort_order ?? 0) };
-  }).filter((row: any) => row.is_upsell).sort((a: any, b: any) => a.sort_order - b.sort_order || a.name.localeCompare(b.name)).map(({ sort_order: _sortOrder, ...row }: any) => row as UpsellItem);
+  });
+  return candidates
+    .filter((row) => row.is_upsell)
+    .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))
+    .map(({ sort_order: _sortOrder, ...row }) => row);
 }
 
 export async function updateUpsell(id: string, payload: { name: string; description: string | null; default_price: number; is_active: boolean }): Promise<void> {
