@@ -13,6 +13,7 @@ import type { Database, Json } from "@/integrations/supabase/types.production";
 import type { Terminology } from "@/contexts/TerminologyContext";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
+import { nextApi } from "@/lib/nextApiClient";
 
 export interface BusinessProfileSettings {
   id?: string;
@@ -73,47 +74,17 @@ const businessSettingsCache = new Map<string, { value: BusinessProfileSettings |
 const businessSettingsInFlight = new Map<string, Promise<BusinessProfileSettings | null>>();
 
 async function resolveWorkspaceFromDatabase(userId: string, selectedWorkspaceId: string | null): Promise<WorkspaceContext | null> {
-  let membershipQuery = productionSupabase
-    .from("workspace_members")
-    .select("workspace_id")
-    .eq("user_id", userId)
-    .eq("is_active", true);
+  const memberships = await nextApi.workspaces();
+  const active = memberships.filter((membership) => membership.is_active && membership.workspaces?.is_active);
 
-  if (selectedWorkspaceId) {
-    membershipQuery = membershipQuery.eq("workspace_id", selectedWorkspaceId);
-  }
+  const selected = selectedWorkspaceId
+    ? active.find((membership) => membership.workspace_id === selectedWorkspaceId)
+    : null;
+  const membership = selected ?? active[0] ?? null;
 
-  let { data: membership, error: membershipError } = await membershipQuery
-    .limit(1)
-    .maybeSingle();
-  if (membershipError) throw membershipError;
-
-  if (!membership && selectedWorkspaceId) {
-    const fallback = await productionSupabase
-      .from("workspace_members")
-      .select("workspace_id")
-      .eq("user_id", userId)
-      .eq("is_active", true)
-      .limit(1)
-      .maybeSingle();
-    membership = fallback.data;
-    membershipError = fallback.error;
-    if (membershipError) throw membershipError;
-  }
-
-  if (membership?.workspace_id) {
-    return { workspaceId: membership.workspace_id, userId };
-  }
-
-  const { data: owned, error: ownedError } = await productionSupabase
-    .from("workspaces")
-    .select("id")
-    .eq("created_by", userId)
-    .eq("is_active", true)
-    .limit(1)
-    .maybeSingle();
-  if (ownedError) throw ownedError;
-  return owned?.id ? { workspaceId: owned.id, userId } : null;
+  return membership?.workspace_id
+    ? { workspaceId: membership.workspace_id, userId }
+    : null;
 }
 
 /**
