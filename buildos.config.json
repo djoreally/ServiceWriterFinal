@@ -9,14 +9,17 @@
     "test": "npm test",
     "build": "npm run build",
     "architecture": "npm run verify:architecture",
-    "identity": "npm run verify:identity"
+    "identity": "npm run verify:identity",
+    "frontend-ui": "npm run verify:frontend-ui"
   },
   "check": [
     "state",
     "typecheck",
     "lint",
     "architecture",
-    "identity"
+    "identity",
+    "frontend-ui",
+    "test"
   ],
   "verify": [
     "state",
@@ -24,6 +27,7 @@
     "lint",
     "architecture",
     "identity",
+    "frontend-ui",
     "test",
     "build"
   ],
