@@ -67,19 +67,13 @@ function mapTemplate(row: Record<string, unknown>): ServiceTemplate {
 
 /** Every active template in the shared library. */
 export async function fetchServiceTemplates(): Promise<ServiceTemplate[]> {
-  const { data, error } = await client.from("service_templates").select("*").eq("is_active", true).order("sort_order");
-  if (error) throw error;
-  return (data ?? []).map(mapTemplate).sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+  // The legacy shared service_templates table was intentionally retired.
+  // Keep the library dialog stable until a canonical replacement catalog is introduced.
+  return [];
 }
 
 /** Categories with their hierarchy, used to group the library. */
 export async function fetchTemplateCategories(): Promise<TemplateCategory[]> {
-  const { data, error } = await client.from("service_categories").select("id, name, parent_id, sort_order").order("sort_order");
-  if (error) throw error;
-  return (data ?? []).map((row) => ({
-    id: String(row.id),
-    name: String(row.name),
-    parentId: (row.parent_id as string | null) ?? null,
-    sortOrder: Number(row.sort_order ?? 0),
-  }));
+  // service_categories belonged to the same retired legacy library.
+  return [];
 }
