@@ -52,7 +52,7 @@ export async function POST(request: Request) {
       ...(body.van_id ? { legacy_van_id: body.van_id } : {}),
     };
 
-    const { data, error } = await (supabase as any).rpc("create_work_order_v1", {
+    const { data, error } = await productionSupabase.rpc("create_work_order_v1", {
       p_workspace_id: body.workspace_id,
       p_payload: {
         appointment_id: body.appointment_id ?? null,
