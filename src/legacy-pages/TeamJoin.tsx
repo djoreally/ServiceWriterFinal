@@ -7,13 +7,10 @@ import { Card, CardContent } from "@/components/ui/card";
 export default function TeamJoin() {
   const { token = "" } = useParams<{ token: string }>();
   const navigate = useNavigate();
-  const [error, setError] = useState("");
+  const [error, setError] = useState(() => token ? "" : "This invitation link is incomplete.");
 
   useEffect(() => {
-    if (!token) {
-      setError("This invitation link is incomplete.");
-      return;
-    }
+    if (!token) return;
 
     let cancelled = false;
     void (async () => {
