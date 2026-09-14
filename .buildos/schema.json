@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "required": ["version", "status", "gates"],
+  "properties": {
+    "version": {"type": "integer"},
+    "status": {"enum": ["not_started","in_progress","blocked","built","deployed","verified","green","red"]},
+    "gates": {"type": "object"}
+  }
+}
