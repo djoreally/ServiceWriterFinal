@@ -1,6 +1,7 @@
 /** Reports supporting queries backed by canonical workspace tables. */
 import { productionSupabase } from "@/integrations/supabase/client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+import type { Database } from "@/integrations/supabase/types.production";
 const db = productionSupabase;
 
 export interface CustomerAnalyticsRow { id: string; name: string; email: string | null; lifetime_value: number; total_services: number; average_order_value: number; days_since_last_service: number | null; churn_risk: string | null; customer_segment: string | null; last_service_date: string | null; first_service_date: string | null; }
@@ -22,14 +23,15 @@ export async function fetchCustomerAnalytics(_userId: string): Promise<CustomerA
   if (customerResult.error) throw customerResult.error;
   if (serviceResult.error) throw serviceResult.error;
 
-  const servicesByCustomer = new Map<string, Array<Record<string, any>>>();
+  type ServiceRecord = Pick<Database["public"]["Tables"]["service_records"]["Row"], "customer_id" | "total_amount" | "started_at" | "completed_at" | "created_at">;
+  const servicesByCustomer = new Map<string, ServiceRecord[]>();
   for (const row of serviceResult.data ?? []) {
     if (!row.customer_id) continue;
     const list = servicesByCustomer.get(row.customer_id) ?? [];
     list.push(row); servicesByCustomer.set(row.customer_id, list);
   }
   const now = Date.now();
-  const customers: CustomerAnalyticsRow[] = (customerResult.data ?? []).map((row: any) => {
+  const customers: CustomerAnalyticsRow[] = (customerResult.data ?? []).map((row) => {
     const services = servicesByCustomer.get(row.id) ?? [];
     const dates = services.map((service) => service.completed_at || service.started_at || service.created_at).filter(Boolean).sort();
     const lifetime = services.reduce((sum, service) => sum + Number(service.total_amount ?? 0), 0);
@@ -70,11 +72,11 @@ export async function fetchTechniciansForReports(_userId: string): Promise<Techn
   if (!context) return [];
   const { data: members, error } = await db.from("workspace_members").select("user_id,role,is_active").eq("workspace_id", context.workspaceId).eq("is_active", true);
   if (error) throw error;
-  const techIds = (members ?? []).filter((member: any) => member.role === "technician").map((member: any) => member.user_id);
+  const techIds = (members ?? []).filter((member) => member.role === "technician").map((member) => member.user_id);
   if (!techIds.length) return [];
   const { data: profiles, error: profileError } = await db.from("profiles").select("id,display_name").in("id", techIds);
   if (profileError) throw profileError;
-  const names = new Map((profiles ?? []).map((profile: any) => [profile.id, profile.display_name]));
+  const names = new Map((profiles ?? []).map((profile) => [profile.id, profile.display_name] as const));
   return techIds.map((id: string) => ({ id, name: String(names.get(id) || "Technician"), status: "active" }));
 }
 
