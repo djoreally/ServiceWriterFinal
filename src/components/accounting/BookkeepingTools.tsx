@@ -52,10 +52,13 @@ export function BookkeepingTools({ facts }: { facts: Omit<BookFacts, "mileageMil
   };
 
   useEffect(() => {
-    void load().catch((error) => {
-      console.error(error);
-      toast.error("Unable to load bookkeeping tools.");
-    });
+    const task = window.setTimeout(() => {
+      void load().catch((error) => {
+        console.error(error);
+        toast.error("Unable to load bookkeeping tools.");
+      });
+    }, 0);
+    return () => window.clearTimeout(task);
   }, []);
 
   const syncMileage = async () => {
