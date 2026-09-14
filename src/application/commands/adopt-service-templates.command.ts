@@ -1,52 +1,50 @@
-/**
- * Adopting library templates into a shop's own service catalog.
- *
- * The template carries its own behavior (vertical, pricing mode, tire intent,
- * fitment/inventory flags) so the adopted row is fully wired the moment it
- * lands — the tire and detailing pricing screens pick it up with no extra step.
- */
-import { supabase } from "@/integrations/supabase/client";
-import { requireWorkspaceOwnerUserId } from "@/application/tenant-workspace";
+/** Copy selected starter-library services into the active workspace catalog. */
+import { productionSupabase } from "@/integrations/supabase/client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+import { invalidateCatalogItems } from "@/application/queries/service-catalog.query";
 import type { ServiceTemplate } from "@/application/queries/service-templates.query";
 
 export interface TemplateAdoption {
   template: ServiceTemplate;
-  /** Price the shop set in the library dialog; falls back to the suggested price. */
   price?: number;
 }
 
 export async function adoptServiceTemplates(adoptions: TemplateAdoption[]): Promise<number> {
   if (adoptions.length === 0) return 0;
-  const ownerUserId = await requireWorkspaceOwnerUserId();
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("No active workspace is available.");
 
   const rows = adoptions.map(({ template, price }) => ({
-    user_id: ownerUserId,
-    template_id: template.id,
+    workspace_id: context.workspaceId,
     name: template.name,
     description: template.description,
-    category: template.categoryId,
-    category_id: template.categoryId,
-    default_price: Number.isFinite(price as number) ? Number(price) : template.defaultPrice,
-    labor_rate: template.laborRate,
-    estimated_duration: template.durationMinutes,
-    skill_level: template.skillLevel,
-    notes: template.notes,
+    category: template.categoryId === "fleet_mobile" ? "Fleet / Mobile-Specific" : template.categoryId === "tire" ? "Tire" : template.categoryId === "detailing" ? "Detailing" : "Automotive",
+    estimated_minutes: template.durationMinutes,
+    labor_price: Number.isFinite(price as number) ? Number(price) : template.defaultPrice,
     is_active: true,
-    is_upsell: template.isUpsell,
-    service_vertical: template.serviceVertical,
-    pricing_mode: template.pricingMode,
-    service_intent: template.serviceIntent,
-    requires_tire_quantity: template.requiresTireQuantity,
-    requires_fitment_lookup: template.requiresFitmentLookup,
-    requires_inventory_selection: template.requiresInventorySelection,
-    allows_manual_fitment: template.allowsManualFitment,
-    sort_order: template.sortOrder,
+    metadata: {
+      template_id: template.id,
+      category_id: template.categoryId,
+      suggested_price: template.suggestedPrice,
+      duration_label: template.durationLabel,
+      labor_rate: template.laborRate,
+      skill_level: template.skillLevel,
+      notes: template.notes,
+      is_upsell: template.isUpsell,
+      service_vertical: template.serviceVertical,
+      pricing_mode: template.pricingMode,
+      service_intent: template.serviceIntent,
+      requires_tire_quantity: template.requiresTireQuantity,
+      requires_fitment_lookup: template.requiresFitmentLookup,
+      requires_inventory_selection: template.requiresInventorySelection,
+      allows_manual_fitment: template.allowsManualFitment,
+      configuration_schema_version: 1,
+      sort_order: template.sortOrder,
+    },
   }));
 
-  const { error } = await (supabase as unknown as {
-    from: (table: string) => { insert: (values: unknown[]) => Promise<{ error: unknown }> };
-  }).from("service_catalog").insert(rows);
-
+  const { error } = await (productionSupabase as any).from("service_catalog").insert(rows);
   if (error) throw error;
+  invalidateCatalogItems(context.workspaceId);
   return rows.length;
 }
