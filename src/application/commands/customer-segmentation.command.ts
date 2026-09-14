@@ -3,7 +3,7 @@ import { productionSupabase } from "@/integrations/supabase/client";
 import type { SegmentRow } from "@/application/queries/customer-segmentation.query";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
-const db = productionSupabase as any;
+const db = productionSupabase;
 
 async function requireContext() {
   const { data: { user } } = await getCurrentAuthUser();
