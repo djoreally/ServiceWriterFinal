@@ -69,6 +69,15 @@ export async function buildAppointmentEmailSnapshot(
     text(metadata.location_address) ??
     text(metadata.service_address) ??
     null;
+  const timezone = text(metadata.business_timezone) ?? text(metadata.timezone) ?? "America/New_York";
+  const startsAt = text(appointment.starts_at);
+  const scheduled = startsAt ? new Date(startsAt) : null;
+  const appointmentDate = scheduled && !Number.isNaN(scheduled.getTime())
+    ? new Intl.DateTimeFormat("en-US", { timeZone: timezone, month: "numeric", day: "numeric", year: "numeric" }).format(scheduled)
+    : undefined;
+  const appointmentTime = scheduled && !Number.isNaN(scheduled.getTime())
+    ? new Intl.DateTimeFormat("en-US", { timeZone: timezone, hour: "numeric", minute: "2-digit" }).format(scheduled)
+    : undefined;
 
   return {
     appointment,
@@ -82,6 +91,11 @@ export async function buildAppointmentEmailSnapshot(
       "appointment.service": serviceLines.map(line => line.split(" — ")[0]).join(", ") || text(metadata.service_name) || "Service",
       "appointment.services": serviceLines.join("\n"),
       "appointment.address": serviceAddress,
+      "appointment.date": appointmentDate,
+      "appointment.time": appointmentTime,
+      "appointment.arrival_window": text(metadata.arrival_window) ?? appointmentTime,
+      "appointment.manage_url": text(metadata.manage_url),
+      "business.timezone": timezone,
       "appointment.total": invoice ? money(invoice.total_amount) : (metadata.estimated_cost != null ? money(metadata.estimated_cost) : undefined),
       "invoice.number": invoice?.invoice_number ?? undefined,
       "invoice.total": invoice ? money(invoice.total_amount) : undefined,
