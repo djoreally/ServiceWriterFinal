@@ -135,9 +135,7 @@ export async function dispatchAppointmentLifecycle(input: {
     entityType: "appointment",
     entityId: input.appointment.id,
     workspaceId: input.appointment.workspace_id,
-    customerId: snapshot?.customerId ?? input.appointment.customer_id,
-    recipientEmail,
-    recipientRole: input.recipientRole ?? "customer",
+    customerId: (input.recipientRole ?? "customer") === "customer"\n      ? (snapshot?.customerId ?? input.appointment.customer_id)\n      : null,\n    recipientEmail,\n    recipientRole: input.recipientRole ?? "customer",
     variables: { ...appointmentLifecycleVariables(input), ...(snapshot?.variables ?? {}) },
     metadata: { appointmentId: input.appointment.id, ...(snapshot?.metadata ?? {}) },
   });
