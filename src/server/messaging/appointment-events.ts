@@ -1,5 +1,7 @@
 import { dispatchLifecycleEvent, type LifecycleRecipientRole } from "@/server/messaging/lifecycle-events";
 import type { LifecycleVariables } from "@/server/messaging/lifecycle-templates";
+import { buildAppointmentEmailSnapshot } from "@/server/messaging/appointment-email-snapshot";
+import { createSupabaseAdminClient } from "@/lib/supabase";
 
 type CustomerContact = {
   id?: string | null;
@@ -119,7 +121,13 @@ export async function dispatchAppointmentLifecycle(input: {
   technicianName?: string | null;
   changedFields?: string[];
 }) {
-  const recipientEmail = input.recipientEmail ?? appointmentCustomerEmail(input.appointment);
+  let snapshot: Awaited<ReturnType<typeof buildAppointmentEmailSnapshot>> | null = null;
+  try {
+    snapshot = await buildAppointmentEmailSnapshot(createSupabaseAdminClient(), input.appointment);
+  } catch (error) {
+    console.error("[Lifecycle] appointment email snapshot enrichment failed; using route payload", error);
+  }
+  const recipientEmail = input.recipientEmail ?? snapshot?.customerEmail ?? appointmentCustomerEmail(input.appointment);
   if (!recipientEmail) return null;
   return dispatchLifecycleEvent({
     templateKey: input.eventKey,
@@ -127,10 +135,10 @@ export async function dispatchAppointmentLifecycle(input: {
     entityType: "appointment",
     entityId: input.appointment.id,
     workspaceId: input.appointment.workspace_id,
-    customerId: input.appointment.customer_id,
+    customerId: snapshot?.customerId ?? input.appointment.customer_id,
     recipientEmail,
     recipientRole: input.recipientRole ?? "customer",
-    variables: appointmentLifecycleVariables(input),
-    metadata: { appointmentId: input.appointment.id },
+    variables: { ...appointmentLifecycleVariables(input), ...(snapshot?.variables ?? {}) },
+    metadata: { appointmentId: input.appointment.id, ...(snapshot?.metadata ?? {}) },
   });
 }
