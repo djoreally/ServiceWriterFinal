@@ -170,6 +170,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       ...metadata,
       last_sent_at: sentAt,
       last_sent_to: recipient.toLowerCase(),
+      last_sent_provider: sent.providerName,
       last_sent_provider_message_id: sent.providerMessageId,
     };
     const invoicePatch: Record<string, unknown> = {
@@ -191,6 +192,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       data: {
         recipient,
         delivery_status: sent.status,
+        provider: sent.providerName,
         provider_message_id: sent.providerMessageId,
         invoice_status: nextStatus,
         amount_paid: paid,
