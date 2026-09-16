@@ -12,7 +12,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node scripts/buildos-local-gate.mjs check && node scripts/check-architecture-contract.mjs && node scripts/check-identity-contract.mjs && node scripts/check-frontend-ui-contract.mjs",
+    "prebuild": "node scripts/check-architecture-contract.mjs && node scripts/check-identity-contract.mjs && node scripts/check-frontend-ui-contract.mjs",
     "build": "next build",
     "typecheck": "tsc --noEmit",
     "test": "jest --runInBand",
@@ -31,7 +31,9 @@
     "buildos:doctor": "npx --yes --package=github:djoreally/buildos-app-forge#2ce5bddaa164e3b221835e820fdc6db9508fb463 buildos doctor",
     "buildos:check": "npx --yes --package=github:djoreally/buildos-app-forge#2ce5bddaa164e3b221835e820fdc6db9508fb463 buildos check",
     "buildos:verify": "npx --yes --package=github:djoreally/buildos-app-forge#2ce5bddaa164e3b221835e820fdc6db9508fb463 buildos verify",
-    "buildos:sync": "npx --yes --package=github:djoreally/buildos-app-forge#2ce5bddaa164e3b221835e820fdc6db9508fb463 buildos sync"
+    "buildos:sync": "npx --yes --package=github:djoreally/buildos-app-forge#2ce5bddaa164e3b221835e820fdc6db9508fb463 buildos sync",
+    "prepare": "husky",
+    "buildos:prepush": "node scripts/buildos-local-gate.mjs check"
   },
   "playwright": {
     "config": "./e2e/playwright.config.ts"
