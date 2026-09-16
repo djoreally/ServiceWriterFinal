@@ -1,3 +1,5 @@
 #!/bin/sh
 set -e
-npm run buildos:verify
+npm run typecheck
+npm run lint
+npm test
