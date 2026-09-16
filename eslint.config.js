@@ -42,6 +42,7 @@ export default tseslint.config(
       "apps/web-next/.next/**",
       "apps/web-next/next-env.d.ts",
       "supabase/functions/**",
+      ".buildos/**",
     ],
   },
   {
@@ -222,7 +223,6 @@ export default tseslint.config(
   {
     files: [
       "src/lib/livePresence.ts",
-      "src/application/commands/campaigns.command.ts",
       "src/application/queries/campaigns.query.ts",
     ],
     languageOptions: {
