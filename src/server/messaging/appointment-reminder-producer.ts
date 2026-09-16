@@ -11,6 +11,15 @@ const CUSTOMER_REMINDERS = [
 ] as const;
 
 const ACTIVE_STATUSES = ["scheduled", "confirmed", "approved", "pending"];
+const CANONICAL_PRODUCTION_APP_URL = "https://servicewriter.xyz";
+
+function appBaseUrl(): string {
+  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  const vercelUrl = process.env.VERCEL_URL?.trim();
+  const value = configured
+    || (process.env.VERCEL_ENV === "production" ? CANONICAL_PRODUCTION_APP_URL : vercelUrl ? `https://${vercelUrl}` : CANONICAL_PRODUCTION_APP_URL);
+  return new URL(value).toString().replace(/\/$/, "");
+}
 
 export async function produceCustomerAppointmentReminders(now = new Date()) {
   const supabase = createSupabaseAdminClient();
@@ -48,7 +57,7 @@ export async function produceCustomerAppointmentReminders(now = new Date()) {
         appointment: appointment as AppointmentLifecycleRecord,
         workspaceName: workspace.name ?? "Service Writer",
         workspaceTimezone: workspace.timezone ?? "UTC",
-        actionUrl: "/my-bookings",
+        actionUrl: new URL("/my-bookings", `${appBaseUrl()}/`).toString(),
       });
       if (result) queued += 1;
       else skipped += 1;
