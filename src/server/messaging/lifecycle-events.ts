@@ -119,7 +119,6 @@ export const LIFECYCLE_EVENT_KEYS = {
   reminder7Days: "appointment_reminders.7_days_before",
   reminder72Hours: "appointment_reminders.72_hours_before",
   reminder24Hours: "appointment_reminders.24_hours_before",
-  reminderMorningOf: "appointment_reminders.morning_of_appointment",
   reminder60Minutes: "appointment_reminders.60_minutes_before",
   technicianEnRoute: "technician_and_live_service_sequence.technician_en_route",
   technicianArrivingSoon: "technician_and_live_service_sequence.technician_arriving_soon",
