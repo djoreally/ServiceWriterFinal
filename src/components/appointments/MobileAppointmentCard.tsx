@@ -44,7 +44,11 @@ export const MobileAppointmentCard = memo(function MobileAppointmentCard({ appoi
   const { formatTime } = useRegionalSettings();
   const { feeSettings } = useFeeSettings();
   const totalDue = computeAppointmentTotal(appointment, feeSettings);
-  const vehicleName = appointment.vehicle ? `${appointment.vehicle.year} ${appointment.vehicle.make} ${appointment.vehicle.model}` : 'Vehicle not specified';
+  const appointmentVehicles = Array.isArray((appointment as Appointment & { vehicles?: Appointment['vehicle'][] }).vehicles)
+    ? ((appointment as Appointment & { vehicles?: Appointment['vehicle'][] }).vehicles ?? []).filter(Boolean)
+    : appointment.vehicle ? [appointment.vehicle] : [];
+  const vehicleNames = appointmentVehicles.map((vehicle) => `${vehicle!.year} ${vehicle!.make} ${vehicle!.model}`);
+  const vehicleName = vehicleNames[0] || 'Vehicle not specified';
   const customerName = appointment.customer?.name || appointment.guest_name || 'Customer';
 
   // Fallback to title if service name is not present
@@ -136,7 +140,7 @@ export const MobileAppointmentCard = memo(function MobileAppointmentCard({ appoi
               </div>
               <div className="flex items-center gap-2">
                 <Car className="w-4 h-4" />
-                <span className="truncate">{vehicleName}</span>
+                <span className="min-w-0">{vehicleNames.length > 0 ? vehicleNames.join(" • ") : vehicleName}</span>
               </div>
             </div>
           </div>
