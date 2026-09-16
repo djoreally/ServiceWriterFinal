@@ -194,6 +194,7 @@ export default tseslint.config(
       "src/components/ai/AIAssistant.tsx",
       "src/components/pricing/CatalogBenchmarkDialog.tsx",
       "src/components/security/RequireMfa.tsx",
+      "src/components/ThemeProvider.tsx",
       "src/components/settings/GDPRDataManagement.tsx",
       "src/pages/MfaRequired.tsx",
       "src/pages/SessionManagement.tsx",
