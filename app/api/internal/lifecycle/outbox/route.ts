@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { processLifecycleEventOutbox } from "@/server/messaging/lifecycle-sender";
+import { produceCustomerAppointmentReminders } from "@/server/messaging/appointment-reminder-producer";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -51,8 +52,9 @@ async function processLifecycleOutboxRequest(request: Request) {
   try {
     const body = await request.json().catch(() => ({})) as { limit?: number };
     const limit = Number.isFinite(body.limit) ? Math.max(1, Math.min(Number(body.limit), 50)) : 10;
-    const result = await processLifecycleEventOutbox(limit);
-    return NextResponse.json({ ok: true, ...result, durationMs: Date.now() - startedAt });
+    const delivery = await processLifecycleEventOutbox(limit);
+    const reminders = await produceCustomerAppointmentReminders();
+    return NextResponse.json({ ok: true, delivery, reminders, durationMs: Date.now() - startedAt });
   } catch (error) {
     console.error("[Lifecycle] outbox worker failed", safeErrorDetails(error));
     return NextResponse.json({ ok: false, error: "worker_failed" }, { status: 500 });
