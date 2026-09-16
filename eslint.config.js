@@ -69,7 +69,12 @@ export default tseslint.config(
       react,
     },
     rules: {
-      // Production-fatal hook correctness only. React Compiler advisory rules\n      // (set-state-in-effect, preserve-manual-memoization, purity, etc.) are\n      // not release gates for this mixed legacy/modern codebase.\n      "react-hooks/rules-of-hooks": "error",\n      "react-hooks/exhaustive-deps": "error",\n      "react-refresh/only-export-components": ["off", {
+      // Production-fatal hook correctness only. React Compiler advisory rules
+      // (set-state-in-effect, preserve-manual-memoization, purity, etc.) are
+      // not release gates for this mixed legacy/modern codebase.
+      "react-hooks/rules-of-hooks": "error",
+      "react-hooks/exhaustive-deps": "error",
+      "react-refresh/only-export-components": ["off", {
         allowConstantExport: true,
         // Audited framework exports, provider hooks, and colocated public helpers.
         // Keeping this list explicit preserves enforcement for every future export.
