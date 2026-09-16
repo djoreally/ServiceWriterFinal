@@ -14,6 +14,7 @@ export type LifecycleSendInput = {
   idempotencyKey: string;
   variables: LifecycleVariables;
   metadata?: Record<string, string>;
+  renderedOverride?: { subject: string; text: string; html: string; purpose: LifecyclePurpose; fromName?: string; replyTo?: string };
 };
 
 type OutboxRow = {
@@ -54,7 +55,8 @@ export async function enqueueLifecycleEmail(input: LifecycleSendInput & {
   entityId?: string;
   recipientRole?: string;
 }): Promise<{ id: string; status: "queued" }> {
-  const rendered = renderLifecycleEmailForDelivery(input.templateKey, input.variables);
+  const canonical = renderLifecycleEmailForDelivery(input.templateKey, input.variables);
+  const rendered = input.renderedOverride ? { ...canonical, ...input.renderedOverride } : canonical;
   const email = assertEmail(input.recipientEmail);
   const supabase = createSupabaseAdminClient();
   const { data, error } = await supabase.rpc("enqueue_lifecycle_event", {
@@ -75,7 +77,7 @@ export async function enqueueLifecycleEmail(input: LifecycleSendInput & {
       renderedText: rendered.text,
       renderedHtml: rendered.html,
       renderedPurpose: rendered.purpose,
-      fromName: typeof input.variables["business.name"] === "string" ? String(input.variables["business.name"]) : "Service Writer",
+      fromName: input.renderedOverride?.fromName ?? (typeof input.variables["business.name"] === "string" ? String(input.variables["business.name"]) : "Service Writer"),
       replyTo: typeof input.variables["business.email"] === "string" && /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(String(input.variables["business.email"])) ? String(input.variables["business.email"]) : null,
     },
   });
@@ -83,7 +85,7 @@ export async function enqueueLifecycleEmail(input: LifecycleSendInput & {
   return { id: String(Array.isArray(data) ? data[0] : data), status: "queued" };
 }
 
-export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ providerMessageId?: string; status: string }> {
+export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ providerMessageId?: string; providerName?: string; status: string }> {
   const rendered = renderLifecycleEmailForDelivery(input.templateKey, input.variables);
   const supabase = createSupabaseAdminClient();
   const recipientEmail = assertEmail(input.recipientEmail);
@@ -126,13 +128,13 @@ export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ p
   }
   const existing = await supabase
     .from("message_logs")
-    .select("id,provider_message_id,status")
+    .select("id,provider,provider_message_id,status")
     .eq("workspace_id", input.workspaceId)
     .eq("idempotency_key", input.idempotencyKey)
     .maybeSingle();
 
   if (existing.data?.provider_message_id && ["accepted", "sent", "delivered"].includes(existing.data.status)) {
-    return { providerMessageId: existing.data.provider_message_id, status: existing.data.status };
+    return { providerMessageId: existing.data.provider_message_id, providerName: existing.data.provider ?? undefined, status: existing.data.status };
   }
 
   const queued = await supabase.from("message_logs").upsert({

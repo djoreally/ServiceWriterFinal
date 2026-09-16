@@ -1,8 +1,6 @@
 import { z } from "zod";
 import { errorResponse, json, requireWorkspaceMember } from "@/server/api";
-import { ResendEmailAdapter } from "@/server/messaging/resend";
-import { EnginemailerEmailAdapter } from "@/server/messaging/enginemailer";
-import { createSupabaseAdminClient } from "@/lib/supabase";
+import { sendLifecycleEmail } from "@/server/messaging/lifecycle-sender";
 
 const bodySchema = z.object({
   workspace_id: z.string().uuid(),
@@ -134,49 +132,39 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const html = `<!doctype html><html><body style="margin:0;background:#f6f7f9;font-family:Arial,sans-serif;color:#111827"><div style="max-width:680px;margin:0 auto;padding:28px 16px"><div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden"><div style="padding:24px;border-bottom:1px solid #e5e7eb"><div style="font-size:13px;color:#6b7280">${escapeHtml(workspace.name)}</div><h1 style="margin:6px 0 0;font-size:24px">Invoice ${escapeHtml(invoice.invoice_number)}</h1></div><div style="padding:24px">${statusHtml}<div style="white-space:pre-line;line-height:1.6;margin-bottom:24px">${escapeHtml(intro).replaceAll("\n", "<br>")}</div><table style="width:100%;border-collapse:collapse;font-size:14px"><thead><tr><th style="padding:10px 8px;text-align:left;border-bottom:2px solid #111827">Item</th><th style="padding:10px 8px;text-align:right;border-bottom:2px solid #111827">Qty</th><th style="padding:10px 8px;text-align:right;border-bottom:2px solid #111827">Rate</th><th style="padding:10px 8px;text-align:right;border-bottom:2px solid #111827">Amount</th></tr></thead><tbody>${rowsHtml}</tbody></table><div style="margin-top:20px;margin-left:auto;max-width:300px"><div style="display:flex;justify-content:space-between;padding:5px 0"><span>Subtotal</span><strong>${escapeHtml(money(invoice.subtotal, currency))}</strong></div><div style="display:flex;justify-content:space-between;padding:5px 0"><span>Tax</span><strong>${escapeHtml(money(invoice.tax_total, currency))}</strong></div><div style="display:flex;justify-content:space-between;padding:10px 0;border-top:2px solid #111827"><span>Total</span><strong>${escapeHtml(money(total, currency))}</strong></div>${paid > 0 ? `<div style="display:flex;justify-content:space-between;padding:5px 0"><span>Paid</span><strong>${escapeHtml(money(paid, currency))}</strong></div>` : ""}<div style="display:flex;justify-content:space-between;padding:10px 0;border-top:1px solid #d1d5db;font-size:18px"><span>Balance due</span><strong>${escapeHtml(money(isPaid ? 0 : balance, currency))}</strong></div>${!isPaid && invoice.due_at ? `<div style="text-align:right;color:#6b7280;font-size:13px">Due ${escapeHtml(new Date(invoice.due_at).toLocaleDateString("en-US"))}</div>` : ""}</div></div></div></div></body></html>`;
 
     const idempotencyKey = `invoice-send:${invoice.id}:${Date.now()}:${crypto.randomUUID()}`;
-    const sendRequest = {
+    const sent = await sendLifecycleEmail({
       workspaceId: body.workspace_id,
-      recipient: { email: recipient },
-      purpose: "transactional" as const,
-      templateKey: isPaid ? "paid_invoice" : "manual_invoice",
-      subject,
-      body: plainText,
-      html,
-      fromName: workspace.name,
+      recipientEmail: recipient,
+      customerId: customer?.id ?? null,
+      templateKey: isPaid
+        ? "invoice_and_payment_sequence.payment_received"
+        : "invoice_and_payment_sequence.invoice_created",
       idempotencyKey,
-      metadata: { invoiceId: invoice.id, invoiceStatus: String(invoice.status), balance: balance.toFixed(2) },
-    };
-
-    let sent;
-    try {
-      sent = await new ResendEmailAdapter().send(sendRequest);
-    } catch (primaryError) {
-      if (!process.env.ENGINEMAILER_API_KEY?.trim()) throw primaryError;
-      sent = await new EnginemailerEmailAdapter().send(sendRequest);
-    }
+      variables: {
+        "business.name": workspace.name,
+        "invoice.number": invoice.invoice_number,
+        "invoice.total": money(total, currency),
+        "invoice.balance_due": money(balance, currency),
+        "invoice.status": String(invoice.status),
+        "customer.full_name": customerName,
+      },
+      metadata: {
+        invoiceId: invoice.id,
+        source: "invoice_send_dialog",
+        invoiceStatus: String(invoice.status),
+        amountPaid: paid.toFixed(2),
+        balanceDue: balance.toFixed(2),
+      },
+      renderedOverride: {
+        subject,
+        text: plainText,
+        html,
+        purpose: "transactional",
+        fromName: workspace.name,
+      },
+    });
 
     const sentAt = new Date().toISOString();
-    const admin = createSupabaseAdminClient();
-    const { error: logError } = await admin.from("message_logs").insert({
-      workspace_id: body.workspace_id,
-      customer_id: customer?.id ?? null,
-      channel: "email",
-      purpose: "transactional",
-      provider: sent.providerName,
-      idempotency_key: idempotencyKey,
-      recipient_email: recipient.toLowerCase(),
-      template_key: sendRequest.templateKey,
-      subject,
-      body_redacted: plainText.slice(0, 240),
-      status: sent.status,
-      provider_message_id: sent.providerMessageId,
-      sent_at: sent.acceptedAt || sentAt,
-      consent_checked_at: sentAt,
-      suppression_checked_at: sentAt,
-      metadata: { invoiceId: invoice.id, source: "invoice_send_dialog", invoiceStatus: invoice.status, amountPaid: paid, balanceDue: balance },
-    });
-    if (logError) console.error("[invoice-send] email sent but message log write failed", logError);
-
     const nextStatus = invoice.status === "draft" ? "issued" : invoice.status;
     const nextMetadata = {
       ...metadata,
@@ -203,6 +191,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return json({
       data: {
         recipient,
+        delivery_status: sent.status,
         provider: sent.providerName,
         provider_message_id: sent.providerMessageId,
         invoice_status: nextStatus,

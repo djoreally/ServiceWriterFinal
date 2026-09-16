@@ -6,6 +6,10 @@ jest.mock("@/server/notifications/push-outbox", () => ({
   processInAppNotificationPushOutbox: jest.fn().mockResolvedValue({ claimed: 0, sent: 0, failed: 0 }),
 }));
 
+jest.mock("@/server/messaging/appointment-reminder-producer", () => ({
+  produceCustomerAppointmentReminders: jest.fn().mockResolvedValue({ scanned: 0, queued: 0, skipped: 0 }),
+}));
+
 jest.mock("next/server", () => ({
   NextResponse: {
     json: (body: unknown, init?: { status?: number }) => ({
@@ -19,6 +23,7 @@ import { GET as runLifecycleWorker } from "../../../app/api/internal/lifecycle/o
 import { GET as runPushWorker } from "../../../app/api/internal/notifications/push/outbox/route";
 import { processLifecycleEventOutbox } from "@/server/messaging/lifecycle-sender";
 import { processInAppNotificationPushOutbox } from "@/server/notifications/push-outbox";
+import { produceCustomerAppointmentReminders } from "@/server/messaging/appointment-reminder-producer";
 
 describe("Vercel cron worker authorization", () => {
   const originalSecret = process.env.CRON_SECRET;
@@ -61,6 +66,7 @@ describe("Vercel cron worker authorization", () => {
     process.env.CRON_SECRET = "correct-secret";
     const response = await handler(request("Bearer correct-secret"));
     expect(response.status).toBe(200);
-    expect(worker).toHaveBeenCalledWith(50);
+    expect(worker).toHaveBeenCalledWith(10);
+    if (_name === "lifecycle") expect(produceCustomerAppointmentReminders).toHaveBeenCalledTimes(1);
   });
 });
