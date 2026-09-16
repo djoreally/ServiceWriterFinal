@@ -68,4 +68,54 @@ describe("renderLifecycleEmailForDelivery", () => {
     expect(variables["appointment.date"]).toBe("9/9/2026");
     expect(variables["appointment.time"]).toBe("9:00 AM");
   });
+  it("renders enriched multi-vehicle appointment lifecycle details without unresolved placeholders", () => {
+    const shared = {
+      "business.name": "MOMS Mobile Oil Change",
+      "business.timezone": "America/New_York",
+      "customer.first_name": "Jordan",
+      "customer.full_name": "Jordan Lee",
+      "appointment.service": "Oil Change, Tire Rotation",
+      "appointment.services": "Oil Change × 1 — $99.99, Tire Rotation × 1 — $50.00",
+      "appointment.vehicles": "2021 Cadillac XT5, 2024 GMC Sierra 2500",
+      "appointment.date": "9/18/2026",
+      "appointment.time": "10:00 AM",
+      "appointment.address": "500 New Service Rd, Ambler, PA",
+      "appointment.total": "$149.99",
+      "appointment.confirmation_code": "ABC12345",
+      "appointment.payment_method": "Pay at service",
+      "appointment.changed_fields": "starts_at, location_address",
+      "appointment.manage_url": "https://servicewriter.xyz/my-bookings",
+      "technician.name": "Edward Smith",
+      "vehicle.year": "2021",
+      "vehicle.make": "Cadillac",
+      "vehicle.model": "XT5",
+      "vehicle.description": "2021 Cadillac XT5",
+      "invoice.number": "INV-1042",
+      "invoice.total": "$149.99",
+      "invoice.status": "issued",
+      "email.recipient_role": "customer",
+      "email.primary_action_url": "https://servicewriter.xyz/my-bookings",
+    };
+
+    for (const key of [
+      "appointment_booking_sequence.appointment_rescheduled",
+      "appointment_booking_sequence.appointment_cancelled",
+      "appointment_booking_sequence.technician_assigned",
+      "technician_and_live_service_sequence.technician_en_route",
+      "technician_and_live_service_sequence.technician_arrived",
+      "technician_and_live_service_sequence.service_completed",
+    ]) {
+      const rendered = renderLifecycleEmailForDelivery(key, shared);
+      expect(rendered.text).not.toMatch(/{{/);
+      expect(rendered.html).not.toMatch(/{{/);
+      expect(rendered.text).toContain("2021 Cadillac XT5, 2024 GMC Sierra 2500");
+      expect(rendered.text).toContain("500 New Service Rd, Ambler, PA");
+    }
+
+    const completed = renderLifecycleEmailForDelivery("technician_and_live_service_sequence.service_completed", shared);
+    expect(completed.text).toContain("INV-1042");
+    expect(completed.text).toContain("$149.99");
+    expect(completed.text).toContain("issued");
+  });
+
 });
