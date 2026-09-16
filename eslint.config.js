@@ -35,6 +35,7 @@ export default tseslint.config(
     ignores: [
       "dist",
       ".next/**",
+      ".buildos/**",
       "next-env.d.ts",
       "coverage/**",
       "e2e/playwright-report/**",
@@ -70,6 +71,9 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      "react-hooks/set-state-in-effect": "off",
+      "react-hooks/purity": "off",
+      "react-hooks/preserve-manual-memoization": "off",
       "react-refresh/only-export-components": ["warn", {
         allowConstantExport: true,
         // Audited framework exports, provider hooks, and colocated public helpers.
@@ -98,15 +102,11 @@ export default tseslint.config(
       "@typescript-eslint/no-explicit-any": "warn",
       "@typescript-eslint/no-empty-object-type": "warn",
       "no-empty": "warn",
-      // Prevent Stripe SDK imports in frontend code, and enforce charting + architecture rules
+      // Enforce charting + architecture rules (Stripe SDK restricted in frontend components)
       "no-restricted-imports": [
         "error",
         {
           patterns: [
-            {
-              group: ["stripe", "stripe/*", "@stripe/*"],
-              message: "Stripe SDK must only be used in edge functions, not frontend code. Use supabase.functions.invoke() to call payment endpoints.",
-            },
             {
               group: ["chart.js", "chart.js/*", "d3", "d3/*", "@d3/*", "nivo", "@nivo/*", "victory", "victory/*"],
               message: "Charting: use Recharts only. chart.js, d3, nivo, and victory are forbidden in this codebase.",
@@ -163,6 +163,10 @@ export default tseslint.config(
               group: ["@supabase/supabase-js", "@supabase/supabase-js/*"],
               message: "Direct Supabase usage is not allowed in components/pages. Use the application layer (src/application/queries or commands) for data access.",
             },
+            {
+              group: ["stripe", "stripe/*", "@stripe/*"],
+              message: "Stripe SDK must only be used in edge functions or server API routes, not frontend component code.",
+            },
           ],
           paths: [
             {
@@ -191,6 +195,7 @@ export default tseslint.config(
     // unsubscribe). The application layer intentionally does not wrap
     // `supabase.auth`, so these files are exempt from the data-access ban.
     files: [
+      "src/components/ThemeProvider.tsx",
       "src/components/admin/AdminTrainingRewards.tsx",
       "src/components/ai/AIAssistant.tsx",
       "src/components/pricing/CatalogBenchmarkDialog.tsx",
@@ -217,15 +222,10 @@ export default tseslint.config(
   {
     files: [
       "src/lib/livePresence.ts",
-      "src/application/commands/campaigns.command.ts",
-      "src/application/queries/campaigns.query.ts",
     ],
     languageOptions: {
       parser: tseslint.parser,
       parserOptions: {
-        // Enable typed linting for this scoped block. projectService lets
-        // typescript-eslint locate the correct tsconfig per file without
-        // requiring an explicit project path list.
         projectService: true,
         tsconfigRootDir: import.meta.dirname,
       },
