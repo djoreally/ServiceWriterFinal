@@ -137,8 +137,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       recipientEmail: recipient,
       customerId: customer?.id ?? null,
       templateKey: isPaid
-        ? "invoice_payment_sequence.payment_received"
-        : "invoice_payment_sequence.invoice_created",
+        ? "invoice_and_payment_sequence.payment_received"
+        : "invoice_and_payment_sequence.invoice_created",
       idempotencyKey,
       variables: {
         "business.name": workspace.name,
