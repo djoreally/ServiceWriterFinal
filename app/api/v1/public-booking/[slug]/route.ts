@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { errorResponse, json } from "@/server/api";
 import { createSupabaseServerClient } from "@/lib/supabase";
-import { checkRateLimit } from "@/lib/security/rateLimiter";
 
 const slugSchema = z.string().trim().min(1).max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/i);
 const querySchema = z.object({
@@ -48,15 +47,6 @@ async function profileForSlug(supabase: Awaited<ReturnType<typeof createSupabase
 
 export async function GET(request: Request, context: { params: Promise<{ slug: string }> }) {
   try {
-    const ip = request.headers.get("x-forwarded-for")?.split(",")[0] || "unknown_ip";
-    const rateLimit = checkRateLimit(`public_booking_${ip}`, 100, 60000);
-    if (!rateLimit.allowed) {
-      return json(
-        { error: { code: "rate_limit_exceeded", message: "Too many booking requests. Please try again in a minute." } },
-        { status: 429, headers: { "Retry-After": Math.ceil(rateLimit.resetMs / 1000).toString() } }
-      );
-    }
-
     const { slug: rawSlug } = await context.params;
     const slug = canonicalBookingSlug(slugSchema.parse(rawSlug));
     const url = new URL(request.url);
