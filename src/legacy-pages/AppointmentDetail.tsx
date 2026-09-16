@@ -255,8 +255,8 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
       setVehicleSpecs(null);
     }
 
-    // Resolve address: prefer customer → appointment location_address → email lookup
-    let address = data.customer?.address || data.location_address || null;
+    // Resolve address: the latest saved appointment location is authoritative; customer/email are fallbacks.
+    let address = data.location_address || data.customer?.address || null;
     if (!address && data.guest_email) {
       const { data: matchedCustomer } = await fetchCustomerAddressByGuestEmail(data.guest_email, queryUserId);
       address = matchedCustomer?.address || null;
@@ -514,12 +514,12 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
                       {customerEmail && (
                         <ClickableEmail email={customerEmail} className="text-sm" />
                       )}
-                      {(appointment.customer?.address || resolvedAddress) ? (
+                      {(resolvedAddress || appointment.customer?.address) ? (
                         <button
-                          onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(appointment.customer?.address || resolvedAddress || '')}`, '_blank', 'noopener,noreferrer')}
+                          onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(resolvedAddress || appointment.customer?.address || '')}`, '_blank', 'noopener,noreferrer')}
                           className="text-sm text-primary hover:underline flex items-start gap-2 text-left whitespace-normal break-words"
                         >
-                          <MapPin className="h-4 w-4 flex-shrink-0 mt-0.5" /><span>{appointment.customer?.address || resolvedAddress}</span>
+                          <MapPin className="h-4 w-4 flex-shrink-0 mt-0.5" /><span>{resolvedAddress || appointment.customer?.address}</span>
                         </button>
                       ) : (
                         appointment.customer && (
