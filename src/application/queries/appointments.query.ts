@@ -106,7 +106,7 @@ export async function fetchAppointmentsPageData(): Promise<AppointmentsPageData>
 
   const errors: AppointmentsPageErrors = {};
   const db = productionSupabase as any;
-  const [appointmentsResult, customersResult, vehiclesResult, settingsResult, catalogResult, scheduleResult, workspaceResult] = await Promise.allSettled([
+  const [appointmentsResult, customersResult, vehiclesResult, settingsResult, catalogResult, scheduleResult, workspaceResult, serviceLinesResult] = await Promise.allSettled([
     nextApi.appointments.list(context.workspaceId),
     nextApi.customers.list(context.workspaceId),
     nextApi.vehicles.list(context.workspaceId),
@@ -114,6 +114,7 @@ export async function fetchAppointmentsPageData(): Promise<AppointmentsPageData>
     productionSupabase.from("service_catalog").select("*").eq("workspace_id", context.workspaceId).eq("is_active", true).order("name"),
     db.from("workspace_settings").select("opening_time,closing_time,working_days,day_hours,slot_duration_minutes,min_lead_time_hours,buffer_time_before,buffer_time_after").eq("workspace_id", context.workspaceId).maybeSingle(),
     db.from("workspaces").select("timezone").eq("id", context.workspaceId).maybeSingle(),
+    db.from("appointment_services").select("appointment_id,price,quantity").eq("workspace_id", context.workspaceId),
   ]);
 
   const customerRows = customersResult.status === "fulfilled" ? customersResult.value.data : [];
@@ -130,9 +131,17 @@ export async function fetchAppointmentsPageData(): Promise<AppointmentsPageData>
   const vehicles = z.array(vehicleApiSchema).parse(vehicleRows).map(mapVehicle);
   const customerMap = new Map(customers.map((customer) => [customer.id, customer]));
   const vehicleMap = new Map(vehicles.map((vehicle) => [vehicle.id, vehicle]));
+  const serviceLines = serviceLinesResult.status === "fulfilled" ? (serviceLinesResult.value.data ?? []) : [];
+  const serviceLinesByAppointment = new Map<string, Array<{ price: number; quantity: number }>>();
+  serviceLines.forEach((line: any) => {
+    if (!line.appointment_id) return;
+    const current = serviceLinesByAppointment.get(line.appointment_id) ?? [];
+    current.push({ price: Number(line.price ?? 0), quantity: Number(line.quantity ?? 1) });
+    serviceLinesByAppointment.set(line.appointment_id, current);
+  });
   const appointments = z.array(appointmentApiSchema).parse(appointmentRows)
     .filter((row) => row.source !== "fleet_work_order" && !metadataObject(row.metadata).fleet_work_order_id)
-    .map((row) => mapAppointment(row, customerMap, vehicleMap, timezone));
+    .map((row) => ({ ...mapAppointment(row, customerMap, vehicleMap, timezone), appointment_services: serviceLinesByAppointment.get(row.id) ?? [] }));
   const serviceCatalog = catalogRows.map(mapCatalog);
 
   const legacySettings = settingsResult.status === "fulfilled" ? settingsResult.value : null;
