@@ -10,4 +10,3 @@ eslint-src.json
 .env
 .env.*
 !.env.example
-.buildos-tool/
