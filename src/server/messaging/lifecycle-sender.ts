@@ -85,7 +85,7 @@ export async function enqueueLifecycleEmail(input: LifecycleSendInput & {
   return { id: String(Array.isArray(data) ? data[0] : data), status: "queued" };
 }
 
-export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ providerMessageId?: string; status: string }> {
+export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ providerMessageId?: string; providerName?: string; status: string }> {
   const rendered = renderLifecycleEmailForDelivery(input.templateKey, input.variables);
   const supabase = createSupabaseAdminClient();
   const recipientEmail = assertEmail(input.recipientEmail);
@@ -128,13 +128,13 @@ export async function sendLifecycleEmail(input: LifecycleSendInput): Promise<{ p
   }
   const existing = await supabase
     .from("message_logs")
-    .select("id,provider_message_id,status")
+    .select("id,provider,provider_message_id,status")
     .eq("workspace_id", input.workspaceId)
     .eq("idempotency_key", input.idempotencyKey)
     .maybeSingle();
 
   if (existing.data?.provider_message_id && ["accepted", "sent", "delivered"].includes(existing.data.status)) {
-    return { providerMessageId: existing.data.provider_message_id, status: existing.data.status };
+    return { providerMessageId: existing.data.provider_message_id, providerName: existing.data.provider ?? undefined, status: existing.data.status };
   }
 
   const queued = await supabase.from("message_logs").upsert({
