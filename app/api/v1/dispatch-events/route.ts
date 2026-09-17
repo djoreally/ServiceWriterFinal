@@ -111,7 +111,7 @@ export async function POST(request: Request) {
             );
             await dispatchAppointmentLifecycle({
               eventKey,
-              eventId: data.id,
+              eventId: body.event_type === "en_route" || body.event_type === "arrived"\n                ? `${appointmentId}:technician-status:${body.event_type}`\n                : data.id,
               appointment,
               workspaceName: workspace?.name ?? "Service Writer",
               workspaceTimezone: workspace?.timezone ?? "UTC",
