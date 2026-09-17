@@ -100,14 +100,6 @@ begin
         updated_at=now()
       where id=p_job_id;
       v_event_type:='started'; v_next:='in_progress';
-    elsif v_next in ('paused','delayed') then
-      if v_current_status <> 'in_progress'
-        then raise exception 'INVALID_TRANSITION: Only an in-progress appointment can be paused'; end if;
-      update public.appointments set
-        metadata=jsonb_set(coalesce(metadata,'{}'::jsonb),'{dispatch_status}',to_jsonb('paused'::text),true),
-        updated_at=now()
-      where id=p_job_id;
-      v_event_type:='paused'; v_next:='paused';
     elsif v_next in ('completed','complete') then
       if v_current_status <> 'in_progress'
         then raise exception 'INVALID_TRANSITION: Only an in-progress appointment can be completed'; end if;
@@ -164,12 +156,6 @@ begin
         metadata=jsonb_set(coalesce(metadata,'{}'::jsonb),'{dispatch_status}',to_jsonb('started'::text),true),updated_at=now()
       where id=p_job_id;
       v_event_type:='started'; v_next:='in_progress';
-    elsif v_next in ('paused','delayed') then
-      if v_current_status <> 'in_progress'
-        then raise exception 'INVALID_TRANSITION: Only an in-progress work order can be paused'; end if;
-      update public.work_orders set metadata=jsonb_set(coalesce(metadata,'{}'::jsonb),'{dispatch_status}',to_jsonb('paused'::text),true),updated_at=now()
-      where id=p_job_id;
-      v_event_type:='paused'; v_next:='paused';
     elsif v_next in ('completed','complete') then
       if v_current_status <> 'in_progress'
         then raise exception 'INVALID_TRANSITION: Only an in-progress work order can be completed'; end if;
