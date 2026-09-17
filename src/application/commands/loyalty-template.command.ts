@@ -1,78 +1,50 @@
-/**
- * Loyalty Template Commands - Seed preconfigured loyalty programs + rewards atomically.
- */
-
+/** Loyalty Template Commands - seed canonical CRM loyalty programs + rewards. */
 import { supabase } from "@/integrations/supabase/client";
-import type { Json } from "@/integrations/supabase/types";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { getTemplateById, type LoyaltyTemplate } from "@/lib/retention/loyalty-templates";
 
-export interface SeedTemplateResult {
-  programId: string;
-  rewardsInserted: number;
-}
+export interface SeedTemplateResult { programId: string; rewardsInserted: number; }
 
-/**
- * Seeds a loyalty template — inserts the program then all rewards.
- * If reward inserts fail, the program is rolled back (deleted) to keep state clean.
- */
-export async function seedLoyaltyTemplate(
-  userId: string,
-  templateId: string,
-): Promise<SeedTemplateResult> {
+export async function seedLoyaltyTemplate(_userId: string, templateId: string): Promise<SeedTemplateResult> {
   const template: LoyaltyTemplate | undefined = getTemplateById(templateId);
   if (!template) throw new Error(`Unknown loyalty template: ${templateId}`);
+  const workspace = await resolveCurrentWorkspace();
+  if (!workspace) throw new Error("No active workspace is available.");
+  const db = supabase as any;
 
-  // 1. Insert program
-  const programRecord = {
-    user_id: userId,
-    name: template.name,
-    scope: template.scope,
-    status: "active",
-    earn_rules_jsonb: {
-      points_per_dollar: template.pointsPerDollar,
-      points_per_visit: template.pointsPerVisit,
-    } as Json,
-  };
-
-  const { data: program, error: programError } = await supabase
-    .from("loyalty_programs")
-    .insert(programRecord)
-    .select("id")
-    .single();
-
-  if (programError || !program) {
-    throw new Error(programError?.message || "Failed to create program from template");
-  }
-
-  // 2. Insert rewards
-  const rewardRecords = template.rewards.map((r) => {
-    const configKey = r.rewardType.includes("discount") ? "value" : "amount";
-    const configJsonb =
-      r.configValue !== null ? ({ [configKey]: r.configValue } as Json) : null;
-    return {
-      user_id: userId,
-      program_id: program.id,
-      name: r.name,
-      description: r.description,
-      points_required: r.pointsRequired,
-      reward_type: r.rewardType,
-      config_jsonb: configJsonb,
-      status: "active" as const,
-    };
+  const { data: programId, error: programError } = await db.rpc("save_loyalty_program_v1", {
+    p_workspace_id: workspace.workspaceId,
+    p_name: template.name,
+    p_scope: template.scope,
+    p_status: "active",
+    p_points_per_dollar: template.pointsPerDollar,
+    p_points_per_visit: template.pointsPerVisit,
+    p_program_id: null,
   });
+  if (programError || !programId) throw new Error(programError?.message || "Failed to create program from template");
 
-  const { error: rewardsError, count } = await supabase
-    .from("loyalty_rewards")
-    .insert(rewardRecords, { count: "exact" });
-
-  if (rewardsError) {
-    // Rollback program insert
-    await supabase.from("loyalty_programs").delete().eq("id", program.id);
-    throw new Error(`Failed to seed rewards: ${rewardsError.message}`);
+  let inserted = 0;
+  try {
+    for (const reward of template.rewards) {
+      const configKey = reward.rewardType.includes("discount") ? "value" : "amount";
+      const config = reward.configValue !== null ? { [configKey]: reward.configValue } : {};
+      const { error } = await db.rpc("save_loyalty_reward_v1", {
+        p_workspace_id: workspace.workspaceId,
+        p_program_id: programId,
+        p_name: reward.name,
+        p_description: reward.description,
+        p_points_required: reward.pointsRequired,
+        p_reward_type: reward.rewardType,
+        p_config: config,
+        p_reward_id: null,
+      });
+      if (error) throw error;
+      inserted += 1;
+    }
+  } catch (error) {
+    await db.from("crm_loyalty_programs").delete().eq("workspace_id", workspace.workspaceId).eq("id", programId);
+    throw error;
   }
 
-  return {
-    programId: program.id,
-    rewardsInserted: count ?? rewardRecords.length,
-  };
+  return { programId: String(programId), rewardsInserted: inserted };
 }

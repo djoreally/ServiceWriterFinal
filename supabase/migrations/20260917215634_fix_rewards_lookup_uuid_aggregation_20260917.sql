@@ -1,0 +1,19 @@
+create or replace function public.lookup_booking_rewards(p_provider_id uuid,p_email text,p_customer_account_id uuid default null)
+returns jsonb language plpgsql security definer set search_path=public as $$
+declare v_workspace uuid; v_customer uuid; v_matches integer; v_account public.crm_loyalty_accounts%rowtype; v_available jsonb; v_catalog jsonb; v_lifetime integer;
+begin
+  v_workspace := public.resolve_rewards_workspace_v1(p_provider_id);
+  if v_workspace is null then return jsonb_build_object('status','no_match','points_balance',0,'available_rewards','[]'::jsonb,'catalog','[]'::jsonb); end if;
+  select count(*) into v_matches from public.customers where workspace_id=v_workspace and lower(email::text)=lower(trim(p_email));
+  if v_matches=0 then return jsonb_build_object('status','no_match','points_balance',0,'available_rewards','[]'::jsonb,'catalog','[]'::jsonb); end if;
+  if v_matches>1 then return jsonb_build_object('status','requires_review','candidate_count',v_matches,'points_balance',0,'available_rewards','[]'::jsonb,'catalog','[]'::jsonb); end if;
+  select id into v_customer from public.customers where workspace_id=v_workspace and lower(email::text)=lower(trim(p_email)) limit 1;
+  select * into v_account from public.crm_loyalty_accounts where workspace_id=v_workspace and customer_id=v_customer;
+  if not found then return jsonb_build_object('status','matched','match_source','email','masked_email',regexp_replace(p_email,'(^.).*(@.*$)','\1***\2'),'points_balance',0,'lifetime_points_earned',0,'visit_count',0,'available_rewards','[]'::jsonb,'catalog',coalesce((select jsonb_agg(jsonb_build_object('reward_id',r.id,'name',r.name,'description',r.description,'reward_type',r.reward_type,'program_id',r.program_id,'program_name',p.name,'points_required',r.points_required,'points_remaining',r.points_required,'config',r.config) order by r.points_required) from public.crm_loyalty_rewards r join public.crm_loyalty_programs p on p.id=r.program_id where r.workspace_id=v_workspace and r.status='active' and p.status='active'),'[]'::jsonb)); end if;
+  perform public.ensure_loyalty_reward_instances_v1(v_account.id);
+  select coalesce(sum(greatest(points_delta,0)),0)::integer into v_lifetime from public.crm_loyalty_ledger where loyalty_account_id=v_account.id;
+  select coalesce(jsonb_agg(jsonb_build_object('instance_id',i.id,'reward_id',r.id,'name',r.name,'description',r.description,'reward_type',r.reward_type,'program_id',r.program_id,'program_name',p.name,'status',i.status,'expires_at',i.expires_at,'points_required',r.points_required,'points_remaining',0,'config',r.config) order by r.points_required),'[]'::jsonb) into v_available from public.crm_loyalty_reward_instances i join public.crm_loyalty_rewards r on r.id=i.reward_id join public.crm_loyalty_programs p on p.id=r.program_id where i.loyalty_account_id=v_account.id and i.status='available' and (i.expires_at is null or i.expires_at>now());
+  select coalesce(jsonb_agg(jsonb_build_object('reward_id',r.id,'name',r.name,'description',r.description,'reward_type',r.reward_type,'program_id',r.program_id,'program_name',p.name,'points_required',r.points_required,'points_remaining',greatest(r.points_required-v_account.current_points,0),'config',r.config) order by r.points_required),'[]'::jsonb) into v_catalog from public.crm_loyalty_rewards r join public.crm_loyalty_programs p on p.id=r.program_id where r.workspace_id=v_workspace and r.status='active' and p.status='active';
+  return jsonb_build_object('status','matched','match_source','email','masked_email',regexp_replace(p_email,'(^.).*(@.*$)','\1***\2'),'points_balance',v_account.current_points,'lifetime_points_earned',v_lifetime,'available_rewards',v_available,'catalog',v_catalog);
+end $$;
+grant execute on function public.lookup_booking_rewards(uuid,text,uuid) to anon, authenticated;

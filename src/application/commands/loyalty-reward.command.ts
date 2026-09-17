@@ -1,10 +1,6 @@
-/**
- * Loyalty Reward Commands
- * Handles creating/updating loyalty reward items.
- */
-
+/** Loyalty Reward Commands - canonical workspace-scoped CRM loyalty writes. */
 import { supabase } from "@/integrations/supabase/client";
-import type { Json } from "@/integrations/supabase/types";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 export interface LoyaltyRewardPayload {
   userId: string;
@@ -17,22 +13,19 @@ export interface LoyaltyRewardPayload {
 }
 
 export async function saveLoyaltyReward(payload: LoyaltyRewardPayload, editId?: string): Promise<void> {
+  const workspace = await resolveCurrentWorkspace();
+  if (!workspace) throw new Error("No active workspace is available.");
   const configKey = payload.rewardType.includes("discount") ? "value" : "amount";
-  const dbPayload = {
-    user_id: payload.userId,
-    program_id: payload.programId,
-    name: payload.name,
-    description: payload.description,
-    points_required: payload.pointsRequired,
-    reward_type: payload.rewardType as "credit" | "free_service" | "discount_percent" | "discount_fixed" | "priority_booking",
-    config_jsonb: payload.configValue ? ({ [configKey]: parseFloat(payload.configValue) } as Json) : null,
-    status: "active",
-  };
-
-  const query = editId
-    ? supabase.from("loyalty_rewards").update(dbPayload).eq("id", editId)
-    : supabase.from("loyalty_rewards").insert(dbPayload);
-
-  const { error } = await query;
-  if (error) throw new Error("Failed to save reward");
+  const config = payload.configValue ? { [configKey]: Number.parseFloat(payload.configValue) } : {};
+  const { error } = await (supabase as any).rpc("save_loyalty_reward_v1", {
+    p_workspace_id: workspace.workspaceId,
+    p_program_id: payload.programId,
+    p_name: payload.name,
+    p_description: payload.description,
+    p_points_required: Math.max(1, payload.pointsRequired),
+    p_reward_type: payload.rewardType,
+    p_config: config,
+    p_reward_id: editId ?? null,
+  });
+  if (error) throw error;
 }
