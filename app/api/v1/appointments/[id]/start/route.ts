@@ -1,5 +1,8 @@
 import { ApiError, errorResponse, json, requireWorkspaceMember } from "@/server/api";
 import { z } from "zod";
+import { createSupabaseAdminClient } from "@/lib/supabase";
+import { dispatchAppointmentLifecycle } from "@/server/messaging/appointment-events";
+import { LIFECYCLE_EVENT_KEYS } from "@/server/messaging/lifecycle-events";
 
 const schema = z.object({ workspace_id: z.string().uuid() });
 
@@ -55,6 +58,37 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         p_location: null,
       });
       if (presenceError) throw presenceError;
+    }
+
+    try {
+      const [{ data: appointment }, { data: workspace }] = await Promise.all([
+        db.from("appointments")
+          .select("id,workspace_id,customer_id,starts_at,ends_at,status,notes,metadata,updated_at,customers(id,first_name,last_name,email),vehicles(id,year,make,model)")
+          .eq("workspace_id", workspace_id).eq("id", id).single(),
+        db.from("workspaces").select("name,timezone").eq("id", workspace_id).single(),
+      ]);
+      if (appointment) {
+        const technicianId = current.assigned_user_id ?? (membership.role === "technician" ? user.id : null);
+        const admin = createSupabaseAdminClient();
+        const technician = technicianId ? await admin.auth.admin.getUserById(technicianId) : null;
+        const technicianName = String(
+          technician?.data?.user?.user_metadata?.full_name
+          || technician?.data?.user?.user_metadata?.name
+          || technician?.data?.user?.email?.split("@")[0]
+          || "Your technician"
+        );
+        await dispatchAppointmentLifecycle({
+          eventKey: LIFECYCLE_EVENT_KEYS.serviceStarted,
+          eventId: `${id}:technician-status:started`,
+          appointment,
+          workspaceName: workspace?.name ?? "Service Writer",
+          workspaceTimezone: workspace?.timezone ?? "UTC",
+          actionUrl: new URL("/my-bookings", request.url).toString(),
+          technicianName,
+        });
+      }
+    } catch (dispatchError) {
+      console.error("[Lifecycle] appointment start email enqueue failed", dispatchError);
     }
 
     return json({ data: { ...data, already_started: false } });
