@@ -37,18 +37,28 @@ export async function buildAppointmentEmailSnapshot(
 
   const [
     { data: items, error: itemsError },
-    { data: invoice, error: invoiceError },
+    { data: workOrder, error: workOrderError },
   ] = await Promise.all([
     supabase.from("appointment_items")
       .select("description,quantity,unit_price,service_catalog(name)")
       .eq("workspace_id", workspaceId).eq("appointment_id", appointmentId)
       .order("sort_order", { ascending: true }).order("created_at", { ascending: true }),
-    supabase.from("invoices")
-      .select("invoice_number,total_amount,status")
+    supabase.from("work_orders")
+      .select("id")
       .eq("workspace_id", workspaceId).eq("appointment_id", appointmentId)
       .order("created_at", { ascending: false }).limit(1).maybeSingle(),
   ]);
-  if (itemsError || invoiceError) throw itemsError ?? invoiceError;
+  if (itemsError || workOrderError) throw itemsError ?? workOrderError;
+
+  let invoice: Record<string, any> | null = null;
+  if (workOrder?.id) {
+    const invoiceResult = await supabase.from("invoices")
+      .select("invoice_number,total,status")
+      .eq("workspace_id", workspaceId).eq("work_order_id", workOrder.id)
+      .order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (invoiceResult.error) throw invoiceResult.error;
+    invoice = invoiceResult.data;
+  }
 
   const booking = object(metadata.booking_configuration);
   const bookedVehicles = Array.isArray(booking.vehicles) ? booking.vehicles.map(object) : [];
@@ -99,9 +109,9 @@ export async function buildAppointmentEmailSnapshot(
       "appointment.arrival_window": text(metadata.arrival_window) ?? appointmentTime,
       "appointment.manage_url": text(metadata.manage_url),
       "business.timezone": timezone,
-      "appointment.total": invoice ? money(invoice.total_amount) : (metadata.estimated_cost != null ? money(metadata.estimated_cost) : undefined),
+      "appointment.total": invoice ? money(invoice.total) : (metadata.estimated_cost != null ? money(metadata.estimated_cost) : undefined),
       "invoice.number": invoice?.invoice_number ?? undefined,
-      "invoice.total": invoice ? money(invoice.total_amount) : undefined,
+      "invoice.total": invoice ? money(invoice.total) : undefined,
       "invoice.status": invoice?.status ?? undefined,
     },
     metadata: {
