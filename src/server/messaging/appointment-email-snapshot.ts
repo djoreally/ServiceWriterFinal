@@ -27,6 +27,7 @@ export type AppointmentEmailSnapshot = {
 export async function buildAppointmentEmailSnapshot(
   supabase: SupabaseClient,
   appointment: AppointmentLike,
+  workspaceTimezone?: string,
 ): Promise<AppointmentEmailSnapshot> {
   const workspaceId = String(appointment.workspace_id);
   const appointmentId = String(appointment.id);
@@ -34,7 +35,10 @@ export async function buildAppointmentEmailSnapshot(
   const customer = one<Record<string, any>>(appointment.customers);
   const primaryVehicle = one<Record<string, any>>(appointment.vehicles);
 
-  const [{ data: items }, { data: invoice }] = await Promise.all([
+  const [
+    { data: items, error: itemsError },
+    { data: invoice, error: invoiceError },
+  ] = await Promise.all([
     supabase.from("appointment_items")
       .select("description,quantity,unit_price,service_catalog(name)")
       .eq("workspace_id", workspaceId).eq("appointment_id", appointmentId)
@@ -44,6 +48,7 @@ export async function buildAppointmentEmailSnapshot(
       .eq("workspace_id", workspaceId).eq("appointment_id", appointmentId)
       .order("created_at", { ascending: false }).limit(1).maybeSingle(),
   ]);
+  if (itemsError || invoiceError) throw itemsError ?? invoiceError;
 
   const booking = object(metadata.booking_configuration);
   const bookedVehicles = Array.isArray(booking.vehicles) ? booking.vehicles.map(object) : [];
@@ -65,11 +70,8 @@ export async function buildAppointmentEmailSnapshot(
     return `${name} × ${quantity} — ${money(Number(item.unit_price ?? 0) * quantity)}`;
   });
 
-  const serviceAddress =
-    text(metadata.location_address) ??
-    text(metadata.service_address) ??
-    null;
-  const timezone = text(metadata.business_timezone) ?? text(metadata.timezone) ?? "America/New_York";
+  const serviceAddress = text(metadata.location_address) ?? text(metadata.service_address) ?? null;
+  const timezone = text(metadata.business_timezone) ?? text(metadata.timezone) ?? text(workspaceTimezone) ?? "America/New_York";
   const startsAt = text(appointment.starts_at);
   const scheduled = startsAt ? new Date(startsAt) : null;
   const appointmentDate = scheduled && !Number.isNaN(scheduled.getTime())
@@ -78,10 +80,11 @@ export async function buildAppointmentEmailSnapshot(
   const appointmentTime = scheduled && !Number.isNaN(scheduled.getTime())
     ? new Intl.DateTimeFormat("en-US", { timeZone: timezone, hour: "numeric", minute: "2-digit" }).format(scheduled)
     : undefined;
+  const hasLinkedCustomer = Boolean(appointment.customer_id || customer?.id);
 
   return {
     appointment,
-    customerEmail: text(metadata.guest_email) ?? text(customer?.email),
+    customerEmail: hasLinkedCustomer ? text(customer?.email) : text(metadata.guest_email),
     customerId: appointment.customer_id ?? customer?.id ?? null,
     variables: {
       "customer.first_name": text(customer?.first_name) ?? text(metadata.guest_name)?.split(/\s+/)[0] ?? "there",
