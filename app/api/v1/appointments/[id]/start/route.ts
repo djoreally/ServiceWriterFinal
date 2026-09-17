@@ -31,13 +31,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
 
     if (!current.customer_id || !current.vehicle_id) return json({ error: { code: "missing_job_context", message: "Start Job requires customer and vehicle context." } }, { status: 409 });
-    const { data: existingWorkOrder, error: workOrderReadError } = await db.from("work_orders").select("id").eq("workspace_id", workspace_id).eq("appointment_id", id).eq("vehicle_id", current.vehicle_id).maybeSingle();
-    if (workOrderReadError) throw workOrderReadError;
-    if (!existingWorkOrder) {
-      const { data: maxNumberRow } = await db.from("work_orders").select("number").eq("workspace_id", workspace_id).order("number", { ascending: false }).limit(1).maybeSingle();
-      const { error: workOrderCreateError } = await db.from("work_orders").insert({ workspace_id, appointment_id: id, customer_id: current.customer_id, vehicle_id: current.vehicle_id, status: "in_progress", number: Number(maxNumberRow?.number ?? 0) + 1, opened_at: new Date().toISOString(), created_by: user.id, metadata: { source: "appointment_start" } });
-      if (workOrderCreateError) throw workOrderCreateError;
-    }
+    const { error: workOrderError } = await db.rpc("ensure_vehicle_work_order_v1", { p_workspace_id: workspace_id, p_appointment_id: id, p_vehicle_id: current.vehicle_id });
+    if (workOrderError) throw workOrderError;
 
     const metadata = current.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata)
       ? current.metadata as Record<string, unknown>
