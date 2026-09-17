@@ -54,13 +54,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       nextMetadata.last_dispatch_location_at = now;
     }
 
-    const appointmentStatus = body.status === "arrived" && ["requested", "confirmed"].includes(current.status)
-      ? "checked_in"
-      : current.status;
-
+    // Arrival is a dispatch/customer-communication event, not a required
+    // appointment lifecycle state. The on-site primary action is Start Job,
+    // which moves a confirmed appointment directly to in_progress.
     const { data, error } = await db
       .from("appointments")
-      .update({ status: appointmentStatus, metadata: nextMetadata, updated_at: now })
+      .update({ metadata: nextMetadata, updated_at: now })
       .eq("workspace_id", body.workspace_id)
       .eq("id", appointmentId)
       .select("id,status,assigned_user_id,metadata,updated_at")
