@@ -103,7 +103,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
             : LIFECYCLE_EVENT_KEYS.technicianArrived;
           await dispatchAppointmentLifecycle({
             eventKey,
-            eventId: `${appointmentId}:technician-status:${body.status}:${data.updated_at}`,
+            eventId: `${appointmentId}:technician-status:${body.status}`,
             appointment,
             workspaceName: workspace?.name ?? "Service Writer",
             workspaceTimezone: workspace?.timezone ?? "UTC",
