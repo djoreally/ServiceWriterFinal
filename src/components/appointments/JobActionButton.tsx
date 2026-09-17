@@ -43,10 +43,21 @@ export function JobActionButton({ appointment, onUpdated, className }: JobAction
   const handleStart = async () => {
     setStarting(true);
     const res = await startAppointmentJob(appointment.id);
+    if (!res.success) {
+      setStarting(false);
+      toast.error(res.error || "Failed to start job");
+      return;
+    }
+
+    // Start Job is the curbside handoff into the service-specific inspection.
+    // Refresh the service-linked inspection gate immediately and open it when
+    // the booked service requires one. Completion stays locked until it is done.
+    const nextGate = await fetchAppointmentInspectionGate(appointment.id).catch(() => ({ required: [], pendingCount: 0 }));
+    setGate(nextGate);
     setStarting(false);
-    if (!res.success) { toast.error(res.error || "Failed to start job"); return; }
-    toast.success(res.alreadyStarted ? "Job already started" : "Job started — timer running");
+    toast.success(res.alreadyStarted ? "Job already started" : "Job started — verify vehicle and complete inspection");
     onUpdated();
+    if (nextGate.pendingCount > 0) setShowInspection(true);
   };
 
   const handleCompleteSuccess = (serviceId: string) => {
@@ -60,10 +71,10 @@ export function JobActionButton({ appointment, onUpdated, className }: JobAction
   if (step === "inspection") {
     const pending = gate?.required.filter((r) => !r.completed) ?? [];
     return <>
-      <Button className={className} variant="default" onClick={() => setShowInspection(true)}><ClipboardCheck className="h-4 w-4 mr-2" />Fill Inspection ({pending.length} pending)</Button>
+      <Button className={className} variant="default" onClick={() => setShowInspection(true)}><ClipboardCheck className="h-4 w-4 mr-2" />Service Inspection ({pending.length} pending)</Button>
       <Dialog open={showInspection} onOpenChange={setShowInspection}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>Required Inspection</DialogTitle><DialogDescription>Complete the inspection below to unlock job completion.</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>Service Inspection</DialogTitle><DialogDescription>This inspection is included with the booked service. Complete the required checks early so recommendations can be sent while the original work continues.</DialogDescription></DialogHeader>
           <InspectionPerformer appointmentId={appointment.id} vehicleId={appointment.vehicle?.id} onComplete={async () => { await refreshGate(); setShowInspection(false); }} />
         </DialogContent>
       </Dialog>
