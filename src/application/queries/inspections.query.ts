@@ -3,146 +3,61 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
-
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
-export interface InspectionTemplate {
-  id: string;
-  name: string;
-  description: string | null;
-  category: string;
-  is_active: boolean;
-  created_at: string;
-}
 
-export interface InspectionItem {
-  id: string;
-  template_id: string;
-  name: string;
-  description: string | null;
-  category: string | null;
-  is_required: boolean;
-  sort_order: number;
-}
-
-export interface InspectionTemplateData {
-  templates: InspectionTemplate[];
-  items: Record<string, InspectionItem[]>;
-}
+export interface InspectionTemplate { id: string; name: string; description: string | null; category: string; is_active: boolean; created_at: string; }
+export interface InspectionItem { id: string; template_id: string; name: string; description: string | null; category: string | null; is_required: boolean; sort_order: number; }
+export interface InspectionTemplateData { templates: InspectionTemplate[]; items: Record<string, InspectionItem[]>; }
 
 export async function fetchInspectionTemplates(): Promise<InspectionTemplateData> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("Authentication required");
-
-  const { data: templates, error } = await supabase
-    .from("inspection_templates")
-    .select("*")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false });
-
+  const db = supabase as any;
+  const { data: templates, error } = await db.from("inspection_templates").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
   if (error) throw error;
-
   const templateList = templates ?? [];
   let items: Record<string, InspectionItem[]> = {};
-
-  // Fetch items for all templates in one query
   if (templateList.length > 0) {
-    const { data: itemsData } = await supabase
-      .from("inspection_items")
-      .select("*")
-      .in("template_id", templateList.map((t) => t.id))
-      .order("sort_order");
-
-    if (itemsData) {
-      items = itemsData.reduce((acc, item) => {
-        if (!acc[item.template_id]) acc[item.template_id] = [];
-        acc[item.template_id].push(item);
-        return acc;
-      }, {} as Record<string, InspectionItem[]>);
-    }
+    const { data: itemsData, error: itemsError } = await db.from("inspection_items").select("*").in("template_id", templateList.map((t: InspectionTemplate) => t.id)).order("sort_order");
+    if (itemsError) throw itemsError;
+    if (itemsData) items = itemsData.reduce((acc: Record<string, InspectionItem[]>, item: InspectionItem) => { if (!acc[item.template_id]) acc[item.template_id] = []; acc[item.template_id].push(item); return acc; }, {});
   }
-
   return { templates: templateList, items };
 }
 
-export interface AppointmentInspectionGate {
-  required: { templateId: string; templateName: string; completed: boolean }[];
-  pendingCount: number;
-}
+export interface AppointmentInspectionGate { required: { templateId: string; templateName: string; completed: boolean }[]; pendingCount: number; }
 
-/**
- * Return the inspection gate status for an appointment: every inspection
- * template linked (via service_catalog.inspection_template_id) to either the
- * appointment's primary catalog item or any of its appointment_services rows,
- * and whether a matching service_inspections row already exists for this
- * appointment.
- */
-export async function fetchAppointmentInspectionGate(
-  appointmentId: string,
-): Promise<AppointmentInspectionGate> {
+/** Canonical workspace-scoped inspection gate. Appointment services come from appointment_items. */
+export async function fetchAppointmentInspectionGate(appointmentId: string): Promise<AppointmentInspectionGate> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return { required: [], pendingCount: 0 };
+  const db = supabase as any;
 
-  // 1. Appointment + linked services
-  const { data: appt } = await supabase
-    .from("appointments")
-    .select("id, service_catalog_id")
-    .eq("id", appointmentId)
-    .eq("user_id", user.id)
-    .maybeSingle();
-
+  const { data: appt, error: apptError } = await db.from("appointments").select("id, workspace_id").eq("id", appointmentId).maybeSingle();
+  if (apptError) throw apptError;
   if (!appt) return { required: [], pendingCount: 0 };
 
-  const { data: apptSvcs } = await supabase
-    .from("appointment_services")
-    .select("name")
-    .eq("appointment_id", appointmentId);
+  const { data: appointmentItems, error: itemsError } = await db.from("appointment_items").select("service_catalog_id, description").eq("workspace_id", appt.workspace_id).eq("appointment_id", appointmentId);
+  if (itemsError) throw itemsError;
+  const catalogIds = Array.from(new Set<string>((appointmentItems ?? []).map((row: any) => row.service_catalog_id).filter(Boolean)));
+  if (catalogIds.length === 0) return { required: [], pendingCount: 0 };
 
-  const names = (apptSvcs ?? []).map((row) => row.name).filter(Boolean);
-
-  // 2. Catalog rows with an inspection template (by id OR matching service name)
-  const ids: string[] = [];
-  if (appt.service_catalog_id) ids.push(appt.service_catalog_id);
-
-  const catalogQuery = supabase
-    .from("service_catalog")
-    .select("id, name, inspection_template_id")
-    .eq("user_id", user.id)
-    .not("inspection_template_id", "is", null);
-
-  // pull rows for the appointment catalog id OR for any line-item name
-  const { data: catalogRows } = await catalogQuery;
+  const { data: catalogRows, error: catalogError } = await db.from("service_catalog").select("id, name, inspection_template_id").eq("workspace_id", appt.workspace_id).in("id", catalogIds).not("inspection_template_id", "is", null);
+  if (catalogError) throw catalogError;
 
   const required: { templateId: string; templateName: string }[] = [];
   const seen = new Set<string>();
   for (const row of catalogRows ?? []) {
-    const tid = row.inspection_template_id;
-    if (!tid || seen.has(tid)) continue;
-    if (ids.includes(row.id) || names.includes(row.name)) {
-      required.push({ templateId: tid, templateName: row.name });
-      seen.add(tid);
-    }
+    const templateId = row.inspection_template_id as string | null;
+    if (!templateId || seen.has(templateId)) continue;
+    required.push({ templateId, templateName: row.name });
+    seen.add(templateId);
   }
+  if (required.length === 0) return { required: [], pendingCount: 0 };
 
-  if (required.length === 0) {
-    return { required: [], pendingCount: 0 };
-  }
-
-  // 3. Fetch saved service_inspections for this appointment
-  const { data: completed } = await supabase
-    .from("service_inspections")
-    .select("template_id")
-    .eq("user_id", user.id)
-    .eq("appointment_id", appointmentId);
-
-  const completedTemplates = new Set((completed ?? []).map((row) => row.template_id));
-
-  const out = required.map((r) => ({
-    ...r,
-    completed: completedTemplates.has(r.templateId),
-  }));
-
-  return {
-    required: out,
-    pendingCount: out.filter((r) => !r.completed).length,
-  };
+  const { data: completed, error: completedError } = await db.from("service_inspections").select("template_id").eq("workspace_id", appt.workspace_id).eq("appointment_id", appointmentId).eq("status", "completed");
+  if (completedError) throw completedError;
+  const completedTemplates = new Set<string>((completed ?? []).map((row: any) => row.template_id));
+  const out = required.map((r) => ({ ...r, completed: completedTemplates.has(r.templateId) }));
+  return { required: out, pendingCount: out.filter((r) => !r.completed).length };
 }
