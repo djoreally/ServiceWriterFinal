@@ -52,8 +52,8 @@ async function processLifecycleOutboxRequest(request: Request) {
   try {
     const body = await request.json().catch(() => ({})) as { limit?: number };
     const limit = Number.isFinite(body.limit) ? Math.max(1, Math.min(Number(body.limit), 50)) : 10;
-    const delivery = await processLifecycleEventOutbox(limit);
     const reminders = await produceCustomerAppointmentReminders();
+    const delivery = await processLifecycleEventOutbox(limit);
     return NextResponse.json({ ok: true, delivery, reminders, durationMs: Date.now() - startedAt });
   } catch (error) {
     console.error("[Lifecycle] outbox worker failed", safeErrorDetails(error));
