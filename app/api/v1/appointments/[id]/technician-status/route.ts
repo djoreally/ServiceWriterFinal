@@ -1,5 +1,8 @@
 import { ApiError, errorResponse, json, requireWorkspaceMember } from "@/server/api";
 import { z } from "zod";
+import { createSupabaseAdminClient } from "@/lib/supabase";
+import { dispatchAppointmentLifecycle } from "@/server/messaging/appointment-events";
+import { LIFECYCLE_EVENT_KEYS } from "@/server/messaging/lifecycle-events";
 
 const bodySchema = z.object({
   workspace_id: z.string().uuid(),
@@ -75,6 +78,42 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         p_location: body.location ?? null,
       });
       if (presenceError) throw presenceError;
+    }
+
+    if (body.status === "en_route" || body.status === "arrived") {
+      try {
+        const [{ data: appointment }, { data: workspace }] = await Promise.all([
+          db.from("appointments")
+            .select("id,workspace_id,customer_id,starts_at,ends_at,status,notes,metadata,updated_at,customers(id,first_name,last_name,email),vehicles(id,year,make,model)")
+            .eq("workspace_id", body.workspace_id).eq("id", appointmentId).single(),
+          db.from("workspaces").select("name,timezone").eq("id", body.workspace_id).single(),
+        ]);
+        if (appointment) {
+          const technicianId = current.assigned_user_id ?? (membership.role === "technician" ? user.id : null);
+          const admin = createSupabaseAdminClient();
+          const technician = technicianId ? await admin.auth.admin.getUserById(technicianId) : null;
+          const technicianName = String(
+            technician?.data?.user?.user_metadata?.full_name
+            || technician?.data?.user?.user_metadata?.name
+            || technician?.data?.user?.email?.split("@")[0]
+            || "Your technician"
+          );
+          const eventKey = body.status === "en_route"
+            ? LIFECYCLE_EVENT_KEYS.technicianEnRoute
+            : LIFECYCLE_EVENT_KEYS.technicianArrived;
+          await dispatchAppointmentLifecycle({
+            eventKey,
+            eventId: `${appointmentId}:technician-status:${body.status}:${data.updated_at}`,
+            appointment,
+            workspaceName: workspace?.name ?? "Service Writer",
+            workspaceTimezone: workspace?.timezone ?? "UTC",
+            actionUrl: new URL("/my-bookings", request.url).toString(),
+            technicianName,
+          });
+        }
+      } catch (dispatchError) {
+        console.error("[Lifecycle] technician-status email enqueue failed", dispatchError);
+      }
     }
 
     return json({ data });
