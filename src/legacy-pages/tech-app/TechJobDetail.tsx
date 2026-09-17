@@ -96,10 +96,7 @@ const STATUS_ORDER = [
   "assigned",
   "en_route",
   "arrived",
-  "waiting_customer",
   "in_progress",
-  "waiting_issue",
-  "ready_review",
   "completed",
 ] as const;
 
@@ -107,10 +104,7 @@ const STATUS_LABELS: Record<string, string> = {
   assigned: "Assigned",
   en_route: "En Route",
   arrived: "Arrived",
-  waiting_customer: "Waiting for Customer",
   in_progress: "In Service",
-  waiting_issue: "Waiting on Issue",
-  ready_review: "Ready for Review",
   completed: "Completed",
   could_not_complete: "Could Not Complete",
 };
