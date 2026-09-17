@@ -1,0 +1,56 @@
+name: Lifecycle Email Coverage Audit
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/server/messaging/**'
+      - 'app/api/**'
+      - 'scripts/audit-lifecycle-trigger-coverage.mjs'
+      - '.github/workflows/lifecycle-email-audit.yml'
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Generate lifecycle email audit
+        run: |
+          node scripts/audit-lifecycle-trigger-coverage.mjs | tee lifecycle-email-audit.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const r = JSON.parse(fs.readFileSync('lifecycle-email-audit.json','utf8'));
+          const lines = [
+            '# Service Writer Lifecycle Email Audit',
+            '',
+            `Templates: ${r.templates}`,
+            `Wired: ${r.wired}`,
+            `Unwired: ${r.unwired}`,
+            '',
+            '## Category coverage',
+            '',
+            '| Category | Templates | Wired | Unwired |',
+            '|---|---:|---:|---:|',
+            ...r.byCategory.map(x => `| ${x.category} | ${x.templates} | ${x.wired} | ${x.unwired} |`),
+            '',
+            '## Unwired templates',
+            '',
+            ...r.unwiredTemplates.map(x => `- ${x.key}`),
+            '',
+            '## Wired templates and production producers',
+            '',
+            ...r.wiredTemplates.flatMap(x => [`### ${x.key}`, ...x.producers.map(p => `- ${p}`), '']),
+          ];
+          fs.writeFileSync('lifecycle-email-audit.md', lines.join('\n'));
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, lines.join('\n'));
+          NODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lifecycle-email-audit
+          path: |
+            lifecycle-email-audit.json
+            lifecycle-email-audit.md
