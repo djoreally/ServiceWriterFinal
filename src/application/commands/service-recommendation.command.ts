@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 
 export type RecommendationDecision = "approved" | "declined";
+export type RecommendationWorkResolution = "completed" | "unable_to_complete";
 
 export async function createServiceRecommendation(input: {
   workspaceId: string; appointmentId: string; vehicleId: string; inspectionId: string;
@@ -21,6 +22,32 @@ export async function decideServiceRecommendation(recommendationId: string, deci
   const { data, error } = await (supabase as any).rpc("decide_service_recommendation_v1", {
     p_recommendation_id: recommendationId, p_decision: decision,
   });
+  if (error) throw error;
+  return data;
+}
+
+export async function resolveApprovedRecommendation(
+  recommendationId: string,
+  resolution: RecommendationWorkResolution,
+  notes?: string | null,
+) {
+  const { data: current, error: readError } = await (supabase as any).from("service_recommendations")
+    .select("id,status,technician_notes,appointment_item_id")
+    .eq("id", recommendationId)
+    .single();
+  if (readError) throw readError;
+  if (current.status === resolution) return current;
+  if (current.status !== "approved" || !current.appointment_item_id) {
+    throw new Error("Only approved additional work can be resolved.");
+  }
+
+  const technicianNotes = [current.technician_notes, notes?.trim()].filter(Boolean).join("\n") || null;
+  const { data, error } = await (supabase as any).from("service_recommendations")
+    .update({ status: resolution, technician_notes: technicianNotes, updated_at: new Date().toISOString() })
+    .eq("id", recommendationId)
+    .eq("status", "approved")
+    .select()
+    .single();
   if (error) throw error;
   return data;
 }
