@@ -58,7 +58,7 @@ export function CompleteAppointmentDialog({
   const [customOilType, setCustomOilType] = useState(false);
   const [step, setStep] = useState<"details" | "closeout">("details");
   const [closeoutProcessing, setCloseoutProcessing] = useState(false);
-  const [closeoutPayment, setCloseoutPayment] = useState<{ id: string; amount: number; subtotal?: number; tax_amount?: number; refund_amount?: number; currency: string; customer_name?: string } | null>(null);
+  const [closeoutPayment, setCloseoutPayment] = useState<{ id: string; amount: number; subtotal?: number; tax_amount?: number; surcharge_amount?: number; refund_amount?: number; currency: string; customer_name?: string } | null>(null);
   const [manualPaymentOpen, setManualPaymentOpen] = useState(false);
   const [paymentLinkUrl, setPaymentLinkUrl] = useState<string | null>(null);
   const [paymentLinkOpen, setPaymentLinkOpen] = useState(false);
@@ -184,6 +184,8 @@ export function CompleteAppointmentDialog({
   const vehicleOilCapacity = appointment.vehicle?.oil_capacity;
   const finalTotal = computeAppointmentTotal(appointment, feeSettings);
   const taxAmount = Number(appointment.tax_amount ?? 0);
+  const noSurchargeTotal = computeAppointmentTotal(appointment, feeSettings ? { ...feeSettings, surcharge_enabled: false } : feeSettings);
+  const surchargeAmount = Math.max(0, Number((finalTotal - noSurchargeTotal).toFixed(2)));
   const subtotal = Math.max(finalTotal - taxAmount, 0);
 
   const resetAndClose = (nextOpen: boolean) => {
@@ -217,6 +219,7 @@ export function CompleteAppointmentDialog({
         amount: payment.amount,
         subtotal,
         tax_amount: taxAmount,
+        surcharge_amount: Math.round(surchargeAmount * 100),
         currency: payment.currency_code,
         customer_name: customerName,
       });
