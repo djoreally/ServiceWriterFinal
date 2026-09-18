@@ -402,7 +402,14 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
     subtotal: estimatedCost,
     // Waste-oil disposal never applies to tire or detailing work.
     feeSettings: feeSettings
-      ? { ...feeSettings, waste_oil_fee_enabled: feeSettings.waste_oil_fee_enabled && showsFluids }
+      ? {
+          ...feeSettings,
+          waste_oil_fee_enabled: feeSettings.waste_oil_fee_enabled && showsFluids,
+          // Payment method is not known on the technician appointment screen.
+          // Do not add a card-only surcharge to the estimate before card payment
+          // is actually selected; the invoice remains the authoritative amount.
+          surcharge_enabled: false,
+        }
       : undefined,
     taxAmount,
   });
@@ -800,6 +807,11 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
                     <span className="text-muted-foreground">{feeSettings?.surcharge_description || "Card Processing Fee"}</span>
                     <span>{formatCurrency(surcharge)}</span>
                   </div>
+                )}
+                {feeSettings?.surcharge_enabled && (
+                  <p className="text-xs text-muted-foreground">
+                    Card processing fee is added only if card payment is selected.
+                  </p>
                 )}
                 {taxAmount > 0 && (
                   <div className="flex justify-between text-sm">
