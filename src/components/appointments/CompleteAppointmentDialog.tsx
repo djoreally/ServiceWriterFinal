@@ -210,6 +210,7 @@ export function CompleteAppointmentDialog({
         subtotalCents,
         taxCents: taxCents > 0 ? taxCents : null,
         taxRate: feeSettings?.tax_rate ?? null,
+        surchargeCents: Math.round(surchargeAmount * 100),
         customerEmail: appointment.customer?.email ?? appointment.guest_email ?? null,
         customerName,
       });
