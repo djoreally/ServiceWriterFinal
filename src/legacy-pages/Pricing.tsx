@@ -23,15 +23,15 @@ const PLANS = [
     price: `$${money(basic.monthlyPrice)}`,
     cadence: "forever",
     annual: "Free",
-    blurb: "The core Service Writer workflow for solo operators and new businesses.",
+    blurb: "The free operational core for running the everyday customer-to-payment service workflow.",
     features: [
       "Customers and vehicles",
       "Appointments and scheduling",
       "Public booking",
       "Service catalog",
       "Basic invoicing and service records",
-      "No Technician OS",
-      "No Fleet OS",
+      "Technician access and everyday job execution",
+      "Basic fleet customer and vehicle workflows",
     ],
     cta: "Start free",
     featured: false,
@@ -41,15 +41,14 @@ const PLANS = [
     price: `$${money(pro.monthlyPrice)}`,
     cadence: "per month",
     annual: `$${money(pro.annualPrice)}/year with annual billing`,
-    blurb: "The full operating platform for growing service businesses and field teams.",
+    blurb: "The value-add layer for businesses that want more automation, retention, growth, and advanced operations.",
     features: [
-      "Everything in Basic",
-      "Technician OS",
-      "Dispatch and field workflows",
-      "Automation and operational tools",
-      `${pro.includedTechnicians} technicians included`,
-      `$${money(pro.additionalTechnicianMonthly)}/month per additional technician`,
-      `$${money(pro.additionalTechnicianAnnual)}/year per additional technician on annual billing`,
+      "Everything in the free operational core",
+      "Advanced automation and operational tools",
+      "Retention, loyalty, and growth capabilities",
+      "Advanced communications and re-engagement",
+      "AI and workflow automation",
+      "Advanced analytics and permissions",
     ],
     cta: "Choose Pro",
     featured: true,
@@ -61,8 +60,8 @@ const PLANS = [
     annual: `$${money(fleet.annualPrice)}/year with annual billing`,
     blurb: "For service providers managing commercial fleets, larger teams, and recurring fleet work.",
     features: [
-      "Everything in Pro",
-      "Fleet OS",
+      "Everything in the operational core",
+      "Advanced Fleet OS",
       "Fleet accounts and vehicle operations",
       "Commercial scheduling and service workflows",
       `${fleet.includedTechnicians} technicians included`,
@@ -80,7 +79,7 @@ export default function Pricing() {
       <PageHeader
         eyebrow="Pricing"
         title="Simple pricing that grows with your operation."
-        subtitle="Start free. Add technicians when your team grows. Move to Fleet when commercial operations become part of the business. Payments stays separate, so your software plan and your merchant account never get confused."
+        subtitle="Run the everyday service operation free. Paid layers are for additional growth, automation, infrastructure, and advanced commercial fleet operations — not artificial customer, vehicle, or technician limits."
       />
 
       <div className="grid md:grid-cols-3 gap-6 mb-10">
@@ -122,7 +121,7 @@ export default function Pricing() {
 
       <NeoCard className="text-center">
         <h2 className="text-2xl font-black mb-3" style={hankenStack}>Pick the operating level you need now.</h2>
-        <p className="mb-6" style={{ color: "#3a3a3a" }}>Basic gets the business running. Pro adds technicians and dispatch. Fleet adds the fleet operating system. Payments can be added separately when you want Stripe inside Service Writer.</p>
+        <p className="mb-6" style={{ color: "#3a3a3a" }}>The free core runs the everyday service workflow. Pro adds advanced growth and automation. Fleet adds advanced commercial fleet operations. Payments remains a separate infrastructure layer.</p>
         <Link to="/signup" className={neoBtn} style={{ backgroundColor: PRIMARY_CONTAINER, ...hardShadow }}>Start with Service Writer <ArrowRight className="w-4 h-4" /></Link>
       </NeoCard>
     </MarketingLayout>
