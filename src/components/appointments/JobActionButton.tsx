@@ -88,7 +88,7 @@ export function JobActionButton({ appointment, onUpdated, className }: JobAction
                 <div className="text-sm font-medium">{recommendation.description}</div>
                 <div className="text-xs text-muted-foreground">
                   {recommendation.price != null ? `${Number(recommendation.price).toFixed(2)} · ` : ""}
-                  Vehicle {String(recommendation.vehicle_id).slice(0, 8)}
+                  {recommendation.vehicle_description || `Vehicle ${String(recommendation.vehicle_id).slice(0, 8)}`}
                 </div>
               </div>
               <div className="flex gap-2">
