@@ -4,13 +4,22 @@ import { ArrowRight, CalendarDays, CarFront, Check, ClipboardList, CreditCard, F
 import { MarketingLayout, NeoCard, PRIMARY, PRIMARY_CONTAINER, hardShadow, hardShadowLg, hankenStack, monoStack, neoBtn } from "@/components/marketing/MarketingLayout";
 
 const FREE_CORE = [
-  "Public booking and manual appointments", "Unlimited customers and vehicles", "VIN, notes, and service history", "Estimates and customer approvals", "Work orders and service records", "Invoices and payment recording", "Daily calendar and technician assignment", "Technician checklists and job status", "Service library and labor configuration", "Basic fleet customer and vehicle workflows", "Unlimited technicians, advisors, and admins", "Standard transactional emails",
+  "Public booking and manual appointments", "Unlimited customers and vehicles", "VIN, notes, and service history", "Estimates and customer approvals", "Appointments, service jobs, and service records", "Invoices and payment recording", "Daily calendar and technician assignment", "Technician checklists and job status", "Service library and labor configuration", "Basic fleet customer and vehicle workflows", "Unlimited technicians, advisors, and admins", "Standard transactional emails",
 ];
 const VALUE_ADD = [
   "Automated service reminders", "Loyalty and rewards", "Two-way SMS and re-engagement campaigns", "Review generation and marketing automation", "AI and workflow automation", "Marketplace and co-op customer acquisition", "Route optimization and live customer tracking", "Advanced fleet PM and manager portal", "Advanced analytics, commissions, and permissions", "Parts and distributor integrations",
 ];
 const FLOW = [
-  ["01", "Customer", "Create or import the customer and vehicle."], ["02", "Estimate", "Build the work, send it, and capture approval."], ["03", "Schedule", "Put approved work on the calendar and assign it."], ["04", "Job", "Complete the service workflow in the field or shop."], ["05", "Invoice", "Close the job, record payment, and retain history."],
+  ["01", "Request", "Customer books, calls, or the office creates the appointment."],
+  ["02", "Vehicle", "Keep the exact vehicle, VIN, mileage, service, and history attached to the job."],
+  ["03", "Approve", "Build the estimate and capture customer authorization before work begins."],
+  ["04", "Start Job", "Verify VIN and mileage, then begin the service-specific inspection immediately."],
+  ["05", "Inspect", "Record condition, notes, and findings while the scheduled service is underway."],
+  ["06", "Recommend", "Turn a finding into priced additional work for that exact vehicle."],
+  ["07", "Authorize", "Customer approves or declines without mixing work between vehicles."],
+  ["08", "Complete", "Finish scheduled and approved work or clearly record what could not be completed."],
+  ["09", "Checkout", "Invoice, reconcile prepaid amounts, collect payment, and issue the receipt."],
+  ["10", "Retain", "Preserve service history and use it for reminders, loyalty, and future service."],
 ];
 
 function useHomepageMeta() {
@@ -40,7 +49,7 @@ export default function Homepage() {
     <section className="mb-24 md:mb-32">
       <div className="flex items-center gap-4 mb-9"><h2 className="uppercase tracking-widest text-white bg-black px-5 py-2 text-xl md:text-2xl font-black" style={hankenStack}>One complete job</h2><div className="h-[4px] flex-grow bg-black"/></div>
       <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-4">{FLOW.map(([number,title,copy])=><article key={number} className="border-[4px] border-black bg-white p-5" style={hardShadow}><span className="text-3xl font-black" style={{...monoStack,color:PRIMARY}}>{number}</span><h3 className="text-xl font-black mt-5 mb-2" style={hankenStack}>{title}</h3><p className="text-sm text-neutral-600 leading-relaxed">{copy}</p></article>)}</div>
-      <div className="mt-7 border-[4px] border-black p-5 md:p-7 text-center" style={{backgroundColor:PRIMARY_CONTAINER,...hardShadow}}><p className="font-black text-xl md:text-3xl" style={hankenStack}>Customer → Vehicle → Estimate → Approval → Schedule → Job → Invoice → Payment → History</p></div>
+      <div className="mt-7 border-[4px] border-black p-5 md:p-7 text-center" style={{backgroundColor:PRIMARY_CONTAINER,...hardShadow}}><p className="font-black text-xl md:text-3xl" style={hankenStack}>Request → Appointment → Vehicle → Start Job → Inspection → Recommendation → Authorization → Service → Invoice → Payment → History</p></div>
     </section>
 
     <section id="free-core" className="mb-24 md:mb-32 grid lg:grid-cols-2 gap-7 items-stretch">
