@@ -94,6 +94,8 @@ const LoginHub = lazyRetry(() => import("./legacy-pages/LoginHub"));
 const OAuthConsent = lazyRetry(() => import("./legacy-pages/OAuthConsent"));
 const Unsubscribe = lazyRetry(() => import("./legacy-pages/Unsubscribe"));
 const Pricing = lazyRetry(() => import("./legacy-pages/Pricing"));
+const Solutions = lazyRetry(() => import("./legacy-pages/Solutions"));
+const Resources = lazyRetry(() => import("./legacy-pages/Resources"));
 const Plans = lazyRetry(() => import("./legacy-pages/Plans"));
 const About = lazyRetry(() => import("./legacy-pages/About"));
 const Blog = lazyRetry(() => import("./legacy-pages/Blog"));
@@ -485,6 +487,8 @@ export const AppRoutes = () => {
               <Route path="/newsletter" element={<RequireAuth><RouteErrorBoundary section="Marketing"><Newsletter /></RouteErrorBoundary></RequireAuth>} />
               <Route path="/retention-engine" element={<RequireAuth><RouteErrorBoundary section="Marketing"><RetentionEngine /></RouteErrorBoundary></RequireAuth>} />
               <Route path="/retention-verify" element={<RequireAuth><RouteErrorBoundary section="Marketing"><RetentionVerify /></RouteErrorBoundary></RequireAuth>} />
+              <Route path="/solutions" element={<RouteErrorBoundary section="Marketing"><Solutions /></RouteErrorBoundary>} />
+              <Route path="/resources" element={<RouteErrorBoundary section="Marketing"><Resources /></RouteErrorBoundary>} />
               <Route path="/features-guide" element={<RouteErrorBoundary section="Marketing"><FeaturesGuide /></RouteErrorBoundary>} />
               <Route path="/features/:featureSlug" element={<RouteErrorBoundary section="Marketing"><FeatureDetail /></RouteErrorBoundary>} />
               <Route path="/vehicle-specs" element={<RequireAuth><RouteRoleGuard><RouteErrorBoundary section="Marketing"><VehicleSpecs /></RouteErrorBoundary></RouteRoleGuard></RequireAuth>} />
@@ -565,7 +569,9 @@ const SeoManager = (): null => {
   useEffect(() => {
     const seoByPath: Record<string, { title: string; description: string }> = {
       "/": { title: "Service Writer | Mobile Mechanic Platform", description: "Service Writer helps mobile mechanics streamline booking, dispatch, diagnostics, and payment workflows." },
-      "/pricing": { title: "Pricing | Service Writer", description: "Start free with Service Writer, then upgrade as your team grows with plans for solo mechanics, shops, and fleets." },
+      "/pricing": { title: "Pricing | Service Writer", description: "Start free with Service Writer, then add advanced growth, automation, payments, and fleet capabilities as they create value." },
+      "/solutions": { title: "Solutions | Service Writer", description: "Service Writer for independent repair shops, mobile mechanics, quick service, tire businesses, detailers, and fleet service providers." },
+      "/resources": { title: "Resources | Service Writer", description: "Service Writer product education, operator guidance, FAQs, support, insights, and security resources." },
       "/about": { title: "About Us | Service Writer", description: "Learn how Service Writer was built by mechanics for mechanics." },
       "/blog": { title: "Blog | Service Writer", description: "Guides, product updates, and growth playbooks for mobile service teams." },
       "/how-it-works": { title: "How It Works | Service Writer", description: "See how Service Writer connects booking, dispatch, field service, payments, and customer follow-up in one mobile-first workflow." },
