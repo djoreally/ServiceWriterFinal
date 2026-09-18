@@ -55,19 +55,47 @@ export async function saveInspection(payload: PerformInspectionPayload): Promise
 
   const workspaceId = await resolveInspectionWorkspace(payload);
   const db = supabase as any;
-  const { data: inspection, error: inspectionError } = await db.from("service_inspections").insert({
-    workspace_id: workspaceId,
-    user_id: user.id,
-    service_id: payload.serviceId || null,
-    vehicle_id: payload.vehicleId,
-    appointment_id: payload.appointmentId,
-    template_id: payload.templateId,
-    template_name: payload.templateName,
-    inspector_name: payload.inspectorName || null,
-    notes: payload.notes || null,
-    status: "completed",
-  }).select().single();
-  if (inspectionError) throw inspectionError;
+  const { data: existingInspection, error: existingError } = await db.from("service_inspections")
+    .select("id")
+    .eq("workspace_id", workspaceId)
+    .eq("appointment_id", payload.appointmentId)
+    .eq("vehicle_id", payload.vehicleId)
+    .eq("template_id", payload.templateId)
+    .neq("status", "cancelled")
+    .maybeSingle();
+  if (existingError) throw existingError;
+
+  let inspection: any;
+  if (existingInspection?.id) {
+    const { data, error } = await db.from("service_inspections").update({
+      user_id: user.id,
+      service_id: payload.serviceId || null,
+      template_name: payload.templateName,
+      inspector_name: payload.inspectorName || null,
+      notes: payload.notes || null,
+      status: "completed",
+      inspection_date: new Date().toISOString(),
+    }).eq("id", existingInspection.id).select().single();
+    if (error) throw error;
+    inspection = data;
+    const { error: clearError } = await db.from("inspection_results").delete().eq("inspection_id", inspection.id);
+    if (clearError) throw clearError;
+  } else {
+    const { data, error } = await db.from("service_inspections").insert({
+      workspace_id: workspaceId,
+      user_id: user.id,
+      service_id: payload.serviceId || null,
+      vehicle_id: payload.vehicleId,
+      appointment_id: payload.appointmentId,
+      template_id: payload.templateId,
+      template_name: payload.templateName,
+      inspector_name: payload.inspectorName || null,
+      notes: payload.notes || null,
+      status: "completed",
+    }).select().single();
+    if (error) throw error;
+    inspection = data;
+  }
 
   const source = Object.values(payload.results);
   const resultRecords = source.map((result) => ({
