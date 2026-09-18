@@ -31,23 +31,11 @@ export async function resolveApprovedRecommendation(
   resolution: RecommendationWorkResolution,
   notes?: string | null,
 ) {
-  const { data: current, error: readError } = await (supabase as any).from("service_recommendations")
-    .select("id,status,technician_notes,appointment_item_id")
-    .eq("id", recommendationId)
-    .single();
-  if (readError) throw readError;
-  if (current.status === resolution) return current;
-  if (current.status !== "approved" || !current.appointment_item_id) {
-    throw new Error("Only approved additional work can be resolved.");
-  }
-
-  const technicianNotes = [current.technician_notes, notes?.trim()].filter(Boolean).join("\n") || null;
-  const { data, error } = await (supabase as any).from("service_recommendations")
-    .update({ status: resolution, technician_notes: technicianNotes, updated_at: new Date().toISOString() })
-    .eq("id", recommendationId)
-    .eq("status", "approved")
-    .select()
-    .single();
+  const { data, error } = await (supabase as any).rpc("resolve_service_recommendation_work_v1", {
+    p_recommendation_id: recommendationId,
+    p_resolution: resolution,
+    p_notes: notes?.trim() || null,
+  });
   if (error) throw error;
   return data;
 }
