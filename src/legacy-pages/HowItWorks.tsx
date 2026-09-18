@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { ArrowRight, Phone, ClipboardList, Wrench, CreditCard, Repeat } from "lucide-react";
+import { ArrowRight, CalendarDays, CarFront, CheckCircle2, ClipboardCheck, CreditCard, FileCheck2, Gauge, History, SearchCheck, Wrench } from "lucide-react";
 import {
   MarketingLayout,
   PageHeader,
@@ -13,31 +13,16 @@ import {
 } from "@/components/marketing/MarketingLayout";
 
 const STEPS = [
-  {
-    icon: Phone,
-    title: "Customer books or calls",
-    body: "Inbound calls, web bookings, and SMS all land in one inbox. The AI receptionist captures details when you're on a job.",
-  },
-  {
-    icon: ClipboardList,
-    title: "Dispatch & route",
-    body: "Drag-and-drop dispatch board with live ETA, geo-aware availability, and automatic SMS confirmations.",
-  },
-  {
-    icon: Wrench,
-    title: "Service in the field",
-    body: "Offline-first PWA: technicians complete DVIs, take photos, scan VINs, and update job status with or without signal.",
-  },
-  {
-    icon: CreditCard,
-    title: "Invoice & collect",
-    body: "Quote → invoice → Stripe or Square payment in one tap. Funds settle to your bank, ledger reconciled automatically.",
-  },
-  {
-    icon: Repeat,
-    title: "Bring them back",
-    body: "Retention engine triggers maintenance reminders, review requests, and loyalty rewards based on the work history.",
-  },
+  { icon: CalendarDays, title: "Request becomes an appointment", body: "A customer books online, calls, or the office creates the appointment. The appointment becomes the non-fleet operating record that carries the scheduled service forward." },
+  { icon: CarFront, title: "Lock the work to the exact vehicle", body: "Customer, vehicle, requested services, pricing, VIN context, and history stay together. Multi-vehicle appointments preserve each vehicle's work separately." },
+  { icon: FileCheck2, title: "Estimate and authorize scheduled work", body: "Build the expected service, price it, and capture customer approval so the technician starts with a clear authorized scope." },
+  { icon: Gauge, title: "Start Job verifies VIN and mileage", body: "At service start, the technician confirms the exact vehicle, VIN, and mileage before moving into that service's required inspection." },
+  { icon: SearchCheck, title: "Inspect while the service is underway", body: "The service-specific inspection begins at Start Job, so condition findings and upsell opportunities surface while the scheduled work is already moving." },
+  { icon: ClipboardCheck, title: "Turn findings into recommendations", body: "Attention or urgent findings can become priced recommendations with technician context for that exact vehicle." },
+  { icon: CheckCircle2, title: "Customer approves or declines", body: "Authorization is explicit. Approved additional work is added to the active appointment for the correct vehicle; declined work remains in history for future service." },
+  { icon: Wrench, title: "Complete the authorized work", body: "Technicians finish scheduled and approved services. Anything that cannot be completed follows a clearly recorded unable-to-complete path instead of being falsely marked complete." },
+  { icon: CreditCard, title: "Invoice, reconcile, and collect", body: "Completed work becomes the invoice. Prepaid amounts, additional authorized work, payment, and receipt are reconciled without losing vehicle-level attribution." },
+  { icon: History, title: "History drives the next visit", body: "Completed and declined work stays with the customer and vehicle. That history can power reminders, loyalty, re-engagement, reviews, and future appointments." },
 ];
 
 export default function HowItWorks() {
@@ -45,8 +30,8 @@ export default function HowItWorks() {
     <MarketingLayout>
       <PageHeader
         eyebrow="How it works"
-        title="From first call to repeat customer — in one platform."
-        subtitle="Service Writer replaces the patchwork of scheduling apps, SMS tools, invoicing, and CRMs that independent shops and fleets stitch together today."
+        title="From appointment to inspection, authorization, payment, and the next visit."
+        subtitle="The workflow follows the actual service job. For non-fleet work, the appointment is the operating record — not a second hidden work-order system."
       />
 
       <div className="space-y-8 mb-20">
