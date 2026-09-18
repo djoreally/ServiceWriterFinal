@@ -41,16 +41,18 @@ export function useMarketingFonts() {
 }
 
 const NAV_LINKS = [
-  { to: "/how-it-works", label: "How It Works" },
-  { to: "/features-guide", label: "Features" },
-  { to: "/tire", label: "Tire" },
-  { to: "/detailers", label: "Detailers" },
+  { to: "/features-guide", label: "Product" },
+  { to: "/solutions", label: "Solutions" },
   { to: "/pricing", label: "Pricing" },
-  { to: "/find-provider", label: "Find Provider" },
-  { to: "/faqs", label: "FAQs" },
+  { to: "/resources", label: "Resources" },
+  { to: "/find-provider", label: "Find a Provider" },
 ];
 
 const MOBILE_SECONDARY_LINKS = [
+  { to: "/how-it-works", label: "How It Works" },
+  { to: "/tire", label: "Tire Businesses" },
+  { to: "/detailers", label: "Detailers" },
+  { to: "/faqs", label: "FAQs" },
   { to: "/contact", label: "Contact" },
   { to: "/about", label: "About" },
   { to: "/blog", label: "Blog" },
@@ -71,7 +73,7 @@ export function MarketingNav() {
     <div className="flex justify-between items-center h-20 px-6 max-w-[1200px] mx-auto">
       <Link to="/" className="flex items-center gap-3"><div className="w-10 h-10 border-[3px] border-black flex items-center justify-center" style={{ backgroundColor: PRIMARY_CONTAINER, boxShadow: "3px 3px 0px #000" }}><Wrench className="w-5 h-5" strokeWidth={2.5} /></div><span className="text-2xl font-black uppercase tracking-tighter" style={hankenStack}>Service Writer</span></Link>
       <div className="hidden xl:flex items-center gap-5 text-sm">{NAV_LINKS.map((link) => { const active = isActive(link.to); return <MarketingLink key={link.to} to={link.to} className={active ? "font-bold border-b-[4px]" : "font-medium hover:opacity-70 transition"} style={active ? { borderColor: PRIMARY_CONTAINER } : undefined}>{link.label}</MarketingLink>; })}</div>
-      <div className="flex gap-4 items-center"><Link to="/login" className={neoBtn} style={{ backgroundColor: PRIMARY_CONTAINER, ...hardShadow, fontSize: "0.875rem" }}>Login</Link><button type="button" className="xl:hidden border-[3px] border-black bg-white p-2" style={hardShadow} aria-label={mobileOpen ? "Close navigation menu" : "Open navigation menu"} aria-expanded={mobileOpen} onClick={() => setMobileOpen((open) => !open)}>{mobileOpen ? <X className="w-5 h-5" strokeWidth={3} /> : <Menu className="w-5 h-5" strokeWidth={3} />}</button></div>
+      <div className="flex gap-3 items-center"><Link to="/login" className={neoBtn} style={{ backgroundColor: "#fff", ...hardShadow, fontSize: "0.875rem" }}>Log In</Link><Link to="/signup" className={`${neoBtn} hidden sm:inline-flex`} style={{ backgroundColor: PRIMARY_CONTAINER, ...hardShadow, fontSize: "0.875rem" }}>Start Free</Link><button type="button" className="xl:hidden border-[3px] border-black bg-white p-2" style={hardShadow} aria-label={mobileOpen ? "Close navigation menu" : "Open navigation menu"} aria-expanded={mobileOpen} onClick={() => setMobileOpen((open) => !open)}>{mobileOpen ? <X className="w-5 h-5" strokeWidth={3} /> : <Menu className="w-5 h-5" strokeWidth={3} />}</button></div>
     </div>
     {mobileOpen && <div className="xl:hidden border-t-[3px] border-black bg-white px-6 py-5"><div className="grid gap-3 sm:grid-cols-2">{mobileLinks.map((link) => { const active = isActive(link.to); return <MarketingLink key={link.to} to={link.to} className="flex items-center justify-between border-[3px] border-black px-4 py-3 font-black uppercase tracking-wide" style={{ backgroundColor: active ? PRIMARY_CONTAINER : SURFACE, boxShadow: active ? "3px 3px 0px #000" : undefined }}>{link.label}{active && <span className="text-xs" style={monoStack}>Current</span>}</MarketingLink>; })}</div></div>}
   </nav>;
