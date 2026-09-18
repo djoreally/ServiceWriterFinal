@@ -637,6 +637,7 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
                   taxAmount={taxAmount}
                   subtotal={estimatedCost + wasteOilFee + shopFee + surcharge}
                   taxRate={feeSettings?.tax_rate || undefined}
+                  surchargeAmount={surcharge}
                 />
               </TabsContent>
 
