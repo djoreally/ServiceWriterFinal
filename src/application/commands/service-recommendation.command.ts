@@ -54,7 +54,16 @@ export async function resolveApprovedRecommendation(
 
 export async function fetchAppointmentRecommendations(appointmentId: string) {
   const { data, error } = await (supabase as any).from("service_recommendations")
-    .select("*").eq("appointment_id", appointmentId).order("created_at");
+    .select("*, vehicles!service_recommendations_vehicle_id_fkey(year,make,model)")
+    .eq("appointment_id", appointmentId).order("created_at");
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []).map((row: any) => {
+    const vehicle = Array.isArray(row.vehicles) ? row.vehicles[0] : row.vehicles;
+    return {
+      ...row,
+      vehicle_description: vehicle
+        ? [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ")
+        : null,
+    };
+  });
 }
