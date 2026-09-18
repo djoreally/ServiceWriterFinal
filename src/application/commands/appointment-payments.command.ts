@@ -15,6 +15,7 @@ export async function createAppointmentPaymentRecord(params: {
   subtotalCents: number;
   taxCents: number | null;
   taxRate: number | null;
+  surchargeCents?: number | null;
   customerEmail?: string | null;
   customerName: string | null;
 }): Promise<{ id: string; amount: number; currency_code: string; status: string }> {
@@ -32,6 +33,7 @@ export async function createAppointmentPaymentRecord(params: {
       subtotal_cents: params.subtotalCents,
       tax_amount_cents: params.taxCents,
       tax_rate: params.taxRate,
+      surcharge_amount_cents: params.surchargeCents ?? 0,
       customer_email: params.customerEmail ?? null,
       customer_name: params.customerName,
       source: "appointment_detail",
