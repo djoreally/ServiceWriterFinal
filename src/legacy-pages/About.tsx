@@ -13,10 +13,10 @@ import {
 } from "@/components/marketing/MarketingLayout";
 
 const STATS = [
-  { value: "100%", label: "Mobile-first" },
-  { value: "Offline", label: "PWA-native" },
-  { value: "USA", label: "Built & supported" },
-  { value: "1", label: "Platform replaces 6 tools" },
+  { value: "Shop", label: "Operator-built" },
+  { value: "$0", label: "Operational core" },
+  { value: "1", label: "Customer-to-payment workflow" },
+  { value: "Your Data", label: "Not an upgrade hostage" },
 ];
 
 export default function About() {
@@ -24,8 +24,8 @@ export default function About() {
     <MarketingLayout>
       <PageHeader
         eyebrow="About"
-        title="Spiffy is for dealerships. We're for everyone else."
-        subtitle="Service Writer was started by operators tired of duct-taping scheduling apps, SMS tools, invoicing, and CRMs together to run a real mobile service business."
+        title="Built by a shop, for shops."
+        subtitle="Service Writer comes from operating an automotive service business and dealing with the same scheduling, vehicle, technician, inspection, authorization, payment, and retention problems the software is built to solve."
       />
 
       <div className="grid md:grid-cols-4 gap-5 mb-20">
@@ -44,21 +44,17 @@ export default function About() {
           Our story
         </div>
         <h2 className="text-3xl font-black mb-6" style={hankenStack}>
-          Built in the van, not the boardroom.
+          The product started with the work.
         </h2>
         <div className="space-y-4 text-lg leading-relaxed" style={{ color: "#3a3a3a" }}>
           <p>
-            The big dealer-group tools have been chasing one customer for a decade: the franchise dealership.
-            Meanwhile the independent shops, the mobile mechanics, and the fleet service teams who actually keep
-            America's cars moving have been stuck with desktop software designed for a service counter that
-            doesn't exist in their world.
+            Service Writer was shaped by the day-to-day reality of running automotive service: customers book, vehicles have histories, technicians need the right information at the right time, inspections uncover additional work, customers must authorize it, and every completed service has to become an accurate invoice and permanent vehicle record.
           </p>
           <p>
-            Service Writer is what we wished we had. Mobile-first. Offline-first. A real operating system for
-            dispatching, doing the work, billing for it, and bringing customers back.
+            That is why the product is organized around the complete service lifecycle instead of disconnected software modules. The non-fleet appointment carries the work from schedule through execution and payment. The exact vehicle stays attached. Inspection findings can become recommendations. Customer decisions remain part of the record. Completed and deferred work become useful history.
           </p>
           <p>
-            We are a small, senior team based in the United States. We reply quickly, ride along, and ship every week.
+            The business model follows the same operator-first logic: the everyday operational core is free. Service Writer earns more when advanced automation, growth products, infrastructure, or fleet capabilities create additional value — not by putting artificial limits on ordinary customers, vehicles, technicians, or service records.
           </p>
         </div>
       </NeoCard>
