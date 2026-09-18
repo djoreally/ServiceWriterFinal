@@ -60,6 +60,7 @@ begin
            round(sum(ai.quantity*ai.unit_price)::numeric,2) vehicle_subtotal
     from public.appointment_items ai
     where ai.workspace_id=p_workspace_id and ai.appointment_id=p_appointment_id
+      and public.is_appointment_item_billable_v1(ai)
     group by coalesce((ai.metadata->>'vehicle_id')::uuid,v_appt.vehicle_id)
   ) x
   where sr.workspace_id=p_workspace_id and sr.appointment_id=p_appointment_id and sr.vehicle_id=x.vehicle_id;
