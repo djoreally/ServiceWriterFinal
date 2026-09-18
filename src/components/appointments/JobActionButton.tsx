@@ -8,6 +8,7 @@ import { startAppointmentJob } from "@/application/commands/appointment-detail.c
 import { fetchAppointmentInspectionGate, type AppointmentInspectionGate } from "@/application/queries/inspections.query";
 import { InspectionPerformer } from "@/components/inspections/InspectionPerformer";
 import { CompleteAppointmentDialog } from "@/components/appointments/CompleteAppointmentDialog";
+import { fetchAppointmentRecommendations, resolveApprovedRecommendation } from "@/application/commands/service-recommendation.command";
 import type { Appointment } from "@/shared/types";
 
 interface JobActionButtonProps { appointment: JobActionAppointment; onUpdated: () => void; className?: string; }
@@ -20,10 +21,18 @@ export function JobActionButton({ appointment, onUpdated, className }: JobAction
   const [gate, setGate] = useState<AppointmentInspectionGate | null>(null);
   const [showInspection, setShowInspection] = useState(false);
   const [showComplete, setShowComplete] = useState(false);
+  const [approvedWork, setApprovedWork] = useState<any[]>([]);
+  const [resolvingRecommendation, setResolvingRecommendation] = useState<string | null>(null);
 
   const refreshGate = useCallback(async () => {
     try { setGate(await fetchAppointmentInspectionGate(appointment.id)); }
     catch { setGate({ required: [], pendingCount: 0 }); }
+    try {
+      const recommendations = await fetchAppointmentRecommendations(appointment.id);
+      setApprovedWork(recommendations.filter((row: any) => row.status === "approved"));
+    } catch {
+      setApprovedWork([]);
+    }
   }, [appointment.id]);
 
   useEffect(() => { void Promise.resolve().then(() => refreshGate()); }, [refreshGate]);
@@ -38,6 +47,7 @@ export function JobActionButton({ appointment, onUpdated, className }: JobAction
   else if (isCompleted) step = "done";
   else if (!started) step = "start";
   else if (gate.pendingCount > 0) step = "inspection";
+  else if (approvedWork.length > 0) step = "inspection";
   else step = "complete";
 
   const handleStart = async () => {
@@ -67,6 +77,65 @@ export function JobActionButton({ appointment, onUpdated, className }: JobAction
   if (step === "inspection") {
     const pending = gate?.required.filter((r) => !r.completed) ?? [];
     const current = pending[0];
+
+    if (pending.length === 0 && approvedWork.length > 0) {
+      return <div className={className}>
+        <div className="space-y-2 rounded-lg border p-3">
+          <div className="font-medium">Approved additional work</div>
+          {approvedWork.map((recommendation: any) => (
+            <div key={recommendation.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2">
+              <div className="min-w-0">
+                <div className="text-sm font-medium">{recommendation.description}</div>
+                <div className="text-xs text-muted-foreground">
+                  {recommendation.price != null ? `${Number(recommendation.price).toFixed(2)} · ` : ""}
+                  Vehicle {String(recommendation.vehicle_id).slice(0, 8)}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  disabled={resolvingRecommendation === recommendation.id}
+                  onClick={async () => {
+                    setResolvingRecommendation(recommendation.id);
+                    try {
+                      await resolveApprovedRecommendation(recommendation.id, "completed");
+                      toast.success("Approved work marked complete");
+                      await refreshGate();
+                      onUpdated();
+                    } catch (error) {
+                      toast.error(error instanceof Error ? error.message : "Unable to complete approved work");
+                    } finally { setResolvingRecommendation(null); }
+                  }}
+                >
+                  <CheckCircle2 className="mr-1 h-4 w-4" />Work Complete
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={resolvingRecommendation === recommendation.id}
+                  onClick={async () => {
+                    const reason = window.prompt("Why could this approved work not be completed?");
+                    if (!reason?.trim()) return;
+                    setResolvingRecommendation(recommendation.id);
+                    try {
+                      await resolveApprovedRecommendation(recommendation.id, "unable_to_complete", reason);
+                      toast.success("Approved work marked unable to complete");
+                      await refreshGate();
+                      onUpdated();
+                    } catch (error) {
+                      toast.error(error instanceof Error ? error.message : "Unable to resolve approved work");
+                    } finally { setResolvingRecommendation(null); }
+                  }}
+                >
+                  Unable to Complete
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>;
+    }
+
     return <>
       <Button className={className} variant="default" onClick={() => setShowInspection(true)}><ClipboardCheck className="h-4 w-4 mr-2" />Service Inspection ({pending.length} pending)</Button>
       <Dialog open={showInspection} onOpenChange={setShowInspection}>
