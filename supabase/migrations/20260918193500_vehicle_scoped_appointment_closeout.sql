@@ -75,7 +75,7 @@ begin
     and status in ('succeeded'::public.payment_status,'partially_refunded'::public.payment_status)
     and invoice_id is distinct from v_invoice_id;
 
-  perform public.reconcile_invoice_payment_balance_v1(p_workspace_id,v_invoice_id);
+  -- payment reconciliation is trigger-driven when payment rows are linked/updated.
   select status,subtotal,tax_total,total,amount_paid into v_invoice_status,v_subtotal,v_tax,v_total,v_amount_paid
    from public.invoices where workspace_id=p_workspace_id and id=v_invoice_id;
   v_balance_due:=round(greatest(v_total-coalesce(v_amount_paid,0),0),2);
