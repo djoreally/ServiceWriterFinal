@@ -479,7 +479,10 @@ export const AppRoutes = () => {
               <Route path="/receptionist" element={<RequireAuth><RouteRoleGuard><RouteErrorBoundary section="Settings"><Receptionist /></RouteErrorBoundary></RouteRoleGuard></RequireAuth>} />
               <Route path="/assets" element={<RequireAuth><RouteErrorBoundary section="Dashboard"><Assets /></RouteErrorBoundary></RequireAuth>} />
 
-              {/* Public feature education + authenticated growth workspace routes */}
+              {/* Public marketing information architecture */}
+              <Route path="/product" element={<Navigate to="/features-guide" replace />} />
+              <Route path="/features" element={<Navigate to="/features-guide" replace />} />
+                            {/* Public feature education + authenticated growth workspace routes */}
               <Route path="/marketing" element={<RequireAuth><RouteErrorBoundary section="Marketing"><Marketing /></RouteErrorBoundary></RequireAuth>} />
               <Route path="/growth-tools" element={<RequireAuth><RouteErrorBoundary section="Marketing"><Marketing /></RouteErrorBoundary></RequireAuth>} />
               <Route path="/growth-tools/email-diagnostics" element={<RequireAuth><Navigate to="/growth-tools?tab=email-testing" replace /></RequireAuth>} />
