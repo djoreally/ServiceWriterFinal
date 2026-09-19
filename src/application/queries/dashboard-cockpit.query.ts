@@ -12,7 +12,9 @@ import { fetchCanonicalCashReceipts } from '@/application/queries/canonical-cash
 import {
   format,
   addDays,
-  parseISO,
+  startOfWeek,
+  startOfMonth,
+  startOfYear,
 } from 'date-fns';
 
 export interface CockpitAppointment {
@@ -160,12 +162,12 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
       .order('starts_at', { ascending: false })
       .limit(20),
     productionSupabase
-      .from('appointments')
-      .select('id', { count: 'exact', head: true })
+      .from('service_records')
+      .select('appointment_id')
       .eq('workspace_id', workspaceId)
       .eq('status', 'completed')
-      .gte('updated_at', todayStart)
-      .lt('updated_at', todayEnd),
+      .gte('completed_at', todayStart)
+      .lt('completed_at', todayEnd),
     productionSupabase
       .from('service_records')
       .select('id,total_amount,completed_at,metadata')
