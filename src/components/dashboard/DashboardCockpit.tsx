@@ -141,7 +141,7 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
           <Button size="sm" variant="secondary" onClick={() => navigate('/appointments')}>
             Appointments
           </Button>
-          <Button size="sm" variant="secondary" onClick={() => navigate('/quick-service')}>
+          <Button size="sm" variant="secondary" onClick={() => navigate('/appointments', { state: { openNewAppointment: true } })}>
             New Service
           </Button>
           <Button size="sm" variant="secondary" onClick={() => navigate('/invoices')}>

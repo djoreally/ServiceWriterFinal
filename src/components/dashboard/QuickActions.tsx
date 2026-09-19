@@ -11,8 +11,8 @@ export const QuickActions = () => {
     {
       icon: Car,
       label: `Check-in ${terms.vehicle}`,
-      description: "Start new service",
-      onClick: () => navigate("/quick-service"),
+      description: "Create an appointment for this vehicle",
+      onClick: () => navigate("/appointments", { state: { openNewAppointment: true } }),
       iconBg: "bg-primary/10",
       iconColor: "text-primary",
     },

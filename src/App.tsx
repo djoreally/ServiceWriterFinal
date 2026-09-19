@@ -455,7 +455,7 @@ export const AppRoutes = () => {
               <Route path="/tire-pricing" element={<RequireAuth><RouteRoleGuard><RouteErrorBoundary section="Services"><TirePricing /></RouteErrorBoundary></RouteRoleGuard></RequireAuth>} />
               <Route path="/detailing-pricing" element={<RequireAuth><RouteRoleGuard><RouteErrorBoundary section="Services"><DetailingPricing /></RouteErrorBoundary></RouteRoleGuard></RequireAuth>} />
               <Route path="/subscriptions" element={<RequireAuth><RouteErrorBoundary section="Services"><Subscriptions /></RouteErrorBoundary></RequireAuth>} />
-              <Route path="/quick-service" element={<RequireAuth><RouteErrorBoundary section="Services"><QuickService /></RouteErrorBoundary></RequireAuth>} />
+              <Route path="/quick-service" element={<Navigate to="/appointments" replace state={{ openNewAppointment: true }} />} />
               {/* Settings & admin routes — isolated error boundary; admin-only */}
               <Route path="/field-companion" element={<RequireAuth><RouteErrorBoundary section="Field Companion"><FieldCompanion /></RouteErrorBoundary></RequireAuth>} />
               <Route path="/settings/sessions" element={<RequireAuth><SessionManagement /></RequireAuth>} />
