@@ -160,12 +160,12 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
       .order('starts_at', { ascending: false })
       .limit(20),
     productionSupabase
-      .from('service_records')
+      .from('appointments')
       .select('id', { count: 'exact', head: true })
       .eq('workspace_id', workspaceId)
       .eq('status', 'completed')
-      .gte('completed_at', todayStart)
-      .lte('completed_at', todayEnd),
+      .gte('updated_at', todayStart)
+      .lte('updated_at', todayEnd),
     productionSupabase
       .from('service_records')
       .select('id,total_amount,completed_at,metadata')
