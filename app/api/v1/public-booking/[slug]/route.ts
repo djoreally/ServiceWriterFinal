@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { errorResponse, json } from "@/server/api";
-import { createSupabaseServerClient } from "@/lib/supabase";
+import { createSupabaseAdminClient } from "@/lib/supabase";
 
 const slugSchema = z.string().trim().min(1).max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/i);
 const querySchema = z.object({
@@ -39,7 +39,7 @@ function normalizeCatalog(rows: RpcRow[]): RpcRow[] {
   return rows.map((row) => ({ ...row, booking_requirements: normalizedRequirements(row) }));
 }
 
-async function profileForSlug(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, slug: string) {
+async function profileForSlug(supabase: ReturnType<typeof createSupabaseAdminClient>, slug: string) {
   const { data, error } = await supabase.rpc("get_public_booking_profile_v3", { booking_slug_param: slug });
   if (error || !Array.isArray(data) || data.length === 0) throw unavailable();
   return data[0] as RpcRow;
@@ -51,7 +51,7 @@ export async function GET(request: Request, context: { params: Promise<{ slug: s
     const slug = canonicalBookingSlug(slugSchema.parse(rawSlug));
     const url = new URL(request.url);
     const query = querySchema.parse({ section: url.searchParams.get("section") ?? undefined, date: url.searchParams.get("date") ?? undefined });
-    const supabase = await createSupabaseServerClient();
+    const supabase = createSupabaseAdminClient();
     const profile = await profileForSlug(supabase, slug);
     const businessUserId = z.string().uuid().parse(profile.user_id);
 
