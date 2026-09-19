@@ -53,7 +53,6 @@ export async function GET(request: Request, context: { params: Promise<{ slug: s
     const query = querySchema.parse({ section: url.searchParams.get("section") ?? undefined, date: url.searchParams.get("date") ?? undefined });
     const supabase = await createSupabaseServerClient();
     const profile = await profileForSlug(supabase, slug);
-    const businessUserId = z.string().uuid().parse(profile.user_id);
 
     if (query.section === "profile") return json({ data: profile }, { headers: { "Cache-Control": "no-store" } });
 
