@@ -127,6 +127,7 @@ begin
     'service_record_ids',to_jsonb(v_service_ids),
     'invoice_id',v_invoice_id,'invoice_number',v_invoice_number,'invoice_status',v_invoice_status,
     'payment_id',v_payment_id,'payment_status',v_payment_status,'subtotal',v_subtotal,'tax_amount',v_tax,
+    'card_fee_amount',coalesce((select nullif(metadata->>'card_fee_amount','')::numeric from public.invoices where id=v_invoice_id),0),
     'total',v_total,'amount_paid',v_amount_paid,'balance_due',v_balance_due,'currency_code','USD'
   );
 end $$;
