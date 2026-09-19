@@ -584,7 +584,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
         p_tax_amount: taxData?.tax_amount || 0,
         p_service_catalog_id: selectedPackage?.services[0]?.id || selectedServices[0]?.id || null,
         p_vehicle_id: vehicleIds[0] || null,
-        p_status: business.require_approval || vehicles.some((vehicle)=>vehicle.detailingQuoteRequired) ? "pending" : "confirmed",
+        p_status: "confirmed",
       });
 
       if (appointmentId && !appointmentError) {
@@ -658,7 +658,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
           service_count: (selectedPackage?.services.length ?? selectedServices.length) || 0,
           amount_cents: Math.round((getGrandTotal() ?? 0) * 100),
           payment_choice: paymentChoice,
-          status: business.require_approval ? "pending" : "confirmed",
+          status: "confirmed",
           vehicle_count: vehicles.length,
         });
       }
