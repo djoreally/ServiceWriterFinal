@@ -103,7 +103,7 @@ export const DateTimeStep = memo(function DateTimeStep({
   getTotalDuration,
   getTotalPrice,
 }: DateTimeStepProps) {
-  const today = startOfDay(new Date());
+  const today = useMemo(() => startOfDay(new Date()), []);
   const blockedDateSet = useMemo(() => new Set(blockedDates), [blockedDates]);
 
   const isWorkingDay = (date: Date) => isOperatingDay(dayHours, workingDays, date);
@@ -112,7 +112,7 @@ export const DateTimeStep = memo(function DateTimeStep({
 
   const availableDates = useMemo(
     () => Array.from({ length: Math.max(maxAdvanceDays, 1) + 1 }, (_, index) => addDays(today, index)),
-    [maxAdvanceDays, today.getTime()],
+    [maxAdvanceDays, today],
   );
 
   const selectDate = (date: Date) => {
