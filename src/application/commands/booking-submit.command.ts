@@ -202,6 +202,7 @@ export interface BookingPaymentRecordInput {
   status: string;
   payment_type: string;
   customer_email: string;
+  customer_phone: string;
   customer_name: string;
 }
 
@@ -214,7 +215,7 @@ export interface BookingPaymentRecordInput {
  * zero-collected intent row. Idempotent per appointment.
  */
 export async function insertBookingPaymentRecord(record: BookingPaymentRecordInput) {
-  const { data, error } = await supabase.rpc("public_booking_record_payment_intent_v2", {
+  const { data, error } = await supabase.rpc("public_booking_record_payment_intent_v3" as never, {
     p_booking_slug: record.booking_slug,
     p_appointment_id: record.appointment_id,
     p_amount: Math.round(record.amount),
@@ -223,8 +224,9 @@ export async function insertBookingPaymentRecord(record: BookingPaymentRecordInp
     p_tax_rate: record.tax_rate,
     p_currency: record.currency,
     p_customer_email: record.customer_email,
+    p_customer_phone: record.customer_phone,
     p_customer_name: record.customer_name,
-  });
+  } as never);
   if (error) throw error;
   return { data: data ? { id: data as string } : null, error: null as null };
 }
