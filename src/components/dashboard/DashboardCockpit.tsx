@@ -11,6 +11,7 @@ import {
   type CockpitData,
 } from '@/application/queries/dashboard-cockpit.query';
 import { getSelectedWorkspaceId } from '@/application/queries/workspaces.selection';
+import { fetchBusinessSettings } from '@/application/queries/settings.query';
 
 const DASHBOARD_CACHE_TTL_MS = 15 * 1000;
 const dashboardCache = new Map<string, { value: CockpitData | null; expiresAt: number }>();
@@ -77,12 +78,16 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
   const [data, setData] = useState<CockpitData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [timeZone, setTimeZone] = useState<string>('America/New_York');
 
   useEffect(() => {
     let active = true;
-    loadDashboardCockpit()
-      .then((d) => {
-        if (active) setData(d);
+    Promise.all([loadDashboardCockpit(), fetchBusinessSettings()])
+      .then(([d, settings]) => {
+        if (active) {
+          setData(d);
+          setTimeZone(settings?.timezone || 'America/New_York');
+        }
       })
       .catch((e) => {
         console.error('Cockpit fetch error:', e);
@@ -114,11 +119,12 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
   }
   if (!data) return <Card><CardContent className="p-4 text-sm text-muted-foreground">No dashboard data is available for this workspace.</CardContent></Card>;
 
-  const todayLabel = new Date().toLocaleDateString(undefined, {
+  const todayLabel = new Intl.DateTimeFormat(undefined, {
     weekday: 'long',
     month: 'long',
     day: 'numeric',
-  });
+    timeZone,
+  }).format(new Date());
   const firstName = ownerName?.split(' ')[0] || 'Shop';
 
   const revenueTrend = data.revenueTodayPrev > 0
@@ -158,7 +164,7 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi label="Revenue Week" value={formatCurrency(data.revenueWeek)} hint="Rolling 7 days" secondary />
+        <Kpi label="Revenue WTD" value={formatCurrency(data.revenueWeek)} hint="Week to date" secondary />
         <Kpi label="Revenue Month" value={formatCurrency(data.revenueMonth)} hint={`Prev ${formatCurrency(data.revenueMonthPrev)}`} secondary />
         <Kpi label="Revenue YTD" value={formatCurrency(data.revenueYTD)} hint="Year to date" secondary />
         <Kpi label="Today vs Yesterday" value={`${revenueTrend >= 0 ? '+' : ''}${revenueTrend.toFixed(1)}%`} hint="Revenue trend" tone={revenueTrend >= 0 ? 'success' : 'warning'} secondary />
