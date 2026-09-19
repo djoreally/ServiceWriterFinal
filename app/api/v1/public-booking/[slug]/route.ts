@@ -40,7 +40,7 @@ function normalizeCatalog(rows: RpcRow[]): RpcRow[] {
 }
 
 async function profileForSlug(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, slug: string) {
-  const { data, error } = await supabase.rpc("get_public_booking_profile_v3" as never, { booking_slug_param: slug });
+  const { data, error } = await (supabase as any).rpc("get_public_booking_profile_v3", { booking_slug_param: slug });
   if (error || !Array.isArray(data) || data.length === 0) throw unavailable();
   return data[0] as RpcRow;
 }
