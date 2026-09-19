@@ -76,6 +76,7 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
   const { formatCurrency, formatTime } = useRegionalSettings();
   const [data, setData] = useState<CockpitData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -83,7 +84,10 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
       .then((d) => {
         if (active) setData(d);
       })
-      .catch((e) => console.error('Cockpit fetch error:', e))
+      .catch((e) => {
+        console.error('Cockpit fetch error:', e);
+        if (active) setError(e instanceof Error ? e.message : 'Dashboard data could not be loaded.');
+      })
       .finally(() => {
         if (active) setLoading(false);
       });
@@ -105,7 +109,10 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
     );
   }
 
-  if (!data) return null;
+  if (error) {
+    return <Card><CardContent className="p-4 text-sm text-destructive">Dashboard data could not be loaded. Refresh the page or try again.</CardContent></Card>;
+  }
+  if (!data) return <Card><CardContent className="p-4 text-sm text-muted-foreground">No dashboard data is available for this workspace.</CardContent></Card>;
 
   const todayLabel = new Date().toLocaleDateString(undefined, {
     weekday: 'long',

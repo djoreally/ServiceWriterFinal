@@ -1,17 +1,15 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { fetchLowStockItems, type LowStockItem } from "@/application/queries/low-stock.query";
 import { AlertTriangle, X, Package } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useNavigate } from "react-router-dom";
-import { notifyLowInventory } from "@/lib/notifications";
 
 export const LowStockAlert = () => {
   const [lowStockItems, setLowStockItems] = useState<LowStockItem[]>([]);
   const [dismissed, setDismissed] = useState(false);
   const navigate = useNavigate();
-  const notifiedItemsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const checkLowStock = async () => {
@@ -25,28 +23,7 @@ export const LowStockAlert = () => {
       const lowStock = await fetchLowStockItems();
       setLowStockItems(lowStock);
 
-      // Create in-app notifications for newly detected low stock items
-      // Only notify once per session per item
-      const notifiedKey = `lowStockNotified_${new Date().toDateString()}`;
-      const previouslyNotified = new Set(
-        JSON.parse(sessionStorage.getItem(notifiedKey) || '[]')
-      );
 
-      for (const item of lowStock) {
-        if (!previouslyNotified.has(item.id) && !notifiedItemsRef.current.has(item.id)) {
-          notifiedItemsRef.current.add(item.id);
-          previouslyNotified.add(item.id);
-          
-          // Create in-app notification
-          await notifyLowInventory(item.name, item.quantity, item.low_stock_threshold, {
-            dedupeKey: `low_inventory:${item.id}:${new Date().toISOString().slice(0, 10)}`,
-            sourceEventId: `inventory:${item.id}:${new Date().toISOString().slice(0, 10)}`,
-          });
-        }
-      }
-
-      // Save notified items to session storage
-      sessionStorage.setItem(notifiedKey, JSON.stringify([...previouslyNotified]));
     };
 
     checkLowStock();

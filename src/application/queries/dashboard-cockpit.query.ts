@@ -141,7 +141,7 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
       .eq('workspace_id', workspaceId)
       .gte('starts_at', todayStart)
       .lte('starts_at', todayEnd)
-      .in('status', ['confirmed', 'in_progress', 'requested'])
+      .in('status', ['confirmed', 'in_progress'])
       .order('starts_at', { ascending: true }),
     productionSupabase
       .from('appointments')
@@ -149,15 +149,15 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
       .eq('workspace_id', workspaceId)
       .gt('starts_at', todayEnd)
       .lte('starts_at', next7End)
-      .in('status', ['confirmed', 'requested'])
+      .eq('status', 'confirmed')
       .order('starts_at', { ascending: true })
       .limit(10),
     productionSupabase
-      .from('service_records')
-      .select('id,started_at,customer_id,vehicle_id,metadata')
+      .from('appointments')
+      .select('id,starts_at,customer_id,vehicle_id,metadata')
       .eq('workspace_id', workspaceId)
       .eq('status', 'in_progress')
-      .order('started_at', { ascending: false })
+      .order('starts_at', { ascending: false })
       .limit(20),
     productionSupabase
       .from('service_records')
@@ -206,7 +206,7 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
       service_type: String(metadata.service_type ?? metadata.service_name ?? 'Service'),
       customer_name: String(metadata.customer_name ?? 'Customer'),
       vehicle: vehicleParts.length ? vehicleParts.join(' ') : null,
-      started_at: row.started_at ?? null,
+      started_at: row.starts_at ?? null,
     };
   });
 
