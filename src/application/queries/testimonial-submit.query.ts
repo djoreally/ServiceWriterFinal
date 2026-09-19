@@ -12,7 +12,7 @@ export interface TestimonialBusinessProfile {
 export async function fetchTestimonialBusinessProfile(
   slug: string
 ): Promise<TestimonialBusinessProfile | null> {
-  const { data, error } = await supabase.rpc("get_public_booking_profile_v2", {
+  const { data, error } = await (supabase as any).rpc("get_public_booking_profile_v3", {
     booking_slug_param: slug,
   });
 
