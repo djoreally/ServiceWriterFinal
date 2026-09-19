@@ -666,6 +666,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
             appointmentId,
             providerId: business.user_id,
             customerEmail: validationResult.data.email,
+            customerPhone: validationResult.data.phone || guestPhone,
             idempotencyKey: `booking:${appointmentId}:reward:${selectedRewardInstanceId}:reserve`,
             reservationMinutes: 30,
           });
