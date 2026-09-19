@@ -500,6 +500,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
               const { error: tireError } = await setVehicleTireSpec({
                 p_booking_slug: slug || "",
                 p_customer_email: validationResult.data.email,
+                p_customer_phone: validationResult.data.phone || "",
                 p_vehicle_id: vehicleId,
                 p_tire_size: vehicle.tireSize,
                 p_tire_size_source: vehicle.tireSizeSource ?? "manual",
