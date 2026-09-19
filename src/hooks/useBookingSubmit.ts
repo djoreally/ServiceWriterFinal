@@ -820,6 +820,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
             status: "pending",
             payment_type: "pay_at_service",
             customer_email: validationResult.data.email,
+            customer_phone: validationResult.data.phone || guestPhone,
             customer_name: validationResult.data.name,
           });
 
