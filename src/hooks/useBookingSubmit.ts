@@ -455,18 +455,14 @@ export function useBookingSubmit(deps: SubmitDeps) {
           p_phone: validationResult.data.phone || null,
           p_address: fullAddress || null,
         });
-        if (upsertError) {
+        if (upsertError || !upsertedId) {
           console.error("Customer upsert error:", upsertError);
-          const { data: existing } = await findCustomerByEmail(
-            business.user_id,
-            validationResult.data.email,
-          );
-          customerId = existing?.id || null;
-        } else {
-          customerId = upsertedId;
+          throw upsertError || new Error("BOOKING_CUSTOMER_PERSISTENCE_FAILED");
         }
+        customerId = upsertedId;
       } catch (err) {
         console.error("Customer upsert failed:", err);
+        throw err;
       }
 
       // Consent is persisted after the appointment exists (see below): the edge
@@ -507,9 +503,13 @@ export function useBookingSubmit(deps: SubmitDeps) {
               });
               if (tireError) console.warn("[Booking] Tire spec save failed:", tireError);
             }
-          } else if (vehicleError) console.error("Vehicle upsert error:", vehicleError);
+          } else {
+            console.error("Vehicle upsert error:", vehicleError);
+            throw vehicleError || new Error("BOOKING_VEHICLE_PERSISTENCE_FAILED");
+          }
         } catch (err) {
           console.error("Vehicle creation failed:", err);
+          throw err;
         }
       }
 
@@ -813,7 +813,8 @@ export function useBookingSubmit(deps: SubmitDeps) {
               validationResult.data.phone || guestPhone,
             );
           } catch (err) {
-            console.warn("[Booking] Failed to create appointment_services:", err);
+            console.error("[Booking] Failed to create appointment_services:", err);
+            throw err;
           }
         }
       }
@@ -866,8 +867,8 @@ export function useBookingSubmit(deps: SubmitDeps) {
           }).catch((syncError) => {
             console.warn("[Booking] Provider sync failed:", syncError);
           });
-        } catch {
-          // Don't fail booking if payment record creation fails
+        } catch (paymentError) {
+          console.error("[Booking] Payment intent creation failed:", paymentError);
           requestAppointmentProviderSync({
             appointmentId,
             syncMode: "appointment_created",
@@ -875,6 +876,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
           }).catch((syncError) => {
             console.warn("[Booking] Provider sync fallback failed:", syncError);
           });
+          throw paymentError;
         }
       } else if (appointmentId) {
         requestAppointmentProviderSync({
