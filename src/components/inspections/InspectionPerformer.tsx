@@ -29,9 +29,9 @@ interface InspectionPerformerProps {
 }
 
 const STATUS_OPTIONS = [
-  { value: "pass", label: "Pass", icon: CheckCircle2, color: "text-gray-600" },
-  { value: "fail", label: "Fail", icon: XCircle, color: "text-red-600" },
-  { value: "warning", label: "Warning", icon: AlertTriangle, color: "text-yellow-600" },
+  { value: "good", label: "Good", icon: CheckCircle2, color: "text-gray-600" },
+  { value: "attention", label: "Attention", icon: AlertTriangle, color: "text-yellow-600" },
+  { value: "urgent", label: "Urgent", icon: XCircle, color: "text-red-600" },
   { value: "not_applicable", label: "N/A", icon: Minus, color: "text-muted-foreground" },
 ];
 
@@ -148,9 +148,9 @@ export function InspectionPerformer({ serviceId, vehicleId, appointmentId, onCom
   const getStatusStats = () => {
     const statuses = Object.values(results);
     return {
-      pass: statuses.filter((r) => r.status === "pass").length,
-      fail: statuses.filter((r) => r.status === "fail").length,
-      warning: statuses.filter((r) => r.status === "warning").length,
+      good: statuses.filter((r) => r.status === "good").length,
+      attention: statuses.filter((r) => r.status === "attention").length,
+      urgent: statuses.filter((r) => r.status === "urgent").length,
       unchecked: statuses.filter((r) => r.status === "not_checked").length,
     };
   };
@@ -223,16 +223,16 @@ export function InspectionPerformer({ serviceId, vehicleId, appointmentId, onCom
 
                 <div className="grid grid-cols-4 gap-2 text-center text-sm">
                   <div className="p-2 bg-gray-500/10 rounded">
-                    <div className="font-bold text-gray-600">{getStatusStats().pass}</div>
-                    <div className="text-muted-foreground">Pass</div>
+                    <div className="font-bold text-gray-600">{getStatusStats().good}</div>
+                    <div className="text-muted-foreground">Good</div>
                   </div>
                   <div className="p-2 bg-red-500/10 rounded">
-                    <div className="font-bold text-red-600">{getStatusStats().fail}</div>
-                    <div className="text-muted-foreground">Fail</div>
+                    <div className="font-bold text-yellow-600">{getStatusStats().attention}</div>
+                    <div className="text-muted-foreground">Attention</div>
                   </div>
                   <div className="p-2 bg-yellow-500/10 rounded">
-                    <div className="font-bold text-yellow-600">{getStatusStats().warning}</div>
-                    <div className="text-muted-foreground">Warning</div>
+                    <div className="font-bold text-red-600">{getStatusStats().urgent}</div>
+                    <div className="text-muted-foreground">Urgent</div>
                   </div>
                   <div className="p-2 bg-muted rounded">
                     <div className="font-bold">{getStatusStats().unchecked}</div>
@@ -297,7 +297,7 @@ export function InspectionPerformer({ serviceId, vehicleId, appointmentId, onCom
                               onChange={(e) => handleNotesChange(item.id, e.target.value)}
                               className="text-sm h-8"
                             />
-                            {["fail", "warning", "attention", "urgent"].includes(results[item.id]?.status || "") && (
+                            {["attention", "urgent"].includes(results[item.id]?.status || "") && (
                               <div className="space-y-1">
                                 <Label className="text-xs">Recommend service (optional)</Label>
                                 <Select
