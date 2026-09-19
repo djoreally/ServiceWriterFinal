@@ -458,6 +458,7 @@ export async function cancelBookingReward(params: {
 export interface SetVehicleTireSpecParams {
   p_booking_slug: string;
   p_customer_email: string;
+  p_customer_phone: string;
   p_vehicle_id: string;
   p_tire_size: string | null;
   p_tire_size_source?: string | null;
