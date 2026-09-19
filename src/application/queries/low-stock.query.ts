@@ -1,8 +1,9 @@
 /**
  * Low Stock Alert Query
- * Fetches inventory items below their stock thresholds.
+ * Derives dashboard alerts from the same canonical workspace-scoped inventory
+ * overview used by the Inventory module.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { fetchInventoryOverview } from "@/application/queries/inventory.query";
 
 export interface LowStockItem {
   id: string;
@@ -12,18 +13,8 @@ export interface LowStockItem {
 }
 
 export async function fetchLowStockItems(): Promise<LowStockItem[]> {
-  const { data: { session } } = await supabase.auth.getSession();
-  const userId = session?.user?.id ?? null;
-  if (!userId) return [];
-
-  const { data, error } = await supabase
-    .from("inventory_items")
-    .select("id, name, quantity, low_stock_threshold")
-    .eq("user_id", userId);
-
-  if (error || !data) return [];
-
-  return data.filter(
-    (item: LowStockItem) => item.quantity <= item.low_stock_threshold
-  );
+  const { items } = await fetchInventoryOverview();
+  return items
+    .filter((item) => item.quantity <= item.low_stock_threshold)
+    .map(({ id, name, quantity, low_stock_threshold }) => ({ id, name, quantity, low_stock_threshold }));
 }
