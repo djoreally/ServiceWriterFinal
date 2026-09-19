@@ -124,7 +124,6 @@ const ServiceDetail = lazyRetry(() => import("./legacy-pages/ServiceDetail"));
 const ServiceCatalog = lazyRetry(() => import("./legacy-pages/ServiceCatalog"));
 const ServicePackages = lazyRetry(() => import("./legacy-pages/ServicePackages"));
 const Subscriptions = lazyRetry(() => import("./legacy-pages/Subscriptions"));
-const QuickService = lazyRetry(() => import("./legacy-pages/QuickService"));
 const Settings = lazyRetry(() => import("./legacy-pages/Settings"));
 const AgentIntegrations = lazyRetry(() => import("./legacy-pages/AgentIntegrations"));
 const Inventory = lazyRetry(() => import("./legacy-pages/Inventory"));

@@ -90,7 +90,6 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
   { match: "/appointments", roles: SCHEDULING },
   { match: "/messages", roles: BOARD },
   { match: "/weather-guard", roles: BOARD },
-  { match: "/quick-service", roles: BOARD },
 
   // --- operations -------------------------------------------------------
   { match: "/customers", roles: BOARD },
