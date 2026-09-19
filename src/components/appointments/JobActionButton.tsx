@@ -66,8 +66,9 @@ export function JobActionButton({ appointment, onUpdated, className }: JobAction
     if (nextGate.pendingCount > 0) setShowInspection(true);
   };
 
-  const handleCompleteSuccess = (serviceId: string) => {
-    setShowComplete(false); onUpdated(); toast.success("Service record created"); navigate(`/services/${serviceId}`);
+  const handleCompleteSuccess = (_serviceId: string) => {
+    onUpdated();
+    toast.success("Service history created");
   };
 
   if (step === "loading") return <Button className={className} variant="default" disabled><Loader2 className="h-4 w-4 mr-2 animate-spin" />Loading…</Button>;
