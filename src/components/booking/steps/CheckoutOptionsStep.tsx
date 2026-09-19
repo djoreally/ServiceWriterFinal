@@ -65,6 +65,7 @@ interface CheckoutOptionsStepProps {
   formatCurrency: (amount: number) => string;
   businessUserId: string;
   guestEmail: string;
+  guestPhone: string;
   selectedRewardInstanceId: string | null;
   onSelectedRewardInstanceChange: (rewardInstanceId: string | null) => void;
   taxLoading: boolean;
@@ -89,6 +90,7 @@ export const CheckoutOptionsStep = memo(function CheckoutOptionsStep({
   formatCurrency,
   businessUserId,
   guestEmail,
+  guestPhone,
   selectedRewardInstanceId,
   onSelectedRewardInstanceChange,
   taxLoading,
@@ -128,7 +130,9 @@ export const CheckoutOptionsStep = memo(function CheckoutOptionsStep({
 
   useEffect(() => {
     const email = guestEmail.trim();
-    if (!businessUserId || !email || !email.includes("@")) {
+    const phone = guestPhone.trim();
+    const phoneDigits = phone.replace(/\D/g, "");
+    if (!businessUserId || !email || !email.includes("@") || phoneDigits.length < 10) {
       setRewardsLookup(null);
       onSelectedRewardInstanceChange(null);
       return;
@@ -137,7 +141,7 @@ export const CheckoutOptionsStep = memo(function CheckoutOptionsStep({
     let active = true;
     const handle = window.setTimeout(() => {
       setLoadingRewards(true);
-      lookupBookingRewards(businessUserId, email)
+      lookupBookingRewards(businessUserId, email, phone)
         .then((result) => {
           if (!active) return;
           setRewardsLookup(result);
@@ -157,7 +161,7 @@ export const CheckoutOptionsStep = memo(function CheckoutOptionsStep({
       active = false;
       window.clearTimeout(handle);
     };
-  }, [businessUserId, guestEmail, selectedRewardInstanceId, onSelectedRewardInstanceChange]);
+  }, [businessUserId, guestEmail, guestPhone, selectedRewardInstanceId, onSelectedRewardInstanceChange]);
 
   const selectedIds = new Set(selectedServices.map(s => s.id));
 
@@ -313,7 +317,7 @@ export const CheckoutOptionsStep = memo(function CheckoutOptionsStep({
 
 
       {/* Booking Rewards Recognition */}
-      {businessUserId && guestEmail.trim().includes("@") && (
+      {businessUserId && guestEmail.trim().includes("@") && guestPhone.replace(/\D/g, "").length >= 10 && (
         <Card className="mb-6 border-primary/20 bg-primary/5">
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
@@ -324,13 +328,13 @@ export const CheckoutOptionsStep = memo(function CheckoutOptionsStep({
           <CardContent className="space-y-3">
             {loadingRewards ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" /> Checking rewards for this email...
+                <Loader2 className="h-4 w-4 animate-spin" /> Securely checking your rewards...
               </div>
             ) : rewardsLookup?.status === "matched" ? (
               <>
                 <div className="flex flex-wrap items-center gap-2 text-sm">
                   <Badge variant="secondary">{rewardsLookup.points_balance.toLocaleString()} points</Badge>
-                  <span className="text-muted-foreground">Matched {rewardsLookup.masked_email || "returning customer"}</span>
+                  <span className="text-muted-foreground">Matched {rewardsLookup.masked_phone || rewardsLookup.masked_email || "returning customer"}</span>
                 </div>
                 {rewardsLookup.available_rewards.length ? (
                   <div className="space-y-2">
@@ -374,9 +378,9 @@ export const CheckoutOptionsStep = memo(function CheckoutOptionsStep({
                 )}
               </>
             ) : rewardsLookup?.status === "requires_review" ? (
-              <p className="text-sm text-muted-foreground">We found multiple possible reward profiles for this email. Please sign in or ask the shop to review your profile before applying rewards.</p>
+              <p className="text-sm text-muted-foreground">We found multiple possible reward profiles for these contact details. Please sign in or ask the shop to review your profile before applying rewards.</p>
             ) : (
-              <p className="text-sm text-muted-foreground">No rewards profile found for this email yet. You can still complete booking and earn rewards after service completion.</p>
+              <p className="text-sm text-muted-foreground">No rewards profile found for these contact details yet. You can still complete booking and earn rewards after service completion.</p>
             )}
           </CardContent>
         </Card>
