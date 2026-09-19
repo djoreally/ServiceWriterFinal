@@ -9,7 +9,7 @@ const CUSTOMER_REMINDERS = [
   { key: LIFECYCLE_EVENT_KEYS.reminder24Hours, targetMs: 24 * 60 * MINUTE, windowMs: 10 * MINUTE, stage: "24h" },
   { key: LIFECYCLE_EVENT_KEYS.reminder60Minutes, targetMs: 60 * MINUTE, windowMs: 10 * MINUTE, stage: "60m" },
 ] as const;
-const ACTIVE_STATUSES = ["scheduled", "confirmed", "approved", "pending"];
+const ACTIVE_STATUSES = ["confirmed"];
 const CANONICAL_PRODUCTION_APP_URL = "https://servicewriter.xyz";
 const MAX_CANDIDATES = 200;
 const REMINDER_BUDGET_MS = 20_000;
