@@ -78,8 +78,6 @@ export async function saveInspection(payload: PerformInspectionPayload): Promise
     }).eq("id", existingInspection.id).select().single();
     if (error) throw error;
     inspection = data;
-    const { error: clearError } = await db.from("inspection_results").delete().eq("inspection_id", inspection.id);
-    if (clearError) throw clearError;
   } else {
     const { data, error } = await db.from("service_inspections").insert({
       workspace_id: workspaceId,
@@ -110,7 +108,9 @@ export async function saveInspection(payload: PerformInspectionPayload): Promise
 
   let inserted: any[] = [];
   if (resultRecords.length) {
-    const { data, error } = await db.from("inspection_results").insert(resultRecords).select();
+    const { data, error } = await db.from("inspection_results")
+      .upsert(resultRecords, { onConflict: "workspace_id,inspection_id,sort_order" })
+      .select();
     if (error) throw error;
     inserted = data || [];
   }
