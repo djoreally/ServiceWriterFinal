@@ -367,15 +367,6 @@ const AppointmentsPage = () => {
     }
   };
   
-  const handleCreateCustomer = async (_data: CustomerFormData): Promise<Customer | null> => {
-    // Implementation to be added
-    return null;
-  }
-  
-  const handleCreateVehicle = async (_data: VehicleFormData): Promise<Vehicle | null> => {
-    // Implementation to be added
-    return null;
-  }
   
   // Handle completing an appointment (opens dialog to add service record details)
   const handleCompleteAppointment = (appointment: Appointment) => {
@@ -634,8 +625,6 @@ const AppointmentsPage = () => {
         businessHours={businessHours}
         saving={saving}
         isEditing={!!editingAppointment && !isPrefillNew}
-        onCreateCustomer={handleCreateCustomer}
-        onCreateVehicle={handleCreateVehicle}
         businessUserId={userId}
       />
       <CompleteAppointmentDialog
