@@ -11,11 +11,6 @@ import { zonedDateTimeParts, zonedLocalDateTimeToUtc } from '@/server/scheduling
 import { fetchCanonicalCashReceipts } from '@/application/queries/canonical-cash-receipts.query';
 import {
   format,
-  startOfWeek,
-  startOfMonth,
-  startOfYear,
-  startOfDay,
-  endOfDay,
   addDays,
   parseISO,
 } from 'date-fns';
@@ -144,7 +139,7 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
       .select('id,starts_at,status,metadata')
       .eq('workspace_id', workspaceId)
       .gte('starts_at', todayStart)
-      .lte('starts_at', todayEnd)
+      .lt('starts_at', todayEnd)
       .in('status', ['confirmed', 'in_progress'])
       .order('starts_at', { ascending: true }),
     productionSupabase
@@ -152,7 +147,7 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
       .select('id,starts_at,status,metadata')
       .eq('workspace_id', workspaceId)
       .gt('starts_at', todayEnd)
-      .lte('starts_at', next7End)
+      .lt('starts_at', next7End)
       .eq('status', 'confirmed')
       .order('starts_at', { ascending: true })
       .limit(10),
@@ -169,7 +164,7 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
       .eq('workspace_id', workspaceId)
       .eq('status', 'completed')
       .gte('updated_at', todayStart)
-      .lte('updated_at', todayEnd),
+      .lt('updated_at', todayEnd),
     productionSupabase
       .from('service_records')
       .select('id,total_amount,completed_at,metadata')
