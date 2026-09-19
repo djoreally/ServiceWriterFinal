@@ -72,15 +72,16 @@ function mapAppointment(row: {
   starts_at: string;
   status: string;
   metadata: unknown;
-}): CockpitAppointment {
+}, timeZone: string): CockpitAppointment {
   const metadata = object(row.metadata);
   const startsAt = new Date(row.starts_at);
   const validDate = !Number.isNaN(startsAt.getTime());
+  const local = validDate ? zonedDateTimeParts(startsAt, timeZone) : null;
   return {
     id: row.id,
     title: String(metadata.title ?? metadata.service_name ?? 'Appointment'),
-    scheduled_date: validDate ? format(startsAt, 'yyyy-MM-dd') : '',
-    scheduled_time: validDate ? format(startsAt, 'HH:mm') : null,
+    scheduled_date: local ? `${local.year}-${String(local.month).padStart(2, '0')}-${String(local.day).padStart(2, '0')}` : '',
+    scheduled_time: local ? `${String(local.hour).padStart(2, '0')}:${String(local.minute).padStart(2, '0')}` : null,
     status: row.status,
     guest_name: metadata.guest_name == null ? null : String(metadata.guest_name),
     estimated_cost: metadata.estimated_cost == null ? null : Number(metadata.estimated_cost),
@@ -223,16 +224,8 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 6);
 
-  const todaysAppointments = (todayAppts.data ?? []).map(mapAppointment);
-  const upcomingNext7 = (upcoming7.data ?? [])
-    .map(mapAppointment)
-    .map((appointment) => ({
-      appointment,
-      startsAt: parseISO(`${appointment.scheduled_date}T${appointment.scheduled_time || '00:00'}`),
-    }))
-    .filter(({ startsAt }) => !Number.isNaN(startsAt.getTime()))
-    .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime())
-    .map(({ appointment }) => appointment);
+  const todaysAppointments = (todayAppts.data ?? []).map((row) => mapAppointment(row, timeZone));
+  const upcomingNext7 = (upcoming7.data ?? []).map((row) => mapAppointment(row, timeZone));
 
   return {
     revenueToday: sumNetCollectedDollars(payToday.data),
