@@ -23,10 +23,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     let completionEmail: Record<string, unknown> = { status: "skipped" }; let completionSummary: Record<string, unknown> = { status: "skipped" }; let supportFollowUp: Record<string, unknown> = { status: "skipped" };
     try {
-      const [{ data: appointment }, { data: workspace }, { data: serviceRecord }] = await Promise.all([
+      const [{ data: appointment }, { data: workspace }, { data: serviceRecords }] = await Promise.all([
         db.from("appointments").select("id,workspace_id,customer_id,starts_at,ends_at,status,notes,metadata,updated_at,customers(id,first_name,last_name,email),vehicles(id,year,make,model)").eq("workspace_id", workspace_id).eq("id", id).single(),
         db.from("workspaces").select("name,timezone").eq("id", workspace_id).single(),
-        serviceRecordId ? db.from("service_records").select("id,work_performed,mileage_at_service,status").eq("workspace_id", workspace_id).eq("id", serviceRecordId).maybeSingle() : Promise.resolve({ data: null }),
+        serviceRecordIds.length
+          ? db.from("service_records").select("id,vehicle_id,work_performed,mileage_at_service,status").eq("workspace_id", workspace_id).in("id", serviceRecordIds)
+          : Promise.resolve({ data: [] }),
       ]);
       if (appointment) {
         const queued = await dispatchAppointmentLifecycle({ eventKey: LIFECYCLE_EVENT_KEYS.serviceCompleted, eventId: `${id}:completed:${serviceRecordId}`, appointment, workspaceName: workspace?.name ?? "Service Writer", workspaceTimezone: workspace?.timezone ?? "UTC", actionUrl });
@@ -34,7 +36,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         const customer = one<any>(appointment.customers); const vehicle = one<any>(appointment.vehicles); const recipientEmail = customer?.email ?? null;
         if (recipientEmail) {
           const customerName = [customer?.first_name, customer?.last_name].filter(Boolean).join(" ") || "Customer"; const vehicleDescription = [vehicle?.year, vehicle?.make, vehicle?.model].filter(Boolean).join(" ") || "Vehicle on file"; const confirmationCode = String((appointment.metadata as any)?.confirmation_code || id.replace(/-/g, "").slice(0, 8).toUpperCase());
-          const baseVariables = { "business.name": workspace?.name ?? "Service Writer", "business.timezone": workspace?.timezone ?? "UTC", "customer.first_name": customerName.split(/\s+/)[0], "customer.full_name": customerName, "appointment.confirmation_code": confirmationCode, "vehicle.description": vehicleDescription, "service.work_performed": serviceRecord?.work_performed || "Completed service", "service.mileage": serviceRecord?.mileage_at_service != null ? String(serviceRecord.mileage_at_service) : "Recorded on service record", "email.primary_action_url": actionUrl };
+          const completedServiceRecords = serviceRecords ?? [];
+          const workPerformed = completedServiceRecords.map((record: any) => record.work_performed).filter(Boolean).join("; ") || "Completed service";
+          const mileages = completedServiceRecords.map((record: any) => record.mileage_at_service).filter((value: unknown) => value != null);
+          const mileageSummary = mileages.length === 1 ? String(mileages[0]) : mileages.length > 1 ? "Recorded per vehicle" : "Recorded on service record";
+          const baseVariables = { "business.name": workspace?.name ?? "Service Writer", "business.timezone": workspace?.timezone ?? "UTC", "customer.first_name": customerName.split(/\s+/)[0], "customer.full_name": customerName, "appointment.confirmation_code": confirmationCode, "vehicle.description": vehicleDescription, "service.work_performed": workPerformed, "service.mileage": mileageSummary, "email.primary_action_url": actionUrl };
           const summary = await dispatchLifecycleEvent({ templateKey: LIFECYCLE_EVENT_KEYS.serviceCompletionSummary, eventId: `${id}:completion-summary:${serviceRecordId}`, entityType: "service_record", entityId: serviceRecordId || id, workspaceId: workspace_id, customerId: appointment.customer_id, recipientEmail, recipientRole: "customer", variables: baseVariables, metadata: { appointmentId: id, serviceRecordId, serviceRecordIds, invoiceId, paymentId } });
           completionSummary = { status: summary.status };
           const supportUrl = new URL("/support", request.url).toString();
