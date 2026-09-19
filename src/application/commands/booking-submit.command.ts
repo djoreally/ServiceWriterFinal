@@ -189,7 +189,7 @@ export async function insertBookingAppointmentServices(
   customerEmail: string,
   customerPhone: string,
 ) {
-  return supabase.rpc("public_booking_insert_services_v4" as never, {
+  return supabase.rpc("public_booking_insert_services_v5" as never, {
     p_booking_slug: bookingSlug,
     p_appointment_id: appointmentId,
     p_customer_email: customerEmail,
