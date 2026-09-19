@@ -30,7 +30,6 @@ import {
   reserveTireInventoryForAppointment,
 } from "@/application/commands/booking-submit.command";
 import { buildAppointmentBookingConfiguration } from "@/lib/booking-configuration";
-import { findCustomerByEmail } from "@/application/queries/booking-submit.query";
 import { reserveOilForBooking, reserveServicePartsForBooking } from "@/application/commands/booking-inventory.command";
 import { format } from "date-fns";
 import { normalizePhoneToE164 } from "@/lib/phone";
