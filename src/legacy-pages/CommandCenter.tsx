@@ -7,13 +7,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { QuickDispatchPanel } from "@/components/command-center/QuickDispatchPanel";
-import { InlineServiceWriter } from "@/components/command-center/InlineServiceWriter";
 import { fetchTodayJobs, fetchActiveTechnicians } from "@/application/queries/command-center.query";
 import type { OperationalJobRow } from "@/application/queries/operational-jobs.query";
 import { buildCommandCenterBuckets } from "@/lib/command-center-filters";
 import { format } from "date-fns";
 import { AlertTriangle, CalendarClock, CheckCircle2, Clock, Plus, Radio, UserRound, Wrench } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
+import { useTeamRole } from "@/hooks/useTeamRole";
+import { canAccessRoute, canWrite } from "@/domain/auth/access-policy";
 
 interface QueueJob extends OperationalJobRow {
   id: string;
@@ -35,12 +36,12 @@ type CommandCenterProps = { embedded?: boolean };
 
 export default function CommandCenter({ embedded = false }: CommandCenterProps) {
   const navigate = useNavigate();
+  const { role } = useTeamRole();
   const [jobs, setJobs] = useState<QueueJob[]>([]);
   const [techs, setTechs] = useState<Tech[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabKey>("queue");
   const [selectedJob, setSelectedJob] = useState<QueueJob | null>(null);
-  const [showNewJob, setShowNewJob] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -107,12 +108,16 @@ export default function CommandCenter({ embedded = false }: CommandCenterProps) 
           <p className="mt-1 text-sm text-muted-foreground">Appointments and repair orders in one Service Writer command center.</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => navigate("/appointments")}>
-            <CalendarClock className="mr-2 h-4 w-4" /> Appointments
-          </Button>
-          <Button onClick={() => { setShowNewJob(true); setSelectedJob(null); }}>
-            <Plus className="mr-2 h-4 w-4" /> New Job
-          </Button>
+          {canAccessRoute(role, "/appointments") ? (
+            <Button variant="outline" onClick={() => navigate("/appointments")}>
+              <CalendarClock className="mr-2 h-4 w-4" /> Appointments
+            </Button>
+          ) : null}
+          {canWrite(role, "appointments") ? (
+            <Button onClick={() => navigate("/appointments", { state: { openNewAppointment: true } })}>
+              <Plus className="mr-2 h-4 w-4" /> New Appointment
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -170,9 +175,7 @@ export default function CommandCenter({ embedded = false }: CommandCenterProps) 
 
         <Card className="overflow-hidden">
           <CardContent className="h-full p-0">
-            {showNewJob ? (
-              <InlineServiceWriter onBack={() => setShowNewJob(false)} onJobCreated={() => { setShowNewJob(false); void load(); }} />
-            ) : selectedJob ? (
+            {selectedJob ? (
               <QuickDispatchPanel job={selectedJob} onBack={() => setSelectedJob(null)} onAssigned={() => { setSelectedJob(null); void load(); }} />
             ) : (
               <div className="p-4">
