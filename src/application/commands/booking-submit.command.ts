@@ -131,13 +131,17 @@ export async function assignVanByZip(userId: string, zipCode: string) {
 export async function updateBookingAppointment(
   appointmentId: string,
   payload: Record<string, unknown>,
+  customerEmail: string,
+  customerPhone: string,
 ) {
   const bookingSlug = currentPublicBookingSlug();
   if (!bookingSlug) throw new Error("BOOKING_CONTEXT_INVALID");
 
-  return supabase.rpc("public_booking_update_appointment_context" as never, {
+  return supabase.rpc("public_booking_update_appointment_context_v2" as never, {
     p_booking_slug: bookingSlug,
     p_appointment_id: appointmentId,
+    p_customer_email: customerEmail,
+    p_customer_phone: customerPhone,
     p_dispatch_notes: optionalText(payload.dispatch_notes),
     p_location_address: optionalText(payload.location_address),
     p_location_lat: optionalFiniteNumber(payload.location_lat),
@@ -149,12 +153,16 @@ export async function saveAppointmentBookingConfiguration(
   appointmentId: string,
   bookingSlug: string,
   configuration: AppointmentBookingConfiguration,
+  customerEmail: string,
+  customerPhone: string,
 ) {
-  return supabase.rpc("public_booking_save_configuration", {
+  return supabase.rpc("public_booking_save_configuration_v2" as never, {
     p_booking_slug: bookingSlug,
     p_appointment_id: appointmentId,
+    p_customer_email: customerEmail,
+    p_customer_phone: customerPhone,
     p_configuration: configuration as unknown as Json,
-  });
+  } as never);
 }
 
 export async function reserveTireInventoryForAppointment(appointmentId:string,businessUserId:string,inventoryItemId:string,quantity:number){
@@ -178,12 +186,16 @@ export async function insertBookingAppointmentServices(
   appointmentId: string,
   bookingSlug: string,
   services: BookingServiceItem[],
+  customerEmail: string,
+  customerPhone: string,
 ) {
-  return supabase.rpc("public_booking_insert_services", {
+  return supabase.rpc("public_booking_insert_services_v2" as never, {
     p_booking_slug: bookingSlug,
     p_appointment_id: appointmentId,
+    p_customer_email: customerEmail,
+    p_customer_phone: customerPhone,
     p_services: services as unknown as Json,
-  });
+  } as never);
 }
 
 // ---------------------------------------------------------------------------
