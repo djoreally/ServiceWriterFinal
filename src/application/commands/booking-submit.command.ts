@@ -67,6 +67,7 @@ export async function upsertBookingCustomer(params: UpsertCustomerParams) {
 export interface UpsertBookingVehicleParams {
   p_booking_slug: string;
   p_customer_email: string;
+  p_customer_phone: string;
   p_year: number;
   p_make: string;
   p_model: string;
