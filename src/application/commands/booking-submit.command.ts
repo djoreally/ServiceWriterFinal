@@ -260,7 +260,7 @@ export async function signUpBookingUser(
     password,
     options: {
       emailRedirectTo: `${origin}/customer/dashboard`,
-      data: { full_name: fullName, phone },
+      data: { full_name: fullName, phone, servicewriter_portal: "customer" },
     },
   });
 }
@@ -273,8 +273,10 @@ export interface CreateCustomerAccountParams {
   p_provider_id: string;
 }
 
-export async function createCustomerAccount(params: CreateCustomerAccountParams) {
-  return supabase.rpc("create_customer_account", params);
+export async function createCustomerAccount(_params: CreateCustomerAccountParams) {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return { data: null, error: null };
+  return supabase.rpc("link_customer_portal_account_v1" as never, {} as never);
 }
 
 // ---------------------------------------------------------------------------
