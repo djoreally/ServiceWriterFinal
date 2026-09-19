@@ -106,55 +106,62 @@ export async function createServiceRecord(data: ServiceRecordData, _ownerUserId?
 
 /** Compatibility entrypoint: appointment completion is authoritative and idempotent. */
 export async function createServiceRecordFromAppointment(data: AppointmentToServiceData): Promise<CreateServiceRecordResult> {
-  const result = await completeAppointmentWithServiceRecord(data.appointmentId, data);
+  const result = await completeAppointmentWithServiceRecord(data.appointmentId);
   return result.success ? { success: true, serviceId: result.serviceId } : { success: false, error: result.error };
 }
 
-/** Complete an appointment through the canonical financial closeout and enrich its generated service record. */
+export interface AppointmentCloseoutResult {
+  success: boolean;
+  serviceId?: string;
+  serviceIds?: string[];
+  invoiceId?: string;
+  paymentId?: string;
+  subtotal?: number;
+  taxAmount?: number;
+  cardFeeAmount?: number;
+  total?: number;
+  amountPaid?: number;
+  balanceDue?: number;
+  currencyCode?: string;
+  error?: string;
+}
+
+/** Complete an appointment through the canonical multi-vehicle financial closeout. */
 export async function completeAppointmentWithServiceRecord(
   appointmentId: string,
-  options?: {
-    technician?: string;
-    additionalNotes?: string;
-    laborHours?: number;
-    mileage?: number;
-    vin?: string;
-    filterParts?: FilterPart[];
-    oilQuartsUsed?: number;
-    oilType?: string;
-  },
-): Promise<{ success: boolean; serviceId?: string; error?: string }> {
+): Promise<AppointmentCloseoutResult> {
   try {
     const workspace_id = workspaceId();
     const completion = await nextApi.appointments.complete(appointmentId, workspace_id);
-    const closeout = completion.data as { service_record_id?: string } | null;
-    const serviceId = closeout?.service_record_id;
-    if (!serviceId) throw new Error("Appointment completion returned no service record id.");
+    const closeout = completion.data as Record<string, unknown> | null;
+    if (!closeout) throw new Error("Appointment completion returned no closeout data.");
 
-    const metadata: Record<string, unknown> = {};
-    if (options?.technician) metadata.technician = options.technician;
-    if (options?.laborHours != null) metadata.labor_hours = options.laborHours;
-    if (options?.mileage != null) metadata.mileage = options.mileage;
-    if (options?.vin) metadata.vin = options.vin;
-    if (options?.oilType?.trim()) metadata.oil_type = options.oilType.trim();
-    if (options?.filterParts?.length) metadata.filter_parts = formatFilterPartsForDisplay(options.filterParts);
+    const serviceIds = Array.isArray(closeout.service_record_ids)
+      ? closeout.service_record_ids.map(String).filter(Boolean)
+      : [];
+    const serviceId = String(closeout.service_record_id ?? serviceIds[0] ?? "");
+    if (!serviceId && serviceIds.length === 0) throw new Error("Appointment completion returned no service records.");
 
-    if (options?.additionalNotes || options?.oilQuartsUsed != null || Object.keys(metadata).length) {
-      await nextApi.serviceRecords.update(serviceId, {
-        workspace_id,
-        ...(options?.additionalNotes ? { internal_notes: options.additionalNotes } : {}),
-        ...(options?.oilQuartsUsed != null ? { oil_quarts_used: options.oilQuartsUsed } : {}),
-        ...(Object.keys(metadata).length ? { metadata } : {}),
-      });
-    }
-    return { success: true, serviceId };
+    return {
+      success: true,
+      serviceId: serviceId || serviceIds[0],
+      serviceIds,
+      invoiceId: closeout.invoice_id ? String(closeout.invoice_id) : undefined,
+      paymentId: closeout.payment_id ? String(closeout.payment_id) : undefined,
+      subtotal: Number(closeout.subtotal ?? 0),
+      taxAmount: Number(closeout.tax_amount ?? 0),
+      cardFeeAmount: Number(closeout.card_fee_amount ?? 0),
+      total: Number(closeout.total ?? 0),
+      amountPaid: Number(closeout.amount_paid ?? 0),
+      balanceDue: Number(closeout.balance_due ?? 0),
+      currencyCode: String(closeout.currency_code ?? "USD"),
+    };
   } catch (error) {
     const raw = message(error, "Failed to complete appointment");
     const friendly: Record<string, string> = {
-      "Vehicle oil type must be recorded": "Please set the vehicle's oil type before completing this oil service.",
-      "Oil services require confirmed oil quantity": "Oil quantity is required. Please enter the number of quarts used.",
-      "Oil services require filter replacement": "Filter/parts confirmation is required for oil services.",
-      "Captured VIN does not match": "The VIN entered does not match the vehicle on file. Please verify.",
+      "INSPECTION_REQUIRED": "Complete every required vehicle inspection before closing the appointment.",
+      "RECOMMENDATION_REQUIRED": "Resolve every pending or approved recommendation before closing the appointment.",
+      "Appointment cannot complete while recommendations": "Resolve every pending or approved recommendation before closing the appointment.",
     };
     return { success: false, error: Object.entries(friendly).find(([key]) => raw.includes(key))?.[1] ?? raw };
   }
