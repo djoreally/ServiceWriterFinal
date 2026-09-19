@@ -480,6 +480,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
           const { data: vehicleId, error: vehicleError } = await upsertBookingVehicle({
             p_booking_slug: slug || "",
             p_customer_email: validationResult.data.email,
+            p_customer_phone: validationResult.data.phone || guestPhone,
             p_year: parseInt(vehicle.year),
             p_make: vehicle.make,
             p_model: vehicle.model,
@@ -499,6 +500,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
               const { error: tireError } = await setVehicleTireSpec({
                 p_booking_slug: slug || "",
                 p_customer_email: validationResult.data.email,
+                p_customer_phone: validationResult.data.phone || guestPhone,
                 p_vehicle_id: vehicleId,
                 p_tire_size: vehicle.tireSize,
                 p_tire_size_source: vehicle.tireSizeSource ?? "manual",
