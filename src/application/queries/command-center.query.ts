@@ -1,14 +1,12 @@
 /** Command Center Query — canonical Service Writer operational reads. */
 import { supabase } from "@/integrations/supabase/client";
-import { addDays, format, parseISO } from "date-fns";
+import { format } from "date-fns";
 import { fetchOperationalJobsByDateRange } from "./operational-jobs.query";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
-/** Fetch Service Writer operational jobs for today + next 6 days. */
+/** Fetch only the requested Service Writer operating day. */
 export async function fetchTodayJobs(userId: string, dateStr: string) {
-  const start = parseISO(dateStr);
-  const end = addDays(start, 6);
-  return fetchOperationalJobsByDateRange(userId, dateStr, format(end, "yyyy-MM-dd"));
+  return fetchOperationalJobsByDateRange(userId, dateStr, dateStr);
 }
 
 /**
@@ -26,15 +24,15 @@ export async function fetchActiveTechnicians(_userId: string) {
       .select("user_id,role,profiles!workspace_members_user_id_fkey(display_name,avatar_url)")
       .eq("workspace_id", context.workspaceId)
       .eq("is_active", true)
-      .in("role", ["technician", "owner", "manager"])
+      .eq("role", "technician")
       .order("created_at");
     if (error) return { data: null, error };
 
     return {
       data: (data ?? []).map((member: any) => ({
         id: member.user_id,
-        name: member.profiles?.display_name || (member.role === "owner" ? "Owner" : "Technician"),
-        status: "available",
+        name: member.profiles?.display_name || "Technician",
+        status: "active",
         avatar_url: member.profiles?.avatar_url ?? null,
         current_location: null,
         assigned_van_id: null,
