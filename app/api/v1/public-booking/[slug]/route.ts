@@ -60,9 +60,7 @@ export async function GET(request: Request, context: { params: Promise<{ slug: s
     if (query.section === "catalog") {
       const v2 = await supabase.rpc("get_public_service_catalog_v3" as never, { p_booking_slug: slug } as never);
       if (!v2.error && Array.isArray(v2.data)) return json({ data: normalizeCatalog(v2.data as RpcRow[]) }, { headers: { "Cache-Control": "no-store" } });
-      const v1 = await supabase.rpc("get_public_service_catalog", { business_user_id: businessUserId });
-      if (v1.error || !Array.isArray(v1.data)) throw unavailable();
-      return json({ data: normalizeCatalog(v1.data as RpcRow[]) }, { headers: { "Cache-Control": "no-store" } });
+      throw unavailable();
     }
 
     if (query.section === "packages") {
