@@ -37,28 +37,22 @@ export async function buildAppointmentEmailSnapshot(
 
   const [
     { data: items, error: itemsError },
-    { data: workOrder, error: workOrderError },
+    { data: invoice, error: invoiceError },
   ] = await Promise.all([
     supabase.from("appointment_items")
       .select("description,quantity,unit_price,service_catalog(name)")
       .eq("workspace_id", workspaceId).eq("appointment_id", appointmentId)
       .order("sort_order", { ascending: true }).order("created_at", { ascending: true }),
-    supabase.from("work_orders")
-      .select("id")
-      .eq("workspace_id", workspaceId).eq("appointment_id", appointmentId)
-      .order("created_at", { ascending: false }).limit(1).maybeSingle(),
-  ]);
-  if (itemsError || workOrderError) throw itemsError ?? workOrderError;
-
-  let invoice: Record<string, any> | null = null;
-  if (workOrder?.id) {
-    const invoiceResult = await supabase.from("invoices")
+    supabase.from("invoices")
       .select("invoice_number,total,status")
-      .eq("workspace_id", workspaceId).eq("work_order_id", workOrder.id)
-      .order("created_at", { ascending: false }).limit(1).maybeSingle();
-    if (invoiceResult.error) throw invoiceResult.error;
-    invoice = invoiceResult.data;
-  }
+      .eq("workspace_id", workspaceId)
+      .eq("metadata->>appointment_id", appointmentId)
+      .neq("status", "void")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  if (itemsError || invoiceError) throw itemsError ?? invoiceError;
 
   const booking = object(metadata.booking_configuration);
   const bookedVehicles = Array.isArray(booking.vehicles) ? booking.vehicles.map(object) : [];
