@@ -73,7 +73,7 @@ export async function fetchCustomerBookings(accountId: string, email: string) {
 // ── Cancel appointment by token ────────────────────────────────────
 
 export async function cancelAppointmentByToken(
-  managementToken: string,
+  appointmentId: string,
   reason?: string,
 ) {
   return supabase.rpc("cancel_appointment_by_token", {
