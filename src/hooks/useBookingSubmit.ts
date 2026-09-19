@@ -588,15 +588,20 @@ export function useBookingSubmit(deps: SubmitDeps) {
       });
 
       if (appointmentId && !appointmentError) {
+        const persistedConfiguration = buildAppointmentBookingConfiguration(vehicles, vehicleServiceSelections);
+        persistedConfiguration.vehicles = persistedConfiguration.vehicles.map((configuredVehicle) => ({
+          ...configuredVehicle,
+          persistedVehicleId: persistedVehicleIdsByClientId[configuredVehicle.clientVehicleId] || undefined,
+        }));
         const { error: configurationError } = await saveAppointmentBookingConfiguration(
           appointmentId,
           slug || "",
-          buildAppointmentBookingConfiguration(vehicles, vehicleServiceSelections),
+          persistedConfiguration,
           validationResult.data.email,
           validationResult.data.phone || guestPhone,
         );
         if (configurationError) throw new Error(`Could not save vehicle service configuration: ${configurationError.message}`);
-        for (const configuredVehicle of buildAppointmentBookingConfiguration(vehicles, vehicleServiceSelections).vehicles) {
+        for (const configuredVehicle of persistedConfiguration.vehicles) {
           const tire = configuredVehicle.tire;
           if (!tire?.inventoryItemId) continue;
           const { error: reserveError } = await reserveTireInventoryForAppointment(appointmentId,business.user_id,tire.inventoryItemId,tire.frontQuantity+tire.rearQuantity);
