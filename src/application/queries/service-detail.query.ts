@@ -198,12 +198,14 @@ export async function fetchServiceDetail(serviceId: string): Promise<ServiceDeta
   let catalogDescription: string | null = null;
   let catalogLaborHours: number | null = null;
   if (row.appointment_id) {
-    const { data: appointmentItems } = await client.from("appointment_items")
-      .select("service_catalog_id,description,quantity,unit_price,service_catalog(name,description,estimated_duration)")
+    let appointmentItemsQuery = client.from("appointment_items")
+      .select("service_catalog_id,description,quantity,unit_price,metadata,service_catalog(name,description,estimated_duration)")
       .eq("workspace_id", context.workspaceId)
-      .eq("appointment_id", row.appointment_id)
-      .order("created_at")
-      .limit(1);
+      .eq("appointment_id", row.appointment_id);
+    if (row.vehicle_id) {
+      appointmentItemsQuery = appointmentItemsQuery.eq("metadata->>vehicle_id", row.vehicle_id);
+    }
+    const { data: appointmentItems } = await appointmentItemsQuery.order("sort_order").order("created_at").limit(1);
     const item = appointmentItems?.[0];
     if (item?.service_catalog?.description) catalogDescription = item.service_catalog.description;
     else if (item?.description) catalogDescription = item.description;

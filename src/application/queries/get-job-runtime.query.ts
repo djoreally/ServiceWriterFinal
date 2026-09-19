@@ -60,11 +60,11 @@ export async function getJobRuntime(jobId: string, trustContext?: TrustContext):
       .eq("appointment_id", jobId)
       .order("sort_order"),
     client.from("service_records")
-      .select("id,subtotal,tax_amount,total_amount,status,started_at,completed_at,metadata")
+      .select("id,vehicle_id,subtotal,tax_amount,total_amount,status,started_at,completed_at,metadata")
       .eq("workspace_id", appointment.workspace_id)
       .eq("appointment_id", jobId)
       .neq("status", "voided")
-      .maybeSingle(),
+      .order("created_at", { ascending: true }),
     client.from("invoices")
       .select("id,status,subtotal,tax_total,total,amount_paid,metadata")
       .eq("workspace_id", appointment.workspace_id)
@@ -88,20 +88,27 @@ export async function getJobRuntime(jobId: string, trustContext?: TrustContext):
   }
 
   const metadata = object(appointment.metadata);
-  const serviceMetadata = object(serviceResult.data?.metadata);
+  const services = serviceResult.data ?? [];
+  const serviceMetadata = object(services[0]?.metadata);
   const items = itemsResult.data ?? [];
   const itemSubtotal = items.reduce(
     (sum: number, row: any) => sum + Number(row.quantity || 0) * Number(row.unit_price || 0),
     0,
   );
-  const service = serviceResult.data;
+  const serviceAggregate = services.length ? {
+    subtotal: services.reduce((sum: number, row: any) => sum + Number(row.subtotal ?? 0), 0),
+    tax_amount: services.reduce((sum: number, row: any) => sum + Number(row.tax_amount ?? 0), 0),
+    total_amount: services.reduce((sum: number, row: any) => sum + Number(row.total_amount ?? 0), 0),
+    started_at: services.map((row: any) => row.started_at).filter(Boolean).sort()[0] ?? null,
+    completed_at: services.map((row: any) => row.completed_at).filter(Boolean).sort().at(-1) ?? null,
+  } : null;
   const invoice = invoiceResult.data;
 
-  // Financial source priority after closeout is invoice -> service record ->
+  // Financial source priority after closeout is invoice -> aggregate vehicle service records ->
   // appointment items. Historical metadata is a final read-only fallback only.
-  const subtotalDollars = Number(invoice?.subtotal ?? service?.subtotal ?? itemSubtotal ?? metadata.estimated_cost ?? 0);
-  const taxDollars = Number(invoice?.tax_total ?? service?.tax_amount ?? metadata.tax_amount ?? 0);
-  const totalDollars = Number(invoice?.total ?? service?.total_amount ?? (subtotalDollars + taxDollars));
+  const subtotalDollars = Number(invoice?.subtotal ?? serviceAggregate?.subtotal ?? itemSubtotal ?? metadata.estimated_cost ?? 0);
+  const taxDollars = Number(invoice?.tax_total ?? serviceAggregate?.tax_amount ?? metadata.tax_amount ?? 0);
+  const totalDollars = Number(invoice?.total ?? serviceAggregate?.total_amount ?? (subtotalDollars + taxDollars));
   const subtotalCents = toCentsFromDollars(subtotalDollars);
   const taxCents = toCentsFromDollars(taxDollars);
   const totalCents = toCentsFromDollars(totalDollars);
@@ -129,8 +136,8 @@ export async function getJobRuntime(jobId: string, trustContext?: TrustContext):
   const vehicle = Array.isArray(appointment.vehicles) ? appointment.vehicles[0] : appointment.vehicles;
   const serviceName = items.find((row: any) => row.item_type === "service")?.description
     ?? String(metadata.title ?? serviceMetadata.service_type ?? "Service");
-  const actualStart = String(service?.started_at ?? metadata.actual_start_time ?? "") || undefined;
-  const actualEnd = String(service?.completed_at ?? metadata.actual_end_time ?? "") || undefined;
+  const actualStart = String(serviceAggregate?.started_at ?? metadata.actual_start_time ?? "") || undefined;
+  const actualEnd = String(serviceAggregate?.completed_at ?? metadata.actual_end_time ?? "") || undefined;
 
   const visibleToUser = appointment.workspace_id === trust.orgId;
   const editableByUser = visibleToUser && trust.role !== "customer";

@@ -101,6 +101,28 @@ export async function POST(request: Request) {
     if ("error" in refs) return refs.error;
 
     const meta = body.metadata ?? {};
+    const explicitVehicleId = body.vehicle_id ?? uuidFromMetadata(meta.vehicle_id);
+    if (body.appointment_id && !explicitVehicleId) {
+      const { data: appointmentItems, error: appointmentItemsError } = await supabase
+        .from("appointment_items")
+        .select("metadata")
+        .eq("workspace_id", body.workspace_id)
+        .eq("appointment_id", body.appointment_id);
+      if (appointmentItemsError) throw appointmentItemsError;
+      const scopedVehicleIds = new Set(
+        (appointmentItems ?? [])
+          .map((item: any) => uuidFromMetadata(item.metadata?.vehicle_id))
+          .filter(Boolean),
+      );
+      if (scopedVehicleIds.size > 1) {
+        return json({
+          error: {
+            code: "vehicle_required_for_multi_vehicle_service_record",
+            message: "A vehicle must be specified when writing service history for a multi-vehicle appointment.",
+          },
+        }, { status: 409 });
+      }
+    }
     const laborCost = numberFromMetadata(meta.labor_cost) ?? 0;
     const partsCost = numberFromMetadata(meta.parts_cost) ?? 0;
     const shopSupplies = numberFromMetadata(meta.shop_supplies) ?? 0;
@@ -117,7 +139,14 @@ export async function POST(request: Request) {
     const payload = { ...body, customer_id: refs.customerId, vehicle_id: refs.vehicleId, subtotal, tax_rate: taxRate, tax_amount: taxAmount, discount_amount: discount, total_amount: total, completed_by: body.status === "completed" ? user.id : null, completed_at: body.status === "completed" ? body.completed_at ?? now : body.completed_at ?? null };
 
     if (body.appointment_id) {
-      const { data: existing, error: existingError } = await supabase.from("service_records").select("id,metadata").eq("workspace_id", body.workspace_id).eq("appointment_id", body.appointment_id).neq("status", "voided").order("created_at", { ascending: true }).limit(1).maybeSingle();
+      const existingQuery = supabase.from("service_records")
+        .select("id,metadata")
+        .eq("workspace_id", body.workspace_id)
+        .eq("appointment_id", body.appointment_id)
+        .neq("status", "voided");
+      const { data: existing, error: existingError } = refs.vehicleId
+        ? await existingQuery.eq("vehicle_id", refs.vehicleId).limit(1).maybeSingle()
+        : await existingQuery.is("vehicle_id", null).limit(1).maybeSingle();
       if (existingError) throw existingError;
       if (existing) {
         const { data, error } = await (supabase.from("service_records") as any).update({ ...payload, metadata: mergeMetadata(existing.metadata, meta) }).eq("workspace_id", body.workspace_id).eq("id", existing.id).select().single();

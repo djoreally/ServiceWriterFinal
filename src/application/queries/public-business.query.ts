@@ -1,7 +1,7 @@
 /**
  * Public Business Profile Query
  * Resolves business profiles by booking slug for public-facing pages.
- * ⚡ Security: Uses the allow-listed get_public_booking_profile_v2 RPC — never exposes stripe_account_id.
+ * ⚡ Security: Uses the allow-listed get_public_booking_profile_v3 RPC — never exposes stripe_account_id.
  */
 import { supabase } from "@/integrations/supabase/client";
 
@@ -17,7 +17,7 @@ export interface PublicBusinessProfile {
 }
 
 export async function fetchBusinessBySlug(slug: string): Promise<PublicBusinessProfile | null> {
-  const { data, error } = await supabase.rpc("get_public_booking_profile_v2", {
+  const { data, error } = await (supabase as any).rpc("get_public_booking_profile_v3", {
     booking_slug_param: slug,
   });
 

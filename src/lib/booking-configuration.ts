@@ -5,7 +5,7 @@ import { hasValidRequestedTireQuantity } from "@/lib/tire-quantity";
 export const BOOKING_CONFIGURATION_VERSION = 2 as const;
 
 export interface BookingVehicleConfiguration {
-  clientVehicleId: string;
+  clientVehicleId: string;\n  persistedVehicleId?: string;
   vehicle: { year: string; make: string; model: string; vin?: string; licensePlate?: string };
   services?: Array<{ id: string; name: string; price: number; quantity: number }>;
   package?: { id: string; name: string; price: number };

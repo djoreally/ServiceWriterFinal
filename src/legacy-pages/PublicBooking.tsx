@@ -1308,6 +1308,7 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
             formatCurrency={pricing.formatCurrency}
             businessUserId={business.user_id}
             guestEmail={bs.guestEmail}
+            guestPhone={bs.guestPhone}
             selectedRewardInstanceId={bs.selectedRewardInstanceId}
             onSelectedRewardInstanceChange={setSelectedRewardInstance}
             taxLoading={bs.taxLoading}

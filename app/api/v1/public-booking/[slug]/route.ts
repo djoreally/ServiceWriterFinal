@@ -40,7 +40,7 @@ function normalizeCatalog(rows: RpcRow[]): RpcRow[] {
 }
 
 async function profileForSlug(supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>, slug: string) {
-  const { data, error } = await supabase.rpc("get_public_booking_profile_v2", { booking_slug_param: slug });
+  const { data, error } = await (supabase as any).rpc("get_public_booking_profile_v3", { booking_slug_param: slug });
   if (error || !Array.isArray(data) || data.length === 0) throw unavailable();
   return data[0] as RpcRow;
 }
@@ -53,39 +53,36 @@ export async function GET(request: Request, context: { params: Promise<{ slug: s
     const query = querySchema.parse({ section: url.searchParams.get("section") ?? undefined, date: url.searchParams.get("date") ?? undefined });
     const supabase = await createSupabaseServerClient();
     const profile = await profileForSlug(supabase, slug);
-    const businessUserId = z.string().uuid().parse(profile.user_id);
 
     if (query.section === "profile") return json({ data: profile }, { headers: { "Cache-Control": "no-store" } });
 
     if (query.section === "catalog") {
-      const v2 = await supabase.rpc("get_public_service_catalog_v2", { p_business_user_id: businessUserId, p_booking_context_id: null });
+      const v2 = await supabase.rpc("get_public_service_catalog_v3" as never, { p_booking_slug: slug } as never);
       if (!v2.error && Array.isArray(v2.data)) return json({ data: normalizeCatalog(v2.data as RpcRow[]) }, { headers: { "Cache-Control": "no-store" } });
-      const v1 = await supabase.rpc("get_public_service_catalog", { business_user_id: businessUserId });
-      if (v1.error || !Array.isArray(v1.data)) throw unavailable();
-      return json({ data: normalizeCatalog(v1.data as RpcRow[]) }, { headers: { "Cache-Control": "no-store" } });
+      throw unavailable();
     }
 
     if (query.section === "packages") {
-      const { data, error } = await supabase.rpc("get_public_service_packages", { business_user_id: businessUserId });
+      const { data, error } = await supabase.rpc("get_public_service_packages_v2" as never, { p_booking_slug: slug } as never);
       if (error || !Array.isArray(data)) throw unavailable();
       return json({ data }, { headers: { "Cache-Control": "no-store" } });
     }
 
     if (query.section === "slots") {
       if (!query.date) return json({ error: { code: "invalid_date", message: "date is required for slots" } }, { status: 400 });
-      const { data, error } = await supabase.rpc("get_booked_slots", { business_user_id: businessUserId, booking_date: query.date });
+      const { data, error } = await supabase.rpc("get_public_booked_slots_v2" as never, { p_booking_slug: slug, p_booking_date: query.date } as never);
       if (error || !Array.isArray(data)) throw unavailable();
       return json({ data }, { headers: { "Cache-Control": "no-store" } });
     }
 
     if (query.section === "blocked_dates") {
       const db = supabase as any;
-      const { data, error } = await db.rpc("get_public_blocked_dates_v2", { p_booking_slug: slug });
+      const { data, error } = await db.rpc("get_public_blocked_dates_v3", { p_booking_slug: slug });
       if (error || !Array.isArray(data)) throw unavailable();
       return json({ data }, { headers: { "Cache-Control": "no-store" } });
     }
 
-    const { data, error } = await supabase.rpc("get_public_booking_settings", { p_business_user_id: businessUserId });
+    const { data, error } = await supabase.rpc("get_public_booking_settings_v2" as never, { p_booking_slug: slug } as never);
     if (error) throw unavailable();
     return json({ data: Array.isArray(data) ? data[0] ?? null : data ?? null }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

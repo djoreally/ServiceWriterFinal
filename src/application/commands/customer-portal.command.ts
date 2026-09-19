@@ -5,7 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 /** Reschedule an appointment by management token. */
 export async function rescheduleAppointment(
-  managementToken: string,
+  appointmentId: string,
   newDate: string,
   newTime: string,
 ): Promise<{ success: boolean; message?: string }> {

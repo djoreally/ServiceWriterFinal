@@ -1,0 +1,2 @@
+revoke all on function public.public_booking_book_appointment(text,date,time,integer,text,text,text,text,text,text,numeric,numeric,uuid,uuid,text) from public,anon,authenticated;
+revoke all on function public.public_booking_upsert_vehicle(text,text,integer,text,text,text,text,integer,text,text,text,text) from public,anon,authenticated;

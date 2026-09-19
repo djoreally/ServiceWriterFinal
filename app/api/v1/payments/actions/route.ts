@@ -165,8 +165,8 @@ export async function POST(request: Request) {
     }
 
     if (body.action === "manual_payment") {
-      if (body.waive_fees || body.waive_tax || body.waive_remaining) {
-        return json({ error: { code: "adjustment_required", message: "Fee, tax, and remaining-balance waivers require the adjustment workflow and cannot be embedded in a payment receipt." } }, { status: 409 });
+      if (body.waive_tax || body.waive_remaining) {
+        return json({ error: { code: "adjustment_required", message: "Tax and remaining-balance waivers require the adjustment workflow." } }, { status: 409 });
       }
 
       const { data: current, error: currentError } = await supabase
@@ -184,11 +184,21 @@ export async function POST(request: Request) {
       if (amountDollars <= 0) {
         return json({ error: { code: "invalid_amount", message: "Payment amount must be greater than zero." } }, { status: 400 });
       }
-      if (Math.abs(amountDollars - Number(current.amount || 0)) > 0.009) {
-        return json({ error: { code: "amount_mismatch", message: "In-person closeout must settle the finalized balance exactly." } }, { status: 409 });
-      }
 
       const metadata = object(current.metadata);
+      const originalAmount = Number(current.amount || 0);
+      const configuredSurchargeCents = Number(metadata.surcharge_amount_cents ?? metadata.card_fee_cents ?? 0);
+      const configuredSurcharge = Number((configuredSurchargeCents / 100).toFixed(2));
+      const feeWaiverAllowed = !!body.waive_fees
+        && ["cash", "check", "external_card"].includes(body.payment_method)
+        && configuredSurcharge > 0;
+      const expectedAmount = feeWaiverAllowed
+        ? Number((originalAmount - configuredSurcharge).toFixed(2))
+        : originalAmount;
+      if (Math.abs(amountDollars - expectedAmount) > 0.009) {
+        return json({ error: { code: "amount_mismatch", message: "Recorded payment does not match the reconciled balance due." } }, { status: 409 });
+      }
+
       if (current.status === "succeeded") {
         return json({ data: { success: true, payment_id: current.id, already_recorded: true, stripe_sync: metadata.stripe_out_of_band_sync_status ?? "unknown" } });
       }
@@ -218,6 +228,11 @@ export async function POST(request: Request) {
             ...metadata,
             payment_method: body.payment_method,
             notes: body.notes ?? null,
+            original_amount_due: originalAmount,
+            waived_fee_amount: feeWaiverAllowed ? configuredSurcharge : 0,
+            waived_fee_type: feeWaiverAllowed ? "card_processing_fee" : null,
+            fee_waived: feeWaiverAllowed,
+            reconciled_amount_due: amountDollars,
             recorded_manually: true,
             received_in_person: true,
             stripe_out_of_band_sync_status: stripeSync.status,

@@ -35,6 +35,7 @@ interface AppointmentPaymentsTabProps {
   taxAmount?: number;
   subtotal?: number;
   taxRate?: number;
+  surchargeAmount?: number;
 }
 
 export function AppointmentPaymentsTab({
@@ -46,6 +47,7 @@ export function AppointmentPaymentsTab({
   taxAmount = 0,
   subtotal,
   taxRate,
+  surchargeAmount = 0,
 }: AppointmentPaymentsTabProps) {
   const { formatCurrency } = useRegionalSettings();
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
@@ -97,6 +99,7 @@ export function AppointmentPaymentsTab({
         subtotalCents: subtotalInCents,
         taxCents: taxInCents > 0 ? taxInCents : null,
         taxRate: taxRate || null,
+        surchargeCents: dollarsToCents(toDollars(surchargeAmount)),
         customerEmail,
         customerName,
       });

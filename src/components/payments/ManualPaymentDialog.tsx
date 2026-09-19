@@ -37,6 +37,7 @@ interface ManualPaymentDialogProps {
     subtotal?: number | null;
     /** Tax in cents. */
     tax_amount?: number | null;
+    surcharge_amount?: number | null;
     refund_amount?: number | null;
     currency: string;
     customer_name?: string | null;
@@ -52,15 +53,19 @@ export function ManualPaymentDialog({
 }: ManualPaymentDialogProps) {
   const [paymentMethod, setPaymentMethod] = useState<string>("cash");
   const [notes, setNotes] = useState("");
+  const [waiveCardFee, setWaiveCardFee] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [step, setStep] = useState<"form" | "review">("form");
 
-  // Manual payment settles a finalized charge. Waivers and partial receipts
-  // require the separate, approved adjustment/allocation workflow.
   const fullDueCents = payment
     ? toCents(payment.amount - (payment.refund_amount || 0))
     : 0;
-  const effectiveDueCents = fullDueCents;
+  const surchargeCents = payment
+    ? Math.max(0, toCents(Number((payment as { surcharge_amount?: number | null }).surcharge_amount ?? 0)))
+    : 0;
+  const canWaiveCardFee = (paymentMethod === "cash" || paymentMethod === "check" || paymentMethod === "external_card") && surchargeCents > 0;
+  const waivedFeeCents = canWaiveCardFee && waiveCardFee ? surchargeCents : 0;
+  const effectiveDueCents = toCents(Math.max(0, fullDueCents - waivedFeeCents));
   const effectiveDueDollars = centsToDollars(toCents(effectiveDueCents));
 
   // Reset the wizard whenever the dialog is closed so it never reopens on review.
@@ -98,7 +103,7 @@ export function ManualPaymentDialog({
         amountCents: requestedCents,
         paymentMethod,
         notes: notes.trim() || undefined,
-        waiveFees: false,
+        waiveFees: waivedFeeCents > 0,
         waiveTax: false,
         waiveRemaining: false,
       });
@@ -115,6 +120,7 @@ export function ManualPaymentDialog({
       // Reset form
       setPaymentMethod("cash");
       setNotes("");
+      setWaiveCardFee(false);
       setStep("form");
     } catch (error: unknown) {
       const message =
@@ -185,10 +191,26 @@ export function ManualPaymentDialog({
                 value={formatMoney(effectiveDueDollars)}
               />
               <p className="text-xs text-muted-foreground">
-                This receipt settles the original finalized charge. Partial receipts and
-                fee or tax waivers require an approved adjustment or allocation workflow.
+                The displayed balance includes the configured card fee. Cash/check can waive that fee and reconcile the balance due.
               </p>
             </div>
+
+            {canWaiveCardFee && (
+              <label className="flex items-start gap-3 rounded-lg border p-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={waiveCardFee}
+                  onChange={(e) => setWaiveCardFee(e.target.checked)}
+                />
+                <span className="space-y-1">
+                  <span className="block text-sm font-medium">Waive card processing fee</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Subtract {formatCentsAsCurrency(surchargeCents, payment.currency)} and record the waiver in reconciliation.
+                  </span>
+                </span>
+              </label>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="payment-notes">Notes (Optional)</Label>
@@ -247,10 +269,20 @@ export function ManualPaymentDialog({
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Original amount due</span>
-                  <span>
-                    {formatCentsAsCurrency(fullDueCents, payment.currency)}
-                  </span>
+                  <span>{formatCentsAsCurrency(fullDueCents, payment.currency)}</span>
                 </div>
+                {waivedFeeCents > 0 && (
+                  <>
+                    <div className="flex justify-between text-amber-700">
+                      <span>Card fee waived</span>
+                      <span>-{formatCentsAsCurrency(waivedFeeCents, payment.currency)}</span>
+                    </div>
+                    <div className="flex justify-between font-medium">
+                      <span>Reconciled amount due</span>
+                      <span>{formatCentsAsCurrency(requestedCents, payment.currency)}</span>
+                    </div>
+                  </>
+                )}
                 {notes.trim() && (
                   <div className="pt-1">
                     <p className="text-xs text-muted-foreground mb-1">Notes</p>

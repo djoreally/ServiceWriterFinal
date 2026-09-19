@@ -10,6 +10,7 @@ import {
   signUpCustomer,
   createCustomerAccount,
   resetPassword,
+  signInCustomerWithGoogle,
 } from "@/application/commands/customer-auth.command";
 import { beginAuthInteraction } from "@/lib/authInteractionLock";
 
@@ -149,6 +150,20 @@ export default function CustomerAuth({ providerId, providerName, onSuccess, retu
     
     return () => subscription.unsubscribe();
   }, [navigate, onSuccess, returnTo]);
+
+  const handleGoogleSignIn = async () => {
+    setLoading(true);
+    const releaseAuthLock = beginAuthInteraction();
+    try {
+      const target = returnTo || "/customer/dashboard";
+      const { error } = await signInCustomerWithGoogle(target);
+      if (error) throw error;
+    } catch (error: unknown) {
+      releaseAuthLock();
+      setLoading(false);
+      toast.error(error instanceof Error ? error.message : "Google sign-in failed");
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -426,6 +441,20 @@ export default function CustomerAuth({ providerId, providerName, onSuccess, retu
                 Sign In
               </Button>
             </form>
+
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
+              <div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-slate-400">or</span></div>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={loading}
+              className="w-full h-11 rounded-xl"
+              onClick={handleGoogleSignIn}
+            >
+              Continue with Google
+            </Button>
 
             <p className="text-center text-sm text-slate-500">
               Don't have an account?{" "}

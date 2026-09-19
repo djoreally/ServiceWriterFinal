@@ -30,7 +30,6 @@ import {
   reserveTireInventoryForAppointment,
 } from "@/application/commands/booking-submit.command";
 import { buildAppointmentBookingConfiguration } from "@/lib/booking-configuration";
-import { findCustomerByEmail } from "@/application/queries/booking-submit.query";
 import { reserveOilForBooking, reserveServicePartsForBooking } from "@/application/commands/booking-inventory.command";
 import { format } from "date-fns";
 import { normalizePhoneToE164 } from "@/lib/phone";
@@ -455,18 +454,14 @@ export function useBookingSubmit(deps: SubmitDeps) {
           p_phone: validationResult.data.phone || null,
           p_address: fullAddress || null,
         });
-        if (upsertError) {
+        if (upsertError || !upsertedId) {
           console.error("Customer upsert error:", upsertError);
-          const { data: existing } = await findCustomerByEmail(
-            business.user_id,
-            validationResult.data.email,
-          );
-          customerId = existing?.id || null;
-        } else {
-          customerId = upsertedId;
+          throw upsertError || new Error("BOOKING_CUSTOMER_PERSISTENCE_FAILED");
         }
+        customerId = upsertedId;
       } catch (err) {
         console.error("Customer upsert failed:", err);
+        throw err;
       }
 
       // Consent is persisted after the appointment exists (see below): the edge
@@ -480,6 +475,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
           const { data: vehicleId, error: vehicleError } = await upsertBookingVehicle({
             p_booking_slug: slug || "",
             p_customer_email: validationResult.data.email,
+            p_customer_phone: validationResult.data.phone || guestPhone,
             p_year: parseInt(vehicle.year),
             p_make: vehicle.make,
             p_model: vehicle.model,
@@ -499,15 +495,20 @@ export function useBookingSubmit(deps: SubmitDeps) {
               const { error: tireError } = await setVehicleTireSpec({
                 p_booking_slug: slug || "",
                 p_customer_email: validationResult.data.email,
+                p_customer_phone: validationResult.data.phone || guestPhone,
                 p_vehicle_id: vehicleId,
                 p_tire_size: vehicle.tireSize,
                 p_tire_size_source: vehicle.tireSizeSource ?? "manual",
               });
               if (tireError) console.warn("[Booking] Tire spec save failed:", tireError);
             }
-          } else if (vehicleError) console.error("Vehicle upsert error:", vehicleError);
+          } else {
+            console.error("Vehicle upsert error:", vehicleError);
+            throw vehicleError || new Error("BOOKING_VEHICLE_PERSISTENCE_FAILED");
+          }
         } catch (err) {
           console.error("Vehicle creation failed:", err);
+          throw err;
         }
       }
 
@@ -586,13 +587,20 @@ export function useBookingSubmit(deps: SubmitDeps) {
       });
 
       if (appointmentId && !appointmentError) {
+        const persistedConfiguration = buildAppointmentBookingConfiguration(vehicles, vehicleServiceSelections);
+        persistedConfiguration.vehicles = persistedConfiguration.vehicles.map((configuredVehicle) => ({
+          ...configuredVehicle,
+          persistedVehicleId: persistedVehicleIdsByClientId[configuredVehicle.clientVehicleId] || undefined,
+        }));
         const { error: configurationError } = await saveAppointmentBookingConfiguration(
           appointmentId,
           slug || "",
-          buildAppointmentBookingConfiguration(vehicles, vehicleServiceSelections),
+          persistedConfiguration,
+          validationResult.data.email,
+          validationResult.data.phone || guestPhone,
         );
         if (configurationError) throw new Error(`Could not save vehicle service configuration: ${configurationError.message}`);
-        for (const configuredVehicle of buildAppointmentBookingConfiguration(vehicles, vehicleServiceSelections).vehicles) {
+        for (const configuredVehicle of persistedConfiguration.vehicles) {
           const tire = configuredVehicle.tire;
           if (!tire?.inventoryItemId) continue;
           const { error: reserveError } = await reserveTireInventoryForAppointment(appointmentId,business.user_id,tire.inventoryItemId,tire.frontQuantity+tire.rearQuantity);
@@ -666,6 +674,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
             appointmentId,
             providerId: business.user_id,
             customerEmail: validationResult.data.email,
+            customerPhone: validationResult.data.phone || guestPhone,
             idempotencyKey: `booking:${appointmentId}:reward:${selectedRewardInstanceId}:reserve`,
             reservationMinutes: 30,
           });
@@ -722,7 +731,12 @@ export function useBookingSubmit(deps: SubmitDeps) {
 
         if (Object.keys(updatePayload).length > 0) {
           try {
-            await updateBookingAppointment(appointmentId, updatePayload);
+            await updateBookingAppointment(
+              appointmentId,
+              updatePayload,
+              validationResult.data.email,
+              validationResult.data.phone || guestPhone,
+            );
           } catch (e) {
             console.warn("Failed to update appointment:", e);
           }
@@ -795,9 +809,16 @@ export function useBookingSubmit(deps: SubmitDeps) {
 
         if (serviceItems.length > 0) {
           try {
-            await insertBookingAppointmentServices(appointmentId, slug || "", serviceItems as BookingServiceItem[]);
+            await insertBookingAppointmentServices(
+              appointmentId,
+              slug || "",
+              serviceItems as BookingServiceItem[],
+              validationResult.data.email,
+              validationResult.data.phone || guestPhone,
+            );
           } catch (err) {
-            console.warn("[Booking] Failed to create appointment_services:", err);
+            console.error("[Booking] Failed to create appointment_services:", err);
+            throw err;
           }
         }
       }
@@ -817,6 +838,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
             status: "pending",
             payment_type: "pay_at_service",
             customer_email: validationResult.data.email,
+            customer_phone: validationResult.data.phone || guestPhone,
             customer_name: validationResult.data.name,
           });
 
@@ -849,8 +871,8 @@ export function useBookingSubmit(deps: SubmitDeps) {
           }).catch((syncError) => {
             console.warn("[Booking] Provider sync failed:", syncError);
           });
-        } catch {
-          // Don't fail booking if payment record creation fails
+        } catch (paymentError) {
+          console.error("[Booking] Payment intent creation failed:", paymentError);
           requestAppointmentProviderSync({
             appointmentId,
             syncMode: "appointment_created",
@@ -858,6 +880,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
           }).catch((syncError) => {
             console.warn("[Booking] Provider sync fallback failed:", syncError);
           });
+          throw paymentError;
         }
       } else if (appointmentId) {
         requestAppointmentProviderSync({

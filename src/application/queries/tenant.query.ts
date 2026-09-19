@@ -105,13 +105,13 @@ export function resolveTenant(routeSlug?: string): TenantResolution {
 
 /**
  * Fetch tenant profile by booking slug.
- * Uses the allow-listed get_public_booking_profile_v2 RPC exclusively — no raw business_profiles query.
+ * Uses the allow-listed get_public_booking_profile_v3 RPC exclusively — no raw business_profiles query.
  * stripe_account_id is never returned to the client; the RPC computes
  * stripe_charges_enabled as (charges_enabled AND account_id IS NOT NULL).
  */
 export async function fetchTenantProfile(bookingSlug: string): Promise<TenantProfileData | null> {
   const { data: profileData, error: profileError } = await supabase.rpc(
-    "get_public_booking_profile_v2",
+    "get_public_booking_profile_v3",
     { booking_slug_param: bookingSlug }
   );
 
