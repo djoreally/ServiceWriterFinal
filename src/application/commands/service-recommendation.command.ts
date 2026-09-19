@@ -8,7 +8,19 @@ export async function createServiceRecommendation(input: {
   inspectionResultId?: string | null; serviceCatalogId?: string | null;
   description: string; technicianNotes?: string | null; price?: number | null;
 }) {
-  const { data, error } = await (supabase as any).from("service_recommendations").insert({
+  const db = supabase as any;
+  if (input.inspectionResultId && input.serviceCatalogId) {
+    const { data: existing, error: existingError } = await db.from("service_recommendations")
+      .select("*")
+      .eq("workspace_id", input.workspaceId)
+      .eq("inspection_result_id", input.inspectionResultId)
+      .eq("service_catalog_id", input.serviceCatalogId)
+      .maybeSingle();
+    if (existingError) throw existingError;
+    if (existing) return existing;
+  }
+
+  const { data, error } = await db.from("service_recommendations").insert({
     workspace_id: input.workspaceId, appointment_id: input.appointmentId, vehicle_id: input.vehicleId,
     inspection_id: input.inspectionId, inspection_result_id: input.inspectionResultId ?? null,
     service_catalog_id: input.serviceCatalogId ?? null, description: input.description,
