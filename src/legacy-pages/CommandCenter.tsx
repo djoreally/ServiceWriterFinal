@@ -8,9 +8,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { QuickDispatchPanel } from "@/components/command-center/QuickDispatchPanel";
 import { fetchTodayJobs, fetchActiveTechnicians } from "@/application/queries/command-center.query";
+import { fetchBusinessSettings } from "@/application/queries/settings.query";
 import type { OperationalJobRow } from "@/application/queries/operational-jobs.query";
 import { buildCommandCenterBuckets } from "@/lib/command-center-filters";
-import { format } from "date-fns";
+
 import { AlertTriangle, CalendarClock, CheckCircle2, Clock, Plus, Radio, UserRound, Wrench } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
 import { useTeamRole } from "@/hooks/useTeamRole";
@@ -46,7 +47,11 @@ export default function CommandCenter({ embedded = false }: CommandCenterProps) 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const today = format(new Date(), "yyyy-MM-dd");
+      const settings = await fetchBusinessSettings();
+      const timeZone = settings?.timezone || "America/New_York";
+      const parts = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+      const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value || "";
+      const today = `${part("year")}-${part("month")}-${part("day")}`;
       const [jobsRes, techsRes] = await Promise.all([
         fetchTodayJobs("", today),
         fetchActiveTechnicians(""),
@@ -189,7 +194,7 @@ export default function CommandCenter({ embedded = false }: CommandCenterProps) 
                         <p className="text-sm font-medium">{tech.name}</p>
                         <p className="text-xs text-muted-foreground">{tech.jobs_today} job{tech.jobs_today === 1 ? "" : "s"} assigned</p>
                       </div>
-                      <Badge variant="outline">Available</Badge>
+                      <Badge variant="outline">Active</Badge>
                     </div>
                   ))}
                 </div>
