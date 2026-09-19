@@ -67,6 +67,7 @@ export async function upsertBookingCustomer(params: UpsertCustomerParams) {
 export interface UpsertBookingVehicleParams {
   p_booking_slug: string;
   p_customer_email: string;
+  p_customer_phone: string;
   p_year: number;
   p_make: string;
   p_model: string;
@@ -450,6 +451,7 @@ export async function cancelBookingReward(params: {
 export interface SetVehicleTireSpecParams {
   p_booking_slug: string;
   p_customer_email: string;
+  p_customer_phone: string;
   p_vehicle_id: string;
   p_tire_size: string | null;
   p_tire_size_source?: string | null;
@@ -464,9 +466,10 @@ export interface SetVehicleTireSpecParams {
  * appointments carry the confirmed tire size (OE or override).
  */
 export async function setVehicleTireSpec(params: SetVehicleTireSpecParams) {
-  return supabase.rpc("public_booking_set_vehicle_tire_spec_v2", {
+  return supabase.rpc("public_booking_set_vehicle_tire_spec_v3" as never, {
     p_booking_slug: params.p_booking_slug,
     p_customer_email: params.p_customer_email,
+    p_customer_phone: params.p_customer_phone,
     p_vehicle_id: params.p_vehicle_id,
     p_tire_size: params.p_tire_size,
     p_tire_size_source: params.p_tire_size_source ?? null,
@@ -474,5 +477,5 @@ export async function setVehicleTireSpec(params: SetVehicleTireSpecParams) {
     p_tire_size_rear: params.p_tire_size_rear ?? null,
     p_tire_load_index: params.p_tire_load_index ?? null,
     p_tire_speed_rating: params.p_tire_speed_rating ?? null,
-  });
+  } as never);
 }
