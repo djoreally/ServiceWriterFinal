@@ -118,10 +118,10 @@ export async function bookAppointmentSafe(params: BookAppointmentSafeParams) {
   if (!params.p_vehicle_id) {
     throw new Error("BOOKING_VEHICLE_REQUIRED");
   }
-  return supabase.rpc("public_booking_book_appointment", {
+  return supabase.rpc("public_booking_book_appointment_v2" as never, {
     ...params,
     p_status: params.p_status ?? "confirmed",
-  });
+  } as never);
 }
 
 export async function assignVanByZip(userId: string, zipCode: string) {
