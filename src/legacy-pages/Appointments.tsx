@@ -107,9 +107,9 @@ const AppointmentsPage = () => {
   // Auto-open the new appointment dialog when navigating from vehicle detail with prefill state
   // We use a ref to track if we've already processed the state so fetchData populating
   // customers/vehicles doesn't cause a race condition — we handle it after data loads.
-  const prefillStateRef = useState<{ prefillVehicleId?: string; prefillCustomerId?: string } | null>(() => {
-    const s = location.state as { prefillVehicleId?: string; prefillCustomerId?: string } | null;
-    return (s?.prefillVehicleId || s?.prefillCustomerId) ? s : null;
+  const prefillStateRef = useState<{ prefillVehicleId?: string; prefillCustomerId?: string; openNewAppointment?: boolean } | null>(() => {
+    const s = location.state as { prefillVehicleId?: string; prefillCustomerId?: string; openNewAppointment?: boolean } | null;
+    return (s?.prefillVehicleId || s?.prefillCustomerId || s?.openNewAppointment) ? s : null;
   })[0];
 
   useEffect(() => {
@@ -151,6 +151,12 @@ const AppointmentsPage = () => {
 
       // After data loads, open prefill dialog with full customer + vehicle info
       if (prefillStateRef) {
+        if (prefillStateRef.openNewAppointment && !prefillStateRef.prefillCustomerId && !prefillStateRef.prefillVehicleId) {
+          setEditingAppointment(null);
+          setIsPrefillNew(false);
+          setDialogOpen(true);
+          return;
+        }
         const allCustomers = data.customers ?? [];
         const allVehicles = data.vehicles ?? [];
       const customer = prefillStateRef.prefillCustomerId
