@@ -81,7 +81,7 @@ export interface UpsertBookingVehicleParams {
 
 export async function upsertBookingVehicle(params: UpsertBookingVehicleParams) {
   const key = bookingVehicleKey(params.p_booking_slug, params.p_customer_email);
-  const result = await supabase.rpc("public_booking_upsert_vehicle", params);
+  const result = await supabase.rpc("public_booking_upsert_vehicle", params as never);
   if (result.error || !result.data) vehiclePersistenceFailures.add(key);
   return result;
 }
