@@ -480,6 +480,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
           const { data: vehicleId, error: vehicleError } = await upsertBookingVehicle({
             p_booking_slug: slug || "",
             p_customer_email: validationResult.data.email,
+            p_customer_phone: validationResult.data.phone || "",
             p_year: parseInt(vehicle.year),
             p_make: vehicle.make,
             p_model: vehicle.model,
@@ -589,6 +590,8 @@ export function useBookingSubmit(deps: SubmitDeps) {
         const { error: configurationError } = await saveAppointmentBookingConfiguration(
           appointmentId,
           slug || "",
+          validationResult.data.email,
+          validationResult.data.phone || "",
           buildAppointmentBookingConfiguration(vehicles, vehicleServiceSelections),
         );
         if (configurationError) throw new Error(`Could not save vehicle service configuration: ${configurationError.message}`);
@@ -722,7 +725,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
 
         if (Object.keys(updatePayload).length > 0) {
           try {
-            await updateBookingAppointment(appointmentId, updatePayload);
+            await updateBookingAppointment(appointmentId, updatePayload, validationResult.data.email, validationResult.data.phone || "");
           } catch (e) {
             console.warn("Failed to update appointment:", e);
           }
@@ -795,7 +798,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
 
         if (serviceItems.length > 0) {
           try {
-            await insertBookingAppointmentServices(appointmentId, slug || "", serviceItems as BookingServiceItem[]);
+            await insertBookingAppointmentServices(appointmentId, slug || "", validationResult.data.email, validationResult.data.phone || "", serviceItems as BookingServiceItem[]);
           } catch (err) {
             console.warn("[Booking] Failed to create appointment_services:", err);
           }
@@ -818,6 +821,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
             payment_type: "pay_at_service",
             customer_email: validationResult.data.email,
             customer_name: validationResult.data.name,
+            customer_phone: validationResult.data.phone || "",
           });
 
           if (selectedRewardInstanceId && rewardDiscountCents > 0) {

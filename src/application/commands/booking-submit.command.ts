@@ -105,7 +105,7 @@ export interface BookAppointmentSafeParams {
   p_tax_amount: number;
   p_service_catalog_id: string | null;
   p_vehicle_id: string | null;
-  p_status?: "confirmed" | "pending" | "scheduled";
+  p_status?: "confirmed";
 }
 
 export async function bookAppointmentSafe(params: BookAppointmentSafeParams) {
@@ -117,10 +117,10 @@ export async function bookAppointmentSafe(params: BookAppointmentSafeParams) {
   if (!params.p_vehicle_id) {
     throw new Error("BOOKING_VEHICLE_REQUIRED");
   }
-  return supabase.rpc("public_booking_book_appointment", {
+  return supabase.rpc("public_booking_book_appointment_v2" as never, {
     ...params,
     p_status: params.p_status ?? "confirmed",
-  });
+  } as never);
 }
 
 export async function assignVanByZip(userId: string, zipCode: string) {
@@ -130,13 +130,17 @@ export async function assignVanByZip(userId: string, zipCode: string) {
 export async function updateBookingAppointment(
   appointmentId: string,
   payload: Record<string, unknown>,
+  customerEmail: string,
+  customerPhone: string,
 ) {
   const bookingSlug = currentPublicBookingSlug();
   if (!bookingSlug) throw new Error("BOOKING_CONTEXT_INVALID");
 
-  return supabase.rpc("public_booking_update_appointment_context" as never, {
+  return supabase.rpc("public_booking_update_appointment_context_v2" as never, {
     p_booking_slug: bookingSlug,
     p_appointment_id: appointmentId,
+    p_customer_email: customerEmail,
+    p_customer_phone: customerPhone,
     p_dispatch_notes: optionalText(payload.dispatch_notes),
     p_location_address: optionalText(payload.location_address),
     p_location_lat: optionalFiniteNumber(payload.location_lat),
@@ -147,13 +151,17 @@ export async function updateBookingAppointment(
 export async function saveAppointmentBookingConfiguration(
   appointmentId: string,
   bookingSlug: string,
+  customerEmail: string,
+  customerPhone: string,
   configuration: AppointmentBookingConfiguration,
 ) {
-  return supabase.rpc("public_booking_save_configuration", {
+  return supabase.rpc("public_booking_save_configuration_v2" as never, {
     p_booking_slug: bookingSlug,
     p_appointment_id: appointmentId,
+    p_customer_email: customerEmail,
+    p_customer_phone: customerPhone,
     p_configuration: configuration as unknown as Json,
-  });
+  } as never);
 }
 
 export async function reserveTireInventoryForAppointment(appointmentId:string,businessUserId:string,inventoryItemId:string,quantity:number){
@@ -176,13 +184,17 @@ export interface BookingServiceItem {
 export async function insertBookingAppointmentServices(
   appointmentId: string,
   bookingSlug: string,
+  customerEmail: string,
+  customerPhone: string,
   services: BookingServiceItem[],
 ) {
-  return supabase.rpc("public_booking_insert_services", {
+  return supabase.rpc("public_booking_insert_services_v7" as never, {
     p_booking_slug: bookingSlug,
     p_appointment_id: appointmentId,
+    p_customer_email: customerEmail,
+    p_customer_phone: customerPhone,
     p_services: services as unknown as Json,
-  });
+  } as never);
 }
 
 // ---------------------------------------------------------------------------
@@ -202,6 +214,7 @@ export interface BookingPaymentRecordInput {
   payment_type: string;
   customer_email: string;
   customer_name: string;
+  customer_phone: string;
 }
 
 /**
@@ -213,7 +226,7 @@ export interface BookingPaymentRecordInput {
  * zero-collected intent row. Idempotent per appointment.
  */
 export async function insertBookingPaymentRecord(record: BookingPaymentRecordInput) {
-  const { data, error } = await supabase.rpc("public_booking_record_payment_intent_v2", {
+  const { data, error } = await supabase.rpc("public_booking_record_payment_intent_v3" as never, {
     p_booking_slug: record.booking_slug,
     p_appointment_id: record.appointment_id,
     p_amount: Math.round(record.amount),
@@ -222,8 +235,9 @@ export async function insertBookingPaymentRecord(record: BookingPaymentRecordInp
     p_tax_rate: record.tax_rate,
     p_currency: record.currency,
     p_customer_email: record.customer_email,
+    p_customer_phone: record.customer_phone,
     p_customer_name: record.customer_name,
-  });
+  } as never);
   if (error) throw error;
   return { data: data ? { id: data as string } : null, error: null as null };
 }
@@ -458,9 +472,10 @@ export interface SetVehicleTireSpecParams {
  * appointments carry the confirmed tire size (OE or override).
  */
 export async function setVehicleTireSpec(params: SetVehicleTireSpecParams) {
-  return supabase.rpc("public_booking_set_vehicle_tire_spec_v2", {
+  return supabase.rpc("public_booking_set_vehicle_tire_spec_v3" as never, {
     p_booking_slug: params.p_booking_slug,
     p_customer_email: params.p_customer_email,
+    p_customer_phone: params.p_customer_phone,
     p_vehicle_id: params.p_vehicle_id,
     p_tire_size: params.p_tire_size,
     p_tire_size_source: params.p_tire_size_source ?? null,
@@ -468,5 +483,5 @@ export async function setVehicleTireSpec(params: SetVehicleTireSpecParams) {
     p_tire_size_rear: params.p_tire_size_rear ?? null,
     p_tire_load_index: params.p_tire_load_index ?? null,
     p_tire_speed_rating: params.p_tire_speed_rating ?? null,
-  });
+  } as never);
 }
