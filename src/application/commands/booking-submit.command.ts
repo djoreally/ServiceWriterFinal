@@ -320,6 +320,7 @@ export interface BookingRewardLookupResult {
   status: string;
   match_source?: string | null;
   masked_email?: string | null;
+  masked_phone?: string | null;
   candidate_count?: number;
   points_balance: number;
   lifetime_points_earned?: number;
@@ -331,12 +332,14 @@ export interface BookingRewardLookupResult {
 export async function lookupBookingRewards(
   providerId: string,
   email: string,
+  phone: string,
 ): Promise<BookingRewardLookupResult> {
-  const { data, error } = await supabase.rpc("lookup_booking_rewards", {
+  const { data, error } = await supabase.rpc("lookup_booking_rewards_v2" as never, {
     p_provider_id: providerId,
     p_email: email,
+    p_phone: phone,
     p_customer_account_id: undefined,
-  });
+  } as never);
   if (error) throw new Error(error.message);
 
   const payload = (data || {}) as Partial<BookingRewardLookupResult>;
@@ -344,6 +347,7 @@ export async function lookupBookingRewards(
     status: payload.status || "no_match",
     match_source: payload.match_source ?? null,
     masked_email: payload.masked_email ?? null,
+    masked_phone: payload.masked_phone ?? null,
     candidate_count: payload.candidate_count,
     points_balance: Number(payload.points_balance || 0),
     lifetime_points_earned: Number(payload.lifetime_points_earned || 0),
@@ -372,17 +376,19 @@ export async function reserveBookingReward(params: {
   appointmentId: string;
   providerId: string;
   customerEmail: string;
+  customerPhone: string;
   idempotencyKey?: string;
   reservationMinutes?: number;
 }): Promise<BookingRewardLifecycleResult> {
-  const { data, error } = await supabase.rpc("reserve_booking_reward", {
+  const { data, error } = await supabase.rpc("reserve_booking_reward_v2" as never, {
     p_reward_instance_id: params.rewardInstanceId,
     p_appointment_id: params.appointmentId,
     p_provider_id: params.providerId,
     p_customer_email: params.customerEmail,
+    p_customer_phone: params.customerPhone,
     p_idempotency_key: params.idempotencyKey,
     p_reservation_minutes: params.reservationMinutes ?? 30,
-  });
+  } as never);
   if (error) throw new Error(error.message);
   return (data || { status: "skipped", reason: "empty_response" }) as unknown as BookingRewardLifecycleResult;
 }
