@@ -592,6 +592,8 @@ export function useBookingSubmit(deps: SubmitDeps) {
           appointmentId,
           slug || "",
           buildAppointmentBookingConfiguration(vehicles, vehicleServiceSelections),
+          validationResult.data.email,
+          validationResult.data.phone || guestPhone,
         );
         if (configurationError) throw new Error(`Could not save vehicle service configuration: ${configurationError.message}`);
         for (const configuredVehicle of buildAppointmentBookingConfiguration(vehicles, vehicleServiceSelections).vehicles) {
@@ -725,7 +727,12 @@ export function useBookingSubmit(deps: SubmitDeps) {
 
         if (Object.keys(updatePayload).length > 0) {
           try {
-            await updateBookingAppointment(appointmentId, updatePayload);
+            await updateBookingAppointment(
+              appointmentId,
+              updatePayload,
+              validationResult.data.email,
+              validationResult.data.phone || guestPhone,
+            );
           } catch (e) {
             console.warn("Failed to update appointment:", e);
           }
@@ -798,7 +805,13 @@ export function useBookingSubmit(deps: SubmitDeps) {
 
         if (serviceItems.length > 0) {
           try {
-            await insertBookingAppointmentServices(appointmentId, slug || "", serviceItems as BookingServiceItem[]);
+            await insertBookingAppointmentServices(
+              appointmentId,
+              slug || "",
+              serviceItems as BookingServiceItem[],
+              validationResult.data.email,
+              validationResult.data.phone || guestPhone,
+            );
           } catch (err) {
             console.warn("[Booking] Failed to create appointment_services:", err);
           }
