@@ -37,6 +37,7 @@ begin
 
   v_invoice_id:=public.sync_appointment_invoice_v1(p_appointment_id);
   if v_invoice_id is null then raise exception 'Appointment invoice could not be created'; end if;
+  perform public.apply_appointment_card_fee_v1(p_workspace_id,p_appointment_id,v_invoice_id);
 
   select count(*) into v_item_count from public.appointment_items
    where workspace_id=p_workspace_id and appointment_id=p_appointment_id;
@@ -53,7 +54,8 @@ begin
     metadata=coalesce(sr.metadata,'{}'::jsonb)||jsonb_build_object(
       'financial_source','appointment_closeout',
       'invoice_id',v_invoice_id,
-      'aggregate_invoice_total',v_total
+      'aggregate_invoice_total',v_total,
+      'card_fee_amount',coalesce((select nullif(metadata->>'card_fee_amount','')::numeric from public.invoices where id=v_invoice_id),0)
     ),
     updated_at=now()
   from (
@@ -70,7 +72,9 @@ begin
     invoice_id=v_invoice_id,
     customer_id=coalesce(customer_id,v_appt.customer_id),
     metadata=coalesce(metadata,'{}'::jsonb)||jsonb_build_object(
-      'invoice_id',v_invoice_id,'service_record_ids',to_jsonb(v_service_ids),'prepaid_reconciled_at',now()
+      'invoice_id',v_invoice_id,'service_record_ids',to_jsonb(v_service_ids),'prepaid_reconciled_at',now(),
+      'card_fee_amount',coalesce((select nullif(metadata->>'card_fee_amount','')::numeric from public.invoices where id=v_invoice_id),0),
+      'card_fee_cents',round(coalesce((select nullif(metadata->>'card_fee_amount','')::numeric from public.invoices where id=v_invoice_id),0)*100)::integer
     ),updated_at=now()
   where workspace_id=p_workspace_id
     and metadata->>'appointment_id'=p_appointment_id::text
@@ -94,11 +98,15 @@ begin
     if v_payment_id is null then
       insert into public.payments(workspace_id,invoice_id,customer_id,provider,provider_payment_id,status,amount,currency_code,created_by,metadata)
       values(p_workspace_id,v_invoice_id,v_appt.customer_id,null,null,'pending'::public.payment_status,v_balance_due,'USD',v_actor,
-        jsonb_build_object('appointment_id',p_appointment_id,'service_record_ids',to_jsonb(v_service_ids),'invoice_id',v_invoice_id,'source','appointment_completion','payment_type','pay_at_service','invoice_total',v_total,'prepaid_amount',v_amount_paid,'balance_due',v_balance_due))
+        jsonb_build_object('appointment_id',p_appointment_id,'service_record_ids',to_jsonb(v_service_ids),'invoice_id',v_invoice_id,'source','appointment_completion','payment_type','pay_at_service','invoice_total',v_total,'prepaid_amount',v_amount_paid,'balance_due',v_balance_due,
+        'card_fee_amount',coalesce((select nullif(metadata->>'card_fee_amount','')::numeric from public.invoices where id=v_invoice_id),0),
+        'card_fee_cents',round(coalesce((select nullif(metadata->>'card_fee_amount','')::numeric from public.invoices where id=v_invoice_id),0)*100)::integer))
       returning id,status into v_payment_id,v_payment_status;
     else
       update public.payments set invoice_id=v_invoice_id,customer_id=v_appt.customer_id,amount=v_balance_due,currency_code='USD',
-        metadata=coalesce(metadata,'{}'::jsonb)||jsonb_build_object('source','appointment_completion','payment_type','pay_at_service','service_record_ids',to_jsonb(v_service_ids),'invoice_id',v_invoice_id,'invoice_total',v_total,'prepaid_amount',v_amount_paid,'balance_due',v_balance_due),
+        metadata=coalesce(metadata,'{}'::jsonb)||jsonb_build_object('source','appointment_completion','payment_type','pay_at_service','service_record_ids',to_jsonb(v_service_ids),'invoice_id',v_invoice_id,'invoice_total',v_total,'prepaid_amount',v_amount_paid,'balance_due',v_balance_due,
+        'card_fee_amount',coalesce((select nullif(metadata->>'card_fee_amount','')::numeric from public.invoices where id=v_invoice_id),0),
+        'card_fee_cents',round(coalesce((select nullif(metadata->>'card_fee_amount','')::numeric from public.invoices where id=v_invoice_id),0)*100)::integer),
         updated_at=now()
       where workspace_id=p_workspace_id and id=v_payment_id;
     end if;
