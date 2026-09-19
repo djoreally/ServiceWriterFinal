@@ -27,5 +27,5 @@ begin
   end if;
   return fee;
 end $$;
-revoke all on function public.apply_appointment_card_fee_v1(uuid,uuid,uuid) from public,anon;
-grant execute on function public.apply_appointment_card_fee_v1(uuid,uuid,uuid) to authenticated,service_role;
+revoke all on function public.apply_appointment_card_fee_v1(uuid,uuid,uuid) from public,anon,authenticated;
+grant execute on function public.apply_appointment_card_fee_v1(uuid,uuid,uuid) to service_role;
