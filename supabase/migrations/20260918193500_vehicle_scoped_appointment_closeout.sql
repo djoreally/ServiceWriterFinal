@@ -27,7 +27,8 @@ begin
   select * into v_appt from public.appointments where id=p_appointment_id and workspace_id=p_workspace_id for update;
   if not found then raise exception 'Appointment not found'; end if;
 
-  -- Run the existing inspection/recommendation gates by transitioning the appointment.
+  -- Explicit readiness assertion plus the existing status triggers form a defense-in-depth gate.
+  perform public.assert_appointment_ready_for_closeout_v1(p_workspace_id,p_appointment_id);
   update public.appointments set status='completed',updated_at=now()
    where id=p_appointment_id and workspace_id=p_workspace_id;
 
