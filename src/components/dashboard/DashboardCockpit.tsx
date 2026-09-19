@@ -11,6 +11,8 @@ import {
   type CockpitData,
 } from '@/application/queries/dashboard-cockpit.query';
 import { getSelectedWorkspaceId } from '@/application/queries/workspaces.selection';
+import { useTeamRole } from '@/hooks/useTeamRole';
+import { canAccessRoute, canWrite } from '@/domain/auth/access-policy';
 import { fetchBusinessSettings } from '@/application/queries/settings.query';
 
 const DASHBOARD_CACHE_TTL_MS = 15 * 1000;
@@ -74,6 +76,7 @@ interface DashboardCockpitProps {
 
 export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
   const navigate = useNavigate();
+  const { role } = useTeamRole();
   const { formatCurrency, formatTime } = useRegionalSettings();
   const [data, setData] = useState<CockpitData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -144,15 +147,21 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="secondary" onClick={() => navigate('/appointments')}>
-            Appointments
-          </Button>
-          <Button size="sm" variant="secondary" onClick={() => navigate('/appointments', { state: { openNewAppointment: true } })}>
-            New Service
-          </Button>
-          <Button size="sm" variant="secondary" onClick={() => navigate('/invoices')}>
-            Invoices
-          </Button>
+          {canAccessRoute(role, '/appointments') && (
+            <Button size="sm" variant="secondary" onClick={() => navigate('/appointments')}>
+              Appointments
+            </Button>
+          )}
+          {canWrite(role, 'appointments') && (
+            <Button size="sm" variant="secondary" onClick={() => navigate('/appointments', { state: { openNewAppointment: true } })}>
+              New Appointment
+            </Button>
+          )}
+          {canAccessRoute(role, '/invoices') && (
+            <Button size="sm" variant="secondary" onClick={() => navigate('/invoices')}>
+              Invoices
+            </Button>
+          )}
         </div>
       </div>
 
