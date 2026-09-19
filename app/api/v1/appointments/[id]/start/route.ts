@@ -31,8 +31,6 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     }
 
     if (!current.customer_id || !current.vehicle_id) return json({ error: { code: "missing_job_context", message: "Start Job requires customer and vehicle context." } }, { status: 409 });
-    const { error: workOrderError } = await db.rpc("ensure_vehicle_work_order_v1", { p_workspace_id: workspace_id, p_appointment_id: id, p_vehicle_id: current.vehicle_id });
-    if (workOrderError) throw workOrderError;
 
     const metadata = current.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata)
       ? current.metadata as Record<string, unknown>
