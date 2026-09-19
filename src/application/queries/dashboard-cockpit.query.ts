@@ -154,7 +154,7 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
       .limit(10),
     productionSupabase
       .from('appointments')
-      .select('id,starts_at,customer_id,vehicle_id,metadata')
+      .select('id,starts_at,customer_id,vehicle_id,metadata,customers(first_name,last_name),vehicles(year,make,model)')
       .eq('workspace_id', workspaceId)
       .eq('status', 'in_progress')
       .order('starts_at', { ascending: false })
@@ -198,13 +198,16 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
 
   const jobsInProgressList: CockpitJobInProgress[] = (inProgress.data ?? []).map((row) => {
     const metadata = object(row.metadata);
-    const vehicleParts = [metadata.vehicle_year, metadata.vehicle_make, metadata.vehicle_model]
+    const customer = Array.isArray(row.customers) ? row.customers[0] : row.customers;
+    const vehicleRow = Array.isArray(row.vehicles) ? row.vehicles[0] : row.vehicles;
+    const customerName = [customer?.first_name, customer?.last_name].filter(Boolean).join(' ');
+    const vehicleParts = [vehicleRow?.year, vehicleRow?.make, vehicleRow?.model]
       .filter((value) => value != null && String(value).trim())
       .map(String);
     return {
       id: row.id,
-      service_type: String(metadata.service_type ?? metadata.service_name ?? 'Service'),
-      customer_name: String(metadata.customer_name ?? 'Customer'),
+      service_type: String(metadata.service_type ?? metadata.service_name ?? metadata.title ?? 'Service'),
+      customer_name: customerName || String(metadata.customer_name ?? metadata.guest_name ?? 'Customer'),
       vehicle: vehicleParts.length ? vehicleParts.join(' ') : null,
       started_at: row.starts_at ?? null,
     };
@@ -236,7 +239,7 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
     revenueMonthPrev: sumNetCollectedDollars(payPrevMonth.data),
     outstandingAR,
     jobsInProgress: jobsInProgressList.length,
-    jobsCompletedToday: completedToday.count || 0,
+    jobsCompletedToday: new Set((completedToday.data ?? []).map((row) => row.appointment_id).filter(Boolean)).size,
     appointmentsToday: todaysAppointments.length,
     unpaidInvoices: outstandingRows.length,
     todaysAppointments,
