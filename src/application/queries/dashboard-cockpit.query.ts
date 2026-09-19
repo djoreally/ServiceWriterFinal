@@ -6,7 +6,8 @@
  * appointments -> schedule. All reads are explicitly workspace scoped.
  */
 import { productionSupabase } from '@/integrations/supabase/client';
-import { resolveCurrentWorkspace } from '@/application/queries/settings.query';
+import { fetchBusinessSettings, resolveCurrentWorkspace } from '@/application/queries/settings.query';
+import { zonedDateTimeParts, zonedLocalDateTimeToUtc } from '@/server/scheduling/timezone';
 import { fetchCanonicalCashReceipts } from '@/application/queries/canonical-cash-receipts.query';
 import {
   format,
@@ -95,25 +96,28 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
   const context = await resolveCurrentWorkspace();
   if (!context) return null;
   const workspaceId = context.workspaceId;
-
+  const settings = await fetchBusinessSettings();
+  const timeZone = settings?.timezone || 'America/New_York';
   const now = new Date();
-  const todayStart = format(startOfDay(now), "yyyy-MM-dd'T'HH:mm:ss");
-  const todayEnd = format(endOfDay(now), "yyyy-MM-dd'T'HH:mm:ss");
-  const yesterdayStart = format(addDays(startOfDay(now), -1), "yyyy-MM-dd'T'HH:mm:ss");
-  const yesterdayEnd = format(addDays(endOfDay(now), -1), "yyyy-MM-dd'T'HH:mm:ss");
-  const weekStart = format(startOfWeek(now, { weekStartsOn: 1 }), "yyyy-MM-dd'T'HH:mm:ss");
-  const monthStart = format(startOfMonth(now), "yyyy-MM-dd'T'HH:mm:ss");
-  const yearStart = format(startOfYear(now), "yyyy-MM-dd'T'HH:mm:ss");
-  const next7End = format(endOfDay(addDays(now, 7)), "yyyy-MM-dd'T'HH:mm:ss");
+  const zoned = zonedDateTimeParts(now, timeZone);
+  const localToday = new Date(zoned.year, zoned.month - 1, zoned.day);
+  const localIso = (date: Date) => format(date, 'yyyy-MM-dd');
+  const boundary = (date: Date, end = false) => zonedLocalDateTimeToUtc(localIso(date), end ? '23:59:59' : '00:00:00', timeZone).toISOString();
+  const todayStart = boundary(localToday);
+  const todayEnd = boundary(localToday, true);
+  const yesterday = addDays(localToday, -1);
+  const yesterdayStart = boundary(yesterday);
+  const yesterdayEnd = boundary(yesterday, true);
+  const weekStart = boundary(startOfWeek(localToday, { weekStartsOn: 1 }));
+  const monthStart = boundary(startOfMonth(localToday));
+  const yearStart = boundary(startOfYear(localToday));
+  const next7End = boundary(addDays(localToday, 7), true);
 
-  const dayOfMonth = now.getDate();
-  const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const prevMonthStart = format(startOfMonth(prevMonth), "yyyy-MM-dd'T'HH:mm:ss");
+  const dayOfMonth = localToday.getDate();
+  const prevMonth = new Date(localToday.getFullYear(), localToday.getMonth() - 1, 1);
+  const prevMonthStart = boundary(startOfMonth(prevMonth));
   const prevMonthLastDay = new Date(prevMonth.getFullYear(), prevMonth.getMonth() + 1, 0).getDate();
-  const prevMonthMtdEnd = format(
-    endOfDay(new Date(prevMonth.getFullYear(), prevMonth.getMonth(), Math.min(dayOfMonth, prevMonthLastDay))),
-    "yyyy-MM-dd'T'HH:mm:ss",
-  );
+  const prevMonthMtdEnd = boundary(new Date(prevMonth.getFullYear(), prevMonth.getMonth(), Math.min(dayOfMonth, prevMonthLastDay)), true);
 
   const [
     payToday,
