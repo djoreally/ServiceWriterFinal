@@ -58,3 +58,23 @@ export async function createCustomerAccount(
 export async function resetPassword(email: string, redirectTo: string) {
   return authSupabase.auth.resetPasswordForEmail(email, { redirectTo });
 }
+
+
+/**
+ * Customer portal OAuth. Supabase exchanges Google's OIDC response for the
+ * canonical Supabase session; provider access tokens are not used as booking
+ * authorization capabilities.
+ */
+export async function signInCustomerWithGoogle(returnPath = "/customer/dashboard") {
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const safeReturnPath = returnPath.startsWith("/") && !returnPath.startsWith("//")
+    ? returnPath
+    : "/customer/dashboard";
+  return supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: `${origin}/customer/auth?oauth=google&returnTo=${encodeURIComponent(safeReturnPath)}`,
+      queryParams: { prompt: "select_account" },
+    },
+  });
+}
