@@ -31,8 +31,9 @@ export async function GET(request: Request) {
   ]);
   const error = appointments.error || workOrders.error || members.error;
   if (error) throw error;
-  const technicians = (members.data || []).filter((m:any)=>m.role==="technician").map((m:any)=>({
-    id:m.user_id,name:m.profiles?.display_name || "Technician",status:"active",current_location:null,
-  }));
+  const technicians = (members.data || []).filter((m) => m.role === "technician").map((m) => {
+    const profile = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
+    return { id: m.user_id, name: profile?.display_name || "Technician", status: "active", current_location: null };
+  });
   return json({ data: { timezone, appointments: appointments.data || [], work_orders: workOrders.data || [], members: members.data || [], technicians } });
 }
