@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { json, requireWorkspaceMember } from "@/server/api";
+import { errorResponse, json, requireWorkspaceMember } from "@/server/api";
 
 const querySchema = z.object({
   workspace_id: z.string().uuid(),
@@ -7,6 +7,7 @@ const querySchema = z.object({
 });
 
 export async function GET(request: Request) {
+ try {
   const url = new URL(request.url);
   const input = querySchema.parse({
     workspace_id: url.searchParams.get("workspace_id"),
@@ -36,4 +37,5 @@ export async function GET(request: Request) {
     return { id: m.user_id, name: profile?.display_name || "Technician", status: "active", current_location: null };
   });
   return json({ data: { timezone, appointments: appointments.data || [], work_orders: workOrders.data || [], members: members.data || [], technicians } });
+ } catch (error) { return errorResponse(error); }
 }
