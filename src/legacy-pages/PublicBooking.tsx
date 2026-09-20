@@ -512,7 +512,13 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
   // can track every booking step even before the visitor types an email.
   const [anonSessionId] = useState(getAnonSessionId);
 
-  useEffect(() => {\n    if (window.parent === window) return;\n    window.parent.postMessage({ type: "servicewriter.booking.progress", version: 1, step: bs.step }, "*");\n    if (bs.step === 6) window.parent.postMessage({ type: "servicewriter.booking.completed", version: 1 }, "*");\n  }, [bs.step]);\n\n  useBookingTracker({
+  useEffect(() => {
+    if (window.parent === window) return;
+    window.parent.postMessage({ type: "servicewriter.booking.progress", version: 1, step: bs.step }, "*");
+    if (bs.step === 6) window.parent.postMessage({ type: "servicewriter.booking.completed", version: 1 }, "*");
+  }, [bs.step]);
+
+  useBookingTracker({
     businessUserId: business?.user_id,
     guestEmail: bs.guestEmail,
     guestName: bs.guestName,
