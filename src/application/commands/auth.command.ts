@@ -179,7 +179,9 @@ export async function fetchOwnerDisplayName(): Promise<string | null> {
       membershipQuery = membershipQuery.eq("workspace_id", selectedWorkspaceId);
     }
 
-    let { data: membership, error: membershipError } = await membershipQuery.limit(1).maybeSingle();
+    const membershipResult = await membershipQuery.limit(1).maybeSingle();
+    // membership may be replaced by the selected-workspace fallback below; the error value is immutable.
+
     if (membershipError) throw membershipError;
 
     if (!membership && selectedWorkspaceId) {
