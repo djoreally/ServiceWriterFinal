@@ -54,7 +54,7 @@ export default function CommandCenter({ embedded = false }: CommandCenterProps) 
       const today = `${part("year")}-${part("month")}-${part("day")}`;
       const [jobsRes, techsRes] = await Promise.all([
         fetchTodayJobs("", today),
-        fetchActiveTechnicians(""),
+        fetchActiveTechnicians("", today),
       ]);
       if (jobsRes.error) throw jobsRes.error;
       if (techsRes.error) throw techsRes.error;
@@ -70,7 +70,7 @@ export default function CommandCenter({ embedded = false }: CommandCenterProps) 
       normalizedJobs.forEach((job) => {
         if (job.assigned_technician_id) counts.set(job.assigned_technician_id, (counts.get(job.assigned_technician_id) ?? 0) + 1);
       });
-      setTechs(((techsRes.data ?? []) as any[]).map((tech) => ({
+      setTechs(((techsRes.data ?? []) as Array<Omit<Tech, "jobs_today">>).map((tech) => ({
         ...tech,
         current_location: null,
         jobs_today: counts.get(tech.id) ?? 0,
