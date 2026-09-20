@@ -28,7 +28,7 @@ export async function fetchTodayJobs(_userId:string,dateStr:string) {
  try {
   const data=await read(dateStr); if(!data) return {data:[],error:null};
   const members=data.members as MemberRow[];
-  const profiles=new Map<string,string>(members.map(m=>{const p=related(m.profiles); return [m.user_id,p?.display_name||""];}));
+  const profiles = new Map<string, string>(members.map((m): [string, string] => { const p = related(m.profiles); return [m.user_id, p?.display_name || ""]; }));
   const jobs:OperationalJobRow[]=[];
   for(const row of data.appointments as AppointmentRow[]) {
    const meta=object(row.metadata), start=localParts(row.starts_at,data.timezone), duration=Math.max(15,Math.round((new Date(row.ends_at).getTime()-new Date(row.starts_at).getTime())/60000));
