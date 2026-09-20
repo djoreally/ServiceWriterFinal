@@ -17,11 +17,7 @@ function TenantBookingContent() {
   const { loading, isValid, slug, errorKind, retry } = useTenant();
 
   // Force light theme for public booking pages
-  useEffect(() => {
-    const root = window.document.documentElement;
-    root.classList.remove("dark");
-    root.classList.add("light");
-  }, []);
+  useEffect(() => {\n    const root = window.document.documentElement;\n    root.classList.remove("dark");\n    root.classList.add("light");\n    if (window.parent !== window) window.parent.postMessage({ type: "servicewriter.booking.started", version: 1 }, "*");\n  }, []);
 
   if (loading) {
     return (
