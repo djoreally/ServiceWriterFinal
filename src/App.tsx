@@ -332,7 +332,11 @@ const HomeRoute = () => {
 };
 
 export const AppRoutes = () => {
-  const { isValid: isTenant, loading: tenantLoading, slug: tenantSlug } = useTenant();
+  const { loading: tenantLoading, slug: tenantSlug } = useTenant();
+  // Route by hostname resolution, not by successful tenant-profile lookup.
+  // A valid tenant subdomain must never fall through to the platform marketing
+  // homepage just because its profile is missing or the backend is unavailable.
+  const isTenant = Boolean(tenantSlug);
   const { shouldBlockRender: startupBlocking } = useStartupNavigation({ enabled: !isTenant });
 
   // Auto-update service worker on new deployments
