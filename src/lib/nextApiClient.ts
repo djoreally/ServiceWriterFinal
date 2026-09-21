@@ -217,11 +217,6 @@ export const nextApi = {
   dispatch: {
     assign: (payload: Record<string, unknown>) => request<{ data: unknown }>("/v1/dispatch/assign", { method: "POST", body: JSON.stringify(payload) }),
   },
-  commandCenter: {
-    get: (workspaceId: string, date: string) => request<{ data: { timezone: string; appointments: unknown[]; work_orders: unknown[]; members: unknown[]; technicians: unknown[] } }>(
-      `/v1/command-center?workspace_id=${encodeURIComponent(workspaceId)}&date=${encodeURIComponent(date)}`,
-    ),
-  },
   dispatchEvents: {
     list: (workspaceId: string) => request<{ data: unknown[] }>(`/v1/dispatch-events?workspace_id=${encodeURIComponent(workspaceId)}`),
     create: (payload: Record<string, unknown>) => request<{ data: unknown }>("/v1/dispatch-events", { method: "POST", body: JSON.stringify(payload) }),
