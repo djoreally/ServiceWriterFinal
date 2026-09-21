@@ -2,7 +2,7 @@
  * Tenant Query - Read operations for tenant/business profile data
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { nextApi } from "@/lib/nextApiClient";
 import { resolveOilPricePerQuart } from "@/lib/oilPricing";
 import { isReservedSubdomain } from "@/lib/reserved-subdomains";
 
@@ -110,45 +110,31 @@ export function resolveTenant(routeSlug?: string): TenantResolution {
  * stripe_charges_enabled as (charges_enabled AND account_id IS NOT NULL).
  */
 export async function fetchTenantProfile(bookingSlug: string): Promise<TenantProfileData | null> {
-  const { data: profileData, error: profileError } = await supabase.rpc(
-    "get_public_booking_profile_v2",
-    { booking_slug_param: bookingSlug }
-  );
+  const response = await nextApi.publicBooking.get(bookingSlug, "profile");
+  if (!response?.data) return null;
 
-  // A transport/backend failure is NOT "shop not found". Collapsing both into
-  // null made booking links fall back to the marketing homepage whenever the
-  // backend timed out. Throw so callers can offer a retry instead.
-  if (profileError) {
-    throw new Error(profileError.message || "Failed to load booking profile");
-  }
-
-  if (!profileData || profileData.length === 0) {
-    return null;
-  }
-
-  const profile = profileData[0];
-
+  const profile = response.data as Record<string, any>;
   return {
     user_id: profile.user_id,
-    business_name: profile.business_name,
-    email: profile.email || null,
-    phone: profile.phone || null,
-    opening_time: profile.opening_time,
-    closing_time: profile.closing_time,
-    working_days: profile.working_days,
-    currency: profile.currency,
-    service_radius_miles: profile.service_radius_miles,
-    service_address: profile.service_address,
-    service_coordinates: profile.service_coordinates as { lat: number; lng: number } | null,
-    logo_url: profile.logo_url,
+    business_name: profile.business_name ?? null,
+    email: profile.email ?? null,
+    phone: profile.phone ?? null,
+    opening_time: profile.opening_time ?? null,
+    closing_time: profile.closing_time ?? null,
+    working_days: profile.working_days ?? null,
+    currency: profile.currency ?? null,
+    service_radius_miles: profile.service_radius_miles ?? null,
+    service_address: profile.service_address ?? null,
+    service_coordinates: profile.service_coordinates ?? null,
+    logo_url: profile.logo_url ?? null,
     buffer_time_before: profile.buffer_time_before ?? 0,
     buffer_time_after: profile.buffer_time_after ?? 0,
     min_lead_time_hours: profile.min_lead_time_hours ?? 2,
     max_advance_days: profile.max_advance_days ?? 30,
     slot_duration_minutes: profile.slot_duration_minutes ?? 30,
-    stripe_charges_enabled: profile.stripe_charges_enabled || false,
-    google_review_url: profile.google_review_url || null,
-    yelp_review_url: profile.yelp_review_url || null,
+    stripe_charges_enabled: Boolean(profile.stripe_charges_enabled),
+    google_review_url: profile.google_review_url ?? null,
+    yelp_review_url: profile.yelp_review_url ?? null,
     oil_price_per_quart: resolveOilPricePerQuart(profile.oil_price_per_quart),
   };
 }
