@@ -102,7 +102,7 @@ export async function buildAppointmentEmailSnapshot(
       "appointment.vehicle": vehicleLabels.join(", "),
       "appointment.vehicles": vehicleLabels.join(", "),
       "appointment.service": serviceLines.map(line => line.split(" — ")[0]).join(", ") || text(metadata.service_name) || "Service",
-      "appointment.services": serviceLines.join("\n"),
+      "appointment.services": serviceLines.join("\n") || text(metadata.service_name) || text(metadata.title) || "Service appointment",
       "appointment.address": serviceAddress,
       "appointment.date": appointmentDate,
       "appointment.time": appointmentTime,
