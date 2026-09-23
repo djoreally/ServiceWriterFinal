@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ArrowLeft, Car, Wrench, FileText, MapPin, Calendar, DollarSign, Edit } from "lucide-react";
+import { ArrowLeft, Car, Wrench, FileText, MapPin, Calendar, DollarSign, Edit, Plus } from "lucide-react";
 import { differenceInDays, format, parseISO } from "date-fns";
 import { useTerminology } from "@/contexts/TerminologyContext";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
