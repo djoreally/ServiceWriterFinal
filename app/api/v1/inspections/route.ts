@@ -29,16 +29,17 @@ export async function POST(request: Request) {
       ["owner", "admin", "manager", "service_advisor", "technician", "dispatcher"],
       request,
     );
+    const db = supabase as any;
 
     const [{ data: appointment, error: appointmentError }, { data: vehicle, error: vehicleError }] =
       await Promise.all([
-        supabase
+        db
           .from("appointments")
           .select("id,workspace_id,vehicle_id")
           .eq("workspace_id", body.workspace_id)
           .eq("id", body.appointment_id)
           .maybeSingle(),
-        supabase
+        db
           .from("vehicles")
           .select("id,workspace_id")
           .eq("workspace_id", body.workspace_id)
@@ -58,7 +59,7 @@ export async function POST(request: Request) {
       return json({ error: { code: "vehicle_mismatch", message: "This inspection vehicle does not match the appointment vehicle." } }, { status: 409 });
     }
 
-    const { data: existing, error: existingError } = await supabase
+    const { data: existing, error: existingError } = await db
       .from("service_inspections")
       .select("id,status")
       .eq("workspace_id", body.workspace_id)
@@ -72,7 +73,7 @@ export async function POST(request: Request) {
       return json({ data: { id: existing.id, already_completed: true } });
     }
 
-    const { data: inspection, error: inspectionError } = await supabase
+    const { data: inspection, error: inspectionError } = await db
       .from("service_inspections")
       .insert({
         workspace_id: body.workspace_id,
@@ -102,9 +103,9 @@ export async function POST(request: Request) {
         sort_order: result.sort_order,
       }));
 
-      const { error: resultsError } = await supabase.from("inspection_results").insert(rows);
+      const { error: resultsError } = await db.from("inspection_results").insert(rows);
       if (resultsError) {
-        await supabase
+        await db
           .from("service_inspections")
           .delete()
           .eq("workspace_id", body.workspace_id)
