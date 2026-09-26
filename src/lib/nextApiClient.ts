@@ -199,6 +199,13 @@ export const nextApi = {
     cancel: (workspaceId: string, id: string) => request<{ data: unknown }>(`/v1/appointments/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`, { method: "DELETE" }),
     complete: (id: string, workspaceId: string) => request<{ data: unknown }>(`/v1/appointments/${encodeURIComponent(id)}/complete`, { method: "POST", body: JSON.stringify({ workspace_id: workspaceId }) }),
   },
+  inspections: {
+    create: (payload: Record<string, unknown>) =>
+      request<{ data: { id: string; already_completed: boolean } }>("/v1/inspections", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+  },
   invoices: {
     list: (workspaceId: string) => request<{ data: unknown[] }>(`/v1/invoices?workspace_id=${encodeURIComponent(workspaceId)}`),
     get: (workspaceId: string, id: string) => request<{ data: unknown }>(`/v1/invoices/${encodeURIComponent(id)}?workspace_id=${encodeURIComponent(workspaceId)}`),
