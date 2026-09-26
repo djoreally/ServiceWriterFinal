@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1.0",
+  "project": "service-writer-api",
+  "repository": "djoreally/service-Writer-backend",
+  "branch": "main",
+  "mission": "Production Service Writer backend API",
+  "architecture": {
+    "framework": "Next.js Route Handlers",
+    "validation": "Zod",
+    "databaseAccess": "Drizzle ORM",
+    "database": "Supabase PostgreSQL",
+    "identity": "Supabase Auth",
+    "payments": "Stripe",
+    "email": "Resend"
+  },
+  "rules": {
+    "serverOwnsBusinessLogic": true,
+    "serverOwnsAuthorization": true,
+    "serverOwnsTransactions": true,
+    "browserDatabaseAccess": false,
+    "greenOnly": true
+  }
+}

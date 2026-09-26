@@ -1,0 +1,61 @@
+{
+  "schemaVersion": "1.0",
+  "status": "IN_PROGRESS",
+  "currentPhase": "B02",
+  "currentTask": "B02-T01",
+  "lastCompletedTask": null,
+  "blockers": [],
+  "phases": [
+    {
+      "id": "B00",
+      "name": "Backend foundation and contracts",
+      "status": "IN_PROGRESS"
+    },
+    {
+      "id": "B01",
+      "name": "Database inventory and Drizzle mapping",
+      "status": "IN_PROGRESS"
+    },
+    {
+      "id": "B02",
+      "name": "Authentication, workspace and authorization",
+      "status": "IN_PROGRESS"
+    },
+    {
+      "id": "B03",
+      "name": "Customers and vehicles API",
+      "status": "PENDING"
+    },
+    {
+      "id": "B04",
+      "name": "Service catalog API",
+      "status": "PENDING"
+    },
+    {
+      "id": "B05",
+      "name": "Appointments and work orders API",
+      "status": "PENDING"
+    },
+    {
+      "id": "B06",
+      "name": "Quotes, invoices and payments API",
+      "status": "PENDING"
+    },
+    {
+      "id": "B07",
+      "name": "Business settings API",
+      "status": "PENDING"
+    },
+    {
+      "id": "B08",
+      "name": "Public booking transaction",
+      "status": "PENDING"
+    },
+    {
+      "id": "B09",
+      "name": "Production certification",
+      "status": "PENDING"
+    }
+  ],
+  "updatedAt": "2026-09-21"
+}
