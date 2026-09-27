@@ -6,8 +6,18 @@ import postgres from 'postgres';
 let queryClient: ReturnType<typeof postgres> | undefined;
 
 function getDatabaseUrl() {
-  const url = process.env.DATABASE_URL;
-  if (!url) throw new Error('DATABASE_URL is required on the Service Writer API server.');
+  const candidates = [
+    process.env.DATABASE_URL,
+    process.env.POSTGRES_URL,
+    process.env.POSTGRES_PRISMA_URL,
+    process.env.POSTGRES_URL_NON_POOLING,
+  ];
+  const url = candidates.find((value) => typeof value === 'string' && value.trim().length > 0);
+  if (!url) {
+    throw new Error(
+      'A database connection URL is required. Set DATABASE_URL or one of the existing Vercel Postgres URL aliases.',
+    );
+  }
   return url;
 }
 
@@ -25,4 +35,3 @@ export function getQueryClient() {
 export function getDb() {
   return drizzle(getQueryClient());
 }
-
