@@ -45,7 +45,6 @@
     "env-cmd": "10.1.0",
     "eslint": "8.55.0",
     "eslint-config-next": "14.0.4",
-    "supabase": "1.145.4",
     "typescript": "5.3.3"
   },
   "engines": {
