@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "mkdir -p public && (npx tsc --noEmit --pretty false > public/tsc-errors.txt 2>&1 || true) && (npx next lint > public/lint-errors.txt 2>&1 || true) && next build",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
