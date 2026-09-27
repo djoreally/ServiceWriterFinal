@@ -1,5 +1,6 @@
 import { createSupabaseAdminClient } from "@/lib/supabase";
-import { dispatchLifecycleEvent, LIFECYCLE_EVENT_KEYS } from "@/server/messaging/lifecycle-events";
+import { LIFECYCLE_EVENT_KEYS } from "@/server/messaging/lifecycle-events";
+import { sendLifecycleEmail } from "@/server/messaging/lifecycle-sender";
 
 type AppointmentRow = {
   id: string;
@@ -122,15 +123,14 @@ export async function sendBookingConfirmation(input: {
     "vehicle.description": vehicleDescription,
     "email.primary_action_url": manageUrl,
   };
-  const customerResult = await dispatchLifecycleEvent({
+  const customerResult = await sendLifecycleEmail({
     workspaceId: input.appointment.workspace_id,
     customerId: input.appointment.customer_id,
     recipientEmail: input.recipientEmail,
-    recipientRole: "customer",
     templateKey: LIFECYCLE_EVENT_KEYS.bookingCreated,
-    eventId: input.appointment.id,
-    variables: customerVariables,
-    metadata: { appointmentId: input.appointment.id },
+    idempotencyKey: `lifecycle:${LIFECYCLE_EVENT_KEYS.bookingCreated}:${input.appointment.id}:${input.recipientEmail.toLowerCase()}`,
+    variables: { ...customerVariables, "email.recipient_role": "customer" },
+    metadata: { appointmentId: input.appointment.id, recipientRole: "customer" },
   });
 
   try {
@@ -148,18 +148,18 @@ export async function sendBookingConfirmation(input: {
 
     const staffUrl = new URL(`/appointments/${input.appointment.id}`, input.actionUrl).toString();
     await Promise.all(Array.from(recipients).map((recipientEmail) =>
-      dispatchLifecycleEvent({
+      sendLifecycleEmail({
         workspaceId: input.appointment.workspace_id,
         customerId: input.appointment.customer_id,
         recipientEmail,
-        recipientRole: "shop_owner",
         templateKey: LIFECYCLE_EVENT_KEYS.newAppointmentBooked,
-        eventId: `${input.appointment.id}:shop-notify:${recipientEmail}`,
+        idempotencyKey: `lifecycle:${LIFECYCLE_EVENT_KEYS.newAppointmentBooked}:${input.appointment.id}:shop-notify:${recipientEmail}:${recipientEmail.toLowerCase()}`,
         variables: {
           ...customerVariables,
+          "email.recipient_role": "shop_owner",
           "email.primary_action_url": staffUrl,
         },
-        metadata: { appointmentId: input.appointment.id },
+        metadata: { appointmentId: input.appointment.id, recipientRole: "shop_owner" },
       }),
     ));
   } catch (ownerNotificationError) {
