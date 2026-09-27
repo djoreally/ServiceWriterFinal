@@ -197,7 +197,6 @@ export interface ConvertQuoteInput {
   serviceDate?: string;
   technicianId?: string | null;
   appointmentId?: string | null;
-  workOrderId?: string | null;
   internalNotes?: string | null;
   expectedQuoteUpdatedAt?: string | null;
 }
@@ -213,7 +212,6 @@ export async function convertQuoteToServiceRecord(input: ConvertQuoteInput): Pro
       service_date: input.serviceDate,
       technician_id: input.technicianId ?? null,
       appointment_id: input.appointmentId ?? null,
-      work_order_id: input.workOrderId ?? null,
       internal_notes: input.internalNotes ?? null,
       expected_quote_updated_at: input.expectedQuoteUpdatedAt ?? null,
     });
