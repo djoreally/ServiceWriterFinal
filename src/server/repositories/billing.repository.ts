@@ -22,8 +22,8 @@ export async function listWorkOrdersDetailed(workspaceId:string,input:{limit:num
     vehicleId:workOrders.vehicleId,updatedAt:workOrders.updatedAt,
     customerFirstName:customers.firstName,customerLastName:customers.lastName,
     vehicleYear:vehicles.year,vehicleMake:vehicles.make,vehicleModel:vehicles.model,
-    itemCount:sql<number>\`count(\${workOrderItems.id})::int\`,
-    lineTotal:sql<string>\`coalesce(sum(\${workOrderItems.quantity} * \${workOrderItems.unitPrice}),0)::text\`,
+        itemCount:sql<number>`count(${workOrderItems.id})::int`,
+        lineTotal:sql<string>`coalesce(sum(${workOrderItems.quantity} * ${workOrderItems.unitPrice}),0)::text`,
   }).from(workOrders)
     .innerJoin(customers,and(eq(customers.workspaceId,workspaceId),eq(customers.id,workOrders.customerId)))
     .leftJoin(vehicles,and(eq(vehicles.workspaceId,workspaceId),eq(vehicles.id,workOrders.vehicleId)))
@@ -47,7 +47,7 @@ export async function listQuotesDetailed(workspaceId:string,input:{limit:number;
     customerFirstName:customers.firstName,customerLastName:customers.lastName,
     vehicleYear:vehicles.year,vehicleMake:vehicles.make,vehicleModel:vehicles.model,
     workOrderNumber:workOrders.number,
-    itemCount:sql<number>\`count(\${quoteItems.id})::int\`,
+        itemCount:sql<number>`count(${quoteItems.id})::int`,
   }).from(quotes)
     .innerJoin(customers,and(eq(customers.workspaceId,workspaceId),eq(customers.id,quotes.customerId)))
     .leftJoin(vehicles,and(eq(vehicles.workspaceId,workspaceId),eq(vehicles.id,quotes.vehicleId)))
