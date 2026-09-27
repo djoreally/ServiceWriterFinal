@@ -34,7 +34,9 @@
     "zod": "3.22.4",
     "stripe": "18.5.0",
     "hono": "^4.9.7",
-    "@hono/zod-validator": "^0.7.2"
+    "@hono/zod-validator": "^0.7.2",
+    "clsx": "2.1.0",
+    "tailwind-merge": "2.2.0"
   },
   "devDependencies": {
     "@types/node": "^20.10.5",
