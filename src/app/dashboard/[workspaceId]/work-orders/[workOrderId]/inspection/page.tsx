@@ -29,7 +29,7 @@ export default async function InspectionPage({
     {searchParams?.error?<div className="errorBox">{searchParams.error}</div>:null}
     <div style={{marginBottom:16}}><Link href={'/dashboard/'+params.workspaceId+'/work-orders'}>← Back to work orders</Link></div>
 
-    {plan.plans.length===0?<section className="card"><h2>No inspection required</h2><p className="subtle">None of this work order's services require an inspection template.</p></section>:null}
+    {plan.plans.length===0?<section className="card"><h2>No inspection required</h2><p className="subtle">None of this work order’s services require an inspection template.</p></section>:null}
 
     <section className="stack">
       {plan.plans.map(template=><article className="card" key={template.templateId}>
