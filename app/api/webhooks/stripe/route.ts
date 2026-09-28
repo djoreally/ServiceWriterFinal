@@ -1,6 +1,7 @@
 import Stripe from "stripe";
 import { createSupabaseAdminClient } from "@/lib/supabase";
 import { reconcileServiceWriterBillingEvent } from "@/server/billing/stripe-billing-reconciliation";
+import { dispatchPaymentLifecycle, LIFECYCLE_EVENT_KEYS } from "@/server/messaging/quote-payment-events";
 
 export const runtime = "nodejs";
 
@@ -131,6 +132,30 @@ async function reconcileInvoiceEvent(event: Stripe.Event, invoice: Stripe.Invoic
   const query = admin.from("payments").update(update).eq("workspace_id", workspaceId).eq("id", paymentId);
   const { error: updateError } = failed ? await query.in("status", ["pending", "failed"]) : await query;
   if (updateError) throw updateError;
+
+  const { data: reconciled } = await admin
+    .from("payments")
+    .select("id,customer_id,invoice_id,status,amount,currency_code,paid_at,metadata,customers(first_name,last_name,email),invoices(invoice_number)")
+    .eq("workspace_id", workspaceId)
+    .eq("id", paymentId)
+    .maybeSingle();
+  const customer = Array.isArray(reconciled?.customers) ? reconciled.customers[0] : reconciled?.customers;
+  if (reconciled && customer?.email) {
+    const { data: workspace } = await admin.from("workspaces").select("name,timezone").eq("id", workspaceId).single();
+    await dispatchPaymentLifecycle({
+      eventKey: paid ? LIFECYCLE_EVENT_KEYS.paymentReceipt : LIFECYCLE_EVENT_KEYS.paymentFailed,
+      eventId: paymentId + ":" + event.id,
+      payment: {
+        ...reconciled,
+        customer_email: customer.email,
+        customer_name: [customer.first_name, customer.last_name].filter(Boolean).join(" "),
+        invoice_number: Array.isArray(reconciled.invoices) ? reconciled.invoices[0]?.invoice_number : reconciled.invoices?.invoice_number,
+      },
+      workspaceName: workspace?.name ?? "Service Writer",
+      workspaceTimezone: workspace?.timezone ?? "UTC",
+      actionUrl: invoice.hosted_invoice_url ?? undefined,
+    });
+  }
   return { received: true };
 }
 
