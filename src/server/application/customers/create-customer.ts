@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 
 import { getDb } from '@/db/client';
 import { customers } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { publishDomainEvent } from '@/server/events/publish';
 import { claimIdempotency, completeIdempotency } from '@/server/idempotency/command-idempotency';
 
@@ -31,7 +31,7 @@ export async function createCustomerCommand(input: CreateCustomerCommand) {
     });
     if (claim.kind === 'replay') {
       if (!claim.resourceId) throw Object.assign(new Error('Idempotent customer result is missing'), { status: 500, code: 'idempotency_resource_missing' });
-      const [existing] = await tx.select().from(customers).where(eq(customers.id, claim.resourceId)).limit(1);
+      const [existing] = await tx.select().from(customers).where(and(eq(customers.workspaceId, workspaceId), eq(customers.id, claim.resourceId))).limit(1);
       if (!existing) throw Object.assign(new Error('Idempotent customer result no longer exists'), { status: 409, code: 'idempotency_resource_gone' });
       return existing;
     }

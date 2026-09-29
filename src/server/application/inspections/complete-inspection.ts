@@ -5,6 +5,7 @@ import { and, asc, eq } from 'drizzle-orm';
 
 import { getDb } from '@/db/client';
 import { inspectionItems, inspectionResults, inspectionTemplates, serviceCatalog, serviceInspections, serviceRecords, workOrderItems, workOrders } from '@/db/schema';
+import { publishDomainEvent } from '@/server/events/publish';
 
 export async function getWorkOrderInspectionPlan(workspaceId:string,workOrderId:string){
   const [workOrder]=await getDb().select({
@@ -67,5 +68,23 @@ export async function completeInspection(input:{
       };
     });
     if(rows.length) await tx.insert(inspectionResults).values(rows);
+
+    await publishDomainEvent(tx, {
+      workspaceId: input.workspaceId,
+      aggregateType: 'inspection',
+      aggregateId: inspectionId,
+      eventType: 'inspection.completed',
+      idempotencyKey: 'inspection-complete:' + inspectionId,
+      payload: {
+        inspectionId,
+        workOrderId: input.workOrderId,
+        templateId: template.templateId,
+        templateName: template.templateName,
+        appointmentId: plan.appointmentId,
+        vehicleId: plan.vehicleId,
+        inspectorName: input.inspectorName,
+        completedAt: now.toISOString(),
+      },
+    });
   });
 }

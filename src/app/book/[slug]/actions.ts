@@ -23,11 +23,25 @@ export async function submitPublicBooking(slug:string,data:FormData){
   if(!context) redirect('/book/'+slug+'?error='+encodeURIComponent('Online booking is unavailable.'));
   try{
     const startsAt=localDateTime(field(data,'date'),field(data,'time'),context.timezone);
-    const result=await createPublicBooking({
-      slug,serviceId:field(data,'serviceId'),firstName:field(data,'firstName'),lastName:field(data,'lastName'),
-      email:field(data,'email')||null,phone:field(data,'phone')||null,year:field(data,'year')?Number(field(data,'year')):null,
-      make:field(data,'make'),model:field(data,'model'),trim:field(data,'trim')||null,vin:field(data,'vin')||null,
-      startsAt,notes:field(data,'notes')||null,
+    const partnerId = field(data, 'partnerId');
+    const campaignId = field(data, 'campaignId');
+    const signature = field(data, 'signature');
+
+    const result = await createPublicBooking({
+      slug,
+      serviceId: field(data, 'serviceId'),
+      firstName: field(data, 'firstName'),
+      lastName: field(data, 'lastName'),
+      email: field(data, 'email') || null,
+      phone: field(data, 'phone') || null,
+      year: field(data, 'year') ? Number(field(data, 'year')) : null,
+      make: field(data, 'make'),
+      model: field(data, 'model'),
+      trim: field(data, 'trim') || null,
+      vin: field(data, 'vin') || null,
+      startsAt,
+      notes: field(data, 'notes') || null,
+      marketplaceAttribution: partnerId && signature ? { partnerId, campaignId: campaignId || null, signature } : null,
     });
     redirect('/book/'+slug+'/confirmed?code='+encodeURIComponent(result.confirmationCode));
   }catch(error){

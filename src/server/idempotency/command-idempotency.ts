@@ -36,15 +36,21 @@ export type IdempotencyClaim =
       resourceId: string | null;
     };
 
-function stableSerialize(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+export function stableSerialize(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+
+  if (value instanceof Date) {
+    return JSON.stringify(value.toISOString());
+  }
 
   if (Array.isArray(value)) {
     return `[${value.map((item) => stableSerialize(item)).join(',')}]`;
   }
 
   const object = value as Record<string, unknown>;
-  const keys = Object.keys(object).sort();
+  const keys = Object.keys(object).filter((key) => object[key] !== undefined).sort();
   return `{${keys.map((key) => `${JSON.stringify(key)}:${stableSerialize(object[key])}`).join(',')}}`;
 }
 

@@ -3,6 +3,26 @@ import { getOptionalPageUser } from '@/server/auth/page-session';
 
 export const dynamic = 'force-dynamic';
 
+function sanitizeNextParam(candidate?: string): string {
+  if (!candidate || typeof candidate !== 'string') return '/dashboard';
+  const trimmed = candidate.trim();
+  if (
+    !trimmed.startsWith('/') ||
+    trimmed.startsWith('//') ||
+    trimmed.startsWith('/\\') ||
+    trimmed.startsWith('/ ')
+  ) {
+    return '/dashboard';
+  }
+  try {
+    const parsed = new URL(trimmed, 'http://localhost');
+    if (parsed.origin !== 'http://localhost') return '/dashboard';
+    return parsed.pathname + parsed.search;
+  } catch {
+    return '/dashboard';
+  }
+}
+
 export default async function LoginPage({
   searchParams,
 }: {
@@ -11,9 +31,7 @@ export default async function LoginPage({
   const user = await getOptionalPageUser();
   if (user) redirect('/dashboard');
 
-  const next = typeof searchParams?.next === 'string' && searchParams.next.startsWith('/')
-    ? searchParams.next
-    : '/dashboard';
+  const next = sanitizeNextParam(searchParams?.next);
 
   return (
     <main className="loginPage">

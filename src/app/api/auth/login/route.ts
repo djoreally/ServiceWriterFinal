@@ -28,6 +28,30 @@ function cookieOptions(maxAge: number) {
   };
 }
 
+function sanitizeRedirectPath(candidate?: string): string {
+  if (!candidate || typeof candidate !== 'string') return '/dashboard';
+  const trimmed = candidate.trim();
+  if (
+    !trimmed.startsWith('/') ||
+    trimmed.startsWith('//') ||
+    trimmed.startsWith('/\\') ||
+    trimmed.startsWith('/ ') ||
+    trimmed.startsWith('/%2f') ||
+    trimmed.startsWith('/%2F') ||
+    trimmed.startsWith('/%5c') ||
+    trimmed.startsWith('/%5C')
+  ) {
+    return '/dashboard';
+  }
+  try {
+    const parsed = new URL(trimmed, 'http://localhost');
+    if (parsed.origin !== 'http://localhost') return '/dashboard';
+    return parsed.pathname + parsed.search;
+  } catch {
+    return '/dashboard';
+  }
+}
+
 export async function POST(request: Request) {
   const formData = await request.formData();
   const parsed = loginSchema.safeParse({
@@ -51,10 +75,7 @@ export async function POST(request: Request) {
     return NextResponse.redirect(url, 303);
   }
 
-  const destination =
-    parsed.data.next && parsed.data.next.startsWith('/') && !parsed.data.next.startsWith('//')
-      ? parsed.data.next
-      : '/dashboard';
+  const destination = sanitizeRedirectPath(parsed.data.next);
 
   const response = NextResponse.redirect(new URL(destination, request.url), 303);
   response.cookies.set('sw_access_token', data.session.access_token, cookieOptions(data.session.expires_in));

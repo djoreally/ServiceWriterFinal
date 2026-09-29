@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 
 let queryClient: ReturnType<typeof postgres> | undefined;
+let dbInstance: ReturnType<typeof drizzle> | undefined;
 
 function getDatabaseUrl() {
   const candidates = [
@@ -23,7 +24,7 @@ function getDatabaseUrl() {
 
 export function getQueryClient() {
   queryClient ??= postgres(getDatabaseUrl(), {
-    max: 10,
+    max: process.env.NODE_ENV === 'production' ? 2 : 10,
     prepare: false,
     idle_timeout: 20,
     connect_timeout: 10,
@@ -33,5 +34,6 @@ export function getQueryClient() {
 }
 
 export function getDb() {
-  return drizzle(getQueryClient());
+  dbInstance ??= drizzle(getQueryClient());
+  return dbInstance;
 }

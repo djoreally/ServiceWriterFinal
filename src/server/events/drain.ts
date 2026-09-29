@@ -133,9 +133,13 @@ async function notificationContext(event: EventRow) {
   return row ?? null;
 }
 
+function sanitizeHeaderValue(value: string) {
+  return value.replace(/[\r\n]+/g, ' ').trim();
+}
+
 function emailCopy(event: EventRow, context: NonNullable<Awaited<ReturnType<typeof notificationContext>>>) {
-  const name = context.firstName || 'Customer';
-  const business = context.businessName;
+  const name = sanitizeHeaderValue(context.firstName || 'Customer');
+  const business = sanitizeHeaderValue(context.businessName);
   const payload = event.payload as Record<string, unknown>;
   const total = typeof payload.total === 'string' ? payload.total : null;
   const confirmationCode = typeof payload.confirmationCode === 'string' ? payload.confirmationCode : null;
@@ -157,9 +161,16 @@ function emailCopy(event: EventRow, context: NonNullable<Awaited<ReturnType<type
     };
   }
   if (event.eventType === 'quote.sent') {
+    const portalUrl = typeof payload.portalUrl === 'string' ? payload.portalUrl : null;
     return {
-      subject: `${business}: quote ready`,
-      body: `Hi ${name},\n\nYour service quote is ready${total ? ' for $' + total : ''}. Please contact ${business} if you have any questions.\n\n${business}`,
+      subject: `${business}: your digital inspection & estimate is ready`,
+      body: `Hi ${name},\n\nYour service quote is ready${total ? ' for $' + total : ''}.${portalUrl ? '\n\nReview & authorize your estimate here:\n' + portalUrl : ''}\n\nPlease contact ${business} if you have any questions.\n\n${business}`,
+    };
+  }
+  if (event.eventType === 'quote.approved') {
+    return {
+      subject: `${business}: repair authorization confirmed`,
+      body: `Hi ${name},\n\nThank you for authorizing your service estimate${total ? ' of $' + total : ''}. Our shop has commenced work on your vehicle.\n\n${business}`,
     };
   }
   if (event.eventType === 'invoice.issued') {
@@ -213,9 +224,10 @@ async function sendEmail(event: EventRow) {
   }
 
   const copy = emailCopy(event, context);
-  const replyTo = context.businessEmail ?? undefined;
+  const replyTo = context.businessEmail ? sanitizeHeaderValue(context.businessEmail) : undefined;
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
+    signal: AbortSignal.timeout(10000),
     headers: {
       Authorization: 'Bearer ' + apiKey,
       'Content-Type': 'application/json',
