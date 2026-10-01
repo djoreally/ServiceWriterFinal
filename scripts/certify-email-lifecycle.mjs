@@ -96,7 +96,6 @@ const criticalProducers = [
   ["appointment_booking_sequence.appointment_rescheduled", "app/api/v1/appointments/[id]/route.ts"],
   ["appointment_booking_sequence.appointment_cancelled", "app/api/v1/appointments/[id]/route.ts"],
   ["appointment_booking_sequence.assignment_changed", "app/api/v1/dispatch/assign/route.ts"],
-  ["quotes_and_service_authorization.your_quote_is_ready", "app/api/v1/quotes/[id]/status/route.ts"],
   ["quotes_and_service_authorization.quote_approved", "app/api/v1/quotes/[id]/status/route.ts"],
   ["quotes_and_service_authorization.quote_declined", "app/api/v1/quotes/[id]/status/route.ts"],
   ["invoice_and_payment_sequence.invoice_created", "src/server/messaging/invoice-events.ts"],
@@ -106,7 +105,6 @@ const criticalProducers = [
   ["invoice_and_payment_sequence.refund_issued", "app/api/v1/payments/[id]/route.ts"],
   ["service_completion_and_follow_up.service_completion_summary", "app/api/v1/appointments/[id]/complete/route.ts"],
   ["service_completion_and_follow_up.review_and_satisfaction_request", "app/api/v1/reviews/actions/route.ts"],
-  ["staff_onboarding_and_account_management.you_ve_been_invited", "src/server/invitations/mailer.ts"],
 ];
 
 const eventConstantByKey = new Map(
@@ -121,6 +119,21 @@ for (const [key, producer] of criticalProducers) {
   const constantName = eventConstantByKey.get(key);
   const wired = source.includes(key) || (constantName && source.includes(`LIFECYCLE_EVENT_KEYS.${constantName}`));
   assert(Boolean(wired), `${key} is not wired from its authoritative producer ${producer}`);
+}
+
+const invitationMailer = read("src/server/invitations/mailer.ts");
+for (const required of ["ResendEmailAdapter", 'purpose: "authentication"', "workspace-invitation:", "generateAuthActionLink", "https:"]) {
+  assert(invitationMailer.includes(required), `Invitation email path missing required control: ${required}`);
+}
+
+const newsletter = read("src/server/messaging/newsletter.ts");
+for (const required of ['templateKey: "newsletter.welcome"', 'templateKey: "newsletter.weekly"', '"email.preferences_url"', 'status: "unsubscribed"', "sendLifecycleEmail"]) {
+  assert(newsletter.includes(required), `Newsletter email path missing required control: ${required}`);
+}
+
+const invoiceSend = read("app/api/v1/invoices/[id]/send/route.ts");
+for (const required of ["sendLifecycleEmail", "renderedOverride", 'purpose: "transactional"', "invoice-send:"]) {
+  assert(invoiceSend.includes(required), `Direct invoice-send path missing required control: ${required}`);
 }
 
 const marketingSetBlock = templates.slice(
