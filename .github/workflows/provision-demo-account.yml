@@ -1,0 +1,49 @@
+name: Provision CRUD Demo Account
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/provision-demo-account.mjs'
+      - '.github/workflows/provision-demo-account.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Require Supabase admin credential
+        env:
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "SUPABASE_SERVICE_ROLE_KEY GitHub secret is not configured" >&2
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Provision isolated demo account
+        env:
+          SUPABASE_URL: https://rjfbrfognxqkyhdrpibx.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/provision-demo-account.mjs
+
+      - name: Upload private demo credentials
+        uses: actions/upload-artifact@v4
+        with:
+          name: service-writer-crud-demo-account
+          path: demo-account.json
+          retention-days: 1
