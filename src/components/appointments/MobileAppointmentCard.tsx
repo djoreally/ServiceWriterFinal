@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useRef } from "react";
 import { Appointment } from "@/shared/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -69,6 +69,23 @@ export const MobileAppointmentCard = memo(function MobileAppointmentCard({ appoi
   };
 
   const statusStyle = getAppointmentStatusStyle(appointment.status);
+  const lastTouchTapRef = useRef(0);
+
+  const handleCardOpen = () => {
+    const coarsePointer = typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches;
+    if (!coarsePointer) {
+      onClick(appointment);
+      return;
+    }
+
+    const now = Date.now();
+    if (now - lastTouchTapRef.current <= 360) {
+      lastTouchTapRef.current = 0;
+      onClick(appointment);
+      return;
+    }
+    lastTouchTapRef.current = now;
+  };
 
   return (
     <Card 
@@ -76,7 +93,9 @@ export const MobileAppointmentCard = memo(function MobileAppointmentCard({ appoi
         "backdrop-blur-sm hover:border-primary/40 transition-all cursor-pointer",
         statusStyle.surfaceClass,
       )}
-      onClick={() => onClick(appointment)}
+      onClick={handleCardOpen}
+      style={{ touchAction: "manipulation" }}
+      aria-label={`${serviceTitle}. Double tap to open appointment details.`}
     >
       <CardContent className="p-4">
         <div className="flex min-w-0 gap-3 sm:gap-4">
