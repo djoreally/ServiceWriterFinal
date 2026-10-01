@@ -280,6 +280,7 @@ select
   )
 from public.service_records sr
 where sr.status<>'voided'
+  and sr.created_at<'2026-09-18T00:00:00Z'::timestamptz
   and coalesce(sr.subtotal,0)>0
   and not exists(
     select 1 from public.service_record_line_items li
@@ -425,8 +426,8 @@ begin
         issued_at=coalesce(issued_at,pg_catalog.now()),
         metadata=coalesce(metadata,'{}'::jsonb)||pg_catalog.jsonb_build_object(
           'appointment_id',v_appt.id::text,
-          'source',case when v_legacy_header then 'legacy_appointment_reconciliation' else 'appointment_invoice' end,
-          'financial_authority','appointment_items_v2'
+          'financial_authority','appointment_items_v2',
+          'legacy_reconciled',v_legacy_header
         ),
         updated_at=pg_catalog.now()
     where id=v_invoice.id
