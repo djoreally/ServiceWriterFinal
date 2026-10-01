@@ -229,14 +229,23 @@ select
   a.workspace_id,
   a.id,
   case
-    when coalesce(svc->>'id','') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}
+    when coalesce(svc->>'id','') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      and exists(
+        select 1
+        from public.service_catalog sc
+        where sc.id = (svc->>'id')::uuid
+          and sc.workspace_id = a.workspace_id
+      )
+    then (svc->>'id')::uuid
+    else null
+  end,
   'service',
   coalesce(nullif(svc->>'name',''), 'Service'),
   greatest(coalesce(nullif(svc->>'quantity','')::numeric, 1), 0.0001),
   greatest(coalesce(nullif(svc->>'price','')::numeric, 0), 0),
   false,
   false,
-  row_number() over(partition by a.id order by vehicle.ordinality, service.ordinality) - 1,
+  (row_number() over(partition by a.id order by vehicle.ordinality, svc_row.ordinality) - 1)::integer,
   pg_catalog.jsonb_build_object(
     'source','public_booking_snapshot_recovery',
     'vehicle_id', a.vehicle_id::text,
@@ -248,7 +257,7 @@ cross join lateral jsonb_array_elements(
 ) with ordinality as vehicle(value, ordinality)
 cross join lateral jsonb_array_elements(
   coalesce(vehicle.value->'services','[]'::jsonb)
-) with ordinality as service(svc, ordinality)
+) with ordinality as svc_row(svc, ordinality)
 where a.source = 'public_booking'
   and not exists(
     select 1 from public.appointment_items ai
