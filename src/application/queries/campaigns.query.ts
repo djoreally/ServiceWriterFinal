@@ -64,12 +64,10 @@ export async function fetchCampaigns(): Promise<CampaignRow[]> {
 export async function fetchCampaignCustomerCount(): Promise<number> {
   const context = await resolveCurrentWorkspace();
   if (!context) return 0;
-  const db = supabase as any;
-  const { count, error } = await db
+  const { count, error } = await supabase
     .from("customers")
     .select("id", { count: "exact", head: true })
-    .eq("workspace_id", context.workspaceId)
-    .neq("status", "archived")
+    .eq("user_id", context.userId)
     .not("email", "is", null);
   if (error) throw error;
   return count ?? 0;
