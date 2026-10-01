@@ -4,7 +4,8 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
-import { createServiceRecommendation } from "@/application/commands/service-recommendation.command";
+import { nextApi } from "@/lib/nextApiClient";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 export interface InspectionResultData { item_name: string; item_category: string | null; status: string; notes: string; sort_order: number; service_catalog_id?: string | null; price?: number | null; }
 export interface PerformInspectionPayload { serviceId?: string; vehicleId?: string; appointmentId?: string; templateId: string; templateName: string; inspectorName?: string; notes?: string; results: Record<string, InspectionResultData>; }
@@ -18,16 +19,24 @@ async function resolveInspectionWorkspace(payload: PerformInspectionPayload): Pr
 }
 
 export async function saveInspection(payload: PerformInspectionPayload): Promise<void> {
- const {data:{user}}=await getCurrentAuthUser(); if(!user)throw new Error("Not authenticated");
- if(!payload.appointmentId||!payload.vehicleId) throw new Error("Job-start inspections require appointment and vehicle context.");
- const workspaceId=await resolveInspectionWorkspace(payload),db=supabase as any;
- const {data:inspection,error:inspectionError}=await db.from("service_inspections").insert({workspace_id:workspaceId,user_id:user.id,service_id:payload.serviceId||null,vehicle_id:payload.vehicleId,appointment_id:payload.appointmentId,template_id:payload.templateId,template_name:payload.templateName,inspector_name:payload.inspectorName||null,notes:payload.notes||null,status:"completed"}).select().single(); if(inspectionError)throw inspectionError;
- const resultRecords=Object.values(payload.results).map(result=>({workspace_id:workspaceId,inspection_id:inspection.id,item_name:result.item_name,item_category:result.item_category,status:result.status,notes:result.notes||null,sort_order:result.sort_order}));
- let inserted:any[]=[]; if(resultRecords.length){const {data,error}=await db.from("inspection_results").insert(resultRecords).select();if(error)throw error;inserted=data||[];}
- const source=Object.values(payload.results);
- for(let i=0;i<inserted.length;i++){const status=String(inserted[i].status||"").toLowerCase(); if(status!=="attention"&&status!=="urgent")continue; const original=source[i];
-   await createServiceRecommendation({workspaceId,appointmentId:payload.appointmentId,vehicleId:payload.vehicleId,inspectionId:inspection.id,inspectionResultId:inserted[i].id,serviceCatalogId:original.service_catalog_id??null,description:original.item_name,technicianNotes:original.notes||null,price:original.price??null});
- }
+  if (!payload.appointmentId || !payload.vehicleId) {
+    throw new Error("Job-start inspections require appointment and vehicle context.");
+  }
+
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("No active workspace is available.");
+
+  await nextApi.inspections.create({
+    workspace_id: context.workspaceId,
+    appointment_id: payload.appointmentId,
+    vehicle_id: payload.vehicleId,
+    service_id: payload.serviceId ?? null,
+    template_id: payload.templateId,
+    template_name: payload.templateName,
+    inspector_name: payload.inspectorName ?? null,
+    notes: payload.notes ?? null,
+    results: Object.values(payload.results),
+  });
 }
 
 export interface InspectionTemplateOption { id:string;name:string;description:string|null;category:string; }
