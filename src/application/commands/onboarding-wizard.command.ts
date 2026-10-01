@@ -5,8 +5,10 @@
 import { apiClient } from "@/lib/api-client";
 
 /** Upsert onboarding profile data. */
-export async function saveOnboardingProgress(profileData: Record<string, unknown>): Promise<void> {
-  await apiClient.post("/v1/platform/onboarding/profile", profileData);
+export async function saveOnboardingProgress(profileData: Record<string, unknown>): Promise<{ success: true; verified: true }> {
+  const result = await apiClient.post<{ success: boolean; verified: boolean }>("/v1/platform/onboarding/profile", profileData);
+  if (!result.success || !result.verified) throw new Error("Onboarding progress was not verified after save.");
+  return { success: true, verified: true };
 }
 
 interface OnboardingServiceInput {
@@ -18,11 +20,12 @@ interface OnboardingServiceInput {
 
 async function saveOnboardingServices(services: OnboardingServiceInput[]): Promise<number> {
   if (services.length === 0) return 0;
-  const { count } = await apiClient.post<{ count: number }>(
+  const result = await apiClient.post<{ count: number; verified: boolean }>(
     "/v1/platform/onboarding/services",
     { services },
   );
-  return count;
+  if (!result.verified) throw new Error("Onboarding services were not verified after save.");
+  return result.count;
 }
 
 /** Add first service during onboarding. */
