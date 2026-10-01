@@ -22,7 +22,7 @@ import {
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { format } from "date-fns";
 import { PaymentLinkDialog } from "@/components/payments/PaymentLinkDialog";
-import { dollarsToCents, toDollars } from "@/lib/financialMath";
+import { centsToDollars, dollarsToCents, toCents, toDollars } from "@/lib/financialMath";
 
 type PaymentRecord = AppointmentPaymentRow;
 
@@ -90,7 +90,7 @@ export function AppointmentPaymentsTab({
         amountCents: amountInCents,
         subtotalCents: subtotalInCents,
         taxCents: taxInCents > 0 ? taxInCents : null,
-        taxRate: taxRate || null,
+        taxRate: null,
         customerEmail,
         customerName,
       });
