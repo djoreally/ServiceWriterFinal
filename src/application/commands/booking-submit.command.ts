@@ -202,13 +202,19 @@ export async function insertBookingAppointmentServices(
   customerPhone: string,
   services: BookingServiceItem[],
 ) {
-  return bookingRpc("public_booking_insert_services_v7", {
+  if (services.length === 0) throw new Error("BOOKING_FINANCIAL_LINES_REQUIRED");
+  const result = await bookingRpc<number>("public_booking_insert_services_v7", {
     p_booking_slug: bookingSlug,
     p_appointment_id: appointmentId,
     p_customer_email: customerEmail,
     p_customer_phone: customerPhone,
     p_services: services as unknown as Json,
   } as unknown as Record<string, unknown>);
+  if (result.error) throw new Error(`BOOKING_FINANCIAL_PERSISTENCE_FAILED: ${result.error.message}`);
+  if (Number(result.data ?? 0) !== services.length) {
+    throw new Error(`BOOKING_FINANCIAL_LINE_COUNT_MISMATCH: expected ${services.length}, persisted ${Number(result.data ?? 0)}`);
+  }
+  return { data: Number(result.data), error: null as null };
 }
 
 // ---------------------------------------------------------------------------
