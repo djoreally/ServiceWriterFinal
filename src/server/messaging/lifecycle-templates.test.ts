@@ -8,9 +8,9 @@ import { LIFECYCLE_EVENT_CATALOG } from "@/server/messaging/lifecycle-events";
 
 describe("Service Writer lifecycle template registry", () => {
   it("contains the complete lifecycle set", () => {
-    expect(LIFECYCLE_TEMPLATE_COUNT).toBe(175);
-    expect(LIFECYCLE_EVENT_CATALOG).toHaveLength(175);
-    expect(new Set(LIFECYCLE_EVENT_CATALOG.map((event) => event.key)).size).toBe(175);
+    expect(LIFECYCLE_TEMPLATE_COUNT).toBe(177);
+    expect(LIFECYCLE_EVENT_CATALOG).toHaveLength(177);
+    expect(new Set(LIFECYCLE_EVENT_CATALOG.map((event) => event.key)).size).toBe(177);
     expect(getLifecycleTemplate("appointment_booking_sequence.booking_confirmation").title).toBe("Booking confirmation");
     expect(getLifecycleTemplate("invoice_and_payment_sequence.payment_receipt").title).toBe("Payment receipt");
   });
