@@ -22,7 +22,7 @@ import {
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { format } from "date-fns";
 import { PaymentLinkDialog } from "@/components/payments/PaymentLinkDialog";
-import { centsToDollars, dollarsToCents, toCents, toDollars } from "@/lib/financialMath";
+import { dollarsToCents, toDollars } from "@/lib/financialMath";
 
 type PaymentRecord = AppointmentPaymentRow;
 
@@ -34,7 +34,6 @@ interface AppointmentPaymentsTabProps {
   estimatedTotal?: number;
   taxAmount?: number;
   subtotal?: number;
-  taxRate?: number;
 }
 
 export function AppointmentPaymentsTab({
@@ -45,7 +44,6 @@ export function AppointmentPaymentsTab({
   estimatedTotal = 0,
   taxAmount = 0,
   subtotal,
-  taxRate,
 }: AppointmentPaymentsTabProps) {
   const { formatCurrency } = useRegionalSettings();
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
@@ -78,18 +76,14 @@ export function AppointmentPaymentsTab({
     
     setCreatingPaymentRecord(true);
     try {
-      // If no tax was explicitly set on the appointment but a tax rate exists, compute it
-      let effectiveTax = taxAmount;
-      let effectiveSubtotal = subtotal;
-      if (effectiveTax === 0 && taxRate && taxRate > 0 && estimatedTotal > 0) {
-        effectiveSubtotal = effectiveSubtotal ?? estimatedTotal;
-        effectiveTax = effectiveSubtotal * taxRate;
+      // Payment requests must settle the canonical invoice snapshot.
+      // Never derive tax or total independently in the payment UI.
+      if (subtotal == null || estimatedTotal <= 0) {
+        throw new Error("Canonical invoice totals are required before creating a payment record");
       }
-      const taxInCents = dollarsToCents(toDollars(effectiveTax));
-      const subtotalInCents = effectiveSubtotal != null
-        ? dollarsToCents(toDollars(effectiveSubtotal))
-        : (dollarsToCents(toDollars(estimatedTotal)) - taxInCents);
-      const amountInCents = subtotalInCents + taxInCents;
+      const taxInCents = dollarsToCents(toDollars(taxAmount));
+      const subtotalInCents = dollarsToCents(toDollars(subtotal));
+      const amountInCents = dollarsToCents(toDollars(estimatedTotal));
       
       await createAppointmentPaymentRecord({
         appointmentId,
