@@ -109,11 +109,11 @@ begin
   end if;
   if v_shop_fee > 0 then
     insert into public.invoice_lines(workspace_id,invoice_id,description,quantity,unit_price,tax_rate,sort_order,metadata)
-    values(p_workspace_id,v_id,'Shop Supplies Fee',1,v_shop_fee,0,9002,jsonb_build_object('source','invoice_fee','fee_key','shop_fee'));
+    values(p_workspace_id,v_id,coalesce(nullif(v_metadata->>'shop_fee_description',''),'Shop Supplies Fee'),1,v_shop_fee,0,9002,jsonb_build_object('source','invoice_fee','fee_key','shop_fee'));
   end if;
   if v_surcharge > 0 then
     insert into public.invoice_lines(workspace_id,invoice_id,description,quantity,unit_price,tax_rate,sort_order,metadata)
-    values(p_workspace_id,v_id,'Processing Fee',1,v_surcharge,0,9003,jsonb_build_object('source','invoice_fee','fee_key','surcharge'));
+    values(p_workspace_id,v_id,coalesce(nullif(v_metadata->>'surcharge_description',''),'Processing Fee'),1,v_surcharge,0,9003,jsonb_build_object('source','invoice_fee','fee_key','surcharge'));
   end if;
 
   return v_id;
@@ -351,21 +351,27 @@ as $$
     where i.workspace_id=p_workspace_id and i.status::text<>'void'
     group by i.id,i.amount_paid
   ),
-  work_order_invoice_totals as (
+  work_order_line_totals as (
     select wo.id,
-           coalesce(sum(woi.quantity*woi.unit_price),0) work_order_lines,
-           i.id invoice_id,
-           coalesce(sum(il.quantity*il.unit_price)
-             filter(where coalesce(il.metadata->>'source','')='invoice_commercial_line'),0) invoice_commercial_lines
+           coalesce(sum(woi.quantity*woi.unit_price),0) work_order_lines
     from public.work_orders wo
     left join public.work_order_items woi
       on woi.workspace_id=wo.workspace_id and woi.work_order_id=wo.id
-    left join public.invoices i
-      on i.workspace_id=wo.workspace_id and i.work_order_id=wo.id and i.status::text<>'void'
+    where wo.workspace_id=p_workspace_id
+    group by wo.id
+  ),
+  work_order_invoice_totals as (
+    select wt.id,
+           wt.work_order_lines,
+           i.id invoice_id,
+           coalesce(sum(il.quantity*il.unit_price)
+             filter(where coalesce(il.metadata->>'source','')='invoice_commercial_line'),0) invoice_commercial_lines
+    from work_order_line_totals wt
+    join public.invoices i
+      on i.workspace_id=p_workspace_id and i.work_order_id=wt.id and i.status::text<>'void'
     left join public.invoice_lines il
       on il.workspace_id=i.workspace_id and il.invoice_id=i.id
-    where wo.workspace_id=p_workspace_id
-    group by wo.id,i.id
+    group by wt.id,wt.work_order_lines,i.id
   )
   select 'quote',id,'quote_subtotal_mismatch',
          public.money_round_v1(line_subtotal,2),public.money_round_v1(coalesce(subtotal,0),2),
