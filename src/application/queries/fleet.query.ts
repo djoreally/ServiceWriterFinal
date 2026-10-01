@@ -2,6 +2,7 @@ import { apiClient } from "@/lib/api-client";
 import type { Database } from "@/integrations/supabase/types";
 import { getOfflineDatabase } from "@/offline/database";
 import { isOfflineEligibleForCurrentUser } from "@/offline/rollout";
+import { safeParseDate } from "@/lib/datetime";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface FleetDashboardStats {
@@ -268,8 +269,8 @@ async function fetchFleetWorkOrdersFromOffline(): Promise<FleetWorkOrderSummary[
       fleet_vehicle_id: row._raw.vehicle_server_id ?? null,
       fleet_client_id: row._raw.client_server_id ?? null,
       user_id: '',
-      created_at: new Date(row._raw.updated_at_local).toISOString(),
-      updated_at: new Date(row._raw.updated_at_local).toISOString(),
+      created_at: safeParseDate(row._raw.updated_at_local)?.toISOString() ?? new Date(0).toISOString(),
+      updated_at: safeParseDate(row._raw.updated_at_local)?.toISOString() ?? new Date(0).toISOString(),
       fleet_vehicles: null,
       fleet_clients: null,
     }) as unknown as FleetWorkOrderSummary)

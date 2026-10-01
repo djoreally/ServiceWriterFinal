@@ -126,7 +126,7 @@ for (const required of ["ResendEmailAdapter", 'purpose: "authentication"', "work
   assert(invitationMailer.includes(required), `Invitation email path missing required control: ${required}`);
 }
 
-const newsletter = read("src/server/messaging/newsletter.ts");
+const newsletter = read("src/server/crm/newsletter.ts");
 for (const required of ['templateKey: "newsletter.welcome"', 'templateKey: "newsletter.weekly"', '"email.preferences_url"', 'status: "unsubscribed"', "sendLifecycleEmail"]) {
   assert(newsletter.includes(required), `Newsletter email path missing required control: ${required}`);
 }

@@ -8,6 +8,7 @@ import {
   addDays,
   parseISO,
 } from "date-fns";
+import { safeParseDate } from "@/lib/datetime";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { fetchCanonicalCashReceipts } from "@/application/queries/canonical-cash-receipts.query";
 
@@ -108,12 +109,15 @@ export async function fetchProviderSnapshot(): Promise<SnapshotData | null> {
   const upcomingAppointments: UpcomingAppt[] = (upcomingRes.data ?? [])
     .map((row) => {
       const metadata = object(row.metadata);
-      const start = new Date(row.starts_at);
+      // safeParseDate returns null for null/undefined/malformed input (new Date(null)
+      // would silently produce epoch); dateless rows get empty schedule fields and
+      // are filtered out by the startsAt >= now check below.
+      const start = safeParseDate(row.starts_at);
       return {
         id: row.id,
         title: String(metadata.title ?? metadata.service_name ?? "Appointment"),
-        scheduled_date: Number.isNaN(start.getTime()) ? "" : format(start, "yyyy-MM-dd"),
-        scheduled_time: Number.isNaN(start.getTime()) ? "" : format(start, "HH:mm"),
+        scheduled_date: start ? format(start, "yyyy-MM-dd") : "",
+        scheduled_time: start ? format(start, "HH:mm") : "",
         status: row.status,
         guest_name: metadata.guest_name == null ? null : String(metadata.guest_name),
       };

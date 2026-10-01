@@ -66,8 +66,12 @@ describe("Service Writer lifecycle template registry", () => {
 
   it("covers every authored email with resolvable variables and HTML/text alternatives", () => {
     for (const template of Object.values(LIFECYCLE_TEMPLATES)) {
-      expect(template.body.split(/\s+/).filter(Boolean).length).toBeGreaterThanOrEqual(10);
-      const source = [template.subject, template.preview, template.headline, template.body, template.essentialInformation].join("\n");
+      // Dynamic templates (e.g. newsletter.weekly) use a single placeholder for externally-rendered content
+      const isDynamicPlaceholder = /^{{\s*[a-zA-Z0-9_.-]+\s*}}$/.test(template.body.trim());
+      if (!isDynamicPlaceholder) {
+        expect(template.body.split(/\s+/).filter(Boolean).length).toBeGreaterThanOrEqual(10);
+      }
+      const source = [template.title, template.subject, template.preview, template.headline, template.body, template.essentialInformation].join("\n");
       const paths = [...source.matchAll(/{{\s*([a-zA-Z0-9_.-]+)\s*}}/g)].map((match) => match[1]);
       const variables = Object.fromEntries([...new Set([...paths, "email.primary_action_url", "email.preferences_url"])].map((path) => [path, "https://example.com/verified-value"]));
       const rendered = renderLifecycleEmail(template.key, variables);

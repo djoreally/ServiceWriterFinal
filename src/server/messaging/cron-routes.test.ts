@@ -45,7 +45,7 @@ describe("Vercel cron worker authorization", () => {
   ] as const)("fails closed when the %s worker secret is missing", async (_name, handler, worker) => {
     delete process.env.CRON_SECRET;
     const response = await handler(request());
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(503);
     expect(worker).not.toHaveBeenCalled();
   });
 

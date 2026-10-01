@@ -8,6 +8,7 @@
 import { apiClient } from "@/lib/api-client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { buildCommandCenterBuckets } from "@/lib/command-center-filters";
+import { safeParseDate } from "@/lib/datetime";
 import { format } from "date-fns";
 
 export type OperationalJobSource = "appointment" | "work_order";
@@ -129,11 +130,21 @@ function profileName(profiles: Map<string, string>, id: string | null | undefine
   return id ? profiles.get(id) ?? null : null;
 }
 
+/** Milliseconds since the given timestamp, or null when it is missing/malformed. */
+function freshnessMs(value: string | null | undefined): number | null {
+  const date = safeParseDate(value);
+  return date ? Math.max(0, Date.now() - date.getTime()) : null;
+}
+
 function appointmentJob(row: AppointmentJobSource, profileNames: Map<string, string>, workspaceId: string): OperationalJobRow {
   const meta = object(row.metadata);
-  const start = new Date(row.starts_at);
-  const end = new Date(row.ends_at);
-  const minutes = Math.max(15, Math.round((end.getTime() - start.getTime()) / 60000));
+  // safeParseDate returns null for null/undefined/malformed input instead of
+  // throwing in format() below. Dateless rows render with empty schedule fields.
+  const start = safeParseDate(row.starts_at);
+  const end = safeParseDate(row.ends_at);
+  const minutes = start && end
+    ? Math.max(15, Math.round((end.getTime() - start.getTime()) / 60000))
+    : 15;
   const location = row.locations;
   const customer = row.customers;
   const vehicle = row.vehicles;
@@ -143,8 +154,8 @@ function appointmentJob(row: AppointmentJobSource, profileNames: Map<string, str
     job_id: row.id,
     user_id: workspaceId,
     title: String(meta.title ?? meta.service_name ?? "Appointment"),
-    scheduled_date: format(start, "yyyy-MM-dd"),
-    scheduled_time: format(start, "HH:mm:ss"),
+    scheduled_date: start ? format(start, "yyyy-MM-dd") : "",
+    scheduled_time: start ? format(start, "HH:mm:ss") : "",
     status: row.status,
     dispatch_status: dispatchStatus,
     canonical_state: row.status,
@@ -171,14 +182,16 @@ function appointmentJob(row: AppointmentJobSource, profileNames: Map<string, str
     vehicle_model: vehicle?.model ?? null,
     service_catalog_name: optionalString(meta.service_name),
     last_event_at: row.updated_at ?? null,
-    source_freshness_ms: row.updated_at ? Math.max(0, Date.now() - new Date(row.updated_at).getTime()) : null,
+    source_freshness_ms: freshnessMs(row.updated_at),
   };
 }
 
 function workOrderJob(row: WorkOrderJobSource, assignmentByOrder: Map<string, string>, profileNames: Map<string, string>, workspaceId: string): OperationalJobRow {
   const meta = object(row.metadata);
   const scheduledRaw = optionalString(meta.scheduled_at) ?? row.opened_at ?? row.created_at;
-  const start = new Date(scheduledRaw);
+  // safeParseDate returns null for missing/malformed input instead of an
+  // Invalid Date that would throw in format() below.
+  const start = safeParseDate(scheduledRaw);
   const assigned = assignmentByOrder.get(row.id) ?? null;
   const customer = row.customers;
   const vehicle = row.vehicles;
@@ -187,8 +200,8 @@ function workOrderJob(row: WorkOrderJobSource, assignmentByOrder: Map<string, st
     job_id: row.id,
     user_id: workspaceId,
     title: String(meta.title ?? `Repair Order RO-${row.number}`),
-    scheduled_date: format(start, "yyyy-MM-dd"),
-    scheduled_time: format(start, "HH:mm:ss"),
+    scheduled_date: start ? format(start, "yyyy-MM-dd") : "",
+    scheduled_time: start ? format(start, "HH:mm:ss") : "",
     status: row.status,
     dispatch_status: assigned ? "assigned" : "unassigned",
     canonical_state: row.status,
@@ -219,7 +232,7 @@ function workOrderJob(row: WorkOrderJobSource, assignmentByOrder: Map<string, st
     vehicle_model: vehicle?.model ?? null,
     service_catalog_name: null,
     last_event_at: row.updated_at ?? null,
-    source_freshness_ms: row.updated_at ? Math.max(0, Date.now() - new Date(row.updated_at).getTime()) : null,
+    source_freshness_ms: freshnessMs(row.updated_at),
   };
 }
 

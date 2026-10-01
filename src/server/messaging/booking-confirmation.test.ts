@@ -1,8 +1,12 @@
-const dispatchLifecycleEvent = jest.fn();
+const sendLifecycleEmail = jest.fn();
 const createSupabaseAdminClient = jest.fn();
 
+jest.mock("@/server/messaging/lifecycle-sender", () => ({
+  sendLifecycleEmail: (...args: unknown[]) => sendLifecycleEmail(...args),
+}));
+
 jest.mock("@/server/messaging/lifecycle-events", () => ({
-  dispatchLifecycleEvent: (...args: unknown[]) => dispatchLifecycleEvent(...args),
+  dispatchLifecycleEvent: jest.fn().mockResolvedValue({ status: "queued" }),
   LIFECYCLE_EVENT_KEYS: {
     bookingCreated: "appointment_booking_sequence.booking_confirmation",
     newAppointmentBooked: "appointment_booking_sequence.new_appointment_booked",
@@ -18,12 +22,14 @@ import { sendBookingConfirmation } from "@/server/messaging/booking-confirmation
 describe("booking confirmation recipient fanout", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    dispatchLifecycleEvent.mockResolvedValue({ status: "queued" });
+    sendLifecycleEmail.mockResolvedValue({ status: "sent" });
     createSupabaseAdminClient.mockReturnValue({
+      rpc: jest.fn().mockResolvedValue({ data: false, error: null }),
       from: jest.fn().mockReturnValue({
         select: jest.fn().mockReturnThis(),
         eq: jest.fn().mockReturnThis(),
         single: jest.fn().mockResolvedValue({ data: { created_by: "owner-1" }, error: null }),
+        maybeSingle: jest.fn().mockResolvedValue({ data: null, error: null }),
       }),
       auth: {
         admin: {
@@ -54,32 +60,36 @@ describe("booking confirmation recipient fanout", () => {
     await sendBookingConfirmation(input);
     await sendBookingConfirmation(input);
 
-    const calls = dispatchLifecycleEvent.mock.calls.map(([event]) => event);
+    const calls = sendLifecycleEmail.mock.calls.map(([event]) => event);
     expect(calls).toHaveLength(4);
-    expect(calls.filter((event) => event.recipientRole === "customer")).toEqual([
+    expect(calls.filter((event) => event.variables["email.recipient_role"] === "customer")).toEqual([
       expect.objectContaining({
-        eventId: input.appointment.id,
         recipientEmail: "customer@example.com",
         templateKey: "appointment_booking_sequence.booking_confirmation",
       }),
-      expect.objectContaining({ eventId: input.appointment.id }),
-    ]);
-    expect(calls.filter((event) => event.recipientRole === "shop_owner")).toEqual([
       expect.objectContaining({
-        eventId: `${input.appointment.id}:shop-owner`,
+        recipientEmail: "customer@example.com",
+      }),
+    ]);
+    expect(calls.filter((event) => event.variables["email.recipient_role"] === "shop_owner")).toEqual([
+      expect.objectContaining({
         recipientEmail: "owner@example.com",
         templateKey: "appointment_booking_sequence.new_appointment_booked",
       }),
-      expect.objectContaining({ eventId: `${input.appointment.id}:shop-owner` }),
+      expect.objectContaining({
+        recipientEmail: "owner@example.com",
+      }),
     ]);
   });
 
   it("does not duplicate the owner recipient when the customer is the owner", async () => {
     createSupabaseAdminClient.mockReturnValue({
+      rpc: jest.fn().mockResolvedValue({ data: false, error: null }),
       from: jest.fn().mockReturnValue({
         select: jest.fn().mockReturnThis(),
         eq: jest.fn().mockReturnThis(),
         single: jest.fn().mockResolvedValue({ data: { created_by: "owner-1" }, error: null }),
+        maybeSingle: jest.fn().mockResolvedValue({ data: null, error: null }),
       }),
       auth: { admin: { getUserById: jest.fn().mockResolvedValue({ data: { user: { email: "owner@example.com" } } }) } },
     });
@@ -101,6 +111,6 @@ describe("booking confirmation recipient fanout", () => {
       actionUrl: "https://servicewriter.xyz/booking/moms/confirmation",
     });
 
-    expect(dispatchLifecycleEvent).toHaveBeenCalledTimes(1);
+    expect(sendLifecycleEmail).toHaveBeenCalledTimes(1);
   });
 });

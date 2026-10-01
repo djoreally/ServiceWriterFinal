@@ -30,7 +30,8 @@ function appointmentAt(offsetMinutes: number) {
 function mockAdmin(appointments: any[]) {
   const appointmentQuery: any = {
     select: jest.fn().mockReturnThis(), in: jest.fn().mockReturnThis(), gt: jest.fn().mockReturnThis(),
-    lte: jest.fn().mockReturnThis(), order: jest.fn().mockResolvedValue({ data: appointments, error: null }),
+    gte: jest.fn().mockReturnThis(),
+    lte: jest.fn().mockReturnThis(), order: jest.fn().mockReturnThis(), limit: jest.fn().mockResolvedValue({ data: appointments, error: null }),
   };
   const workspaceQuery: any = {
     select: jest.fn().mockReturnThis(),

@@ -135,8 +135,8 @@ describe("buildAppointmentEmailSnapshot", () => {
     expect(snapshot.metadata.vehicleCount).toBe("0");
     const fromCalls = (supabase.from as jest.Mock).mock.calls.map((call) => call[0]);
     expect(fromCalls).toContain("appointment_items");
-    expect(fromCalls).toContain("work_orders");
-    expect(fromCalls).not.toContain("invoices");
+    expect(fromCalls).toContain("invoices");
+    expect(fromCalls).not.toContain("work_orders");
   });
 
   it("reads the first customer when customers is an array", async () => {

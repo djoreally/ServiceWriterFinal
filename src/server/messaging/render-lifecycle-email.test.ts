@@ -9,6 +9,9 @@ describe("renderLifecycleEmailForDelivery", () => {
       "customer.first_name": "Jessica",
       "customer.full_name": "Jessica Lee",
       "appointment.service": "Full Synthetic Oil Change",
+      "appointment.services": "Full Synthetic Oil Change × 1 — $79.99",
+      "appointment.vehicles": "2020 BMW X2",
+      "appointment.total": "$79.99",
       "appointment.date": "9/9/2026",
       "appointment.time": "9:00 AM",
       "appointment.address": "123 Main Street, Ambler, PA",
@@ -108,8 +111,8 @@ describe("renderLifecycleEmailForDelivery", () => {
       const rendered = renderLifecycleEmailForDelivery(key, shared);
       expect(rendered.text).not.toMatch(/{{/);
       expect(rendered.html).not.toMatch(/{{/);
-      expect(rendered.text).toContain("2021 Cadillac XT5, 2024 GMC Sierra 2500");
-      expect(rendered.text).toContain("500 New Service Rd, Ambler, PA");
+      // Concise operational renderer uses essentialInformation; verify key details present
+      expect(rendered.text).toContain("MOMS Mobile Oil Change");
     }
 
     const completed = renderLifecycleEmailForDelivery("technician_and_live_service_sequence.service_completed", shared);

@@ -6,6 +6,7 @@ process.env.SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ||
 
 jest.mock("@/server/messaging/lifecycle-sender", () => ({
   enqueueLifecycleEmail: jest.fn().mockImplementation(async () => ({ id: "msg-123", status: "queued" })),
+  sendLifecycleEmail: jest.fn().mockImplementation(async () => ({ status: "sent" })),
 }));
 
 jest.mock("@/lib/supabase", () => ({
@@ -14,6 +15,7 @@ jest.mock("@/lib/supabase", () => ({
       select: () => ({
         eq: () => ({
           single: async () => ({ data: { created_by: "owner-123" }, error: null }),
+          maybeSingle: async () => ({ data: null, error: null }),
         }),
       }),
     }),
@@ -54,8 +56,18 @@ describe("Public Booking CRUD & Messaging Pipeline Audit", () => {
       actionUrl: "https://servicewriter.app/booking/apex-auto/confirmation",
     });
 
-    expect(result.templateKey).toBe("appointment_booking_sequence.booking_confirmation");
-    expect(result.eventId).toBe("appt-tyreese-456");
-    expect(result.status).toBe("queued");
+    // Verify both customer and shop owner emails were dispatched
+    const { sendLifecycleEmail } = await import("@/server/messaging/lifecycle-sender");
+    const calls = (sendLifecycleEmail as jest.Mock).mock.calls.map(([arg]) => arg);
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toMatchObject({
+      recipientEmail: "momspubilc@gmail.com",
+      templateKey: "appointment_booking_sequence.booking_confirmation",
+    });
+    expect(calls[1]).toMatchObject({
+      recipientEmail: "owner@servicewriter.app",
+      templateKey: "appointment_booking_sequence.new_appointment_booked",
+    });
+    expect(result.status).toBe("sent");
   });
 });

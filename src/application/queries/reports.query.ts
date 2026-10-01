@@ -1,5 +1,6 @@
 /** Reports Query — compatibility adapters over Final's canonical schema. */
 import { apiClient } from "@/lib/api-client";
+import { safeParseDate } from "@/lib/datetime";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 export type QueryResult<T> = { data: T | null; error: unknown };
@@ -64,9 +65,11 @@ function name(customer: CustomerNameSource | null | undefined): string {
 
 function appointmentRow(row: AppointmentReportSource) {
   const metadata = obj(row.metadata);
-  const starts = new Date(row.starts_at);
-  const ends = new Date(row.ends_at);
-  const duration = Number.isFinite(starts.getTime()) && Number.isFinite(ends.getTime())
+  // safeParseDate returns null for null/undefined/malformed input; new Date(null)
+  // would silently produce epoch and yield a bogus multi-decade duration.
+  const starts = safeParseDate(row.starts_at);
+  const ends = safeParseDate(row.ends_at);
+  const duration = starts && ends
     ? Math.max(0, Math.round((ends.getTime() - starts.getTime()) / 60_000))
     : null;
   return {

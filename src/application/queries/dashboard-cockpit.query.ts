@@ -9,6 +9,7 @@ import { apiClient } from '@/lib/api-client';
 import { fetchBusinessSettings, resolveCurrentWorkspace } from '@/application/queries/settings.query';
 import { zonedDateTimeParts, zonedLocalDateTimeToUtc } from '@/server/scheduling/timezone';
 import { fetchCanonicalCashReceipts } from '@/application/queries/canonical-cash-receipts.query';
+import { safeParseDate } from '@/lib/datetime';
 import {
   format,
   addDays,
@@ -76,9 +77,10 @@ function mapAppointment(row: {
   metadata: unknown;
 }, timeZone: string): CockpitAppointment {
   const metadata = object(row.metadata);
-  const startsAt = new Date(row.starts_at);
-  const validDate = !Number.isNaN(startsAt.getTime());
-  const local = validDate ? zonedDateTimeParts(startsAt, timeZone) : null;
+  // safeParseDate returns null for null/undefined/malformed input instead of
+  // an Invalid Date (or epoch for null), so downstream formatting never throws.
+  const startsAt = safeParseDate(row.starts_at);
+  const local = startsAt ? zonedDateTimeParts(startsAt, timeZone) : null;
   return {
     id: row.id,
     title: String(metadata.title ?? metadata.service_name ?? 'Appointment'),

@@ -1,6 +1,7 @@
 /** Dashboard query adapters for Final's canonical workspace schema. */
 import { apiClient } from "@/lib/api-client";
 import { format, subDays, startOfDay } from "date-fns";
+import { safeParseDate } from "@/lib/datetime";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 
@@ -137,12 +138,12 @@ function appointmentTitle(row: Pick<DashboardAppointmentSource, "metadata">): st
 
 function appointmentLegacy(row: DashboardAppointmentSource): AppointmentRecord {
   const metadata = obj(row.metadata);
-  const startsAt = new Date(row.starts_at);
+  const startsAt = safeParseDate(row.starts_at);
   return {
     id: row.id,
     title: appointmentTitle(row),
-    scheduled_date: format(startsAt, "yyyy-MM-dd"),
-    scheduled_time: format(startsAt, "HH:mm"),
+    scheduled_date: startsAt ? format(startsAt, "yyyy-MM-dd") : "",
+    scheduled_time: startsAt ? format(startsAt, "HH:mm") : "",
     status: row.status,
     guest_name: typeof metadata.guest_name === "string" ? metadata.guest_name : undefined,
     guest_email: typeof metadata.guest_email === "string" ? metadata.guest_email : undefined,
@@ -218,12 +219,12 @@ export async function fetchDashboardOverview(): Promise<DashboardOverviewResult>
   }));
 
   const upcomingAppointments: UpcomingAppointment[] = (rows.upcomingRows ?? []).map((row) => {
-    const startsAt = new Date(row.starts_at);
+    const startsAt = safeParseDate(row.starts_at);
     return {
       id: row.id,
       title: appointmentTitle(row),
-      date: startsAt,
-      time: format(startsAt, "HH:mm"),
+      date: startsAt ?? new Date(0),
+      time: startsAt ? format(startsAt, "HH:mm") : "",
       vehicle: row.vehicles ? `${row.vehicles.year ?? ""} ${row.vehicles.make ?? ""} ${row.vehicles.model ?? ""}`.trim() : undefined,
       status: row.status === "confirmed" ? "confirmed" : "pending",
     };
