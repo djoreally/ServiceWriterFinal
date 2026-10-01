@@ -1,5 +1,5 @@
 /** Service Records Query — canonical reads with a legacy UI adapter. */
-import { productionSupabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
@@ -40,6 +40,37 @@ export interface ServiceRecordsPageData {
   userId: string;
 }
 
+interface RawServiceRow {
+  id: string;
+  customer_id: string | null;
+  vehicle_id: string | null;
+  status: string;
+  work_performed: string | null;
+  customer_notes: string | null;
+  internal_notes: string | null;
+  metadata: unknown;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  subtotal: number | null;
+  total_amount: number | null;
+  technician_id: string | null;
+}
+
+interface RawCustomerRow {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+}
+
+interface RawVehicleRow {
+  id: string;
+  customer_id: string | null;
+  make: string | null;
+  model: string | null;
+  year: number | null;
+}
+
 function object(value: unknown): Record<string, any> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
 }
@@ -54,30 +85,17 @@ export async function fetchServiceRecordsPageData(): Promise<ServiceRecordsPageD
   const context = await resolveCurrentWorkspace();
   if (!context) return null;
 
-  const [servicesRes, customersRes, vehiclesRes] = await Promise.all([
-    productionSupabase.from("service_records")
-      .select("id,customer_id,vehicle_id,status,work_performed,customer_notes,internal_notes,metadata,started_at,completed_at,created_at,subtotal,total_amount,technician_id")
-      .eq("workspace_id", context.workspaceId)
-      .neq("status", "voided")
-      .order("completed_at", { ascending: false, nullsFirst: false })
-      .order("created_at", { ascending: false }),
-    productionSupabase.from("customers")
-      .select("id,first_name,last_name")
-      .eq("workspace_id", context.workspaceId)
-      .neq("status", "archived")
-      .order("last_name"),
-    productionSupabase.from("vehicles")
-      .select("id,customer_id,make,model,year")
-      .eq("workspace_id", context.workspaceId)
-      .neq("status", "archived")
-      .order("created_at", { ascending: false }),
-  ]);
+  const { data } = await apiClient.get<{
+    data: {
+      services: RawServiceRow[];
+      customers: RawCustomerRow[];
+      vehicles: RawVehicleRow[];
+      userId: string;
+    } | null;
+  }>(`/v1/service-records/page?selected_workspace_id=${encodeURIComponent(context.workspaceId)}`);
+  if (!data) return null;
 
-  if (servicesRes.error) throw servicesRes.error;
-  if (customersRes.error) throw customersRes.error;
-  if (vehiclesRes.error) throw vehiclesRes.error;
-
-  const services: ServiceRecordRow[] = (servicesRes.data ?? []).map((row) => {
+  const services: ServiceRecordRow[] = (data.services ?? []).map((row) => {
     const metadata = object(row.metadata);
     const serviceDate = row.completed_at ?? row.started_at ?? row.created_at;
     return {
@@ -102,14 +120,14 @@ export async function fetchServiceRecordsPageData(): Promise<ServiceRecordsPageD
 
   return {
     services,
-    customers: (customersRes.data ?? []).map((row) => ({ id: row.id, name: customerName(row) })),
-    vehicles: (vehiclesRes.data ?? []).map((row) => ({
+    customers: (data.customers ?? []).map((row) => ({ id: row.id, name: customerName(row) })),
+    vehicles: (data.vehicles ?? []).map((row) => ({
       id: row.id,
       customer_id: row.customer_id ?? null,
       make: row.make ?? "",
       model: row.model ?? "",
       year: Number(row.year ?? 0),
     })),
-    userId: user.id,
+    userId: data.userId,
   };
 }

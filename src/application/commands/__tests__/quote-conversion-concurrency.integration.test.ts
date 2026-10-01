@@ -1,5 +1,24 @@
+jest.mock("@/lib/api-client", () => ({
+  apiClient: {
+    get: jest.fn(),
+    post: jest.fn(),
+    patch: jest.fn(),
+    delete: jest.fn(),
+  },
+  ApiClientError: class ApiClientError extends Error {
+    constructor(
+      public status: number,
+      public code: string,
+      message: string,
+    ) {
+      super(message);
+      this.name = "ApiClientError";
+    }
+  },
+}));
+
 import { convertQuoteToServiceRecord } from "@/application/commands/quotes.command";
-import { nextApi } from "@/lib/nextApiClient";
+import { apiClient } from "@/lib/api-client";
 
 class TestRequest {
   readonly url: string;
@@ -41,12 +60,12 @@ describe("quote conversion command concurrency contract", () => {
     jest.clearAllMocks();
   });
 
-  it("sends concurrent retries through the bridge while the server returns one conversion identity", async () => {
+  it("sends concurrent retries through the API client while the server returns one conversion identity", async () => {
     const responses = new Map<string, { conversion_id: string; service_record_id: string }>();
-    const convert = nextApi.quotes.convert as jest.Mock;
-    convert.mockImplementation(async (quoteId: string, payload: { idempotency_key: string }) => {
+    const post = apiClient.post as jest.Mock;
+    post.mockImplementation(async (path: string, payload: { idempotency_key: string }) => {
       await new Promise((resolve) => setTimeout(resolve, Math.floor(Math.random() * 5)));
-      const key = `${WORKSPACE_A}:${quoteId}:${payload.idempotency_key}`;
+      const key = `${WORKSPACE_A}:${path}:${payload.idempotency_key}`;
       const existing = responses.get(key);
       if (existing) return { data: existing };
       const value = { conversion_id: "conversion-once", service_record_id: "service-once" };
@@ -65,19 +84,25 @@ describe("quote conversion command concurrency contract", () => {
 
     expect(results.every((result) => result.error === null)).toBe(true);
     expect(new Set(results.map((result) => result.data?.service_record_id)).size).toBe(1);
-    expect(convert).toHaveBeenCalledTimes(24);
-    expect(convert.mock.calls.every(([, payload]) => payload.workspace_id === WORKSPACE_A)).toBe(true);
+    expect(post).toHaveBeenCalledTimes(24);
+    expect(post.mock.calls.every(([, payload]) => payload.workspace_id === WORKSPACE_A)).toBe(true);
   });
 
   it("does not silently change tenant context when the selected workspace changes between calls", async () => {
-    const convert = nextApi.quotes.convert as jest.Mock;
-    convert.mockResolvedValue({ data: { conversion_id: "c", service_record_id: "s" } });
+    const post = apiClient.post as jest.Mock;
+    post.mockResolvedValue({ data: { conversion_id: "c", service_record_id: "s" } });
 
     const result = await convertQuoteToServiceRecord({ quoteId: QUOTE_ID, idempotencyKey: "tenant-key-001234" });
 
     expect(result.error).toBeNull();
-    expect(convert).toHaveBeenCalledWith(QUOTE_ID, expect.objectContaining({ workspace_id: WORKSPACE_A }));
-    expect(convert).not.toHaveBeenCalledWith(QUOTE_ID, expect.objectContaining({ workspace_id: WORKSPACE_B }));
+    expect(post).toHaveBeenCalledWith(
+      `/v1/quotes/${QUOTE_ID}/convert`,
+      expect.objectContaining({ workspace_id: WORKSPACE_A }),
+    );
+    expect(post).not.toHaveBeenCalledWith(
+      `/v1/quotes/${QUOTE_ID}/convert`,
+      expect.objectContaining({ workspace_id: WORKSPACE_B }),
+    );
   });
 });
 

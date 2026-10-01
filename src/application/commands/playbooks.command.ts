@@ -4,7 +4,7 @@
  * Steps format: [{ name: string, requires_photo?: boolean, description?: string }]
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 // ============= Types =============
 
@@ -27,7 +27,6 @@ export interface PlaybookPayload {
 /** Create a new service playbook. */
 export async function createPlaybook(userId: string, payload: PlaybookPayload) {
   const row = {
-    user_id: userId,
     service_catalog_id: payload.serviceCatalogId ?? null,
     name: payload.name,
     description: payload.description ?? null,
@@ -35,14 +34,11 @@ export async function createPlaybook(userId: string, payload: PlaybookPayload) {
     is_active: payload.isActive ?? true,
   };
 
-  const { data, error } = await supabase
-    .from("service_playbooks")
-    .insert(row)
-    .select("id")
-    .single();
-
-  if (error) throw new Error(`Failed to create playbook: ${error.message}`);
-  return data.id;
+  const { data } = await apiClient.post<{ data: string }>("/v1/platform/playbooks", {
+    user_id: userId,
+    row,
+  });
+  return data;
 }
 
 /** Update an existing playbook. */
@@ -59,39 +55,28 @@ export async function updatePlaybook(
   if (payload.serviceCatalogId !== undefined)
     updates.service_catalog_id = payload.serviceCatalogId;
 
-  const { error } = await supabase
-    .from("service_playbooks")
-    .update(updates as never)
-    .eq("id", playbookId);
-
-  if (error) throw new Error(`Failed to update playbook: ${error.message}`);
+  await apiClient.patch(`/v1/platform/playbooks/${encodeURIComponent(playbookId)}`, {
+    updates,
+  });
 }
 
 /** Delete a playbook. */
 export async function deletePlaybook(playbookId: string) {
-  const { error } = await supabase
-    .from("service_playbooks")
-    .delete()
-    .eq("id", playbookId);
-
-  if (error) throw new Error(`Failed to delete playbook: ${error.message}`);
+  await apiClient.delete(`/v1/platform/playbooks/${encodeURIComponent(playbookId)}`);
 }
 
 /** Toggle playbook active state. */
 export async function togglePlaybookActive(playbookId: string, isActive: boolean) {
-  const { error } = await supabase
-    .from("service_playbooks")
-    .update({ is_active: isActive, updated_at: new Date().toISOString() })
-    .eq("id", playbookId);
-
-  if (error) throw new Error(`Failed to toggle playbook: ${error.message}`);
+  await apiClient.patch(`/v1/platform/playbooks/${encodeURIComponent(playbookId)}`, {
+    updates: { is_active: isActive, updated_at: new Date().toISOString() },
+  });
 }
 
 /** Fetch all playbooks for a user (query co-located here for simplicity). */
 export async function fetchPlaybooks(userId: string) {
-  return supabase
-    .from("service_playbooks")
-    .select("*, service_catalog(id, name)")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false });
+  const { data, error } = await apiClient.get<{ data: unknown[]; error: unknown }>(
+    "/v1/platform/playbooks",
+    { query: { user_id: userId } },
+  );
+  return { data, error };
 }

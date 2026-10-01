@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface RewardsCorrectionResult {
   status: string;
@@ -12,6 +12,9 @@ export interface RewardsCorrectionResult {
   result?: unknown;
 }
 
+// actorId is kept in each params signature but the actor is derived from the
+// auth token server-side.
+
 export async function adjustLoyaltyPoints(params: {
   providerId: string;
   customerId: string;
@@ -22,18 +25,16 @@ export async function adjustLoyaltyPoints(params: {
   appointmentId?: string | null;
   idempotencyKey?: string | null;
 }): Promise<RewardsCorrectionResult> {
-  const { data, error } = await supabase.rpc("adjust_loyalty_points", {
-    p_provider_id: params.providerId,
-    p_customer_id: params.customerId,
-    p_points_delta: params.pointsDelta,
-    p_reason_code: params.reasonCode,
-    p_actor_id: params.actorId,
-    p_reason_note: params.reasonNote ?? undefined,
-    p_appointment_id: params.appointmentId ?? undefined,
-    p_idempotency_key: params.idempotencyKey ?? undefined,
+  const { data } = await apiClient.post<{ data: RewardsCorrectionResult }>("/v1/crm/loyalty/points/adjust", {
+    provider_id: params.providerId,
+    customer_id: params.customerId,
+    points_delta: params.pointsDelta,
+    reason_code: params.reasonCode,
+    reason_note: params.reasonNote ?? null,
+    appointment_id: params.appointmentId ?? null,
+    idempotency_key: params.idempotencyKey ?? null,
   });
-  if (error) throw new Error(error.message);
-  return (data || { status: "skipped", reason: "empty_response" }) as unknown as RewardsCorrectionResult;
+  return data || { status: "skipped", reason: "empty_response" };
 }
 
 export async function cancelLoyaltyRewardInstance(params: {
@@ -42,14 +43,12 @@ export async function cancelLoyaltyRewardInstance(params: {
   actorId: string;
   reasonNote?: string | null;
 }): Promise<RewardsCorrectionResult> {
-  const { data, error } = await supabase.rpc("cancel_loyalty_reward_instance", {
-    p_reward_instance_id: params.rewardInstanceId,
-    p_reason_code: params.reasonCode,
-    p_actor_id: params.actorId,
-    p_reason_note: params.reasonNote ?? undefined,
+  const { data } = await apiClient.post<{ data: RewardsCorrectionResult }>("/v1/crm/loyalty/reward-instances/cancel", {
+    reward_instance_id: params.rewardInstanceId,
+    reason_code: params.reasonCode,
+    reason_note: params.reasonNote ?? null,
   });
-  if (error) throw new Error(error.message);
-  return (data || { status: "skipped", reason: "empty_response" }) as unknown as RewardsCorrectionResult;
+  return data || { status: "skipped", reason: "empty_response" };
 }
 
 export async function overrideLoyaltyRewardExpiration(params: {
@@ -59,15 +58,16 @@ export async function overrideLoyaltyRewardExpiration(params: {
   actorId: string;
   reasonNote?: string | null;
 }): Promise<RewardsCorrectionResult> {
-  const { data, error } = await supabase.rpc("override_loyalty_reward_expiration", {
-    p_reward_instance_id: params.rewardInstanceId,
-    p_expires_at: params.expiresAt ?? undefined,
-    p_reason_code: params.reasonCode,
-    p_actor_id: params.actorId,
-    p_reason_note: params.reasonNote ?? undefined,
-  });
-  if (error) throw new Error(error.message);
-  return (data || { status: "skipped", reason: "empty_response" }) as unknown as RewardsCorrectionResult;
+  const { data } = await apiClient.post<{ data: RewardsCorrectionResult }>(
+    "/v1/crm/loyalty/reward-instances/override-expiration",
+    {
+      reward_instance_id: params.rewardInstanceId,
+      expires_at: params.expiresAt ?? null,
+      reason_code: params.reasonCode,
+      reason_note: params.reasonNote ?? null,
+    },
+  );
+  return data || { status: "skipped", reason: "empty_response" };
 }
 
 export async function retryAppointmentRewardsApplication(params: {
@@ -76,12 +76,10 @@ export async function retryAppointmentRewardsApplication(params: {
   actorId: string;
   reasonNote?: string | null;
 }): Promise<RewardsCorrectionResult> {
-  const { data, error } = await supabase.rpc("retry_appointment_rewards_application", {
-    p_appointment_id: params.appointmentId,
-    p_reason_code: params.reasonCode,
-    p_actor_id: params.actorId,
-    p_reason_note: params.reasonNote ?? undefined,
+  const { data } = await apiClient.post<{ data: RewardsCorrectionResult }>("/v1/crm/loyalty/appointments/retry", {
+    appointment_id: params.appointmentId,
+    reason_code: params.reasonCode,
+    reason_note: params.reasonNote ?? null,
   });
-  if (error) throw new Error(error.message);
-  return (data || { status: "skipped", reason: "empty_response" }) as unknown as RewardsCorrectionResult;
+  return data || { status: "skipped", reason: "empty_response" };
 }

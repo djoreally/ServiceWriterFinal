@@ -1,6 +1,7 @@
 let mockCurrentDb: any = null;
-const mockRpc = jest.fn();
-const mockFrom = jest.fn();
+const mockApiPost = jest.fn();
+const mockApiGet = jest.fn();
+const mockApiPatch = jest.fn();
 
 jest.mock('@/offline/database', () => ({
   getOfflineDatabase: () => mockCurrentDb,
@@ -10,10 +11,13 @@ jest.mock('@/offline/rollout', () => ({
   isOfflineEligibleForCurrentUser: jest.fn(async () => true),
 }));
 
-jest.mock('@/integrations/supabase/client', () => ({
-  supabase: {
-    rpc: (...args: unknown[]) => mockRpc(...args),
-    from: (...args: unknown[]) => mockFrom(...args),
+jest.mock('@/lib/api-client', () => ({
+  apiClient: {
+    get: (...args: unknown[]) => mockApiGet(...args),
+    post: (...args: unknown[]) => mockApiPost(...args),
+    put: jest.fn(),
+    patch: (...args: unknown[]) => mockApiPatch(...args),
+    delete: jest.fn(),
   },
 }));
 
@@ -68,13 +72,19 @@ describe('Phase 5 offline outbox QA scenarios', () => {
   });
 
   it('network flap: marks mutation failed and schedules backoff retry', async () => {
-    mockRpc.mockResolvedValueOnce({ error: new Error('temporary network failure') });
+    mockApiPost.mockRejectedValueOnce(new Error('temporary network failure'));
 
     const mutation = createMutation({
-      mutation_id: 'inventory-van-1-item-1',
-      entity: 'inventory',
-      operation: 'transfer',
-      payload: JSON.stringify({ itemId: 'item-1', vanId: 'van-1', quantity: 2 }),
+      mutation_id: 'job-message-client-1',
+      entity: 'job_message',
+      operation: 'send',
+      payload: JSON.stringify({
+        jobId: 'job-1',
+        jobSource: 'appointment',
+        content: 'hello',
+        channel: 'dispatch',
+        clientMessageId: 'client-1',
+      }),
       status: 'pending',
       attempt_count: 0,
     });
@@ -89,13 +99,19 @@ describe('Phase 5 offline outbox QA scenarios', () => {
   });
 
   it('conflict storm simulation: escalates to dead-letter after max attempts', async () => {
-    mockRpc.mockResolvedValue({ error: new Error('temporary network failure') });
+    mockApiPost.mockRejectedValue(new Error('temporary network failure'));
 
     const mutation = createMutation({
-      mutation_id: 'inventory-van-1-item-1',
-      entity: 'inventory',
-      operation: 'transfer',
-      payload: JSON.stringify({ itemId: 'item-1', vanId: 'van-1', quantity: 2 }),
+      mutation_id: 'job-message-client-2',
+      entity: 'job_message',
+      operation: 'send',
+      payload: JSON.stringify({
+        jobId: 'job-2',
+        jobSource: 'appointment',
+        content: 'hello',
+        channel: 'dispatch',
+        clientMessageId: 'client-2',
+      }),
       status: 'pending',
       attempt_count: 0,
       next_retry_at: null,
@@ -110,6 +126,26 @@ describe('Phase 5 offline outbox QA scenarios', () => {
 
     expect(mutation._raw.status).toBe('dead_letter');
     expect(mutation._raw.dead_letter_reason).toContain('Max retry attempts');
+  });
+
+  it('missing server endpoint: parks inventory transfer in dead-letter for operator retry', async () => {
+    const mutation = createMutation({
+      mutation_id: 'inventory-van-1-item-1',
+      entity: 'inventory',
+      operation: 'transfer',
+      payload: JSON.stringify({ itemId: 'item-1', vanId: 'van-1', quantity: 2 }),
+      status: 'pending',
+      attempt_count: 0,
+      next_retry_at: null,
+    });
+
+    mockCurrentDb = createDb([mutation]);
+
+    await processOfflineOutbox();
+
+    expect(mockApiPost).not.toHaveBeenCalled();
+    expect(mutation._raw.status).toBe('dead_letter');
+    expect(mutation._raw.dead_letter_reason).toContain('not implemented');
   });
 
   it('dead-letter operator controls: retry resets state and discard marks discarded', async () => {

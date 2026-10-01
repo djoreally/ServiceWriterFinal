@@ -1,22 +1,27 @@
 /**
  * Cash Drawer Commands — All write operations for cash drawer management.
  * Extracted from cash-drawer.query.ts to enforce command/query separation.
+ * The user identity is resolved server-side from the auth token.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 import type { CashDrawerSettings, CashDrawerSession } from "@/application/queries/cash-drawer.query";
 
+function toError(error: unknown): Error {
+  return new Error(error instanceof ApiClientError ? error.message : "Cash drawer request failed");
+}
+
 export async function saveCashDrawerSettings(userId: string, settings: CashDrawerSettings): Promise<void> {
-  const { error } = await supabase
-    .from("business_profiles")
-    .update({
+  try {
+    await apiClient.put("/v1/billing/cash-drawer/settings", {
       cash_drawer_enabled: settings.cash_drawer_enabled,
       cash_drawer_type: settings.cash_drawer_type,
-      cash_drawer_config: settings.cash_drawer_config as any,
+      cash_drawer_config: settings.cash_drawer_config ?? {},
       cash_drawer_open_on_cash_payment: settings.cash_drawer_open_on_cash_payment,
       cash_drawer_require_reason: settings.cash_drawer_require_reason,
-    })
-    .eq("user_id", userId);
-  if (error) throw error;
+    });
+  } catch (error) {
+    throw toError(error);
+  }
 }
 
 export async function logCashDrawerEvent(params: {
@@ -26,29 +31,29 @@ export async function logCashDrawerEvent(params: {
   reason?: string;
   paymentMethod?: string;
 }): Promise<void> {
-  const { error } = await supabase.rpc("log_cash_drawer_event", {
-    p_event_type: params.eventType,
-    p_trigger_type: params.triggerType,
-    p_amount: params.amount ?? null,
-    p_reason: params.reason ?? null,
-    p_payment_method: params.paymentMethod ?? null,
-  });
-  if (error) throw error;
+  try {
+    await apiClient.post("/v1/billing/cash-drawer/events", {
+      event_type: params.eventType,
+      trigger_type: params.triggerType,
+      amount: params.amount ?? null,
+      reason: params.reason ?? null,
+      payment_method: params.paymentMethod ?? null,
+    });
+  } catch (error) {
+    throw toError(error);
+  }
 }
 
 export async function startCashDrawerSession(userId: string, openingAmount: number, staffName?: string): Promise<CashDrawerSession> {
-  const { data, error } = await supabase
-    .from("cash_drawer_sessions")
-    .insert({
-      user_id: userId,
+  try {
+    const { data } = await apiClient.post<{ data: CashDrawerSession }>("/v1/billing/cash-drawer/sessions", {
       opening_amount: openingAmount,
-      staff_name: staffName || null,
-      status: "open",
-    })
-    .select()
-    .single();
-  if (error) throw error;
-  return data as CashDrawerSession;
+      staff_name: staffName ?? null,
+    });
+    return data;
+  } catch (error) {
+    throw toError(error);
+  }
 }
 
 export async function endCashDrawerSession(
@@ -57,17 +62,13 @@ export async function endCashDrawerSession(
   expectedClosing: number,
   varianceReason?: string,
 ): Promise<void> {
-  const variance = closingAmount - expectedClosing;
-  const { error } = await supabase
-    .from("cash_drawer_sessions")
-    .update({
-      ended_at: new Date().toISOString(),
+  try {
+    await apiClient.patch(`/v1/billing/cash-drawer/sessions/${sessionId}`, {
       closing_amount: closingAmount,
       expected_closing: expectedClosing,
-      variance,
-      variance_reason: Math.abs(variance) > 0.01 ? varianceReason : null,
-      status: "closed",
-    })
-    .eq("id", sessionId);
-  if (error) throw error;
+      variance_reason: varianceReason ?? null,
+    });
+  } catch (error) {
+    throw toError(error);
+  }
 }

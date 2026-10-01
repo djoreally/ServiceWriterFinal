@@ -1,10 +1,10 @@
 /**
  * Assets Commands — upload, rename, delete.
- * Uploads go directly from the browser to private storage; metadata is
- * persisted in the `assets` table (RLS enforces ownership).
+ * Uploads go from the browser to private storage via the Hono API; metadata is
+ * persisted in the `assets` table (server enforces ownership).
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import {
   validateFile,
   getExtension,
@@ -14,7 +14,6 @@ import {
 import { extractMediaMetadata } from "@/lib/assets/metadata";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
-const BUCKET = "assets";
 
 export interface AssetRecord {
   id: string;
@@ -78,72 +77,38 @@ export async function uploadAsset(
   const safeName = sanitizeFilename(file.name);
   const storagePath = `${userId}/${assetId}.${ext}`;
 
-  // Direct browser → private bucket upload. supabase-js v2 streams the blob.
   opts?.onProgress?.(5);
-  const { error: uploadErr } = await supabase.storage
-    .from(BUCKET)
-    .upload(storagePath, file, {
-      contentType: file.type || "application/octet-stream",
-      cacheControl: "3600",
-      upsert: false,
+
+  const form = new FormData();
+  form.append("file", file);
+  form.append("storage_path", storagePath);
+  form.append("original_filename", safeName);
+  form.append("mime_type", file.type || "application/octet-stream");
+  form.append("file_size", String(file.size));
+  form.append("asset_type", v.assetType);
+  if (meta.width != null) form.append("width", String(meta.width));
+  if (meta.height != null) form.append("height", String(meta.height));
+  if (meta.durationSeconds != null) form.append("duration_seconds", String(meta.durationSeconds));
+
+  try {
+    const response = await apiClient.post<{ data: AssetRecord }>("/v1/assets/upload", form, {
+      signal: opts?.signal,
     });
-  if (uploadErr) {
-    throw new Error(friendlyStorageError(uploadErr.message));
+    if (!response.data) throw new Error("Failed to save asset record");
+    opts?.onProgress?.(100);
+    return response.data;
+  } catch (error) {
+    throw new Error(friendlyStorageError(error instanceof Error ? error.message : undefined));
   }
-  opts?.onProgress?.(90);
-
-  const { data: row, error: insertErr } = await supabase
-    .from("assets")
-    .insert({
-      user_id: userId,
-      storage_path: storagePath,
-      bucket: BUCKET,
-      original_filename: safeName,
-      mime_type: file.type || "application/octet-stream",
-      file_size: file.size,
-      asset_type: v.assetType,
-      width: meta.width ?? null,
-      height: meta.height ?? null,
-      duration_seconds: meta.durationSeconds ?? null,
-      status: "ready",
-    })
-    .select("*")
-    .single();
-
-  if (insertErr || !row) {
-    // Rollback storage if DB insert fails
-    await supabase.storage.from(BUCKET).remove([storagePath]).catch(() => {});
-    throw new Error(insertErr?.message || "Failed to save asset record");
-  }
-  opts?.onProgress?.(100);
-  return row as AssetRecord;
 }
 
 export async function renameAsset(id: string, newName: string): Promise<void> {
   const trimmed = sanitizeFilename(newName.trim());
   if (!trimmed) throw new Error("Name cannot be empty");
-  const { error } = await supabase
-    .from("assets")
-    .update({ original_filename: trimmed })
-    .eq("id", id);
-  if (error) throw error;
+  await apiClient.patch(`/v1/assets/${id}`, { original_filename: trimmed });
 }
 
 export async function deleteAsset(id: string): Promise<void> {
-  // Fetch path first
-  const { data: row, error: fetchErr } = await supabase
-    .from("assets")
-    .select("storage_path")
-    .eq("id", id)
-    .single();
-  if (fetchErr || !row) throw new Error(fetchErr?.message || "Asset not found");
-
-  await supabase.storage.from(BUCKET).remove([row.storage_path]).catch(() => {});
-
-  // Soft delete (preserves history); RLS guarantees ownership
-  const { error: updErr } = await supabase
-    .from("assets")
-    .update({ status: "deleted", deleted_at: new Date().toISOString() })
-    .eq("id", id);
-  if (updErr) throw updErr;
+  // Server fetches the storage path, removes the object, then soft-deletes.
+  await apiClient.delete(`/v1/assets/${id}`);
 }

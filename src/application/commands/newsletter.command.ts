@@ -1,16 +1,14 @@
 /** Newsletter Commands — workspace-scoped writes. */
-import { productionSupabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import type { NewsletterTemplateRow } from "@/application/queries/newsletter.query";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
-const db = productionSupabase as any;
 
 async function requireContext() {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) throw new Error("Not authenticated");
   const workspace = await resolveCurrentWorkspace();
   if (!workspace) throw new Error("No active workspace is available.");
-  return { userId: user.id, workspaceId: workspace.workspaceId };
+  // UI hint only — the server validates it against the caller's memberships
+  // and resolves the workspace from the auth token.
+  return { selectedWorkspaceId: workspace.workspaceId };
 }
 
 export async function createNewsletterSequence(
@@ -19,39 +17,38 @@ export async function createNewsletterSequence(
   description: string,
   defaultTemplates: Array<Omit<NewsletterTemplateRow, "id">>,
 ): Promise<string> {
-  const { userId, workspaceId } = await requireContext();
-  const { data: sequence, error: seqError } = await db.from("newsletter_sequences").insert({
-    workspace_id: workspaceId,
-    user_id: userId,
+  const { selectedWorkspaceId } = await requireContext();
+  const { data } = await apiClient.post<{ data: { id: string } }>("/v1/newsletter/sequences", {
+    selected_workspace_id: selectedWorkspaceId,
     name,
     description,
-    is_active: true,
-    start_date: new Date().toISOString().split("T")[0],
-  }).select("id").single();
-  if (seqError) throw seqError;
-
-  if (defaultTemplates.length) {
-    const { error: templateError } = await db.from("newsletter_templates").insert(defaultTemplates.map((template) => ({
-      ...template,
-      workspace_id: workspaceId,
-      user_id: userId,
-      sequence_id: sequence.id,
-    })));
-    if (templateError) throw templateError;
-  }
-  return sequence.id;
+    defaultTemplates: defaultTemplates.map((template) => ({
+      month_number: template.month_number,
+      subject: template.subject,
+      preview_text: template.preview_text,
+      content: template.content,
+      holiday_theme: template.holiday_theme,
+      seasonal_theme: template.seasonal_theme,
+      is_active: template.is_active,
+    })),
+  });
+  return data.id;
 }
 
 export async function toggleNewsletterTemplateActive(templateId: string, isActive: boolean): Promise<void> {
-  const { workspaceId } = await requireContext();
-  const { error } = await db.from("newsletter_templates").update({ is_active: isActive }).eq("workspace_id", workspaceId).eq("id", templateId);
-  if (error) throw error;
+  const { selectedWorkspaceId } = await requireContext();
+  await apiClient.patch(`/v1/newsletter/templates/${templateId}`, {
+    selected_workspace_id: selectedWorkspaceId,
+    is_active: isActive,
+  });
 }
 
 export async function saveNewsletterTemplate(templateId: string, updates: {
   subject: string; preview_text: string; content: string; holiday_theme: string; seasonal_theme: string;
 }): Promise<void> {
-  const { workspaceId } = await requireContext();
-  const { error } = await db.from("newsletter_templates").update(updates).eq("workspace_id", workspaceId).eq("id", templateId);
-  if (error) throw error;
+  const { selectedWorkspaceId } = await requireContext();
+  await apiClient.put(`/v1/newsletter/templates/${templateId}`, {
+    selected_workspace_id: selectedWorkspaceId,
+    ...updates,
+  });
 }

@@ -1,9 +1,8 @@
 /**
  * Time clock queries — Read operations for time clock data.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface TimeClockEntry {
   id: string;
   clock_in: string;
@@ -22,28 +21,20 @@ export interface TimeClockEntry {
   approved_at: string | null;
 }
 
+interface TimeClockResponse {
+  entries: TimeClockEntry[];
+  current: TimeClockEntry | null;
+}
+
+function toPublicEntry(entry: TimeClockEntry): TimeClockEntry {
+  return entry as unknown as TimeClockEntry;
+}
+
 export async function fetchTimeClockData() {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) return { activeEntry: null, entries: [] };
-
-  const [activeRes, recentRes] = await Promise.all([
-    supabase
-      .from("time_clock_entries")
-      .select("*")
-      .eq("user_id", user.id)
-      .in("status", ["active", "on_break"])
-      .order("clock_in", { ascending: false })
-      .limit(1),
-    supabase
-      .from("time_clock_entries")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("clock_in", { ascending: false })
-      .limit(50),
-  ]);
-
-  const activeEntry = activeRes.data?.[0] as unknown as TimeClockEntry | undefined;
-  const entries = (recentRes.data || []) as unknown as TimeClockEntry[];
-
-  return { activeEntry: activeEntry || null, entries };
+  const response = await apiClient.get<{ data: TimeClockResponse }>("/v1/time-clock");
+  const payload = response.data;
+  return {
+    activeEntry: payload.current ? toPublicEntry(payload.current) : null,
+    entries: payload.entries.map(toPublicEntry),
+  };
 }

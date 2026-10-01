@@ -1,8 +1,12 @@
 /**
  * Availability Settings Query — canonical workspace-scoped scheduling reads.
+ *
+ * Phase 2: all data access goes through the typed API client
+ * (`@/lib/api-client`) to the appointments Hono router. Exported signatures
+ * are unchanged. The server resolves the workspace from the auth token.
  */
-import { productionSupabase as supabase } from "@/integrations/supabase/client";
-import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+import { apiClient } from "@/lib/api-client";
+import { getCurrentAuthUser } from "@/lib/auth/current-user";
 
 export interface AvailabilityBlockedDateRow { id: string; blocked_date: string; reason: string | null; }
 export interface AvailabilityIntakeQuestionRow {
@@ -16,53 +20,37 @@ export interface AvailabilityIntakeQuestionRow {
 }
 
 export async function getSessionUserId(): Promise<string | null> {
-  const { data: { session } } = await supabase.auth.getSession();
-  return session?.user?.id ?? null;
+  const { data } = await getCurrentAuthUser();
+  return data?.user?.id ?? null;
+}
+
+export interface AvailabilityProfileRow {
+  day_hours: unknown;
+  timezone: string | null;
+  buffer_time_before: number | null;
+  buffer_time_after: number | null;
+  min_lead_time_hours: number | null;
+  max_advance_days: number | null;
+  allow_multi_day_bookings: boolean | null;
+  slot_duration_minutes: number | null;
+  require_approval: boolean | null;
+  cancellation_window_hours: number | null;
+  allow_cancellation: boolean | null;
+  allow_rescheduling: boolean | null;
+  require_terms_acceptance: boolean | null;
+  reschedule_window_hours: number | null;
+  terms_and_conditions: string | null;
 }
 
 export async function fetchAvailabilityPageData(_userId?: string) {
-  const context = await resolveCurrentWorkspace();
-  if (!context) throw new Error("Select a workspace before managing availability.");
-  // These two tables were introduced by the scheduling migration in this release.
-  // Keep the temporary untyped boundary here until generated production types are refreshed.
-  const db = supabase as any;
-
-  const [settingsResult, workspaceResult, blockedResult, questionsResult] = await Promise.all([
-    supabase
-      .from("workspace_settings")
-      .select("day_hours, buffer_time_before, buffer_time_after, min_lead_time_hours, max_advance_days, allow_multi_day_bookings, slot_duration_minutes, require_approval, cancellation_window_hours, allow_cancellation, allow_rescheduling, reschedule_window_hours, terms_and_conditions, require_terms_acceptance")
-      .eq("workspace_id", context.workspaceId)
-      .maybeSingle(),
-    supabase
-      .from("workspaces")
-      .select("timezone")
-      .eq("id", context.workspaceId)
-      .maybeSingle(),
-    db
-      .from("workspace_blackout_dates")
-      .select("id, blocked_date, reason")
-      .eq("workspace_id", context.workspaceId)
-      .order("blocked_date", { ascending: true }),
-    db
-      .from("workspace_intake_questions")
-      .select("id, question_text, question_type, options, is_required, sort_order, is_active")
-      .eq("workspace_id", context.workspaceId)
-      .order("sort_order", { ascending: true })
-      .order("created_at", { ascending: true }),
-  ]);
-
-  if (settingsResult.error) throw settingsResult.error;
-  if (workspaceResult.error) throw workspaceResult.error;
-  if (blockedResult.error) throw blockedResult.error;
-  if (questionsResult.error) throw questionsResult.error;
-
-  const profile = settingsResult.data
-    ? { ...settingsResult.data, timezone: workspaceResult.data?.timezone ?? "UTC" }
-    : null;
-
+  const response = await apiClient.get<{
+    profile: AvailabilityProfileRow | null;
+    blocked: AvailabilityBlockedDateRow[];
+    questions: AvailabilityIntakeQuestionRow[];
+  }>("/v1/appointments/availability-page");
   return {
-    profile,
-    blocked: (blockedResult.data ?? []) as AvailabilityBlockedDateRow[],
-    questions: (questionsResult.data ?? []) as AvailabilityIntakeQuestionRow[],
+    profile: response.profile,
+    blocked: response.blocked ?? [],
+    questions: response.questions ?? [],
   };
 }

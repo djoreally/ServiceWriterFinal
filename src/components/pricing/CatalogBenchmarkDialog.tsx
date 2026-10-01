@@ -5,7 +5,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/sonner";
-import { supabase } from "@/integrations/supabase/client";
 import { saveCatalogBenchmark } from "@/application/queries/repair-pricing.query";
 import { RepairEstimatorDialog, type RepairEstimatorApplyPayload } from "@/components/pricing/RepairEstimatorDialog";
 import { extractRepairCosts, marketPosition } from "@/domain/pricing/repair-estimate";

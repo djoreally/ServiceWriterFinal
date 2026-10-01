@@ -1,7 +1,7 @@
 /**
  * SMS queries - fetch inbound/outbound messages for 2-way inbox
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface SmsMessage {
   id: string;
@@ -22,18 +22,20 @@ export interface SmsRecipient {
   scheduled_at: string;
 }
 
+interface SmsLogRow {
+  id: string;
+  direction: "inbound" | "outbound";
+  recipient_hash?: string | null;
+  status?: string | null;
+  correlation_id?: string | null;
+  message_body?: string | null;
+  created_at: string;
+  error_message?: string | null;
+}
+
 export async function fetchSmsMessages(): Promise<SmsMessage[]> {
-  const { data, error } = await supabase
-    .from("sms_logs")
-    .select("id, direction, recipient_hash, status, correlation_id, message_body, created_at, error_message")
-    .order("created_at", { ascending: false });
-
-  if (error) {
-    console.error("Error fetching SMS logs:", error);
-    return [];
-  }
-
-  return (data || []).map((row: any) => ({
+  const { data } = await apiClient.get<{ data: SmsLogRow[] }>("/v1/sms/messages");
+  return (data ?? []).map((row) => ({
     id: row.id,
     direction: row.direction,
     phone: row.recipient_hash || "Unknown",
@@ -45,21 +47,18 @@ export async function fetchSmsMessages(): Promise<SmsMessage[]> {
   }));
 }
 
+interface EligibleRecipientRow {
+  id: string;
+  status: string;
+  scheduled_date: string;
+  scheduled_time: string;
+  customer?: { name?: string | null; phone?: string | null } | null;
+}
+
 /** Customers with appointments that are not completed/cancelled and have a phone */
 export async function fetchSmsEligibleRecipients(): Promise<SmsRecipient[]> {
-  const allowedStatuses = ["pending", "confirmed", "in_progress", "scheduled", "no_show"];
-  const { data, error } = await supabase
-    .from("appointments")
-    .select("id, status, scheduled_date, scheduled_time, customer:customers(name, phone)")
-    .in("status", allowedStatuses)
-    .not("customer.phone", "is", null)
-    .order("scheduled_date", { ascending: true });
-
-  if (error) {
-    throw new Error(error.message || "Failed to load message recipients");
-  }
-
-  return (data || [])
+  const { data } = await apiClient.get<{ data: EligibleRecipientRow[] }>("/v1/sms/eligible-recipients");
+  return (data ?? [])
     .filter((row) => row.customer?.phone)
     .map((row) => ({
       appointment_id: row.id,
@@ -81,43 +80,18 @@ export interface AppointmentSmsTimelineRow {
   error_message: string | null;
 }
 
-const TIMELINE_COLUMNS =
-  "id, created_at, direction, status, message_type, message_body, to_number_last4, error_message";
-
 export async function fetchAppointmentSmsTimeline(params: {
   appointmentId: string;
   customerPhone?: string | null;
   scheduledDate?: string | null;
 }): Promise<AppointmentSmsTimelineRow[]> {
   const { appointmentId, customerPhone, scheduledDate } = params;
-
-  const { data, error } = await supabase
-    .from("sms_logs")
-    .select(TIMELINE_COLUMNS)
-    .eq("appointment_id", appointmentId)
-    .order("created_at", { ascending: false });
-  if (error) throw error;
-  if (data && data.length > 0) return data as AppointmentSmsTimelineRow[];
-
-  const last4 = customerPhone?.replace(/\D/g, "").slice(-4);
-  if (!last4) return [];
-
-  let fallback = supabase
-    .from("sms_logs")
-    .select(TIMELINE_COLUMNS)
-    .eq("to_number_last4", last4)
-    .order("created_at", { ascending: false })
-    .limit(25);
-  if (scheduledDate) {
-    const start = new Date(`${scheduledDate}T00:00:00`);
-    start.setDate(start.getDate() - 2);
-    const end = new Date(`${scheduledDate}T00:00:00`);
-    end.setDate(end.getDate() + 7);
-    fallback = fallback
-      .gte("created_at", start.toISOString())
-      .lte("created_at", end.toISOString());
-  }
-  const { data: fallbackData, error: fallbackError } = await fallback;
-  if (fallbackError) throw fallbackError;
-  return (fallbackData ?? []) as AppointmentSmsTimelineRow[];
+  const { data } = await apiClient.get<{ data: AppointmentSmsTimelineRow[] }>("/v1/sms/timeline", {
+    query: {
+      appointment_id: appointmentId,
+      ...(customerPhone ? { customer_phone: customerPhone } : {}),
+      ...(scheduledDate ? { scheduled_date: scheduledDate } : {}),
+    },
+  });
+  return data ?? [];
 }

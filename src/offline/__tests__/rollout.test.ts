@@ -26,16 +26,18 @@ jest.mock("@/config/features", () => ({
   },
 }));
 
+const mockSupabaseGetUser = jest.fn();
+const mockSupabaseRpc = jest.fn();
+
 jest.mock("@/integrations/supabase/client", () => ({
   supabase: {
     auth: {
-      getUser: jest.fn(),
+      getUser: (...args: unknown[]) => mockSupabaseGetUser(...args),
     },
-    rpc: jest.fn(),
+    rpc: (...args: unknown[]) => mockSupabaseRpc(...args),
   },
 }));
 
-import { supabase } from "@/integrations/supabase/client";
 import { resetCurrentAuthUserCache } from "@/lib/auth/current-user";
 
 function setFlag(key: string, value: string | boolean | number) {
@@ -54,7 +56,7 @@ beforeEach(() => {
   resetFlags();
   resetCurrentAuthUserCache();
   jest.clearAllMocks();
-  (supabase.rpc as jest.Mock).mockResolvedValue({
+  mockSupabaseRpc.mockResolvedValue({
     data: { has_pwa_offline: true },
     error: null,
   });
@@ -218,7 +220,7 @@ describe("isOfflineEligibleForCurrentUser", () => {
   });
 
   it("returns false when supabase getUser returns an error", async () => {
-    (supabase.auth.getUser as jest.Mock).mockResolvedValue({
+    mockSupabaseGetUser.mockResolvedValue({
       data: { user: null },
       error: new Error("no session"),
     });
@@ -226,7 +228,7 @@ describe("isOfflineEligibleForCurrentUser", () => {
   });
 
   it("returns false when no user is authenticated", async () => {
-    (supabase.auth.getUser as jest.Mock).mockResolvedValue({
+    mockSupabaseGetUser.mockResolvedValue({
       data: { user: null },
       error: null,
     });
@@ -234,31 +236,31 @@ describe("isOfflineEligibleForCurrentUser", () => {
   });
 
   it("returns true when authenticated user is eligible (no allowlist)", async () => {
-    (supabase.auth.getUser as jest.Mock).mockResolvedValue({
+    mockSupabaseGetUser.mockResolvedValue({
       data: { user: { id: "user-xyz" } },
       error: null,
     });
     expect(await isOfflineEligibleForCurrentUser()).toBe(true);
-    expect(supabase.rpc).not.toHaveBeenCalled();
+    expect(mockSupabaseRpc).not.toHaveBeenCalled();
   });
 
   it("returns true for any authenticated plan and does not require has_pwa_offline entitlement", async () => {
-    (supabase.rpc as jest.Mock).mockResolvedValue({
+    mockSupabaseRpc.mockResolvedValue({
       data: { has_pwa_offline: false },
       error: null,
     });
-    (supabase.auth.getUser as jest.Mock).mockResolvedValue({
+    mockSupabaseGetUser.mockResolvedValue({
       data: { user: { id: "user-basic-plan" } },
       error: null,
     });
 
     expect(await isOfflineEligibleForCurrentUser()).toBe(true);
-    expect(supabase.rpc).not.toHaveBeenCalled();
+    expect(mockSupabaseRpc).not.toHaveBeenCalled();
   });
 
   it("returns true when authenticated user is in allowlist", async () => {
     setFlag("offline-engine-allowlist", "user-xyz");
-    (supabase.auth.getUser as jest.Mock).mockResolvedValue({
+    mockSupabaseGetUser.mockResolvedValue({
       data: { user: { id: "user-xyz" } },
       error: null,
     });
@@ -267,7 +269,7 @@ describe("isOfflineEligibleForCurrentUser", () => {
 
   it("returns false when authenticated user is not in allowlist", async () => {
     setFlag("offline-engine-allowlist", "user-other");
-    (supabase.auth.getUser as jest.Mock).mockResolvedValue({
+    mockSupabaseGetUser.mockResolvedValue({
       data: { user: { id: "user-xyz" } },
       error: null,
     });

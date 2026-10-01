@@ -229,7 +229,7 @@ export function CustomerSegmentation() {
     finally { setViewLoading(false); }
   };
 
-  const sendCampaignToSegment = (segment: Segment) => navigate(`/growth-tools?tab=campaigns&segment=${encodeURIComponent(segment.name)}`);
+  const sendCampaignToSegment = (segment: Segment) => navigate(`/crm/growth?tab=campaigns&segment=${encodeURIComponent(segment.name)}`);
   const getSegmentIcon = (iconName: string) => SEGMENT_ICONS[iconName] || <Users className="h-5 w-5" />;
 
   if (loading) return <div className="flex items-center justify-center min-h-[400px]"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>;

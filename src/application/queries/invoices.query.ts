@@ -1,7 +1,11 @@
-/** Invoice read adapters for the canonical Final ledger. */
+/** Invoice read adapters for the canonical Final ledger.
+ *
+ * Phase 2: all data access goes through the typed API client
+ * (`@/lib/api-client`) to the documents Hono router. Row shaping stays
+ * client-side; exported signatures are unchanged.
+ */
 import { z } from "zod";
-import { productionSupabase } from "@/integrations/supabase/client";
-import { nextApi } from "@/lib/nextApiClient";
+import { apiClient } from "@/lib/api-client";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
 const invoiceCustomerSchema = z.object({
@@ -236,7 +240,7 @@ function customerAddress(customer: InvoiceApiCustomer | null | undefined): strin
 
 export async function fetchInvoiceList(_userId: string): Promise<InvoiceListRow[]> {
   const id = workspaceId();
-  const response = await nextApi.invoices.list(id);
+  const response = await apiClient.get<{ data: unknown[] }>(`/v1/invoices`, { query: { workspace_id: id } });
   return z.array(invoiceApiSchema).parse(response.data ?? []).map((row) => {
     const metadata = object(row.metadata);
     const customer = relatedCustomer(row.customers);
@@ -261,7 +265,10 @@ export async function fetchInvoiceList(_userId: string): Promise<InvoiceListRow[
 
 export async function fetchInvoiceDetail(invoiceId: string): Promise<InvoiceFullRow> {
   const id = workspaceId();
-  const response = await nextApi.invoices.get(id, invoiceId);
+  const response = await apiClient.get<{ data: unknown }>(
+    `/v1/invoices/${encodeURIComponent(invoiceId)}`,
+    { query: { workspace_id: id } },
+  );
   const row = invoiceApiSchema.parse(response.data);
   const metadata = object(row.metadata);
   const customer = relatedCustomer(row.customers);
@@ -345,25 +352,30 @@ export async function fetchInvoiceFormOptions(_userId: string): Promise<{
   fees: InvoiceFeeDefaults | null;
 }> {
   const id = workspaceId();
-  const [customersRes, vehiclesRes, catalogRes, settingsRes] = await Promise.all([
-    nextApi.customers.list(id),
-    nextApi.vehicles.list(id),
-    productionSupabase.from("service_catalog")
-      .select("id,name,description,labor_price")
-      .eq("workspace_id", id)
-      .eq("is_active", true)
-      .order("name"),
-    productionSupabase.from("workspace_settings")
-      .select("waste_oil_fee,waste_oil_fee_enabled,shop_fee_value,shop_fee_type,shop_fee_enabled,surcharge_value,surcharge_type,surcharge_enabled,tax_rate")
-      .eq("workspace_id", id)
-      .maybeSingle(),
+  const [customersRes, vehiclesRes, formRes] = await Promise.all([
+    apiClient.get<{ data: unknown[] }>(`/v1/customers`, { query: { workspace_id: id } }),
+    apiClient.get<{ data: unknown[] }>(`/v1/vehicles`, { query: { workspace_id: id } }),
+    apiClient.get<{
+      data: {
+        catalog: Array<{ id: string; name: string; description: string | null; default_price: number }>;
+        fees: {
+          waste_oil_fee: number;
+          waste_oil_fee_enabled: boolean;
+          shop_fee_value: number;
+          shop_fee_type: string | null;
+          shop_fee_enabled: boolean;
+          surcharge_value: number;
+          surcharge_type: string | null;
+          surcharge_enabled: boolean;
+          tax_rate: number;
+        } | null;
+      };
+    }>(`/v1/invoices/form-options`, { query: { workspace_id: id } }),
   ]);
-
-  if (catalogRes.error) throw catalogRes.error;
-  if (settingsRes.error) throw settingsRes.error;
 
   const customers = z.array(invoiceCustomerSchema).parse(customersRes.data ?? []);
   const vehicles = z.array(invoiceVehicleSchema).parse(vehiclesRes.data ?? []);
+  const { catalog, fees } = formRes.data;
 
   return {
     customers: customers.map((row) => ({
@@ -381,22 +393,22 @@ export async function fetchInvoiceFormOptions(_userId: string): Promise<{
       model: row.model ?? "",
       license_plate: row.license_plate ?? null,
     })),
-    catalog: (catalogRes.data ?? []).map((row) => ({
+    catalog: (catalog ?? []).map((row) => ({
       id: row.id,
       name: row.name,
       description: row.description ?? null,
-      default_price: Number(row.labor_price ?? 0),
+      default_price: Number(row.default_price ?? 0),
     })),
-    fees: settingsRes.data ? {
-      waste_oil_fee: Number(settingsRes.data.waste_oil_fee ?? 0),
-      waste_oil_fee_enabled: Boolean(settingsRes.data.waste_oil_fee_enabled),
-      shop_fee_value: Number(settingsRes.data.shop_fee_value ?? 0),
-      shop_fee_type: settingsRes.data.shop_fee_type ?? null,
-      shop_fee_enabled: Boolean(settingsRes.data.shop_fee_enabled),
-      surcharge_value: Number(settingsRes.data.surcharge_value ?? 0),
-      surcharge_type: settingsRes.data.surcharge_type ?? null,
-      surcharge_enabled: Boolean(settingsRes.data.surcharge_enabled),
-      tax_rate: Number(settingsRes.data.tax_rate ?? 0),
+    fees: fees ? {
+      waste_oil_fee: Number(fees.waste_oil_fee ?? 0),
+      waste_oil_fee_enabled: Boolean(fees.waste_oil_fee_enabled),
+      shop_fee_value: Number(fees.shop_fee_value ?? 0),
+      shop_fee_type: fees.shop_fee_type ?? null,
+      shop_fee_enabled: Boolean(fees.shop_fee_enabled),
+      surcharge_value: Number(fees.surcharge_value ?? 0),
+      surcharge_type: fees.surcharge_type ?? null,
+      surcharge_enabled: Boolean(fees.surcharge_enabled),
+      tax_rate: Number(fees.tax_rate ?? 0),
     } : null,
   };
 }
@@ -404,12 +416,9 @@ export async function fetchInvoiceFormOptions(_userId: string): Promise<{
 /** Display-only legacy label. The database assigns the canonical bigint. */
 export async function generateInvoiceNumber(_userId: string): Promise<string> {
   const id = workspaceId();
-  const { count, error } = await productionSupabase
-    .from("invoices")
-    .select("id", { count: "exact", head: true })
-    .eq("workspace_id", id);
-  if (error) throw error;
-  const seq = (count ?? 0) + 1;
-  const year = new Date().getFullYear();
-  return `INV-${year}-${String(seq).padStart(5, "0")}`;
+  const response = await apiClient.get<{ data: { number: string } }>(
+    `/v1/invoices/next-number`,
+    { query: { workspace_id: id } },
+  );
+  return response.data.number;
 }

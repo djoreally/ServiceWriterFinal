@@ -1,7 +1,11 @@
-/** Declined Services Queries — canonical workspace reads. */
-import { productionSupabase } from "@/integrations/supabase/client";
-import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
-const db = productionSupabase as any;
+/** Declined Services Queries — canonical workspace reads.
+ *
+ * Phase 2: all data access goes through the typed API client
+ * (`@/lib/api-client`) to the documents Hono router. Row formatting and
+ * metrics stay client-side; exported signatures are unchanged.
+ */
+import { apiClient } from "@/lib/api-client";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
 export interface DeclinedServiceRow {
   id: string; customer_id: string; customer_name?: string; customer_email?: string; customer_phone?: string;
@@ -15,17 +19,15 @@ export interface DeclinedServicesDataResult { services: DeclinedServiceRow[]; me
 function one<T>(value: T | T[] | null | undefined): T | null { return Array.isArray(value) ? value[0] ?? null : value ?? null; }
 
 export async function fetchDeclinedServicesData(): Promise<DeclinedServicesDataResult> {
-  const context = await resolveCurrentWorkspace();
-  if (!context) throw new Error("No active workspace is available.");
-  const [declinedRes, customerRes, vehicleRes] = await Promise.all([
-    db.from("declined_services").select("*,customers(first_name,last_name,company_name,email,phone),vehicles(year,make,model)").eq("workspace_id", context.workspaceId).order("declined_at", { ascending: false }),
-    db.from("customers").select("id,first_name,last_name,company_name").eq("workspace_id", context.workspaceId),
-    db.from("vehicles").select("id,customer_id,year,make,model").eq("workspace_id", context.workspaceId).order("make"),
-  ]);
-  if (declinedRes.error) throw declinedRes.error;
-  if (customerRes.error) throw customerRes.error;
-  if (vehicleRes.error) throw vehicleRes.error;
-  const formattedData = (declinedRes.data ?? []).map((d: any) => {
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) throw new Error("No active workspace is available.");
+  const response = await apiClient.get<{
+    data: { services: any[]; customers: any[]; vehicles: any[] };
+  }>(`/v1/declined-services`, { query: { workspace_id: workspaceId } });
+  const declined = response.data?.services ?? [];
+  const customerRows = response.data?.customers ?? [];
+  const vehicleRows = response.data?.vehicles ?? [];
+  const formattedData = declined.map((d: any) => {
     const customer = one<any>(d.customers); const vehicle = one<any>(d.vehicles);
     return {
       ...d,
@@ -42,7 +44,7 @@ export async function fetchDeclinedServicesData(): Promise<DeclinedServicesDataR
   return {
     services: formattedData,
     metrics: { totalDeclined: formattedData.length, totalLostRevenue, pendingFollowUps, converted, conversionRate: formattedData.length ? converted / formattedData.length * 100 : 0, recoveredRevenue },
-    customers: (customerRes.data ?? []).map((c: any) => ({ id: c.id, name: [c.first_name, c.last_name].filter(Boolean).join(" ") || c.company_name || "Customer" })),
-    vehicles: (vehicleRes.data ?? []).map((v: any) => ({ id: v.id, info: [v.year, v.make, v.model].filter(Boolean).join(" "), customer_id: v.customer_id })),
+    customers: customerRows.map((c: any) => ({ id: c.id, name: [c.first_name, c.last_name].filter(Boolean).join(" ") || c.company_name || "Customer" })),
+    vehicles: vehicleRows.map((v: any) => ({ id: v.id, info: [v.year, v.make, v.model].filter(Boolean).join(" "), customer_id: v.customer_id })),
   };
 }

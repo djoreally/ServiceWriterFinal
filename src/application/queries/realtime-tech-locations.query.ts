@@ -4,8 +4,11 @@
  * Final does not yet have a canonical technician-location table. The retired
  * Lovable `technicians` and `location_history` subscriptions are intentionally
  * disabled so Command Center does not subscribe to objects that do not exist.
+ *
+ * There is no realtime primitive on the sanctioned API client, so this keeps
+ * the disabled no-op subscription: it returns the same shape without opening
+ * a channel. The exported signature is unchanged.
  */
-import { supabase } from "@/integrations/supabase/client";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
 export interface TechLocationUpdate {
@@ -25,9 +28,11 @@ export function subscribeTechLocations(opts: TechLocationChannelOptions): {
   channel: RealtimeChannel;
   unsubscribe: () => void;
 } {
-  const channel = supabase.channel(`tech-locations-disabled-${opts.userId}`);
+  void opts;
   return {
-    channel,
-    unsubscribe: () => { void supabase.removeChannel(channel); },
+    // Intentionally disabled: no channel is opened. Callers only use
+    // `unsubscribe`, so this is never dereferenced.
+    channel: null as unknown as RealtimeChannel,
+    unsubscribe: () => {},
   };
 }

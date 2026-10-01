@@ -1,7 +1,6 @@
 /** Reports supporting queries backed by canonical workspace tables. */
-import { productionSupabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
-const db = productionSupabase as any;
 
 export interface CustomerAnalyticsRow { id: string; name: string; email: string | null; lifetime_value: number; total_services: number; average_order_value: number; days_since_last_service: number | null; churn_risk: string | null; customer_segment: string | null; last_service_date: string | null; first_service_date: string | null; }
 export interface CustomerAnalytics { customers: CustomerAnalyticsRow[]; totalLifetimeValue: number; repeat: number; oneTime: number; dueForService: CustomerAnalyticsRow[]; churnRisk: CustomerAnalyticsRow[]; topByValue: CustomerAnalyticsRow[]; }
@@ -15,21 +14,19 @@ const parseValidDate = (value: unknown): Date | null => {
 export async function fetchCustomerAnalytics(_userId: string): Promise<CustomerAnalytics> {
   const context = await resolveCurrentWorkspace();
   if (!context) throw new Error("No active workspace is available.");
-  const [customerResult, serviceResult] = await Promise.all([
-    db.from("customers").select("id,first_name,last_name,company_name,email,created_at").eq("workspace_id", context.workspaceId),
-    db.from("service_records").select("customer_id,total_amount,status,started_at,completed_at,created_at").eq("workspace_id", context.workspaceId),
-  ]);
-  if (customerResult.error) throw customerResult.error;
-  if (serviceResult.error) throw serviceResult.error;
+  const { customerRows, serviceRows } = await apiClient.get<{ customerRows: any[]; serviceRows: any[] }>(
+    "/v1/platform/reports/customer-analytics-rows",
+    { query: { selected_workspace_id: context.workspaceId } },
+  );
 
   const servicesByCustomer = new Map<string, Array<Record<string, any>>>();
-  for (const row of serviceResult.data ?? []) {
+  for (const row of serviceRows ?? []) {
     if (!row.customer_id) continue;
     const list = servicesByCustomer.get(row.customer_id) ?? [];
     list.push(row); servicesByCustomer.set(row.customer_id, list);
   }
   const now = Date.now();
-  const customers: CustomerAnalyticsRow[] = (customerResult.data ?? []).map((row: any) => {
+  const customers: CustomerAnalyticsRow[] = (customerRows ?? []).map((row: any) => {
     const services = servicesByCustomer.get(row.id) ?? [];
     const dates = services.map((service) => service.completed_at || service.started_at || service.created_at).filter(Boolean).sort();
     const lifetime = services.reduce((sum, service) => sum + Number(service.total_amount ?? 0), 0);
@@ -68,27 +65,20 @@ export interface TechnicianRef { id: string; name: string; status: string | null
 export async function fetchTechniciansForReports(_userId: string): Promise<TechnicianRef[]> {
   const context = await resolveCurrentWorkspace();
   if (!context) return [];
-  const { data: members, error } = await db.from("workspace_members").select("user_id,role,is_active").eq("workspace_id", context.workspaceId).eq("is_active", true);
-  if (error) throw error;
-  const techIds = (members ?? []).filter((member: any) => member.role === "technician").map((member: any) => member.user_id);
-  if (!techIds.length) return [];
-  const { data: profiles, error: profileError } = await db.from("profiles").select("id,display_name").in("id", techIds);
-  if (profileError) throw profileError;
-  const names = new Map((profiles ?? []).map((profile: any) => [profile.id, profile.display_name]));
-  return techIds.map((id: string) => ({ id, name: String(names.get(id) || "Technician"), status: "active" }));
+  return apiClient.get<TechnicianRef[]>("/v1/platform/reports/technicians", {
+    query: { selected_workspace_id: context.workspaceId },
+  });
 }
 
 export interface MarketingAttributionRow { source: string; bookings: number; billed: number; }
 export async function fetchEarliestActivityDate(): Promise<Date | null> {
   const context = await resolveCurrentWorkspace();
   if (!context) return null;
-  const [apptRes, serviceRes] = await Promise.all([
-    db.from("appointments").select("starts_at").eq("workspace_id", context.workspaceId).order("starts_at", { ascending: true }).limit(1),
-    db.from("service_records").select("created_at").eq("workspace_id", context.workspaceId).order("created_at", { ascending: true }).limit(1),
-  ]);
-  if (apptRes.error) throw apptRes.error;
-  if (serviceRes.error) throw serviceRes.error;
-  const candidates = [apptRes.data?.[0]?.starts_at, serviceRes.data?.[0]?.created_at].map(parseValidDate).filter((value): value is Date => value !== null);
+  const { apptStartsAt, serviceCreatedAt } = await apiClient.get<{ apptStartsAt: string | null; serviceCreatedAt: string | null }>(
+    "/v1/platform/reports/earliest-activity",
+    { query: { selected_workspace_id: context.workspaceId } },
+  );
+  const candidates = [apptStartsAt, serviceCreatedAt].map(parseValidDate).filter((value): value is Date => value !== null);
   if (!candidates.length) return null;
   return candidates.reduce((earliest, current) => current < earliest ? current : earliest);
 }

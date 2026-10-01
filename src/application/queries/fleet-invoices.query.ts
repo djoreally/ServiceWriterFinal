@@ -1,5 +1,5 @@
 /** Fleet invoice documents and authoritative accounts-receivable state. */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface FleetInvoiceRow {
   id: string;
@@ -19,17 +19,9 @@ export interface FleetInvoiceRow {
 }
 
 export async function fetchFleetInvoices(userId: string, clientId?: string): Promise<FleetInvoiceRow[]> {
-  let query = supabase
-    .from("invoices")
-    .select(
-      "id, invoice_number, fleet_client_id, status, issue_date, due_date, total, amount_paid, sent_at, delivery_status, delivery_last_error, delivery_attempt_count, created_at, fleet_clients(company_name)",
-    )
-    .eq("user_id", userId)
-    .eq("bill_to_type", "fleet");
-
-  if (clientId) query = query.eq("fleet_client_id", clientId);
-  const { data, error } = await query.order("created_at", { ascending: false });
-
-  if (error) throw error;
-  return (data ?? []) as unknown as FleetInvoiceRow[];
+  const params = new URLSearchParams();
+  if (clientId) params.set("client_id", clientId);
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const { data } = await apiClient.get<{ data: FleetInvoiceRow[] }>(`/v1/fleet/invoices${query}`);
+  return (data ?? []) as FleetInvoiceRow[];
 }

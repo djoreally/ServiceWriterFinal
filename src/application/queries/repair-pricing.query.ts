@@ -2,7 +2,7 @@
  * Repair Pricing — reads and writes for market-benchmark pricing and
  * estimate-only quote requests.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import type { PricingTier } from "@/domain/pricing/repair-estimate";
 
 export interface CatalogBenchmark {
@@ -23,20 +23,17 @@ export interface CatalogBenchmark {
 
 /** All benchmarks for the current shop, keyed by catalog item id (latest first). */
 export async function fetchCatalogBenchmarks(): Promise<Record<string, CatalogBenchmark>> {
-  const { data, error } = await supabase.from("service_catalog_benchmarks")
-    .select("*")
-    .order("captured_at", { ascending: false });
-
-  if (error) {
-    console.warn("[fetchCatalogBenchmarks]", error.message);
+  try {
+    const response = await apiClient.get<{ data: CatalogBenchmark[] }>("/v1/repair-pricing/catalog-benchmarks");
+    const byItem: Record<string, CatalogBenchmark> = {};
+    for (const row of response.data ?? []) {
+      if (!byItem[row.service_catalog_id]) byItem[row.service_catalog_id] = row;
+    }
+    return byItem;
+  } catch (error) {
+    console.warn("[fetchCatalogBenchmarks]", error instanceof Error ? error.message : error);
     return {};
   }
-
-  const byItem: Record<string, CatalogBenchmark> = {};
-  for (const row of (data ?? []) as CatalogBenchmark[]) {
-    if (!byItem[row.service_catalog_id]) byItem[row.service_catalog_id] = row;
-  }
-  return byItem;
 }
 
 export interface SaveBenchmarkInput {
@@ -52,24 +49,21 @@ export interface SaveBenchmarkInput {
 
 /** Upsert the latest benchmark for a catalog item + vehicle. */
 export async function saveCatalogBenchmark(input: SaveBenchmarkInput) {
-  return supabase.from("service_catalog_benchmarks").upsert(
-    {
-      user_id: input.userId,
-      service_catalog_id: input.serviceCatalogId,
-      vin: input.vin,
-      vehicle_label: input.vehicleLabel,
-      repair_title: input.repairTitle,
-      independent_low: input.independent.low,
-      independent_avg: input.independent.avg,
-      independent_high: input.independent.high,
-      dealer_low: input.dealer.low,
-      dealer_avg: input.dealer.avg,
-      dealer_high: input.dealer.high,
-      shop_price: input.shopPrice,
-      captured_at: new Date().toISOString(),
-    },
-    { onConflict: "service_catalog_id,vin" },
-  );
+  const response = await apiClient.post<{ data: CatalogBenchmark }>("/v1/repair-pricing/catalog-benchmarks", {
+    user_id: input.userId,
+    service_catalog_id: input.serviceCatalogId,
+    vin: input.vin,
+    vehicle_label: input.vehicleLabel,
+    repair_title: input.repairTitle,
+    independent_low: input.independent.low,
+    independent_avg: input.independent.avg,
+    independent_high: input.independent.high,
+    dealer_low: input.dealer.low,
+    dealer_avg: input.dealer.avg,
+    dealer_high: input.dealer.high,
+    shop_price: input.shopPrice,
+  });
+  return { data: response.data, error: null };
 }
 
 export interface QuoteRequest {
@@ -96,16 +90,13 @@ export interface QuoteRequest {
 
 /** Estimate-only requests for the current shop. */
 export async function fetchQuoteRequests(): Promise<QuoteRequest[]> {
-  const { data, error } = await supabase.from("quote_requests")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(200);
-
-  if (error) {
-    console.warn("[fetchQuoteRequests]", error.message);
+  try {
+    const response = await apiClient.get<{ data: QuoteRequest[] }>("/v1/repair-pricing/shop-quote-requests");
+    return response.data ?? [];
+  } catch (error) {
+    console.warn("[fetchQuoteRequests]", error instanceof Error ? error.message : error);
     return [];
   }
-  return (data ?? []) as QuoteRequest[];
 }
 
 export async function updateQuoteRequestStatus(
@@ -113,12 +104,14 @@ export async function updateQuoteRequestStatus(
   status: QuoteRequest["status"],
   convertedQuoteId?: string,
 ) {
-  return supabase.from("quote_requests")
-    .update({ status, ...(convertedQuoteId ? { converted_quote_id: convertedQuoteId } : {}) })
-    .eq("id", id);
+  const response = await apiClient.patch<{ data: QuoteRequest }>(
+    `/v1/repair-pricing/shop-quote-requests/${id}`,
+    { status, ...(convertedQuoteId ? { converted_quote_id: convertedQuoteId } : {}) },
+  );
+  return { data: response.data, error: null };
 }
 
-/** Public/anonymous submission — always goes through the edge function. */
+/** Public/anonymous submission — proxied to the edge function via Hono. */
 export async function submitPublicQuoteRequest(body: {
   businessUserId: string;
   guestName?: string;
@@ -133,5 +126,14 @@ export async function submitPublicQuoteRequest(body: {
   tier?: PricingTier;
   source?: string;
 }) {
-  return supabase.functions.invoke("public-quote-request", { body });
+  const response = await apiClient.post<{
+    data: {
+      success?: boolean;
+      error?: string;
+      repairTitle?: string;
+      estimate?: { low: number; avg: number; high: number } | null;
+      shopPrice?: number | null;
+    } | null;
+  }>("/v1/repair-pricing/public-quote-requests", body);
+  return { data: response.data, error: null };
 }

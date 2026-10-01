@@ -1,10 +1,13 @@
-/** Canonical Appointment Detail adapter. */
-import { productionSupabase } from "@/integrations/supabase/client";
+/** Canonical Appointment Detail adapter.
+ *
+ * Phase 2: data access goes through the typed API client
+ * (`@/lib/api-client`) to the appointments Hono router; `nextApi` stays as
+ * the grandfathered typed wrapper. Exported signatures are unchanged.
+ */
+import { apiClient } from "@/lib/api-client";
 import { getCurrentAuthUser as resolveCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { nextApi } from "@/lib/nextApiClient";
-
-const db = productionSupabase as any;
 
 export async function getCurrentAuthUser() {
   const { data: { user } } = await resolveCurrentAuthUser();
@@ -51,13 +54,11 @@ export async function fetchAppointmentWithRelations(id: string, _userId: string)
 
     let vehicleSpecs: Record<string, any> | null = null;
     if (vehicleRow?.id) {
-      const specs = await db.from("vehicle_service_specs")
-        .select("engine,oil_type,oil_capacity,oil_filter,metadata")
-        .eq("workspace_id", context.workspaceId)
-        .eq("vehicle_id", vehicleRow.id)
-        .maybeSingle();
-      if (specs.error) throw specs.error;
-      vehicleSpecs = specs.data ?? null;
+      const specsResponse = await apiClient.get<{ data: Record<string, any> | null }>(
+        "/v1/appointments/vehicle-service-specs",
+        { query: { vehicle_id: vehicleRow.id, selected_workspace_id: context.workspaceId } },
+      );
+      vehicleSpecs = specsResponse.data ?? null;
     }
 
     const vehicle = vehicleRow ? {
@@ -74,7 +75,11 @@ export async function fetchAppointmentWithRelations(id: string, _userId: string)
     const serviceCatalogId = text(metadata.service_catalog_id);
     let serviceCatalog: Record<string, unknown> | null = null;
     if (serviceCatalogId) {
-      const { data: service } = await db.from("service_catalog").select("id,name,description,category,labor_price,estimated_minutes,is_active").eq("workspace_id", context.workspaceId).eq("id", serviceCatalogId).maybeSingle();
+      const serviceResponse = await apiClient.get<{ data: Record<string, any> | null }>(
+        "/v1/appointments/service-catalog-item",
+        { query: { service_catalog_id: serviceCatalogId, selected_workspace_id: context.workspaceId } },
+      );
+      const service = serviceResponse.data;
       if (service) serviceCatalog = { id: service.id, name: service.name, description: service.description || "", category: service.category ?? undefined, default_price: Number(service.labor_price ?? 0), estimated_duration: service.estimated_minutes ?? undefined, is_active: service.is_active };
     }
 
@@ -101,13 +106,28 @@ export async function fetchVehicleSpecs(_make: string, _model: string, _year: st
 export async function fetchCustomerAddressByGuestEmail(email: string, _userId: string) {
   const context = await resolveCurrentWorkspace();
   if (!context) return { data: null, error: new Error("No active workspace is available.") };
-  const result = await db.from("customers").select("address_line1,address_line2,city,region,postal_code,phone").eq("workspace_id", context.workspaceId).ilike("email", email).order("updated_at", { ascending: false }).limit(1).maybeSingle();
-  return { ...result, data: result.data ? { address: [result.data.address_line1, result.data.address_line2, result.data.city, result.data.region, result.data.postal_code].filter(Boolean).join(", "), phone: result.data.phone } : null };
+  const response = await apiClient.get<{ data: { address_line1: string | null; address_line2: string | null; city: string | null; region: string | null; postal_code: string | null; phone: string | null } | null }>(
+    "/v1/appointments/customer-address-by-email",
+    { query: { email, selected_workspace_id: context.workspaceId } },
+  );
+  const row = response.data;
+  return { data: row ? { address: [row.address_line1, row.address_line2, row.city, row.region, row.postal_code].filter(Boolean).join(", "), phone: row.phone } : null, error: null };
 }
 
-export async function fetchSucceededPayments(appointmentId: string) { return db.from("payments").select("status,payment_type").eq("appointment_id", appointmentId).eq("status", "succeeded"); }
+export async function fetchSucceededPayments(appointmentId: string) {
+  const response = await apiClient.get<{ data: unknown[] }>(
+    `/v1/appointments/${encodeURIComponent(appointmentId)}/payments`,
+    { query: { status: "succeeded" } },
+  );
+  return { data: response.data ?? [], error: null };
+}
+
 export async function fetchAppointmentFeeSettings(_userId: string) {
   const context = await resolveCurrentWorkspace();
   if (!context) return { data: null, error: new Error("No active workspace is available.") };
-  return db.from("workspace_settings").select("waste_oil_fee_enabled,waste_oil_fee,shop_fee_enabled,shop_fee_type,shop_fee_value,shop_fee_description,surcharge_enabled,surcharge_type,surcharge_value,surcharge_description,tax_rate").eq("workspace_id", context.workspaceId).single();
+  const response = await apiClient.get<{ data: unknown }>(
+    "/v1/appointments/fee-settings",
+    { query: { selected_workspace_id: context.workspaceId } },
+  );
+  return { data: response.data ?? null, error: null };
 }

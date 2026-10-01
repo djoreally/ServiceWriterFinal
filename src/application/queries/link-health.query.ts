@@ -2,7 +2,7 @@
  * Link Health Query — Fetches business link fields for validation
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface BusinessLinkData {
@@ -22,11 +22,5 @@ export async function fetchBusinessLinks(): Promise<{
 
   if (!user) return { data: null, error: new Error("Not authenticated") };
 
-  const { data, error } = await supabase
-    .from("business_profiles")
-    .select("booking_slug, google_review_url, yelp_review_url, website_url")
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  return { data: data as BusinessLinkData | null, error };
+  return apiClient.get("/v1/platform/link-health");
 }

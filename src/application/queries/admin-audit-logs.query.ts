@@ -2,7 +2,7 @@
  * Admin Audit Logs Query
  * Fetches audit log entries for the admin dashboard.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface AuditLog {
   id: string;
@@ -19,17 +19,8 @@ export interface AuditLog {
 }
 
 export async function fetchAuditLogs(actionFilter?: string): Promise<AuditLog[]> {
-  let query = supabase
-    .from("audit_logs")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(100);
-
-  if (actionFilter && actionFilter !== "all") {
-    query = query.eq("action", actionFilter);
-  }
-
-  const { data, error } = await query;
-  if (error) throw error;
-  return (data ?? []) as AuditLog[];
+  const data = await apiClient.get<AuditLog[]>("/v1/platform/admin/audit-logs", {
+    query: { action: actionFilter ?? undefined },
+  });
+  return data ?? [];
 }

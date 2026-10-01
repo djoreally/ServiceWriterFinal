@@ -1,8 +1,12 @@
 /**
  * Dispatch Monitor Queries
  * Canonical appointment reads use workspace_id + starts_at + metadata.
+ *
+ * Phase 2: data access goes through the typed API client
+ * (`@/lib/api-client`) to the appointments Hono router. Exported signatures
+ * are unchanged.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { assignTechnician } from "@/application/commands/dispatch.command";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
@@ -59,17 +63,12 @@ export async function fetchDispatchableAppointments() {
   const context = await resolveCurrentWorkspace();
   if (!context) return { data: null, error: new Error("No active workspace is available.") };
 
-  const { data, error } = await (supabase as any)
-    .from("appointments")
-    .select("id,status,starts_at,ends_at,metadata")
-    .eq("workspace_id", context.workspaceId)
-    .not("status", "in", '("completed","cancelled")')
-    .order("starts_at", { ascending: true })
-    .limit(50);
+  const response = await apiClient.get<{ data: Array<{ id: string; status: string; starts_at: string; ends_at: string; metadata: unknown }> }>(
+    "/v1/appointments/dispatchable",
+    { query: { limit: "50", selected_workspace_id: context.workspaceId } },
+  );
 
-  if (error) return { data: null, error };
-
-  const mapped: DispatchableAppointment[] = (data ?? []).map((row: any) => {
+  const mapped: DispatchableAppointment[] = (response.data ?? []).map((row: any) => {
     const start = row.starts_at ? new Date(row.starts_at) : null;
     const end = row.ends_at ? new Date(row.ends_at) : null;
     const metadata = meta(row.metadata);
@@ -94,13 +93,14 @@ export async function invokeDispatchEngine(
   body: Record<string, unknown>,
 ): Promise<{ data: DispatchMonitorResult | null; error: unknown }> {
   const estimatedDuration = Number(body.estimated_duration_minutes ?? body.estimated_duration ?? 60);
-  const result = await supabase.functions.invoke("dispatch-engine", {
-    body: { ...body, estimated_duration_minutes: estimatedDuration },
-  });
+  const response = await apiClient.post<{ data: DispatchMonitorResult | null; error: unknown }>(
+    "/v1/appointments/edge/dispatch-engine",
+    { body: { ...body, estimated_duration_minutes: estimatedDuration } },
+  );
 
   return {
-    data: result.data as DispatchMonitorResult | null,
-    error: result.error,
+    data: response.data,
+    error: response.error,
   };
 }
 

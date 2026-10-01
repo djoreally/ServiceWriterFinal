@@ -2,21 +2,16 @@
  * Voice Agent Commands — update owner settings + invoke ElevenLabs
  * booking tools / token vending edge functions.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export async function updateVoiceAgentSettings(params: {
   enabled: boolean;
   agentId: string;
 }): Promise<void> {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) throw new Error("Not authenticated");
-  const nextValue = params.enabled ? (params.agentId || null) : null;
-  const { error } = await supabase
-    .from("business_profiles")
-    .update({ elevenlabs_agent_id: nextValue })
-    .eq("user_id", user.id);
-  if (error) throw error;
+  await apiClient.put("/v1/voice-agent/settings", {
+    enabled: params.enabled,
+    agentId: params.agentId,
+  });
 }
 
 export interface VoiceBookingToolResult {
@@ -30,10 +25,15 @@ export async function invokeVoiceBookingTool(params: {
   tool: "get_services" | "check_availability" | "book_appointment" | "create_service_request" | "get_shop_info";
   params?: Record<string, unknown>;
 }): Promise<VoiceBookingToolResult> {
-  const { data, error } = await supabase.functions.invoke("elevenlabs-booking-tools", {
-    body: { tool: params.tool, slug: params.slug, params: params.params },
-  });
-  return { data: data ?? null, error: error ? { message: error.message } : null };
+  try {
+    const { data } = await apiClient.post<{ data: unknown; error: null }>(
+      "/v1/voice-agent/booking-tools",
+      { slug: params.slug, tool: params.tool, params: params.params },
+    );
+    return { data: data ?? null, error: null };
+  } catch (error) {
+    return { data: null, error: { message: error instanceof Error ? error.message : "Voice booking tool failed" } };
+  }
 }
 
 export interface VoiceTokenResponse {
@@ -44,9 +44,9 @@ export interface VoiceTokenResponse {
 
 /** Mint an ElevenLabs WebRTC conversation token for a public booking slug. */
 export async function fetchVoiceConversationToken(slug: string): Promise<VoiceTokenResponse> {
-  const { data, error } = await supabase.functions.invoke("elevenlabs-voice-token", {
-    body: { slug },
-  });
-  if (error) throw new Error(error.message || "Failed to get voice token");
+  const { data } = await apiClient.post<{ data: VoiceTokenResponse | null; error: null }>(
+    "/v1/voice-agent/conversation-token",
+    { slug },
+  );
   return (data ?? {}) as VoiceTokenResponse;
 }

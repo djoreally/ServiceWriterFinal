@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface ProviderRewardsLedgerFilters {
   providerId: string;
@@ -18,27 +18,28 @@ export interface ProviderRewardsLedgerResult {
 }
 
 export async function fetchProviderRewardsLedger(filters: ProviderRewardsLedgerFilters): Promise<ProviderRewardsLedgerResult> {
-  const { data, error } = await supabase.rpc("get_provider_rewards_ledger", {
-    p_provider_id: filters.providerId,
-    p_customer_id: filters.customerId ?? undefined,
-    p_appointment_id: filters.appointmentId ?? undefined,
-    p_event_type: filters.eventType as never,
-    p_from: filters.from ?? undefined,
-    p_to: filters.to ?? undefined,
-    p_limit: filters.limit ?? 200,
-    p_offset: filters.offset ?? 0,
+  const { data } = await apiClient.get<{ data: ProviderRewardsLedgerResult }>("/v1/crm/loyalty/ledger", {
+    query: {
+      provider_id: filters.providerId,
+      ...(filters.customerId ? { customer_id: filters.customerId } : {}),
+      ...(filters.appointmentId ? { appointment_id: filters.appointmentId } : {}),
+      ...(filters.eventType ? { event_type: filters.eventType } : {}),
+      ...(filters.from ? { from: filters.from } : {}),
+      ...(filters.to ? { to: filters.to } : {}),
+      limit: String(filters.limit ?? 200),
+      offset: String(filters.offset ?? 0),
+    },
   });
-  if (error) throw new Error(error.message);
-  const payload = (data || {}) as { status?: string; rows?: Array<Record<string, unknown>>; reason?: string };
   return {
-    status: payload.status || "ok",
-    rows: payload.rows || [],
-    reason: payload.reason,
+    status: data?.status || "ok",
+    rows: data?.rows || [],
+    reason: data?.reason,
   };
 }
 
 export async function fetchRewardsOperationsSummary(providerId: string): Promise<Record<string, unknown>> {
-  const { data, error } = await supabase.rpc("get_rewards_operations_summary", { p_provider_id: providerId });
-  if (error) throw new Error(error.message);
+  const { data } = await apiClient.get<{ data: Record<string, unknown> }>("/v1/crm/loyalty/operations-summary", {
+    query: { provider_id: providerId },
+  });
   return (data || {}) as Record<string, unknown>;
 }

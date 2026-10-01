@@ -1,7 +1,7 @@
 /**
  * Provider Marketplace Dashboard — write operations.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface MarketplaceListingUpdate {
   business_name?: string;
@@ -31,11 +31,10 @@ export interface MarketplaceListingUpdate {
 }
 
 export async function saveMarketplaceListing(userId: string, updates: MarketplaceListingUpdate): Promise<void> {
-  const { error } = await supabase
-    .from("business_profiles")
-    .update(updates as never)
-    .eq("user_id", userId);
-  if (error) throw error;
+  await apiClient.patch("/v1/platform/marketplace/listing", {
+    user_id: userId,
+    updates,
+  });
 }
 
 export async function setMarketplaceVisibility(userId: string, listed: boolean): Promise<void> {
@@ -43,17 +42,15 @@ export async function setMarketplaceVisibility(userId: string, listed: boolean):
 }
 
 export async function replyToReview(reviewId: string, reply: string): Promise<void> {
-  const { error } = await supabase
-    .from("testimonials")
-    .update({ provider_reply: reply, provider_replied_at: new Date().toISOString() } as never)
-    .eq("id", reviewId);
-  if (error) throw error;
+  await apiClient.patch("/v1/platform/marketplace/review-reply", {
+    review_id: reviewId,
+    reply,
+  });
 }
 
 export async function updateMarketplaceLeadStatus(appointmentId: string, status: string): Promise<void> {
-  const { error } = await supabase
-    .from("appointments")
-    .update({ status } as never)
-    .eq("id", appointmentId);
-  if (error) throw error;
+  await apiClient.patch("/v1/platform/marketplace/lead-status", {
+    appointment_id: appointmentId,
+    status,
+  });
 }

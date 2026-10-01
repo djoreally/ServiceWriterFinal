@@ -1,4 +1,4 @@
-import { SUPABASE_URL_RESOLVED } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 /**
  * GDPR Data Management Component
  * Sprint 3 Story 3.2.1 - Data Export UI
@@ -46,25 +46,11 @@ export function GDPRDataManagement() {
         return;
       }
 
-      // Call the GDPR data export edge function
-      const response = await fetch(
-        `${SUPABASE_URL_RESOLVED}/functions/v1/gdpr-data-export`,
-        {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${session.access_token}`,
-            "Content-Type": "application/json",
-          },
-        }
+      // Call the GDPR data export via the Hono edge-function proxy
+      const { data } = await apiClient.post<{ data: unknown }>(
+        "/v1/platform/edge/gdpr-data-export",
+        {},
       );
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || "Failed to export data");
-      }
-
-      // Get the JSON data
-      const data = await response.json();
       
       // Create a Blob and download it
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -104,23 +90,14 @@ export function GDPRDataManagement() {
         return;
       }
 
-      // Call the GDPR account deletion edge function
-      const response = await fetch(
-        `${SUPABASE_URL_RESOLVED}/functions/v1/gdpr-account-deletion`,
-        {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${session.access_token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ confirmationText }),
-        }
+      // Call the GDPR account deletion via the Hono edge-function proxy
+      const { data } = await apiClient.post<{ data: { message?: string } | null }>(
+        "/v1/platform/edge/gdpr-account-deletion",
+        { body: { confirmationText } },
       );
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.message || "Failed to delete account");
+      if (!data) {
+        throw new Error("Failed to delete account");
       }
 
       // Success - account has been deleted

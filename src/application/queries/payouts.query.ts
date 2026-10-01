@@ -1,40 +1,76 @@
-import { SUPABASE_PROJECT_ID_RESOLVED, SUPABASE_PUBLISHABLE_KEY_RESOLVED } from "@/integrations/supabase/client";
 /**
- * Payouts Query — Abstracts Stripe payouts edge function
+ * Payouts Query — Stripe payouts via the Hono billing API.
  */
+import { apiClient, ApiClientError } from "@/lib/api-client";
+import { getCurrentAuthUser } from "@/lib/auth/current-user";
 
-import { supabase } from "@/integrations/supabase/client";
+async function signedIn(): Promise<boolean> {
+  const { data: { user } } = await getCurrentAuthUser();
+  return Boolean(user);
+}
 
-const PROJECT_ID = SUPABASE_PROJECT_ID_RESOLVED;
-const FN_BASE = `https://${PROJECT_ID}.supabase.co/functions/v1/stripe-payouts`;
+export interface PayoutBalanceAmount {
+  amount: number;
+  currency: string;
+}
 
-async function authedGet(path = "") {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) return null;
-  const res = await fetch(`${FN_BASE}${path}`, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${session.access_token}`,
-      apikey: SUPABASE_PUBLISHABLE_KEY_RESOLVED,
-    },
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(text || `Request failed (${res.status})`);
-  }
-  return res.json();
+export interface PayoutBalance {
+  available: PayoutBalanceAmount[];
+  pending: PayoutBalanceAmount[];
+}
+
+export interface StripePayoutRow {
+  id: string;
+  amount: number;
+  currency: string;
+  status: string;
+  arrivalDate: number;
+  created: number;
+  description: string | null;
+  method: string;
+  type: string;
+  failureCode: string | null;
+  failureMessage: string | null;
+}
+
+export interface PayoutsDataShape {
+  payouts: StripePayoutRow[];
+  balance: PayoutBalance | null;
+  hasMore: boolean;
+  message?: string;
 }
 
 export async function fetchPayoutsData() {
-  return authedGet();
+  if (!(await signedIn())) return null;
+  try {
+    return await apiClient.get<PayoutsDataShape>("/v1/billing/payouts", {
+      query: { action: "list" },
+    });
+  } catch (error) {
+    throw error instanceof ApiClientError ? new Error(error.message) : error;
+  }
 }
 
 export async function fetchInstantPayoutBalance() {
-  return authedGet("?action=balance");
+  if (!(await signedIn())) return null;
+  try {
+    return await apiClient.get<Record<string, unknown>>("/v1/billing/payouts", {
+      query: { action: "balance" },
+    });
+  } catch (error) {
+    throw error instanceof ApiClientError ? new Error(error.message) : error;
+  }
 }
 
 export async function fetchInstantPayoutEligibility() {
-  return authedGet("?action=eligibility");
+  if (!(await signedIn())) return null;
+  try {
+    return await apiClient.get<Record<string, unknown>>("/v1/billing/payouts", {
+      query: { action: "eligibility" },
+    });
+  } catch (error) {
+    throw error instanceof ApiClientError ? new Error(error.message) : error;
+  }
 }
 
 /**
@@ -43,35 +79,29 @@ export async function fetchInstantPayoutEligibility() {
  * available balance. Currency defaults to the account's first available currency.
  */
 export async function triggerInstantPayout(opts?: { amount?: number; currency?: string }) {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error("Not signed in");
-
-  const response = await supabase.functions.invoke("stripe-payouts", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${session.access_token}` },
-    body: opts ?? {},
-  });
-
-  if (response.error) {
-    const apiError = (response.data as any)?.error || response.error.message || "Payout failed";
-    throw new Error(apiError);
+  if (!(await signedIn())) throw new Error("Not signed in");
+  try {
+    const data = await apiClient.post<{
+      success: boolean;
+      noFunds?: boolean;
+      error?: string;
+      availableAmount?: number;
+      currency?: string;
+      payout?: {
+        id: string;
+        amount: number;
+        currency: string;
+        status: string;
+        method: string;
+        arrivalDate: number;
+      };
+    }>("/v1/billing/payouts/instant", opts ?? {});
+    if (data?.error) throw new Error(String(data.error));
+    return data;
+  } catch (error) {
+    if (error instanceof ApiClientError) {
+      throw new Error(error.message || "Payout failed");
+    }
+    throw error;
   }
-
-  const data = response.data as {
-    success: boolean;
-    noFunds?: boolean;
-    error?: string;
-    availableAmount?: number;
-    currency?: string;
-    payout?: {
-      id: string;
-      amount: number;
-      currency: string;
-      status: string;
-      method: string;
-      arrivalDate: number;
-    };
-  };
-
-  return data;
 }

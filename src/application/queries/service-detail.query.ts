@@ -1,5 +1,5 @@
 /** Service Detail Query — canonical service-record detail with legacy UI adapter. */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { bankersRound } from "@/lib/financialMath";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
@@ -131,62 +131,46 @@ function customerAdapter(row: ServiceDetailCustomerRow | null | undefined): Serv
   };
 }
 
+interface ServiceDetailBundle {
+  service: Record<string, any>;
+  customer: ServiceDetailCustomerRow | null;
+  vehicle: Record<string, any> | null;
+  line_items: ServiceDetailLineRow[];
+  workspace_email: string;
+  workspace_name: string;
+  appointment: { id: string; customer_id: string | null; vehicle_id: string | null; metadata: unknown; notes: string | null; starts_at: string | null } | null;
+  fallback_customer: ServiceDetailCustomerRow | null;
+  vehicle_specs: VehicleServiceSpecRow | null;
+  first_appointment_item: {
+    service_catalog_id: string | null;
+    description: string | null;
+    quantity: number | null;
+    unit_price: number | null;
+    service_catalog: { name: string | null; description: string | null; estimated_duration: number | null } | null;
+  } | null;
+}
+
 export async function fetchServiceDetail(serviceId: string): Promise<ServiceDetailResult | null> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return null;
   const context = await resolveCurrentWorkspace();
   if (!context) return null;
-  const client = supabase as any;
 
-  const { data: row, error } = await client
-    .from("service_records")
-    .select("*")
-    .eq("workspace_id", context.workspaceId)
-    .eq("id", serviceId)
-    .single();
-  if (error || !row) return null;
+  const response = await apiClient.get<{ data: ServiceDetailBundle | null }>(
+    `/v1/service-records/${serviceId}/detail-full`,
+    { query: { workspace_id: context.workspaceId } },
+  ).catch(() => ({ data: null as ServiceDetailBundle | null }));
+  const bundle = response.data;
+  if (!bundle) return null;
 
+  const row = bundle.service;
   const metadata = object(row.metadata);
-  const [customerRes, vehicleRes, linesRes, settingsRes, workspaceRes, appointmentRes] = await Promise.all([
-    row.customer_id
-      ? client.from("customers").select("*").eq("workspace_id", context.workspaceId).eq("id", row.customer_id).maybeSingle()
-      : Promise.resolve({ data: null, error: null }),
-    row.vehicle_id
-      ? client.from("vehicles").select("*").eq("workspace_id", context.workspaceId).eq("id", row.vehicle_id).maybeSingle()
-      : Promise.resolve({ data: null, error: null }),
-    client.from("service_record_line_items")
-      .select("id,item_type,description,quantity,unit_price,total_price,labor_hours,labor_rate,metadata,created_at")
-      .eq("workspace_id", context.workspaceId)
-      .eq("service_record_id", serviceId)
-      .order("sort_order"),
-    client.from("workspace_settings").select("email").eq("workspace_id", context.workspaceId).maybeSingle(),
-    client.from("workspaces").select("name").eq("id", context.workspaceId).maybeSingle(),
-    row.appointment_id
-      ? client.from("appointments").select("id,customer_id,vehicle_id,metadata,notes,starts_at").eq("workspace_id", context.workspaceId).eq("id", row.appointment_id).maybeSingle()
-      : Promise.resolve({ data: null, error: null }),
-  ]);
 
-  let customer = customerAdapter(customerRes.data);
-  const rawVehicle = vehicleRes.data;
-  let specs: VehicleServiceSpecRow | null = null;
-  if (row.vehicle_id) {
-    const specRes = await client.from("vehicle_service_specs")
-      .select("engine,oil_type,oil_capacity,oil_filter,metadata")
-      .eq("workspace_id", context.workspaceId)
-      .eq("vehicle_id", row.vehicle_id)
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    specs = specRes.data as VehicleServiceSpecRow | null;
-  }
+  const customer = customerAdapter(bundle.customer) ?? customerAdapter(bundle.fallback_customer);
+  const rawVehicle = bundle.vehicle;
+  const specs = bundle.vehicle_specs;
 
-  if (!customer && appointmentRes.data?.customer_id) {
-    const fallbackCustomer = await client.from("customers").select("*")
-      .eq("workspace_id", context.workspaceId).eq("id", appointmentRes.data.customer_id).maybeSingle();
-    customer = customerAdapter(fallbackCustomer.data);
-  }
-
-  const appointmentMeta = object(appointmentRes.data?.metadata);
+  const appointmentMeta = object(bundle.appointment?.metadata);
   const guestInfo = !customer && (appointmentMeta.guest_name || appointmentMeta.customer_name)
     ? {
         name: String(appointmentMeta.guest_name ?? appointmentMeta.customer_name),
@@ -197,19 +181,11 @@ export async function fetchServiceDetail(serviceId: string): Promise<ServiceDeta
 
   let catalogDescription: string | null = null;
   let catalogLaborHours: number | null = null;
-  if (row.appointment_id) {
-    const { data: appointmentItems } = await client.from("appointment_items")
-      .select("service_catalog_id,description,quantity,unit_price,service_catalog(name,description,estimated_duration)")
-      .eq("workspace_id", context.workspaceId)
-      .eq("appointment_id", row.appointment_id)
-      .order("created_at")
-      .limit(1);
-    const item = appointmentItems?.[0];
-    if (item?.service_catalog?.description) catalogDescription = item.service_catalog.description;
-    else if (item?.description) catalogDescription = item.description;
-    if (item?.service_catalog?.estimated_duration != null) {
-      catalogLaborHours = bankersRound(Number(item.service_catalog.estimated_duration) / 60, 2);
-    }
+  const item = bundle.first_appointment_item;
+  if (item?.service_catalog?.description) catalogDescription = item.service_catalog.description;
+  else if (item?.description) catalogDescription = item.description;
+  if (item?.service_catalog?.estimated_duration != null) {
+    catalogLaborHours = bankersRound(Number(item.service_catalog.estimated_duration) / 60, 2);
   }
 
   const serviceDate = row.completed_at ?? row.started_at ?? row.created_at;
@@ -228,7 +204,7 @@ export async function fetchServiceDetail(serviceId: string): Promise<ServiceDeta
     engine: specs?.engine ?? optionalString(object(rawVehicle.metadata).engine),
   } : null;
 
-  const lineRows = (linesRes.data ?? []) as ServiceDetailLineRow[];
+  const lineRows = (bundle.line_items ?? []) as ServiceDetailLineRow[];
   const laborItems: ServiceDetailLaborItem[] = lineRows
     .filter((line) => Number(line.labor_hours ?? 0) > 0 || line.item_type === "labor")
     .map((line) => ({ id: line.id, description: line.description, hours: Number(line.labor_hours ?? line.quantity ?? 0) }));
@@ -288,8 +264,8 @@ export async function fetchServiceDetail(serviceId: string): Promise<ServiceDeta
     vehicle,
     laborItems,
     timeline,
-    businessName: workspaceRes.data?.name || "",
-    businessEmail: settingsRes.data?.email || "",
+    businessName: bundle.workspace_name || "",
+    businessEmail: bundle.workspace_email || "",
     guestInfo,
     catalogDescription,
     catalogLaborHours,

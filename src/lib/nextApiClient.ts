@@ -1,9 +1,5 @@
 import { z } from "zod";
-import { supabase } from "@/integrations/supabase/client";
-
-type ApiErrorBody = { error?: { code?: string; message?: string } };
-
-const baseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL || "/api").replace(/\/$/, "");
+import { apiRequest, ApiClientError as CoreApiClientError } from "@/lib/api-client";
 
 export class ApiClientError extends Error {
   constructor(public status: number, public code: string, message: string) {
@@ -51,23 +47,26 @@ export type InvitationCreatePayload = {
 };
 export type InvitationDelivery = { status: "accepted" | "failed"; provider?: string; provider_message_id?: string; error?: string };
 
+/**
+ * Phase 3: transport delegates to the sanctioned API client
+ * (`@/lib/api-client`), which attaches the Supabase session bearer token,
+ * sets JSON headers, and throws on non-2xx. Errors are re-thrown as this
+ * module's own ApiClientError so existing `instanceof` checks keep working.
+ *
+ * Accepted delta vs the old inline fetch: a 204 / non-JSON success now
+ * resolves `undefined` (the api-client contract) instead of `{}`.
+ */
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const { data: { session } } = await supabase.auth.getSession();
   const headers = new Headers(init.headers);
-  headers.set("Accept", "application/json");
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-  if (session?.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
-
-  const response = await fetch(`${baseUrl}${path}`, {
-    ...init,
-    credentials: "include",
-    headers,
-  });
-  const body = await response.json().catch(() => ({})) as ApiErrorBody & T;
-  if (!response.ok) {
-    throw new ApiClientError(response.status, body.error?.code || "api_error", body.error?.message || "Request failed");
+  try {
+    return await apiRequest<T>(path, { ...init, headers });
+  } catch (error) {
+    if (error instanceof CoreApiClientError) {
+      throw new ApiClientError(error.status, error.code, error.message);
+    }
+    throw error;
   }
-  return body as T;
 }
 
 export const nextApi = {

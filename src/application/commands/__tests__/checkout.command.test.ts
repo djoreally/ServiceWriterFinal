@@ -1,13 +1,20 @@
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 import { startCheckout, type CheckoutRequest } from "../checkout.command";
 
-jest.mock("@/integrations/supabase/client", () => ({
-  supabase: {
-    functions: { invoke: jest.fn() },
+jest.mock("@/lib/api-client", () => ({
+  apiClient: { post: jest.fn() },
+  ApiClientError: class ApiClientError extends Error {
+    status: number;
+    code: string;
+    constructor(status: number, code: string, message: string) {
+      super(message);
+      this.status = status;
+      this.code = code;
+    }
   },
 }));
 
-const invoke = supabase.functions.invoke as jest.Mock;
+const post = apiClient.post as jest.Mock;
 
 function request(overrides: Partial<CheckoutRequest> = {}): CheckoutRequest {
   return {
@@ -42,35 +49,39 @@ describe("startCheckout", () => {
     expect((await startCheckout(request({ tenantId: "" }))).error?.type).toBe("tenant_not_found");
     expect((await startCheckout(request({ serviceCatalogIds: [] }))).error?.type).toBe("validation_error");
     expect((await startCheckout(request({ customerEmail: "" }))).error?.message).toBe("Email address is required.");
-    expect(invoke).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
   });
 
   it("routes Stripe checkout and forwards independent vehicle assignments", async () => {
-    invoke.mockResolvedValue({ data: { url: "https://checkout.stripe.test/session", session_id: "cs_1" }, error: null });
+    post.mockResolvedValue({ url: "https://checkout.stripe.test/session", session_id: "cs_1" });
     const result = await startCheckout(request());
     expect(result).toEqual({ success: true, redirectUrl: "https://checkout.stripe.test/session", sessionId: "cs_1" });
-    expect(invoke).toHaveBeenCalledWith("create-booking-payment", expect.objectContaining({ body: expect.objectContaining({
-      service_catalog_ids: ["oil-service", "tire-service"],
-      oil_extra_quarts: 1,
-      appointment_data: expect.objectContaining({
-        hasPickupService: true,
-        vehicleServiceAssignments: { "vehicle-1": { serviceCatalogIds: ["oil-service"] }, "vehicle-2": { serviceCatalogIds: ["tire-service"] } },
-        tireItems: [{ inventoryItemId: "tire-1", quantity: 4 }],
+    expect(post).toHaveBeenCalledWith("/v1/billing/public-checkout", expect.objectContaining({
+      payment_provider: "stripe",
+      checkout: expect.objectContaining({
+        business_user_id: "provider-1",
+        service_catalog_ids: ["oil-service", "tire-service"],
+        oil_extra_quarts: 1,
+        appointment_data: expect.objectContaining({
+          hasPickupService: true,
+          vehicleServiceAssignments: { "vehicle-1": { serviceCatalogIds: ["oil-service"] }, "vehicle-2": { serviceCatalogIds: ["tire-service"] } },
+          tireItems: [{ inventoryItemId: "tire-1", quantity: 4 }],
+        }),
       }),
-    }) }));
+    }));
   });
 
   it("routes Square checkout and normalizes provider errors", async () => {
-    invoke.mockResolvedValue({ data: null, error: { context: { error: "square not configured" } } });
+    post.mockRejectedValueOnce(new ApiClientError(500, "edge_function_error", "square not configured"));
     const result = await startCheckout(request({ paymentProvider: "square" }));
-    expect(invoke).toHaveBeenCalledWith("create-square-payment", expect.anything());
+    expect(post).toHaveBeenCalledWith("/v1/billing/public-checkout", expect.objectContaining({ payment_provider: "square" }));
     expect(result.error?.type).toBe("payment_provider_not_enabled");
   });
 
   it("normalizes rate-limit and missing-url responses", async () => {
-    invoke.mockResolvedValueOnce({ data: null, error: { message: "rate_limit retry_after: 42" } });
+    post.mockRejectedValueOnce(new ApiClientError(429, "edge_function_error", "rate_limit retry_after: 42"));
     expect((await startCheckout(request())).error).toMatchObject({ type: "rate_limited", retryAfter: 42 });
-    invoke.mockResolvedValueOnce({ data: {}, error: null });
+    post.mockResolvedValueOnce({});
     expect((await startCheckout(request())).error?.type).toBe("unknown");
   });
 });

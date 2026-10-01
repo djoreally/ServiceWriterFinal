@@ -1,4 +1,11 @@
-import { productionSupabase } from "@/integrations/supabase/client";
+/**
+ * Operational Jobs Query — canonical workspace-scoped reads for the dispatch/command-center board.
+ *
+ * Phase 2: the raw appointment/work-order/member reads go through the typed
+ * API client (`@/lib/api-client`) to the appointments Hono router. All row
+ * mapping stays client-side. Exported signatures are unchanged.
+ */
+import { apiClient } from "@/lib/api-client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { buildCommandCenterBuckets } from "@/lib/command-center-filters";
 import { format } from "date-fns";
@@ -226,50 +233,42 @@ async function fetchCanonicalJobs(
   // Always read normalized workspace tables. The old compatibility view is
   // keyed by a legacy user ID and can return a different dataset than the
   // workspace-scoped appointment list.
-  const startIso = new Date(`${fromDate}T00:00:00`).toISOString();
-  const endIso = new Date(`${toDate}T23:59:59.999`).toISOString();
+  try {
+    const response = await apiClient.get<{
+      data: {
+        appointments: AppointmentJobSource[];
+        work_orders: WorkOrderJobSource[];
+        members: Array<{ user_id: string; profiles: { display_name: string } | Array<{ display_name: string }> | null }>;
+      } | null;
+    }>("/v1/dispatch/operational-jobs", {
+      query: { from: fromDate, to: toDate, selected_workspace_id: workspaceId },
+    });
 
-  const [appointmentsRes, workOrdersRes, membersRes] = await Promise.all([
-    productionSupabase.from("appointments")
-      .select("id,status,starts_at,ends_at,assigned_user_id,updated_at,metadata,customers(first_name,last_name,company_name,phone,address_line1,address_line2,city,region,postal_code),vehicles(year,make,model),locations(address_line1,address_line2,city,region,postal_code,latitude,longitude)")
-      .eq("workspace_id", workspaceId)
-      .gte("starts_at", startIso)
-      .lte("starts_at", endIso)
-      .order("starts_at"),
-    productionSupabase.from("work_orders")
-      .select("id,number,status,priority,opened_at,created_at,updated_at,technician_notes,metadata,customers(first_name,last_name,company_name,phone,address_line1,address_line2,city,region,postal_code),vehicles(year,make,model),locations(address_line1,address_line2,city,region,postal_code,latitude,longitude),work_order_assignments(user_id,assigned_at,unassigned_at)")
-      .eq("workspace_id", workspaceId)
-      .is("appointment_id", null)
-      .gte("created_at", startIso)
-      .lte("created_at", endIso)
-      .order("created_at"),
-    productionSupabase.from("workspace_members")
-      .select("user_id,profiles!workspace_members_user_id_fkey(display_name)")
-      .eq("workspace_id", workspaceId)
-      .eq("is_active", true),
-  ]);
+    const payload = response.data;
+    if (!payload) return { data: [], error: null };
 
-  const error = appointmentsRes.error ?? workOrdersRes.error ?? membersRes.error;
-  if (error) return { data: [], error };
+    const profileNames = new Map<string, string>();
+    for (const member of payload.members ?? []) {
+      const profiles = member.profiles;
+      const name = Array.isArray(profiles) ? profiles[0]?.display_name : profiles?.display_name;
+      if (name) profileNames.set(member.user_id, name);
+    }
 
-  const profileNames = new Map<string, string>();
-  for (const member of membersRes.data ?? []) {
-    const name = member.profiles?.display_name;
-    if (name) profileNames.set(member.user_id, name);
+    const assignmentByOrder = new Map<string, string>();
+    for (const row of payload.work_orders ?? []) {
+      const active = (row.work_order_assignments ?? []).find((assignment) => !assignment.unassigned_at);
+      if (active?.user_id) assignmentByOrder.set(row.id, active.user_id);
+    }
+
+    const jobs = [
+      ...(payload.appointments ?? []).map((row) => appointmentJob(row, profileNames, workspaceId)),
+      ...(payload.work_orders ?? []).map((row) => workOrderJob(row, assignmentByOrder, profileNames, workspaceId)),
+    ].sort((a, b) => `${a.scheduled_date}T${a.scheduled_time}`.localeCompare(`${b.scheduled_date}T${b.scheduled_time}`));
+
+    return { data: jobs, error: null };
+  } catch (error) {
+    return { data: [], error };
   }
-
-  const assignmentByOrder = new Map<string, string>();
-  for (const row of workOrdersRes.data ?? []) {
-    const active = (row.work_order_assignments ?? []).find((assignment) => !assignment.unassigned_at);
-    if (active?.user_id) assignmentByOrder.set(row.id, active.user_id);
-  }
-
-  const jobs = [
-    ...(appointmentsRes.data ?? []).map((row) => appointmentJob(row, profileNames, workspaceId)),
-    ...(workOrdersRes.data ?? []).map((row) => workOrderJob(row, assignmentByOrder, profileNames, workspaceId)),
-  ].sort((a, b) => `${a.scheduled_date}T${a.scheduled_time}`.localeCompare(`${b.scheduled_date}T${b.scheduled_time}`));
-
-  return { data: jobs, error: null };
 }
 
 export async function fetchOperationalJobsByDate(_userId: string, dateStr: string) {

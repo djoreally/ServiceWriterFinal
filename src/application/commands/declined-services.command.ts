@@ -1,14 +1,18 @@
 /**
  * Declined Services Commands — Write operations for declined service tracking.
+ *
+ * Phase 2: all data access goes through the typed API client
+ * (`@/lib/api-client`) to the documents Hono router. The server resolves the
+ * workspace from the auth token; exported signatures are unchanged.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import type { DeclinedServiceRow } from "@/application/queries/declined-services.query";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
-async function requireUser() {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) throw new Error("Authentication required");
-  return user;
+function currentWorkspace(): string {
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) throw new Error("Select a workspace before working with declined services.");
+  return workspaceId;
 }
 
 export interface TrackDeclinedServicePayload {
@@ -24,55 +28,38 @@ export interface TrackDeclinedServicePayload {
 }
 
 export async function trackDeclinedService(payload: TrackDeclinedServicePayload): Promise<void> {
-  const { error } = await supabase.rpc("track_declined_service", {
-    p_customer_id: payload.customer_id,
-    p_vehicle_id: payload.vehicle_id,
-    p_recommended_service: payload.recommended_service,
-    p_estimated_cost: payload.estimated_cost,
-    p_urgency: payload.urgency,
-    p_decline_reason: payload.decline_reason,
-    p_notes: payload.decline_notes,
-    p_appointment_id: payload.appointment_id ?? null,
-    p_catalog_item_id: payload.catalog_item_id,
+  await apiClient.post<{ data: null }>("/v1/declined-services/track", {
+    workspace_id: currentWorkspace(),
+    customer_id: payload.customer_id,
+    vehicle_id: payload.vehicle_id,
+    recommended_service: payload.recommended_service,
+    catalog_item_id: payload.catalog_item_id,
+    estimated_cost: payload.estimated_cost,
+    urgency: payload.urgency,
+    decline_reason: payload.decline_reason,
+    decline_notes: payload.decline_notes,
+    appointment_id: payload.appointment_id ?? null,
   });
-  if (error) throw error;
 }
 
 export async function sendDeclinedServiceFollowUp(service: DeclinedServiceRow): Promise<void> {
-  const user = await requireUser();
-
-  const { error } = await supabase
-    .from("declined_services")
-    .update({
-      follow_up_status: "sent",
-      follow_up_sent_at: new Date().toISOString(),
-    })
-    .eq("id", service.id);
-  if (error) throw error;
-
-  await supabase.from("email_queue").insert({
-    user_id: user.id,
-    customer_id: service.customer_id,
-    email_type: "declined_service_followup",
-    recipient_email: service.customer_email,
-    recipient_name: service.customer_name,
-    scheduled_for: new Date().toISOString(),
-    metadata: {
-      service_name: service.recommended_service,
+  await apiClient.post<{ data: null }>(
+    `/v1/declined-services/${encodeURIComponent(service.id)}/follow-up`,
+    {
+      workspace_id: currentWorkspace(),
+      customer_id: service.customer_id,
+      customer_email: service.customer_email ?? null,
+      customer_name: service.customer_name ?? null,
+      recommended_service: service.recommended_service,
       estimated_cost: service.estimated_cost,
       urgency: service.urgency,
     },
-  });
+  );
 }
 
 export async function markDeclinedServiceConverted(serviceId: string): Promise<void> {
-  const { error } = await supabase
-    .from("declined_services")
-    .update({
-      follow_up_status: "converted",
-      was_converted: true,
-      converted_at: new Date().toISOString(),
-    })
-    .eq("id", serviceId);
-  if (error) throw error;
+  await apiClient.post<{ data: null }>(
+    `/v1/declined-services/${encodeURIComponent(serviceId)}/convert`,
+    { workspace_id: currentWorkspace() },
+  );
 }

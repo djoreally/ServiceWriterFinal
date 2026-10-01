@@ -1,7 +1,13 @@
-/** Quotes Query — canonical workspace-scoped reads with a legacy UI adapter. */
-import { productionSupabase, supabase } from "@/integrations/supabase/client";
+/** Quotes Query — canonical workspace-scoped reads with a legacy UI adapter.
+ *
+ * Phase 2: all data access goes through the typed API client
+ * (`@/lib/api-client`) to the documents Hono router. The legacy UI
+ * adapter (tuple returns, uiStatus mapping) is preserved; exported
+ * signatures are unchanged.
+ */
+import { apiClient } from "@/lib/api-client";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
-import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
 export async function getCurrentUser() {
   const { data: { user } } = await getCurrentAuthUser();
@@ -26,37 +32,27 @@ function customerName(row: { first_name?: string | null; last_name?: string | nu
   return [row?.first_name, row?.last_name].filter(Boolean).join(" ").trim() || row?.company_name || "Customer";
 }
 
+interface PageDataResponse {
+  quotes: Array<Record<string, unknown>>;
+  customers: Array<{ id: string; first_name?: string | null; last_name?: string | null; company_name?: string | null }>;
+  vehicles: Array<{ id: string; customer_id: string | null; make: string; model: string; year: number; vin: string | null }>;
+  catalog: Array<{ id: string; name: string; description: string | null; labor_price: number | null; metadata: unknown }>;
+}
+
 export async function fetchQuotesPageData() {
-  const context = await resolveCurrentWorkspace();
-  if (!context) {
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) {
     const empty = { data: [], error: null };
     return [empty, empty, empty, empty, empty] as const;
   }
 
-  const client = productionSupabase;
-  const [quotesRes, customersRes, vehiclesRes, catalogRes] = await Promise.all([
-    client.from("quotes")
-      .select("id,workspace_id,customer_id,vehicle_id,work_order_id,status,subtotal,tax_total,total,expires_at,created_at,updated_at,metadata")
-      .eq("workspace_id", context.workspaceId)
-      .order("created_at", { ascending: false }),
-    client.from("customers")
-      .select("id,first_name,last_name,company_name")
-      .eq("workspace_id", context.workspaceId)
-      .neq("status", "archived")
-      .order("last_name"),
-    client.from("vehicles")
-      .select("id,customer_id,make,model,year,vin")
-      .eq("workspace_id", context.workspaceId)
-      .neq("status", "archived")
-      .order("created_at", { ascending: false }),
-    client.from("service_catalog")
-      .select("id,name,description,labor_price,metadata")
-      .eq("workspace_id", context.workspaceId)
-      .eq("is_active", true)
-      .order("name"),
-  ]);
+  const response = await apiClient.get<{ data: PageDataResponse }>(`/v1/quotes/page-data`, {
+    query: { workspace_id: workspaceId },
+  });
+  const { quotes: quoteRows = [], customers: customerRows = [], vehicles: vehicleRows = [], catalog: catalogRows = [] } =
+    response.data ?? {};
 
-  const quotes = (quotesRes.data ?? [])
+  const quotes = quoteRows
     .filter((row) => !object(row.metadata).archived_at)
     .map((row) => {
       const metadata = object(row.metadata);
@@ -64,9 +60,9 @@ export async function fetchQuotesPageData() {
         id: row.id,
         customer_id: row.customer_id,
         vehicle_id: row.vehicle_id,
-        quote_number: String(metadata.quote_number ?? `Q-${row.id.slice(0, 8).toUpperCase()}`),
-        quote_date: String(metadata.quote_date ?? row.created_at?.slice(0, 10) ?? ""),
-        valid_until: metadata.valid_until ?? row.expires_at?.slice(0, 10) ?? null,
+        quote_number: String(metadata.quote_number ?? `Q-${String(row.id).slice(0, 8).toUpperCase()}`),
+        quote_date: String(metadata.quote_date ?? String(row.created_at ?? "").slice(0, 10) ?? ""),
+        valid_until: metadata.valid_until ?? (typeof row.expires_at === "string" ? row.expires_at.slice(0, 10) : null),
         description: String(metadata.description ?? "Quote"),
         labor_hours: metadata.labor_hours == null ? null : Number(metadata.labor_hours),
         labor_cost: metadata.labor_cost == null ? null : Number(metadata.labor_cost),
@@ -80,32 +76,36 @@ export async function fetchQuotesPageData() {
     });
 
   return [
-    { data: quotes, error: quotesRes.error },
-    { data: (customersRes.data ?? []).map((row) => ({ id: row.id, name: customerName(row) })), error: customersRes.error },
-    { data: vehiclesRes.data ?? [], error: vehiclesRes.error },
+    { data: quotes, error: null },
+    { data: customerRows.map((row) => ({ id: String(row.id), name: customerName(row) })), error: null },
+    { data: vehicleRows, error: null },
     { data: [], error: null },
     {
-      data: (catalogRes.data ?? []).map((row) => {
+      data: catalogRows.map((row) => {
         const metadata = object(row.metadata);
         return {
-          id: row.id,
-          name: row.name,
-          description: row.description,
-          default_price: Number(metadata.default_price ?? row.labor_price),
+          id: String(row.id),
+          name: String(row.name ?? ""),
+          description: row.description ?? null,
+          default_price: Number(metadata.default_price ?? row.labor_price ?? 0),
           labor_rate: metadata.labor_rate == null ? null : Number(metadata.labor_rate),
         };
       }),
-      error: catalogRes.error,
+      error: null,
     },
   ] as const;
 }
 
 export async function fetchQuoteItems(quoteId: string) {
-  const context = await resolveCurrentWorkspace();
-  if (!context) return { data: [], error: null };
-  return (supabase.from("quote_items") as any)
-    .select("id,quote_id,inventory_item_id,description,quantity,unit_price,total_price")
-    .eq("workspace_id", context.workspaceId)
-    .eq("quote_id", quoteId)
-    .order("created_at");
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) return { data: [], error: null };
+  try {
+    const response = await apiClient.get<{ data: unknown[] }>(
+      `/v1/quotes/${encodeURIComponent(quoteId)}/items`,
+      { query: { workspace_id: workspaceId } },
+    );
+    return { data: response.data ?? [], error: null };
+  } catch (error) {
+    return { data: [], error: error instanceof Error ? error : new Error("Failed to fetch quote items") };
+  }
 }

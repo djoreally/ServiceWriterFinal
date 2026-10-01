@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 
 export interface CanonicalCashReceipt {
   payment_record_id: string;
@@ -54,53 +54,61 @@ function taxDollars(metadata: Record<string, unknown>): number {
   return metadataDollars(pricingDetails, "taxAmount", "tax_amount");
 }
 
+interface PaymentReceiptRow {
+  id: string;
+  amount: number | null;
+  status: string;
+  provider: string | null;
+  paid_at: string | null;
+  created_at: string;
+  metadata: Record<string, unknown> | null;
+}
+
 /**
  * Canonical replacement for the retired cash_collection_receipts_v1 view.
- * Settled cash is periodized by payments.paid_at and always scoped to one workspace.
+ * Settled cash is periodized by payments.paid_at and always scoped to the
+ * caller's workspace (resolved server-side; the workspaceId param is
+ * compatibility-only).
  */
 export async function fetchCanonicalCashReceipts(params: {
   workspaceId: string;
   from: string;
   to?: string;
 }): Promise<{ data: CanonicalCashReceipt[]; error: unknown | null }> {
-  let query = supabase
-    .from("payments")
-    .select("id,amount,status,provider,paid_at,created_at,metadata")
-    .eq("workspace_id", params.workspaceId)
-    .in("status", ["succeeded", "partially_refunded", "refunded"])
-    .not("paid_at", "is", null)
-    .gte("paid_at", params.from)
-    .order("paid_at", { ascending: true });
+  try {
+    const { data } = await apiClient.get<{ data: PaymentReceiptRow[] }>("/v1/billing/cash-receipts", {
+      query: {
+        from: params.from,
+        ...(params.to ? { to: params.to } : {}),
+      },
+    });
+    return {
+      data: (data ?? []).map((row) => {
+        const metadata = object(row.metadata);
+        const amountDollars = Math.max(Number(row.amount ?? 0), 0);
+        const refundedDollars = refundDollars(row.status, amountDollars, metadata);
+        const collectedCents = dollarsToCents(amountDollars);
+        const refundedCents = dollarsToCents(refundedDollars);
+        const paymentType = metadata.payment_type ?? metadata.payment_method ?? row.provider ?? null;
+        const dataOrigin = metadata.data_origin ?? metadata.origin ?? null;
 
-  if (params.to) query = query.lte("paid_at", params.to);
-
-  const { data, error } = await query;
-  if (error) return { data: [], error };
-
-  return {
-    data: (data ?? []).map((row) => {
-      const metadata = object(row.metadata);
-      const amountDollars = Math.max(Number(row.amount ?? 0), 0);
-      const refundedDollars = refundDollars(row.status, amountDollars, metadata);
-      const collectedCents = dollarsToCents(amountDollars);
-      const refundedCents = dollarsToCents(refundedDollars);
-      const paymentType = metadata.payment_type ?? metadata.payment_method ?? row.provider ?? null;
-      const dataOrigin = metadata.data_origin ?? metadata.origin ?? null;
-
-      return {
-        payment_record_id: row.id,
-        payment_status: row.status,
-        payment_provider: row.provider,
-        collected_at: row.paid_at ?? row.created_at,
-        collected_cents: collectedCents,
-        refunded_cents: refundedCents,
-        net_collected_cents: Math.max(collectedCents - refundedCents, 0),
-        payment_type: paymentType == null ? null : String(paymentType),
-        tax_amount: dollarsToCents(taxDollars(metadata)),
-        data_origin: dataOrigin == null ? null : String(dataOrigin),
-        metadata,
-      };
-    }),
-    error: null,
-  };
+        return {
+          payment_record_id: row.id,
+          payment_status: row.status,
+          payment_provider: row.provider,
+          collected_at: row.paid_at ?? row.created_at,
+          collected_cents: collectedCents,
+          refunded_cents: refundedCents,
+          net_collected_cents: Math.max(collectedCents - refundedCents, 0),
+          payment_type: paymentType == null ? null : String(paymentType),
+          tax_amount: dollarsToCents(taxDollars(metadata)),
+          data_origin: dataOrigin == null ? null : String(dataOrigin),
+          metadata,
+        };
+      }),
+      error: null,
+    };
+  } catch (error) {
+    return { data: [], error: error instanceof ApiClientError ? new Error(error.message) : error };
+  }
 }

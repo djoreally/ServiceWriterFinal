@@ -26,7 +26,7 @@ import {
   setMinutes,
   startOfDay,
 } from "date-fns";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import {
   fetchWeatherForecast,
   getBlockedSlots,
@@ -163,10 +163,12 @@ export function useSuggestNextSlots(opts: Options) {
           const dateStr = format(date, "yyyy-MM-dd");
 
           // Fetch booked slots for the day (parallel to weather below).
-          const bookedPromise = supabase.rpc("get_booked_slots", {
-            business_user_id: opts.businessUserId,
-            booking_date: dateStr,
-          });
+          const bookedPromise = apiClient
+            .post<{ data: BookedSlot[] | null; error: unknown }>("/v1/appointments/booking-rpc", {
+              fn: "get_booked_slots",
+              params: { business_user_id: opts.businessUserId, booking_date: dateStr },
+            })
+            .then((response) => ({ data: response.data }));
 
           // Fetch weather only if Weather Guard is enabled and we have coords.
           const blockedTimes: Set<string> = new Set();

@@ -3,7 +3,7 @@
  * Write operations have been moved to public-booking.command.ts.
  */
 import { supabase } from "@/integrations/supabase/client";
-import { nextApi } from "@/lib/nextApiClient";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 import { z } from "zod";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 
@@ -79,10 +79,20 @@ export interface PublicSubscriptionPlan {
   display_order: number;
 }
 /** Fetch business profile via the safe versioned public RPC. */
+/** Public section read helper (profile, catalog, packages, slots, blocked_dates, settings). */
+async function fetchPublicSection(slug: string, section: string, date?: string) {
+  const { data } = await apiClient.get<{ data: unknown }>(
+    `/v1/public-booking/${encodeURIComponent(slug)}`,
+    { query: { section, ...(date ? { date } : {}) } },
+  );
+  return data;
+}
+
+/** Fetch business profile via the safe versioned public RPC. */
 export async function fetchPublicBookingProfile(slug: string) {
   try {
-    const response = await nextApi.publicBooking.get(slug, "profile");
-    return { data: [publicBookingProfileSchema.parse(response.data)], error: null as unknown };
+    const data = await fetchPublicSection(slug, "profile");
+    return { data: [publicBookingProfileSchema.parse(data)], error: null as unknown };
   } catch (error) {
     return { data: null, error };
   }
@@ -90,11 +100,10 @@ export async function fetchPublicBookingProfile(slug: string) {
 
 /** Fetch additional business settings (fees, payment provider, etc.). */
 export async function fetchBusinessFeeSettings(userId: string) {
-  return supabase
-    .from("business_profiles")
-    .select("oil_price_per_quart, waste_oil_fee_enabled, waste_oil_fee, shop_fee_enabled, shop_fee_type, shop_fee_value, shop_fee_description, surcharge_enabled, surcharge_type, surcharge_value, surcharge_description, payment_provider")
-    .eq("user_id", userId)
-    .single();
+  return apiClient.get<{ data: unknown; error: unknown }>(
+    "/v1/platform/public-booking/fee-settings",
+    { query: { user_id: userId } },
+  );
 }
 
 /**
@@ -106,8 +115,8 @@ export async function fetchBusinessFeeSettings(userId: string) {
  */
 export async function fetchPublicServiceCatalog(bookingSlug: string) {
   try {
-    const response = await nextApi.publicBooking.get(bookingSlug, "catalog");
-    return { data: response.data, error: null as unknown };
+    const data = await fetchPublicSection(bookingSlug, "catalog");
+    return { data, error: null as unknown };
   } catch (error) {
     return { data: null, error };
   }
@@ -117,8 +126,8 @@ export async function fetchPublicServiceCatalog(bookingSlug: string) {
 /** Fetch public service packages for a business. */
 export async function fetchPublicServicePackages(bookingSlug: string) {
   try {
-    const response = await nextApi.publicBooking.get(bookingSlug, "packages");
-    return { data: response.data, error: null as unknown };
+    const data = await fetchPublicSection(bookingSlug, "packages");
+    return { data, error: null as unknown };
   } catch (error) {
     return { data: null, error };
   }
@@ -134,14 +143,10 @@ export async function fetchPublicServicePackages(bookingSlug: string) {
  * tiers instead of the shop's own customer-facing plans.
  */
 export async function fetchPublicSubscriptionPlans(businessUserId: string) {
-  const { data, error } = await supabase
-    .from("subscription_plans")
-    .select(
-      "id, user_id, name, description, price, billing_cycle, features, included_services, max_services_per_cycle, is_active, display_order, tier, stripe_product_id, stripe_price_id, price_min, price_max, badge_label, badge_color, highlight, cta_label, created_at, updated_at",
-    )
-    .eq("user_id", businessUserId)
-    .eq("is_active", true)
-    .order("display_order", { ascending: true });
+  const { data, error } = await apiClient.get<{ data: any[] | null; error: unknown }>(
+    "/v1/platform/public-booking/subscription-plans",
+    { query: { user_id: businessUserId } },
+  );
 
   if (error) return { data: null as null, error };
 
@@ -176,8 +181,8 @@ export async function fetchPublicSubscriptionPlans(businessUserId: string) {
 /** Fetch booked slots for a specific date. */
 export async function fetchBookedSlotsForDate(bookingSlug: string, dateStr: string) {
   try {
-    const response = await nextApi.publicBooking.get(bookingSlug, "slots", dateStr);
-    return { data: response.data, error: null as unknown };
+    const data = await fetchPublicSection(bookingSlug, "slots", dateStr);
+    return { data, error: null as unknown };
   } catch (error) {
     return { data: null as unknown, error };
   }
@@ -207,12 +212,23 @@ export function subscribeToAppointmentChanges(
 
 /** Invoke tax calculation edge function. */
 export async function calculateTax(body: Record<string, unknown>) {
-  return supabase.functions.invoke("calculate-tax", { body });
+  try {
+    const { data } = await apiClient.post<{ data: unknown }>(
+      "/v1/platform/public-booking/calculate-tax",
+      body,
+    );
+    return { data, error: null };
+  } catch (error) {
+    return { data: null, error: error instanceof ApiClientError ? new Error(error.message) : error };
+  }
 }
 
 /** Insert blocked date record. */
 export async function fetchBlockedDates(userId: string) {
-  return supabase.from("blocked_dates").select("blocked_date").eq("user_id", userId);
+  return apiClient.get<{ data: unknown; error: unknown }>(
+    "/v1/platform/public-booking/blocked-dates",
+    { query: { user_id: userId } },
+  );
 }
 
 /**
@@ -224,7 +240,7 @@ export async function fetchPublicBlockedDates(bookingSlug: string): Promise<stri
   try {
     // Pass both params to disambiguate overloaded RPC (1-arg vs 2-arg variants).
     // Without this, PostgREST returns PGRST203 and the picker silently shows blocked days as bookable.
-    const { data } = await nextApi.publicBooking.get(bookingSlug, "blocked_dates");
+    const data = await fetchPublicSection(bookingSlug, "blocked_dates");
     return publicBlockedDatesSchema.parse(data).map((row) => row.blocked_date);
   } catch (e) {
     console.warn("[fetchPublicBlockedDates] threw:", e);
@@ -235,9 +251,9 @@ export async function fetchPublicBlockedDates(bookingSlug: string): Promise<stri
 /** Fetch extended business settings (fees, payment provider, square, weather guard). */
 export async function fetchPublicBusinessExtendedSettings(bookingSlug: string) {
   try {
-    const response = await nextApi.publicBooking.get(bookingSlug, "settings");
+    const data = await fetchPublicSection(bookingSlug, "settings");
     return {
-      data: response.data == null ? null : publicBusinessSettingsSchema.parse(response.data),
+      data: data == null ? null : publicBusinessSettingsSchema.parse(data),
       error: null as unknown,
     };
   } catch (error) {
@@ -247,11 +263,10 @@ export async function fetchPublicBusinessExtendedSettings(bookingSlug: string) {
 
 /** Fetch a customer account profile (name + phone) for the logged-in user. */
 export async function fetchBookingCustomerAccount(userId: string) {
-  return supabase
-    .from("customer_accounts")
-    .select("full_name, phone")
-    .eq("user_id", userId)
-    .maybeSingle();
+  return apiClient.get<{ data: { full_name: string | null; phone: string | null } | null; error: unknown }>(
+    "/v1/platform/public-booking/customer-account",
+    { query: { user_id: userId } },
+  );
 }
 
 /** Fetch the currently authenticated customer user (if present). */

@@ -1,8 +1,8 @@
 /**
  * Webhook Health Queries
- * Abstracts webhook_event_logs table access and replay edge function calls.
+ * Abstracts webhook event inspection and replay/dismiss actions.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface WebhookEventLog {
   id: string;
@@ -37,21 +37,10 @@ export interface WebhookStats {
 type WebhookFilter = "all" | "failed" | "dead_letter";
 
 export async function fetchWebhookEvents(filter: WebhookFilter): Promise<WebhookEventLog[]> {
-  let query = supabase
-    .from("webhook_event_logs")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(100);
-
-  if (filter === "failed") {
-    query = query.in("status", ["failed", "dead_letter"]);
-  } else if (filter === "dead_letter") {
-    query = query.eq("status", "dead_letter");
-  }
-
-  const { data, error } = await query;
-  if (error) throw error;
-  return (data || []) as unknown as WebhookEventLog[];
+  const { data } = await apiClient.get<{ data: WebhookEventLog[] }>("/v1/admin/webhook-events", {
+    query: { filter },
+  });
+  return data ?? [];
 }
 
 export function calculateWebhookStats(events: WebhookEventLog[]): WebhookStats {
@@ -73,27 +62,17 @@ export function calculateWebhookStats(events: WebhookEventLog[]): WebhookStats {
 }
 
 export async function replayWebhookEvent(eventLogId: string): Promise<void> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error("Not authenticated");
-
-  const { data, error } = await supabase.functions.invoke("replay-webhook-event", {
-    body: { event_log_id: eventLogId, action: "replay" },
-    headers: { Authorization: `Bearer ${session.access_token}` },
-  });
-
-  if (error) throw error;
+  const { data } = await apiClient.post<{ data: { error?: string } | null }>(
+    `/v1/admin/webhook-events/${eventLogId}/replay`,
+    {},
+  );
   if (data?.error) throw new Error(data.error);
 }
 
 export async function dismissWebhookEvent(eventLogId: string): Promise<void> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error("Not authenticated");
-
-  const { data, error } = await supabase.functions.invoke("replay-webhook-event", {
-    body: { event_log_id: eventLogId, action: "dismiss" },
-    headers: { Authorization: `Bearer ${session.access_token}` },
-  });
-
-  if (error) throw error;
+  const { data } = await apiClient.post<{ data: { error?: string } | null }>(
+    `/v1/admin/webhook-events/${eventLogId}/dismiss`,
+    {},
+  );
   if (data?.error) throw new Error(data.error);
 }

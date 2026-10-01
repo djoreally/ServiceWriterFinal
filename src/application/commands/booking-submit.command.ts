@@ -3,9 +3,22 @@
  * operations performed during the public booking flow. Keeps useBookingSubmit
  * free of direct Supabase references.
  */
+import { apiClient } from "@/lib/api-client";
 import { supabase } from "@/integrations/supabase/client";
+import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import type { Json } from "@/integrations/supabase/types.production";
 import type { AppointmentBookingConfiguration } from "@/lib/booking-configuration";
+
+/**
+ * Whitelisted public-booking RPCs are proxied by the appointments domain.
+ * The proxy returns the same { data, error } shape as supabase.rpc.
+ */
+function bookingRpc<T = unknown>(fn: string, params: Record<string, unknown>) {
+  return apiClient.post<{ data: T | null; error: { message: string } | null }>(
+    "/v1/appointments/booking-rpc",
+    { fn, params },
+  );
+}
 
 const vehiclePersistenceFailures = new Set<string>();
 function bookingVehicleKey(slug: string, email: string) {
@@ -57,7 +70,7 @@ export interface UpsertCustomerParams {
 
 export async function upsertBookingCustomer(params: UpsertCustomerParams) {
   vehiclePersistenceFailures.delete(bookingVehicleKey(params.p_booking_slug, params.p_email));
-  return supabase.rpc("public_booking_upsert_customer", params);
+  return bookingRpc<string>("public_booking_upsert_customer", params as unknown as Record<string, unknown>);
 }
 
 // ---------------------------------------------------------------------------
@@ -82,7 +95,7 @@ export interface UpsertBookingVehicleParams {
 
 export async function upsertBookingVehicle(params: UpsertBookingVehicleParams) {
   const key = bookingVehicleKey(params.p_booking_slug, params.p_customer_email);
-  const result = await supabase.rpc("public_booking_upsert_vehicle", params as never);
+  const result = await bookingRpc<string>("public_booking_upsert_vehicle", params as unknown as Record<string, unknown>);
   if (result.error || !result.data) vehiclePersistenceFailures.add(key);
   return result;
 }
@@ -118,14 +131,14 @@ export async function bookAppointmentSafe(params: BookAppointmentSafeParams) {
   if (!params.p_vehicle_id) {
     throw new Error("BOOKING_VEHICLE_REQUIRED");
   }
-  return supabase.rpc("public_booking_book_appointment_v2" as never, {
+  return bookingRpc<string>("public_booking_book_appointment_v2", {
     ...params,
     p_status: params.p_status ?? "confirmed",
-  } as never);
+  } as unknown as Record<string, unknown>);
 }
 
 export async function assignVanByZip(userId: string, zipCode: string) {
-  return supabase.rpc("assign_van_by_zip", { p_user_id: userId, p_zip_code: zipCode });
+  return bookingRpc("assign_van_by_zip", { p_user_id: userId, p_zip_code: zipCode });
 }
 
 export async function updateBookingAppointment(
@@ -137,7 +150,7 @@ export async function updateBookingAppointment(
   const bookingSlug = currentPublicBookingSlug();
   if (!bookingSlug) throw new Error("BOOKING_CONTEXT_INVALID");
 
-  return supabase.rpc("public_booking_update_appointment_context_v2" as never, {
+  return bookingRpc("public_booking_update_appointment_context_v2", {
     p_booking_slug: bookingSlug,
     p_appointment_id: appointmentId,
     p_customer_email: customerEmail,
@@ -146,7 +159,7 @@ export async function updateBookingAppointment(
     p_location_address: optionalText(payload.location_address),
     p_location_lat: optionalFiniteNumber(payload.location_lat),
     p_location_lng: optionalFiniteNumber(payload.location_lng),
-  } as never);
+  });
 }
 
 export async function saveAppointmentBookingConfiguration(
@@ -156,17 +169,17 @@ export async function saveAppointmentBookingConfiguration(
   customerPhone: string,
   configuration: AppointmentBookingConfiguration,
 ) {
-  return supabase.rpc("public_booking_save_configuration_v2" as never, {
+  return bookingRpc("public_booking_save_configuration_v2", {
     p_booking_slug: bookingSlug,
     p_appointment_id: appointmentId,
     p_customer_email: customerEmail,
     p_customer_phone: customerPhone,
     p_configuration: configuration as unknown as Json,
-  } as never);
+  } as unknown as Record<string, unknown>);
 }
 
 export async function reserveTireInventoryForAppointment(appointmentId:string,businessUserId:string,inventoryItemId:string,quantity:number){
-  return supabase.rpc("reserve_tire_inventory_for_appointment" as never,{p_appointment_id:appointmentId,p_business_user_id:businessUserId,p_inventory_item_id:inventoryItemId,p_quantity:quantity} as never);
+  return bookingRpc("reserve_tire_inventory_for_appointment",{p_appointment_id:appointmentId,p_business_user_id:businessUserId,p_inventory_item_id:inventoryItemId,p_quantity:quantity});
 }
 
 // ---------------------------------------------------------------------------
@@ -189,13 +202,13 @@ export async function insertBookingAppointmentServices(
   customerPhone: string,
   services: BookingServiceItem[],
 ) {
-  return supabase.rpc("public_booking_insert_services_v7" as never, {
+  return bookingRpc("public_booking_insert_services_v7", {
     p_booking_slug: bookingSlug,
     p_appointment_id: appointmentId,
     p_customer_email: customerEmail,
     p_customer_phone: customerPhone,
     p_services: services as unknown as Json,
-  } as never);
+  } as unknown as Record<string, unknown>);
 }
 
 // ---------------------------------------------------------------------------
@@ -227,7 +240,7 @@ export interface BookingPaymentRecordInput {
  * zero-collected intent row. Idempotent per appointment.
  */
 export async function insertBookingPaymentRecord(record: BookingPaymentRecordInput) {
-  const { data, error } = await supabase.rpc("public_booking_record_payment_intent_v3" as never, {
+  const { data, error } = await bookingRpc<string>("public_booking_record_payment_intent_v3", {
     p_booking_slug: record.booking_slug,
     p_appointment_id: record.appointment_id,
     p_amount: Math.round(record.amount),
@@ -238,7 +251,7 @@ export async function insertBookingPaymentRecord(record: BookingPaymentRecordInp
     p_customer_email: record.customer_email,
     p_customer_phone: record.customer_phone,
     p_customer_name: record.customer_name,
-  } as never);
+  });
   if (error) throw error;
   return { data: data ? { id: data as string } : null, error: null as null };
 }
@@ -274,9 +287,9 @@ export interface CreateCustomerAccountParams {
 }
 
 export async function createCustomerAccount(_params: CreateCustomerAccountParams) {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) return { data: null, error: null };
-  return supabase.rpc("link_customer_portal_account_v1" as never, {} as never);
+  const { data: { user } } = await getCurrentAuthUser();
+  if (!user) return { data: null, error: null };
+  return bookingRpc("link_customer_portal_account_v1", {});
 }
 
 // ---------------------------------------------------------------------------
@@ -307,11 +320,11 @@ export interface BookingConsentInput {
 }
 
 export async function recordBookingConsent(input: BookingConsentInput) {
-  const { signature, ...body } = input;
-  return supabase.functions.invoke("record-booking-consent", {
-    body,
-    headers: signature ? { "x-hmac-signature": signature } : {},
-  });
+  const { data, error } = await apiClient.post<{ data: unknown; error: { message: string } | null }>(
+    "/v1/platform/booking/record-consent",
+    { ...input },
+  );
+  return { data, error };
 }
 
 // ---------------------------------------------------------------------------
@@ -349,10 +362,9 @@ export async function lookupBookingRewards(
   providerId: string,
   email: string,
 ): Promise<BookingRewardLookupResult> {
-  const { data, error } = await supabase.rpc("lookup_booking_rewards", {
+  const { data, error } = await bookingRpc("lookup_booking_rewards", {
     p_provider_id: providerId,
     p_email: email,
-    p_customer_account_id: undefined,
   });
   if (error) throw new Error(error.message);
 
@@ -392,7 +404,7 @@ export async function reserveBookingReward(params: {
   idempotencyKey?: string;
   reservationMinutes?: number;
 }): Promise<BookingRewardLifecycleResult> {
-  const { data, error } = await supabase.rpc("reserve_booking_reward", {
+  const { data, error } = await bookingRpc("reserve_booking_reward", {
     p_reward_instance_id: params.rewardInstanceId,
     p_appointment_id: params.appointmentId,
     p_provider_id: params.providerId,
@@ -412,10 +424,10 @@ export async function applyBookingReward(params: {
   taxCents: number;
   idempotencyKey?: string;
 }): Promise<BookingRewardLifecycleResult> {
-  const { data, error } = await supabase.rpc("apply_booking_reward", {
+  const { data, error } = await bookingRpc("apply_booking_reward", {
     p_reward_instance_id: params.rewardInstanceId,
     p_appointment_id: params.appointmentId,
-    p_payment_record_id: params.paymentRecordId ?? undefined,
+    p_payment_record_id: params.paymentRecordId ?? null,
     p_subtotal_cents: params.subtotalCents,
     p_tax_cents: params.taxCents,
     p_idempotency_key: params.idempotencyKey,
@@ -430,10 +442,10 @@ export async function redeemBookingReward(params: {
   paymentRecordId?: string | null;
   idempotencyKey?: string;
 }): Promise<BookingRewardLifecycleResult> {
-  const { data, error } = await supabase.rpc("redeem_booking_reward", {
+  const { data, error } = await bookingRpc("redeem_booking_reward", {
     p_reward_instance_id: params.rewardInstanceId,
     p_appointment_id: params.appointmentId,
-    p_payment_record_id: params.paymentRecordId ?? undefined,
+    p_payment_record_id: params.paymentRecordId ?? null,
     p_idempotency_key: params.idempotencyKey,
   });
   if (error) throw new Error(error.message);
@@ -445,9 +457,9 @@ export async function cancelBookingReward(params: {
   appointmentId?: string | null;
   reason?: string;
 }): Promise<BookingRewardLifecycleResult> {
-  const { data, error } = await supabase.rpc("cancel_booking_reward", {
+  const { data, error } = await bookingRpc("cancel_booking_reward", {
     p_reward_instance_id: params.rewardInstanceId,
-    p_appointment_id: params.appointmentId ?? undefined,
+    p_appointment_id: params.appointmentId ?? null,
     p_reason: params.reason ?? "booking_cancelled_or_failed",
   });
   if (error) throw new Error(error.message);
@@ -476,7 +488,7 @@ export interface SetVehicleTireSpecParams {
  * appointments carry the confirmed tire size (OE or override).
  */
 export async function setVehicleTireSpec(params: SetVehicleTireSpecParams) {
-  return supabase.rpc("public_booking_set_vehicle_tire_spec_v3" as never, {
+  return bookingRpc("public_booking_set_vehicle_tire_spec_v3", {
     p_booking_slug: params.p_booking_slug,
     p_customer_email: params.p_customer_email,
     p_customer_phone: params.p_customer_phone,
@@ -487,5 +499,5 @@ export async function setVehicleTireSpec(params: SetVehicleTireSpecParams) {
     p_tire_size_rear: params.p_tire_size_rear ?? null,
     p_tire_load_index: params.p_tire_load_index ?? null,
     p_tire_speed_rating: params.p_tire_speed_rating ?? null,
-  } as never);
+  });
 }

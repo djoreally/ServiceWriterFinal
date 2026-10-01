@@ -1,11 +1,9 @@
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { MarketingSiteFooter, MarketingSiteHeader } from "@/components/layout/MarketingSiteChrome";
 
 export default function MarketingVideos() {
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <MarketingSiteHeader />
       <main>
         <section className="py-20 lg:py-28">
           <div className="mx-auto max-w-5xl px-6 text-center lg:px-8">
@@ -92,7 +90,6 @@ export default function MarketingVideos() {
           </div>
         </section>
       </main>
-      <MarketingSiteFooter />
     </div>
   );
 }

@@ -1,6 +1,7 @@
-import { SUPABASE_PUBLISHABLE_KEY_RESOLVED, SUPABASE_URL_RESOLVED } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 /**
- * Hits the public GET probe of the `sync-appointment-to-provider` edge function.
+ * Hits the public GET probe of the `sync-appointment-to-provider` edge function
+ * (proxied through the platform API).
  * Used by the AppointmentSyncCard so we can confirm the deployed function
  * matches the source we expect before re-running a sync.
  */
@@ -13,15 +14,5 @@ export interface SyncFunctionVersion {
 }
 
 export async function fetchSyncFunctionVersion(): Promise<SyncFunctionVersion> {
-  const url = `${SUPABASE_URL_RESOLVED}/functions/v1/sync-appointment-to-provider`;
-  const res = await fetch(url, {
-    method: "GET",
-    headers: {
-      apikey: SUPABASE_PUBLISHABLE_KEY_RESOLVED,
-    },
-  });
-  if (!res.ok) {
-    throw new Error(`Version probe failed (${res.status})`);
-  }
-  return res.json();
+  return apiClient.get("/v1/platform/provider-sync/function-version");
 }

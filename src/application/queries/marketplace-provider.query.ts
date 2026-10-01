@@ -2,7 +2,7 @@
  * Provider Marketplace Dashboard — read-only data access.
  * Scoped to the authenticated provider (business_profiles.user_id = auth.uid()).
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export const MARKETPLACE_BOOKING_SOURCE = "provider_directory";
 export const MARKETPLACE_VIEW_EVENT = "marketplace_profile_view";
@@ -64,14 +64,13 @@ const LISTING_COLUMNS = [
 ].join(", ");
 
 export async function fetchMarketplaceListing(userId: string): Promise<MarketplaceListing | null> {
-  const { data, error } = await supabase
-    .from("business_profiles")
-    .select(LISTING_COLUMNS)
-    .eq("user_id", userId)
-    .maybeSingle();
+  const { data } = await apiClient.get<{ data: Record<string, unknown> | null }>(
+    "/v1/platform/marketplace/listing",
+    { query: { user_id: userId } },
+  );
 
-  if (error || !data) return null;
-  const row = data as unknown as Record<string, unknown>;
+  if (!data) return null;
+  const row = data;
 
   return {
     business_name: (row.business_name as string) ?? "",
@@ -131,41 +130,26 @@ export async function fetchMarketplaceMetrics(
 ): Promise<MarketplaceMetrics> {
   const since = scope === "month" ? monthStartIso() : null;
 
-  const countEvent = (eventName: string) => {
-    let q = supabase
-      .from("analytics_events")
-      .select("id", { count: "exact", head: true })
-      .eq("tenant_id", userId)
-      .eq("event_name", eventName);
-    if (since) q = q.gte("created_at", since);
-    return q;
-  };
+  const query: Record<string, string> = { user_id: userId };
+  if (since) query.since = since;
+  const res = await apiClient.get<{
+    impressions: number;
+    views: number;
+    bookingClicks: number;
+    quoteClicks: number;
+    appointments: { status: string | null; estimated_cost: number | null }[];
+  }>("/v1/platform/marketplace/metrics", { query });
 
-  let apptQuery = supabase
-    .from("appointments")
-    .select("status, estimated_cost, created_at")
-    .eq("user_id", userId)
-    .eq("source", MARKETPLACE_BOOKING_SOURCE);
-  if (since) apptQuery = apptQuery.gte("created_at", since);
-
-  const [impressionsRes, viewsRes, bookingClicksRes, quoteClicksRes, { data: appointments }] = await Promise.all([
-    countEvent(FUNNEL_EVENTS.impressions),
-    countEvent(FUNNEL_EVENTS.views),
-    countEvent(FUNNEL_EVENTS.bookingClicks),
-    countEvent(FUNNEL_EVENTS.quoteClicks),
-    apptQuery,
-  ]);
-
-  const rows = (appointments || []) as { status: string | null; estimated_cost: number | null }[];
+  const rows = res.appointments || [];
   const completedRows = rows.filter((r) => r.status === "completed");
   const revenue = completedRows.reduce((sum, r) => sum + Number(r.estimated_cost ?? 0), 0);
-  const viewCount = viewsRes.count ?? 0;
+  const viewCount = res.views ?? 0;
 
   return {
-    impressions: impressionsRes.count ?? 0,
+    impressions: res.impressions ?? 0,
     views: viewCount,
-    bookingClicks: bookingClicksRes.count ?? 0,
-    quoteClicks: quoteClicksRes.count ?? 0,
+    bookingClicks: res.bookingClicks ?? 0,
+    quoteClicks: res.quoteClicks ?? 0,
     bookings: rows.length,
     completed: completedRows.length,
     revenue,
@@ -189,15 +173,10 @@ export interface MarketplaceLead {
 }
 
 export async function fetchMarketplaceLeads(userId: string): Promise<MarketplaceLead[]> {
-  const { data } = await supabase
-    .from("appointments")
-    .select(
-      "id, title, status, scheduled_date, scheduled_time, guest_name, guest_email, guest_phone, estimated_cost, customers(name), vehicles(year, make, model)",
-    )
-    .eq("user_id", userId)
-    .eq("source", MARKETPLACE_BOOKING_SOURCE)
-    .order("scheduled_date", { ascending: true })
-    .limit(100);
+  const { data } = await apiClient.get<{ data: Array<Record<string, any>> }>(
+    "/v1/platform/marketplace/leads",
+    { query: { user_id: userId } },
+  );
 
   return (data || []).map((row) => ({
     id: row.id,
@@ -226,11 +205,10 @@ export interface MarketplaceService {
 }
 
 export async function fetchMarketplaceServices(userId: string): Promise<MarketplaceService[]> {
-  const { data } = await supabase
-    .from("service_catalog")
-    .select("id, name, description, default_price, estimated_duration, is_active")
-    .eq("user_id", userId)
-    .order("name", { ascending: true });
+  const { data } = await apiClient.get<{ data: Array<Record<string, any>> }>(
+    "/v1/platform/marketplace/services",
+    { query: { user_id: userId } },
+  );
 
   return (data || []).map((row) => ({
     id: row.id,
@@ -254,13 +232,10 @@ export interface MarketplaceReview {
 }
 
 export async function fetchMarketplaceReviews(userId: string): Promise<MarketplaceReview[]> {
-  const { data } = await supabase
-    .from("testimonials")
-    .select("id, customer_name, content, rating, created_at, provider_reply, provider_replied_at, status")
-    .eq("user_id", userId)
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false })
-    .limit(100);
+  const { data } = await apiClient.get<{ data: Array<Record<string, any>> }>(
+    "/v1/platform/marketplace/reviews",
+    { query: { user_id: userId } },
+  );
 
   return (data || []).map((row) => ({
     id: row.id,

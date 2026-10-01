@@ -4,7 +4,7 @@
  * All mutations route through the security-definer RPCs that own grouping,
  * cascaded assignment, and dispatch audit events.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface CreateFleetJobResult {
   jobId: string;
@@ -12,33 +12,16 @@ export interface CreateFleetJobResult {
   workOrders: number;
 }
 
-const FLEET_JOB_ERROR_MESSAGES: Record<string, string> = {
-  fleet_job_access_denied: "You do not have permission to manage fleet jobs.",
-  fleet_assignment_access_denied: "You do not have permission to assign fleet jobs.",
-};
-
-function formatFleetJobError(message?: string): string {
-  if (!message) return "Fleet job operation failed";
-  return FLEET_JOB_ERROR_MESSAGES[message] ?? message;
-}
-
 /** Group one or more same-client vehicle work orders into a dispatchable site visit. */
 export async function createFleetJobFromWorkOrders(
   workOrderIds: string[],
   notes?: string,
 ): Promise<CreateFleetJobResult> {
-  const { data, error } = await supabase.rpc("create_fleet_job_for_work_orders_v1", {
-    p_work_order_ids: workOrderIds,
-    ...(notes ? { p_notes: notes } : {}),
-  });
-  if (error) throw new Error(formatFleetJobError(error.message));
-
-  const payload = data as { job_id?: string; job_number?: string | null; work_orders?: number } | null;
-  return {
-    jobId: payload?.job_id ?? "",
-    jobNumber: payload?.job_number ?? null,
-    workOrders: payload?.work_orders ?? workOrderIds.length,
-  };
+  const { data } = await apiClient.post<{ data: CreateFleetJobResult }>(
+    "/v1/fleet/jobs/from-work-orders",
+    { work_order_ids: workOrderIds, notes: notes ?? null },
+  );
+  return data;
 }
 
 /**
@@ -53,13 +36,14 @@ export async function assignFleetJob(input: {
   start: string;
   durationMinutes?: number;
 }): Promise<number> {
-  const { data, error } = await supabase.rpc("assign_fleet_job_v1", {
-    p_job_id: input.jobId,
-    p_technician_id: input.technicianId,
-    p_date: input.date,
-    p_start: input.start,
-    p_duration_minutes: input.durationMinutes ?? 60,
-  });
-  if (error) throw new Error(formatFleetJobError(error.message));
-  return Number((data as { assigned_work_orders?: number } | null)?.assigned_work_orders ?? 0);
+  const { data } = await apiClient.post<{ data: { assignedWorkOrders: number } }>(
+    `/v1/fleet/jobs/${input.jobId}/assign`,
+    {
+      technician_id: input.technicianId,
+      date: input.date,
+      start: input.start,
+      duration_minutes: input.durationMinutes ?? 60,
+    },
+  );
+  return data.assignedWorkOrders;
 }

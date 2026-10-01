@@ -1,6 +1,5 @@
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
-const db = supabase as any;
 export type FleetPortalVehicle = { id: string; unit_number: string | null; year: number | null; make: string | null; model: string | null; vin: string | null; license_plate: string | null; mileage: number | null; status: string };
 export type FleetPortalRequest = { id: string; subject: string; status: string; priority: string; received_at: string; vehicle_id: string | null };
 export type FleetPortalWorkOrder = { id: string; order_number: string | null; status: string; service_type: string | null; scheduled_date: string | null; scheduled_time: string | null; vehicle_id: string; total: number };
@@ -14,16 +13,18 @@ export type FleetManagerPortal = {
 };
 
 export async function fetchFleetManagerPortal(clientId?: string): Promise<FleetManagerPortal> {
-  const { data, error } = await db.rpc("get_fleet_manager_portal_v1", { p_client_id: clientId ?? null });
-  if (error) throw error;
+  const params = new URLSearchParams();
+  if (clientId) params.set("client_id", clientId);
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const { data } = await apiClient.get<{ data: FleetManagerPortal }>(`/v1/fleet/manager-portal${query}`);
   return data as FleetManagerPortal;
 }
 export async function createFleetPortalRequest(input: { clientId: string; vehicleId?: string; subject: string; summary: string; priority: string }): Promise<string> {
-  const { data, error } = await db.rpc("create_fleet_portal_service_request_v1", { p_client_id: input.clientId, p_vehicle_id: input.vehicleId ?? null, p_subject: input.subject, p_summary: input.summary, p_priority: input.priority });
-  if (error) throw error;
-  return String(data);
+  const { data } = await apiClient.post<{ data: { id: string } }>("/v1/fleet/manager-portal/requests", {
+    input,
+  });
+  return String(data.id);
 }
 export async function respondFleetPortalApproval(id: string, status: "approved" | "rejected", notes?: string): Promise<void> {
-  const { error } = await db.rpc("respond_fleet_portal_approval_v1", { p_approval_id: id, p_status: status, p_notes: notes ?? null });
-  if (error) throw error;
+  await apiClient.post(`/v1/fleet/manager-portal/approvals/${id}/respond`, { status, notes: notes ?? null });
 }

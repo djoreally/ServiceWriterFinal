@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { signInWithPassword, signUpWithEmail } from "@/application/commands/auth.command";
+import { apiClient } from "@/lib/api-client";
 import { supabase } from "@/integrations/supabase/client";
 import { nextApi, type InvitationRecord } from "@/lib/nextApiClient";
 
@@ -67,11 +68,11 @@ export default function InvitationAccept() {
     let cancelled = false;
     void (async () => {
       try {
-        const response = await fetch(`/api/v1/invitations/${encodeURIComponent(invitationId)}?token=${encodeURIComponent(token)}`, {
-          headers: { Accept: "application/json" },
-        });
-        const payload = await response.json().catch(() => null) as { data?: InvitationPreview; error?: { message?: string } } | null;
-        if (!response.ok || !payload?.data) throw new Error(payload?.error?.message || "This invitation link is invalid or expired.");
+        const payload = await apiClient.get<{ data?: InvitationPreview }>(
+          `/v1/invitations/${encodeURIComponent(invitationId)}`,
+          { query: { token } },
+        );
+        if (!payload?.data) throw new Error("This invitation link is invalid or expired.");
         if (cancelled) return;
         setPreview(payload.data);
 

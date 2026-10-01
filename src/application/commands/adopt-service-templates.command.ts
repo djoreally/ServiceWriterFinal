@@ -1,5 +1,5 @@
 /** Copy selected starter-library services into the active workspace catalog. */
-import { productionSupabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { invalidateCatalogItems } from "@/application/queries/service-catalog.query";
 import type { ServiceTemplate } from "@/application/queries/service-templates.query";
@@ -60,8 +60,7 @@ export async function adoptServiceTemplates(adoptions: TemplateAdoption[]): Prom
   });
   });
 
-  const { error } = await (productionSupabase as any).from("service_catalog").insert(rows);
-  if (error) throw error;
+  await apiClient.post("/v1/catalog/items", { workspace_id: context.workspaceId, rows });
   invalidateCatalogItems(context.workspaceId);
   return rows.length;
 }

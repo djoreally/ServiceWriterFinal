@@ -1,7 +1,7 @@
 /**
  * Customer Portal Commands — Write operations for the customer-facing portal.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 /** Reschedule an appointment by management token. */
 export async function rescheduleAppointment(
@@ -9,17 +9,17 @@ export async function rescheduleAppointment(
   newDate: string,
   newTime: string,
 ): Promise<{ success: boolean; message?: string }> {
-  const { data, error } = await supabase.rpc("reschedule_appointment_by_token", {
-    p_management_token: managementToken,
-    p_new_date: newDate,
-    p_new_time: newTime,
-  });
+  const { data } = await apiClient.post<{ data: { success: boolean; message?: string } }>(
+    "/v1/crm/customer-portal/appointments/reschedule-by-token",
+    {
+      management_token: managementToken,
+      new_date: newDate,
+      new_time: newTime,
+    },
+  );
 
-  if (error) throw error;
-
-  const result = data as Record<string, unknown> | null;
-  if (result?.success === false) {
-    return { success: false, message: result.message as string };
+  if (data?.success === false) {
+    return { success: false, message: data.message };
   }
   return { success: true };
 }

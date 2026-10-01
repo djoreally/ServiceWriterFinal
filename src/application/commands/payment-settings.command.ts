@@ -1,55 +1,24 @@
-/** Payment Settings Commands — canonical workspace-backed writes. */
-import { productionSupabase } from "@/integrations/supabase/client";
+/** Payment Settings Commands — canonical workspace-backed writes, via the Hono billing API. */
+import { apiClient, ApiClientError } from "@/lib/api-client";
 import type { PaymentSettingsData } from "@/application/queries/payment-settings.query";
-import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
 
-const db = productionSupabase as any;
-
-async function requireContext() {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) throw new Error("Not authenticated");
-  const workspace = await resolveCurrentWorkspace();
-  if (!workspace) throw new Error("No active workspace is available.");
-  return { userId: user.id, workspaceId: workspace.workspaceId };
-}
-
-function object(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+function toError(error: unknown, fallback: string): Error {
+  if (error instanceof ApiClientError) {
+    if (error.status === 401) return new Error("Not authenticated");
+    if (error.code === "workspace_missing") return new Error("No active workspace is available.");
+    return new Error(error.message);
+  }
+  return new Error(fallback);
 }
 
 export async function savePaymentSettings(settings: PaymentSettingsData): Promise<void> {
-  const { workspaceId } = await requireContext();
-  const current = await db.from("workspace_settings").select("operational_settings").eq("workspace_id", workspaceId).maybeSingle();
-  if (current.error) throw current.error;
-  const operational = {
-    ...object(current.data?.operational_settings),
-    accept_deposits: settings.accept_deposits,
-    deposit_percentage: settings.deposit_percentage,
-    phone_as_coupon_enabled: settings.phone_as_coupon_enabled,
-    phone_coupon_discount_type: settings.phone_coupon_discount_type,
-    phone_coupon_discount_value: settings.phone_coupon_discount_value,
-    phone_coupon_min_order_amount: settings.phone_coupon_min_order_amount,
-    phone_coupon_description: settings.phone_coupon_description,
-  };
-  const { error } = await db.from("workspace_settings").upsert({
-    workspace_id: workspaceId,
-    tax_rate: settings.tax_rate,
-    oil_price_per_quart: settings.oil_price_per_quart,
-    surcharge_enabled: settings.surcharge_enabled,
-    surcharge_type: settings.surcharge_type,
-    surcharge_value: settings.surcharge_value,
-    surcharge_description: settings.surcharge_description,
-    waste_oil_fee_enabled: settings.waste_oil_fee_enabled,
-    waste_oil_fee: settings.waste_oil_fee,
-    shop_fee_enabled: settings.shop_fee_enabled,
-    shop_fee_type: settings.shop_fee_type,
-    shop_fee_value: settings.shop_fee_value,
-    shop_fee_description: settings.shop_fee_description,
-    operational_settings: operational,
-    updated_at: new Date().toISOString(),
-  }, { onConflict: "workspace_id" });
-  if (error) throw error;
+  try {
+    // The server resolves the workspace from the auth token, merges the
+    // operational_settings, and upserts the workspace_settings row.
+    await apiClient.put("/v1/billing/payment-settings", settings);
+  } catch (error) {
+    throw toError(error, "Failed to save payment settings");
+  }
 }
 
 export async function saveCoupon(couponData: {
@@ -61,25 +30,29 @@ export async function saveCoupon(couponData: {
   max_uses: number | null;
   valid_until: string | null;
 }, editingId?: string): Promise<void> {
-  const { userId, workspaceId } = await requireContext();
-  const payload = { ...couponData, workspace_id: workspaceId, user_id: userId };
-  if (editingId) {
-    const { error } = await db.from("coupon_codes").update(payload).eq("workspace_id", workspaceId).eq("id", editingId);
-    if (error) throw error;
-  } else {
-    const { error } = await db.from("coupon_codes").insert(payload);
-    if (error) throw error;
+  try {
+    if (editingId) {
+      await apiClient.put(`/v1/billing/coupons/${editingId}`, couponData);
+    } else {
+      await apiClient.post("/v1/billing/coupons", couponData);
+    }
+  } catch (error) {
+    throw toError(error, "Failed to save coupon");
   }
 }
 
 export async function deleteCoupon(couponId: string): Promise<void> {
-  const { workspaceId } = await requireContext();
-  const { error } = await db.from("coupon_codes").delete().eq("workspace_id", workspaceId).eq("id", couponId);
-  if (error) throw error;
+  try {
+    await apiClient.delete(`/v1/billing/coupons/${couponId}`);
+  } catch (error) {
+    throw toError(error, "Failed to delete coupon");
+  }
 }
 
 export async function toggleCouponActive(couponId: string, isActive: boolean): Promise<void> {
-  const { workspaceId } = await requireContext();
-  const { error } = await db.from("coupon_codes").update({ is_active: isActive }).eq("workspace_id", workspaceId).eq("id", couponId);
-  if (error) throw error;
+  try {
+    await apiClient.patch(`/v1/billing/coupons/${couponId}`, { is_active: isActive });
+  } catch (error) {
+    throw toError(error, "Failed to update coupon");
+  }
 }

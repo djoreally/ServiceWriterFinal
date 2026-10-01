@@ -1,7 +1,6 @@
 import { Q, type Model } from '@nozbe/watermelondb';
 import { getOfflineDatabase } from '@/offline/database';
-import { supabase } from '@/integrations/supabase/client';
-import type { Database } from '@/integrations/supabase/types';
+import { apiClient } from '@/lib/api-client';
 import { isOfflineEligibleForCurrentUser } from '@/offline/rollout';
 import { getRuntimeEnvString } from '@/lib/runtime-env';
 
@@ -73,8 +72,37 @@ function resolveMaxRetryAttempts(): number {
 
 const MAX_RETRY_ATTEMPTS = resolveMaxRetryAttempts(); // Escalate to dead-letter after this many attempts
 
-type ServiceCatalogInsert = Database['public']['Tables']['service_catalog']['Insert'];
-type ServiceCatalogUpdate = Database['public']['Tables']['service_catalog']['Update'];
+/**
+ * Marker for mutations that cannot be replayed because the server has no
+ * endpoint for the operation yet. These are parked in dead-letter (kept for
+ * operator retry once the endpoint lands) instead of being discarded.
+ */
+const OFFLINE_ENDPOINT_MISSING = 'OFFLINE_ENDPOINT_MISSING';
+
+class OfflineEndpointMissingError extends Error {
+  readonly code = OFFLINE_ENDPOINT_MISSING;
+  constructor(operation: string) {
+    super(
+      `offline endpoint not implemented: ${operation} — no server route serves this operation yet; ` +
+        `mutation retained in dead-letter for operator retry`,
+    );
+    this.name = 'OfflineEndpointMissingError';
+  }
+}
+
+/**
+ * Resolve the caller's workspace through the sanctioned API path.
+ * The Hono layer derives it server-side from the auth token.
+ */
+async function resolveWorkspaceId(): Promise<string> {
+  const { workspaceId } = await apiClient.get<{ workspaceId: string | null }>(
+    '/v1/workspace-context',
+  );
+  if (!workspaceId) {
+    throw new Error('No workspace available for offline sync');
+  }
+  return workspaceId;
+}
 
 function readRawRecord(model: Model): Record<string, unknown> {
   const result: Record<string, unknown> = {};
@@ -133,15 +161,39 @@ async function hasSyncedMutationWithIdempotencyKey(idempotencyKey: string): Prom
   return rows.length > 0;
 }
 
-function classifySyncError(error: unknown): { retryable: boolean; reason: string } {
+function classifySyncError(error: unknown): {
+  retryable: boolean;
+  reason: string;
+  keepForOperator?: boolean;
+} {
   const asObj = (error && typeof error === 'object') ? (error as Record<string, unknown>) : null;
   const message = String(asObj?.message || error || 'sync_error');
   const code = String(asObj?.code || '');
+  const normalizedCode = code.toLowerCase().replace(/_/g, ' ');
+  const status = typeof asObj?.status === 'number' ? asObj.status : undefined;
   const lower = message.toLowerCase();
+
+  // Mutations blocked by a missing server endpoint are parked for operator
+  // retry (dead-letter) rather than discarded or retried forever.
+  if (code === OFFLINE_ENDPOINT_MISSING) {
+    return { retryable: false, reason: message, keepForOperator: true };
+  }
+
+  // ApiClientError statuses from the Hono layer's { error: { code, message } }
+  // envelope: 4xx rejections are permanent for this payload, 429/5xx are
+  // transient and safe to retry.
+  const permanentByStatus = status !== undefined && [400, 401, 403, 404, 409, 422].includes(status);
+  const transientByStatus = status !== undefined && (status === 429 || status >= 500);
+
   const nonRetryable =
-    code === '23505' ||
-    code === '23503' ||
-    code === 'PGRST116' ||
+    permanentByStatus ||
+    normalizedCode === '23505' ||
+    normalizedCode === '23503' ||
+    normalizedCode === 'pgrst116' ||
+    normalizedCode.includes('not found') ||
+    normalizedCode.includes('conflict') ||
+    normalizedCode.includes('forbidden') ||
+    normalizedCode.includes('unauthenticated') ||
     lower.includes('invalid') ||
     lower.includes('not found') ||
     lower.includes('permission') ||
@@ -151,7 +203,7 @@ function classifySyncError(error: unknown): { retryable: boolean; reason: string
     lower.includes('conflict');
 
   return {
-    retryable: !nonRetryable,
+    retryable: transientByStatus ? true : !nonRetryable,
     reason: message,
   };
 }
@@ -518,11 +570,13 @@ export async function processOfflineOutbox(): Promise<void> {
 
           if (isFinal) {
             // Escalate to dead-letter after max attempts OR immediately for non-retryable command rejection.
+            // Mutations blocked by a missing server endpoint are parked (not discarded)
+            // so an operator can retry them once the endpoint exists.
             const deadLetterReason = classification.retryable
               ? `Max retry attempts (${MAX_RETRY_ATTEMPTS}) exceeded: ${errorMsg}`
               : `Permanent rejection: ${errorMsg}`;
             writeRawFields(record, {
-              status: classification.retryable ? 'dead_letter' : 'discarded',
+              status: classification.retryable || classification.keepForOperator ? 'dead_letter' : 'discarded',
               dead_letter_reason: deadLetterReason,
             });
             console.warn(`[offline:outbox] ⚠ escalated to dead-letter: ${deadLetterReason}`);
@@ -544,49 +598,52 @@ async function syncAppointmentMutation(
   operation: string,
   payload: Record<string, unknown>,
 ): Promise<void> {
+  if (operation !== 'update_status' && operation !== 'update') {
+    throw new Error(`Unsupported appointment operation: ${operation}`);
+  }
+
+  // Prefer the full id from the payload; fall back to the legacy mutation_id
+  // parse for rows queued before the payload carried it.
   const mutationId = Reflect.get(mutation._raw, 'mutation_id');
-  const appointmentId = typeof mutationId === 'string' ? mutationId.split('-')[1] : undefined;
+  const appointmentId =
+    optionalString(payload, 'appointmentId') ??
+    (typeof mutationId === 'string' ? mutationId.split('-')[1] : undefined);
 
   if (!appointmentId) {
     throw new Error('Missing appointmentId in mutation');
   }
 
-  if (operation === 'update_status' || operation === 'update') {
-    const targetStatus = String(payload.status || '');
-    if (!targetStatus) {
-      throw new Error('Missing appointment target status');
-    }
-    const { data: current, error: readError } = await supabase
-      .from('appointments')
-      .select('id,status')
-      .eq('id', appointmentId)
-      .maybeSingle();
-    if (readError) throw readError;
-    if (!current?.id) {
-      throw new Error('appointment not found');
-    }
-    const currentStatus = String(current.status || '');
-    if (currentStatus === targetStatus) {
-      return;
-    }
-    const currentIdx = APPOINTMENT_STATUS_ORDER.indexOf(currentStatus as (typeof APPOINTMENT_STATUS_ORDER)[number]);
-    const targetIdx = APPOINTMENT_STATUS_ORDER.indexOf(targetStatus as (typeof APPOINTMENT_STATUS_ORDER)[number]);
-    if (currentIdx >= 0 && targetIdx >= 0 && targetIdx < currentIdx) {
-      throw new Error(`stale transition rejected: ${currentStatus} -> ${targetStatus}`);
-    }
+  const targetStatus = String(payload.status || '');
+  if (!targetStatus) {
+    throw new Error('Missing appointment target status');
+  }
 
-    const { error } = await supabase
-      .from('appointments')
-      .update({
-        status: targetStatus,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', appointmentId)
-      .eq('status', currentStatus);
+  const workspaceId = await resolveWorkspaceId();
 
-    if (error) throw error;
-  } else {
-    throw new Error(`Unsupported appointment operation: ${operation}`);
+  const { data: current } = await apiClient.get<{
+    data: { id: string; status: string } | null;
+  }>(`/v1/appointments/${appointmentId}`, { query: { workspace_id: workspaceId } });
+  if (!current?.id) {
+    throw new Error('appointment not found');
+  }
+  const currentStatus = String(current.status || '');
+  if (currentStatus === targetStatus) {
+    return;
+  }
+  const currentIdx = APPOINTMENT_STATUS_ORDER.indexOf(currentStatus as (typeof APPOINTMENT_STATUS_ORDER)[number]);
+  const targetIdx = APPOINTMENT_STATUS_ORDER.indexOf(targetStatus as (typeof APPOINTMENT_STATUS_ORDER)[number]);
+  if (currentIdx >= 0 && targetIdx >= 0 && targetIdx < currentIdx) {
+    throw new Error(`stale transition rejected: ${currentStatus} -> ${targetStatus}`);
+  }
+
+  const { data: updated } = await apiClient.patch<{
+    data: { id: string; status: string } | null;
+  }>(`/v1/appointments/${appointmentId}`, {
+    workspace_id: workspaceId,
+    status: targetStatus,
+  });
+  if (!updated?.id) {
+    throw new Error('appointment status update did not return a record');
   }
 }
 
@@ -604,98 +661,100 @@ async function syncInventoryTransfer(
   const vanId = requiredString(payload, 'vanId');
   const quantity = requiredNumber(payload, 'quantity');
 
-  // Transactional server-side transfer. The queued mutation's idempotency key is
+  // Transactional server-side transfer via the idempotent
+  // POST /v1/tech-app/inventory-transfer endpoint (wraps the
+  // transfer_inventory_to_van RPC). The queued mutation's idempotency key is
   // passed through so a retried replay resolves to the original ledger entry
   // instead of moving stock a second time.
-  const { error } = await supabase.rpc('transfer_inventory_to_van', {
-    p_item_id: itemId,
-    p_van_id: vanId,
-    p_quantity: quantity,
-    p_idempotency_key:
-      optionalString(readRawRecord(mutation), 'idempotency_key') ??
-      `inventory-transfer-${vanId}-${itemId}-${quantity}`,
+  const idempotencyKey =
+    optionalString(readRawRecord(mutation), 'idempotency_key') ??
+    `inventory-transfer-${vanId}-${itemId}-${quantity}`;
+
+  await apiClient.post<{ data: unknown }>('/v1/tech-app/inventory-transfer', {
+    item_id: itemId,
+    van_id: vanId,
+    quantity,
+    idempotency_key: idempotencyKey,
   });
-
-  if (error) throw error;
-
 }
 
 async function syncServiceCatalogMutation(
   operation: string,
   payload: Record<string, unknown>,
 ): Promise<void> {
-  const itemId = optionalString(payload, 'itemId');
-  const mutationData = objectRecord(payload.data) ?? payload;
+  const workspaceId = await resolveWorkspaceId();
+  // The queued `data` carries raw service_catalog columns (snake_case); spread
+  // them straight into the endpoint body so the shapes stay compatible.
+  const { workspace_id: _ignoredWorkspace, ...itemFields } = objectRecord(payload.data) ?? {};
 
-  switch (operation) {
-    case 'create': {
-      const { error } = await supabase
-        .from('service_catalog')
-        .insert(mutationData as ServiceCatalogInsert);
-      if (error) throw error;
-      break;
-    }
-    case 'update': {
-      if (!itemId) {
-        throw new Error('Missing itemId for service_catalog update');
-      }
-      const { error } = await supabase
-        .from('service_catalog')
-        .update(mutationData as ServiceCatalogUpdate)
-        .eq('id', itemId);
-      if (error) throw error;
-      break;
-    }
-    case 'delete': {
-      if (!itemId) {
-        throw new Error('Missing itemId for service_catalog delete');
-      }
-      const { error } = await supabase
-        .from('service_catalog')
-        .delete()
-        .eq('id', itemId);
-      if (error) throw error;
-      break;
-    }
-    default:
-      throw new Error(`Unsupported service_catalog operation: ${operation}`);
+  if (operation === 'create') {
+    await apiClient.post<{ data: unknown }>('/v1/service-catalog', {
+      ...itemFields,
+      workspace_id: workspaceId,
+    });
+    return;
   }
+
+  const itemId = requiredString(payload, 'itemId');
+  if (operation === 'update') {
+    await apiClient.patch<{ data: unknown }>(`/v1/service-catalog/${itemId}`, {
+      ...itemFields,
+      workspace_id: workspaceId,
+    });
+    return;
+  }
+  if (operation === 'delete') {
+    await apiClient.delete<{ data: unknown }>(`/v1/service-catalog/${itemId}`, {
+      query: { workspace_id: workspaceId },
+    });
+    return;
+  }
+  throw new Error(`Unknown service catalog operation: ${operation}`);
 }
 
+const JOB_THREAD_CHANNEL_MAP: Record<string, 'sms' | 'email' | 'internal'> = {
+  dispatch: 'internal',
+  customer_sms: 'sms',
+  customer_email: 'email',
+};
+
 async function syncJobThreadMessage(payload: Record<string, unknown>): Promise<void> {
-  const { error } = await supabase.rpc('send_job_thread_message_v2', {
-    p_job_id: requiredString(payload, 'jobId'),
-    p_job_source: requiredString(payload, 'jobSource'),
-    p_content: requiredString(payload, 'content'),
-    p_channel: optionalString(payload, 'channel') ?? 'dispatch',
-    p_recipient: optionalString(payload, 'recipient'),
-    p_attachments: [],
-    p_client_message_id: requiredString(payload, 'clientMessageId'),
-  });
-  if (error) throw error;
+  // The server dedupes on client_message_id, so a replay can never double-send.
+  await apiClient.post<{ data: { message_id: string | null; thread_id: string } }>(
+    '/v1/job-threads/messages',
+    {
+      job_id: requiredString(payload, 'jobId'),
+      job_source: requiredString(payload, 'jobSource'),
+      content: requiredString(payload, 'content'),
+      channel: JOB_THREAD_CHANNEL_MAP[String(payload.channel ?? 'dispatch')] ?? 'internal',
+      recipient: optionalString(payload, 'recipient'),
+      attachments: [],
+      client_message_id: requiredString(payload, 'clientMessageId'),
+    },
+  );
 }
 
 async function syncInventoryMovement(payload: Record<string, unknown>): Promise<void> {
-  const { error } = await supabase.rpc('record_inventory_movement_v1', {
-    p_van_inventory_id: requiredString(payload, 'vanInventoryId'),
-    p_entry_type: requiredString(payload, 'entryType'),
-    p_quantity: requiredNumber(payload, 'quantity'),
-    p_idempotency_key: requiredString(payload, 'idempotencyKey'),
-    p_job_id: optionalString(payload, 'jobId'),
-    p_job_source: optionalString(payload, 'jobSource'),
-    p_note: optionalString(payload, 'note'),
+  await apiClient.post<{ data: unknown }>('/v1/tech-app/van-inventory/movements', {
+    van_inventory_id: requiredString(payload, 'vanInventoryId'),
+    entry_type: requiredString(payload, 'entryType'),
+    quantity: requiredNumber(payload, 'quantity'),
+    idempotency_key: requiredString(payload, 'idempotencyKey'),
+    job_id: optionalString(payload, 'jobId') ?? null,
+    job_source: optionalString(payload, 'jobSource') ?? null,
+    note: optionalString(payload, 'note') ?? null,
   });
-  if (error) throw error;
 }
 
 async function syncChecklistStep(payload: Record<string, unknown>): Promise<void> {
-  const { error } = await supabase.rpc('advance_job_execution_step_v1', {
-    p_step_id: requiredString(payload, 'stepId'),
-    p_status: requiredString(payload, 'status'),
-    p_evidence_url: optionalString(payload, 'evidenceUrl'),
-    p_notes: optionalString(payload, 'notes'),
+  // The server-side RPC has no idempotency parameter; replay safety comes from
+  // the outbox's own idempotency-key dedupe (synced-key + in-flight checks).
+  await apiClient.post<{ data: unknown }>('/v1/tech-app/execution-steps/advance', {
+    step_id: requiredString(payload, 'stepId'),
+    status: requiredString(payload, 'status'),
+    evidence_url: optionalString(payload, 'evidenceUrl') ?? null,
+    notes: optionalString(payload, 'notes') ?? null,
   });
-  if (error) throw error;
 }
 
 /**

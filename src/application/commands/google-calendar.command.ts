@@ -1,38 +1,22 @@
 /**
  * Google Calendar Commands — Write operations for Google Calendar sync.
  */
+import { apiClient } from "@/lib/api-client";
 import { supabase } from "@/integrations/supabase/client";
 
 /** App route Google redirects back to after calendar authorization. */
 export const GOOGLE_CALENDAR_REDIRECT_PATH = "/google-calendar/callback";
 
 async function invokeGoogleCalendar(body: Record<string, unknown>) {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error("Not authenticated");
-
-  const { data, error } = await supabase.functions.invoke("google-calendar-sync", {
-    headers: { Authorization: `Bearer ${session.access_token}` },
-    body,
-  });
-
-  if (error) {
-    const context = (error as { context?: Response }).context;
-    if (context) {
-      try {
-        const raw = await context.clone().text();
-        if (raw) {
-          const parsed = JSON.parse(raw) as { error?: string };
-          if (parsed.error) throw new Error(parsed.error);
-        }
-      } catch (caught) {
-        if (caught instanceof Error && caught.message && caught.message !== "Unexpected end of JSON input") {
-          if (!(caught instanceof SyntaxError)) throw caught;
-        }
-      }
-    }
-    throw new Error(error.message || "Google Calendar integration request failed");
-  }
-  if (data?.error) throw new Error(String(data.error));
+  const { data } = await apiClient.post<{
+    data: {
+      error?: string;
+      backfill?: { pushed: number; failed: number; repaired: number };
+    } | null;
+  }>(
+    "/v1/platform/google-calendar/invoke",
+    { body },
+  );
   return { data, error: null };
 }
 
@@ -41,7 +25,15 @@ async function invokeGoogleCalendar(body: Record<string, unknown>) {
  * Supabase Auth. This deliberately avoids a second, drifting Google OAuth
  * client configuration inside Edge Functions.
  */
-export async function startGoogleCalendarOAuth(redirectUri: string) {
+export interface GoogleCalendarOAuthResult {
+  connected?: boolean;
+  authorization_url?: string;
+  url?: string;
+  error?: string;
+  backfill?: { pushed: number; failed: number; repaired: number };
+}
+
+export async function startGoogleCalendarOAuth(redirectUri: string): Promise<{ data: GoogleCalendarOAuthResult; error: null }> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) throw new Error("Not authenticated");
 

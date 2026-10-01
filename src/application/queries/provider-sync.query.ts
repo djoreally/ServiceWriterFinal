@@ -1,9 +1,9 @@
-import { SUPABASE_URL_RESOLVED } from "@/integrations/supabase/client";
 /**
  * Provider Sync Query — Read operations for the payment-provider sync pipeline.
- * Backed by the `provider-sync-manager` edge function.
+ * Backed by the `provider-sync-manager` edge function, proxied through the
+ * platform API so the client never holds edge-function auth details.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface ProviderSyncSummary {
   total: number;
@@ -47,40 +47,27 @@ export interface ProviderSyncLog {
   created_at: string;
 }
 
-async function authHeaders() {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error("Not authenticated");
-  return { Authorization: `Bearer ${session.access_token}` };
-}
-
 export async function fetchProviderSyncSummary(): Promise<ProviderSyncSummary> {
-  const headers = await authHeaders();
-  const url = `${SUPABASE_URL_RESOLVED}/functions/v1/provider-sync-manager?action=summary`;
-  const res = await fetch(url, { headers });
-  if (!res.ok) throw new Error(`Failed to load sync summary (${res.status})`);
-  return res.json();
+  return apiClient.get("/v1/platform/provider-sync/summary");
 }
 
 export async function fetchProviderSyncRecords(
   options: { status?: string; limit?: number } = {},
 ): Promise<ProviderSyncRecord[]> {
-  const headers = await authHeaders();
-  const params = new URLSearchParams({ action: "list" });
-  if (options.status) params.set("status", options.status);
-  if (options.limit) params.set("limit", String(options.limit));
-  const url = `${SUPABASE_URL_RESOLVED}/functions/v1/provider-sync-manager?${params}`;
-  const res = await fetch(url, { headers });
-  if (!res.ok) throw new Error(`Failed to load sync records (${res.status})`);
-  const data = await res.json();
+  const query: Record<string, string | number> = {};
+  if (options.status) query.status = options.status;
+  if (options.limit) query.limit = options.limit;
+  const data = await apiClient.get<{ records?: ProviderSyncRecord[] }>(
+    "/v1/platform/provider-sync/records",
+    { query },
+  );
   return data.records || [];
 }
 
 export async function fetchProviderSyncLogs(recordId: string): Promise<ProviderSyncLog[]> {
-  const headers = await authHeaders();
-  const params = new URLSearchParams({ action: "logs", record_id: recordId });
-  const url = `${SUPABASE_URL_RESOLVED}/functions/v1/provider-sync-manager?${params}`;
-  const res = await fetch(url, { headers });
-  if (!res.ok) throw new Error(`Failed to load sync logs (${res.status})`);
-  const data = await res.json();
+  const data = await apiClient.get<{ logs?: ProviderSyncLog[] }>(
+    "/v1/platform/provider-sync/logs",
+    { query: { record_id: recordId } },
+  );
   return data.logs || [];
 }

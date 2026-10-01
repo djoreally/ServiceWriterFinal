@@ -3,6 +3,7 @@ import { Link2, Loader2, XCircle } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { apiClient } from "@/lib/api-client";
 
 export default function TeamJoin() {
   const { token = "" } = useParams<{ token: string }>();
@@ -18,12 +19,12 @@ export default function TeamJoin() {
     let cancelled = false;
     void (async () => {
       try {
-        const response = await fetch(`/api/v1/invitations/resolve?token=${encodeURIComponent(token)}`, {
-          headers: { Accept: "application/json" },
-        });
-        const payload = await response.json().catch(() => null) as { data?: { invitation_id?: string }; error?: { message?: string } } | null;
-        if (!response.ok || !payload?.data?.invitation_id) {
-          throw new Error(payload?.error?.message || "This invitation link is invalid or expired.");
+        const payload = await apiClient.get<{ data?: { invitation_id?: string } }>(
+          "/v1/invitations/resolve",
+          { query: { token } },
+        );
+        if (!payload?.data?.invitation_id) {
+          throw new Error("This invitation link is invalid or expired.");
         }
         if (!cancelled) {
           navigate(`/team/join?invitation_id=${encodeURIComponent(payload.data.invitation_id)}&token=${encodeURIComponent(token)}`, { replace: true });

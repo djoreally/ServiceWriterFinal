@@ -1,10 +1,8 @@
 /** Service Catalog Commands — canonical workspace-scoped writes. */
-import { productionSupabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/api-client';
 import { resolveCurrentWorkspace } from '@/application/queries/settings.query';
 import { getCurrentAuthUser } from '@/lib/auth/current-user';
 import { invalidateCatalogItems } from '@/application/queries/service-catalog.query';
-
-const db = productionSupabase as any;
 
 export interface CatalogItemWritePayload {
   name: string;
@@ -71,25 +69,26 @@ export async function createCatalogItem(payload: CatalogItemWritePayload): Promi
   const { workspaceId } = await requireContext();
   const metadata = metadataPatch(payload);
   const row = { ...canonicalColumns(payload, metadata), workspace_id: workspaceId };
-  const { error } = await db.from('service_catalog').insert(row);
-  if (error) throw error;
+  await apiClient.post("/v1/catalog/items", { workspace_id: workspaceId, rows: [row] });
   invalidateCatalogItems(workspaceId);
 }
 
 export async function updateCatalogItem(id: string, payload: Partial<CatalogItemWritePayload>): Promise<void> {
   const { workspaceId } = await requireContext();
-  const current = await db.from('service_catalog').select('metadata').eq('workspace_id', workspaceId).eq('id', id).maybeSingle();
-  if (current.error) throw current.error;
+  const current = await apiClient.get<{ data: { metadata: unknown } | null }>(`/v1/catalog/items/${id}`, {
+    query: { workspace_id: workspaceId },
+  });
   const metadata = metadataPatch(payload, object(current.data?.metadata));
-  const { error } = await db.from('service_catalog').update(canonicalColumns(payload, metadata)).eq('workspace_id', workspaceId).eq('id', id);
-  if (error) throw error;
+  await apiClient.patch(`/v1/catalog/items/${id}`, {
+    workspace_id: workspaceId,
+    row: canonicalColumns(payload, metadata),
+  });
   invalidateCatalogItems(workspaceId);
 }
 
 export async function deleteCatalogItem(id: string): Promise<void> {
   const { workspaceId } = await requireContext();
-  const { error } = await db.from('service_catalog').delete().eq('workspace_id', workspaceId).eq('id', id);
-  if (error) throw error;
+  await apiClient.delete(`/v1/catalog/items/${id}`, { query: { workspace_id: workspaceId } });
   invalidateCatalogItems(workspaceId);
 }
 

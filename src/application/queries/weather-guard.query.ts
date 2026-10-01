@@ -1,3 +1,4 @@
+import { apiClient } from "@/lib/api-client";
 import { supabase } from "@/integrations/supabase/client";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
@@ -52,81 +53,50 @@ export async function fetchShopWeatherContext(): Promise<{
 } | null> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return null;
-  const { data, error } = await (supabase
-    .from("business_profiles")
-    .select("service_address, service_coordinates, weather_guard_enabled, weather_guard_settings") as any)
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (error || !data) return null;
-  const coords = (data.service_coordinates ?? null) as { lat?: number; lng?: number } | null;
-  return {
-    lat: coords?.lat ?? null,
-    lng: coords?.lng ?? null,
-    address: data.service_address ?? null,
-    weatherGuardEnabled: data.weather_guard_enabled ?? false,
-    settings: data.weather_guard_settings ?? null,
-  };
+  return apiClient.get<{
+    lat: number | null;
+    lng: number | null;
+    address: string | null;
+    weatherGuardEnabled: boolean;
+    settings: unknown;
+  } | null>("/v1/platform/weather-guard/shop-context");
 }
 
 /** Ensure default rules exist for the current user. */
 export async function ensureDefaultRules(): Promise<void> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return;
-  await supabase.rpc("seed_default_dispatch_rules", { _user_id: user.id });
+  await apiClient.post("/v1/platform/weather-guard/seed-rules", {});
 }
 
 export async function fetchDispatchRules(): Promise<DispatchRule[]> {
-  const { data, error } = await supabase
-    .from("dispatch_rules")
-    .select("*")
-    .order("created_at", { ascending: true });
-  if (error) throw error;
-  return (data ?? []) as unknown as DispatchRule[];
+  return apiClient.get<DispatchRule[]>("/v1/platform/weather-guard/dispatch-rules");
 }
 
 export async function updateDispatchRule(
   id: string,
   patch: Partial<Pick<DispatchRule, "active" | "auto_execute" | "name" | "condition" | "action">>,
 ): Promise<void> {
-  const { error } = await supabase.from("dispatch_rules").update(patch as never).eq("id", id);
-  if (error) throw error;
+  await apiClient.patch(`/v1/platform/weather-guard/dispatch-rules/${encodeURIComponent(id)}`, patch);
 }
 
 export async function fetchUpcomingAtRisk(): Promise<AtRiskAppointment[]> {
   const today = new Date().toISOString().slice(0, 10);
   const horizon = new Date(Date.now() + 48 * 3_600_000).toISOString().slice(0, 10);
 
-  const { data, error } = await supabase
-    .from("appointments")
-    .select(
-      "id, title, scheduled_date, scheduled_time, duration_minutes, status, location_address, guest_name, weather_risk_score, weather_decision, weather_evaluated_at",
-    )
-    .gte("scheduled_date", today)
-    .lte("scheduled_date", horizon)
-    .is("deleted_at", null)
-    .order("scheduled_date", { ascending: true })
-    .order("scheduled_time", { ascending: true });
-
-  if (error) throw error;
-  return (data ?? []) as AtRiskAppointment[];
+  return apiClient.get<AtRiskAppointment[]>("/v1/platform/weather-guard/at-risk", {
+    query: { today, horizon },
+  });
 }
 
 export async function fetchRecentRiskLogs(limit = 20): Promise<WeatherRiskLog[]> {
-  const { data, error } = await supabase
-    .from("weather_risk_logs")
-    .select("*")
-    .order("evaluated_at", { ascending: false })
-    .limit(limit);
-  if (error) throw error;
-  return (data ?? []) as unknown as WeatherRiskLog[];
+  return apiClient.get<WeatherRiskLog[]>("/v1/platform/weather-guard/risk-logs", {
+    query: { limit },
+  });
 }
 
 export async function evaluateAppointmentNow(appointmentId: string) {
-  const { data, error } = await supabase.functions.invoke("weather-guard-evaluate", {
-    body: { appointmentId },
-  });
-  if (error) throw error;
-  return data;
+  return apiClient.post("/v1/platform/weather-guard/evaluate", { appointmentId });
 }
 
 export async function executeWeatherAction(
@@ -134,11 +104,7 @@ export async function executeWeatherAction(
   decision: WeatherDecision,
   reason: string,
 ) {
-  const { data, error } = await supabase.functions.invoke("weather-guard-action", {
-    body: { appointmentId, decision, reason },
-  });
-  if (error) throw error;
-  return data;
+  return apiClient.post("/v1/platform/weather-guard/action", { appointmentId, decision, reason });
 }
 
 export async function checkSlotRisk(args: {
@@ -149,15 +115,13 @@ export async function checkSlotRisk(args: {
   end?: string;
   scope?: "all" | "outdoor" | "mobile";
 }) {
-  const { data, error } = await supabase.functions.invoke("weather-guard-check-slot", { body: args });
-  if (error) throw error;
-  return data as {
+  return apiClient.post<{
     riskScore: number;
     riskLevel: RiskLevel;
     decision: WeatherDecision;
     message: string;
     reasons?: string[];
-  };
+  }>("/v1/platform/weather-guard/check-slot", args);
 }
 
 /** Subscribe to weather_risk_logs INSERTs; used by the guard dashboard to refresh live. */

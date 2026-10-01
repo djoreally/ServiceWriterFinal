@@ -13,7 +13,7 @@
       "schedule": "*/5 * * * *"
     },
     {
-      "path": "/api/internal/newsletter/weekly",
+      "path": "/api/internal/crm/newsletter/weekly",
       "schedule": "0 15 * * *"
     }
   ],

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { productionSupabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import type { Appointment, BusinessHours, Customer, ServiceCatalogItem, Vehicle } from "@/shared/types";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { fetchBusinessSettings, resolveCurrentWorkspace } from "@/application/queries/settings.query";
@@ -105,16 +105,27 @@ export async function fetchAppointmentsPageData(): Promise<AppointmentsPageData>
   if (!context) throw new Error("No active workspace is available.");
 
   const errors: AppointmentsPageErrors = {};
-  const db = productionSupabase as any;
   const [appointmentsResult, customersResult, vehiclesResult, settingsResult, catalogResult, scheduleResult, workspaceResult, serviceLinesResult] = await Promise.allSettled([
     nextApi.appointments.list(context.workspaceId),
     nextApi.customers.list(context.workspaceId),
     nextApi.vehicles.list(context.workspaceId),
     fetchBusinessSettings(),
-    productionSupabase.from("service_catalog").select("*").eq("workspace_id", context.workspaceId).eq("is_active", true).order("name"),
-    db.from("workspace_settings").select("opening_time,closing_time,working_days,day_hours,slot_duration_minutes,min_lead_time_hours,buffer_time_before,buffer_time_after").eq("workspace_id", context.workspaceId).maybeSingle(),
-    db.from("workspaces").select("timezone").eq("id", context.workspaceId).maybeSingle(),
-    db.from("appointment_services").select("appointment_id,vehicle_id,price,quantity").eq("workspace_id", context.workspaceId),
+    apiClient.get<{ data: Array<{ id: string; name: string; description: string | null; labor_price: number | string | null; estimated_minutes: number | null; category: string | null; is_active: boolean }> | null }>(
+      "/v1/appointments/service-catalog",
+      { query: { active: "true", selected_workspace_id: context.workspaceId } },
+    ),
+    apiClient.get<{ settings: Record<string, any> | null }>(
+      "/v1/appointments/scheduling-settings",
+      { query: { selected_workspace_id: context.workspaceId } },
+    ),
+    apiClient.get<{ data: { timezone: string | null } | null }>(
+      "/v1/appointments/workspace-context",
+      { query: { selected_workspace_id: context.workspaceId } },
+    ),
+    apiClient.get<{ data: Array<{ appointment_id: string; vehicle_id: string | null; price: number; quantity: number }> | null }>(
+      "/v1/appointments/service-lines",
+      { query: { selected_workspace_id: context.workspaceId } },
+    ),
   ]);
 
   const customerRows = customersResult.status === "fulfilled" ? customersResult.value.data : [];
@@ -124,7 +135,7 @@ export async function fetchAppointmentsPageData(): Promise<AppointmentsPageData>
   if (appointmentsResult.status === "rejected") errors.appointments = appointmentsResult.reason instanceof Error ? appointmentsResult.reason.message : "Failed to load appointments";
   if (customersResult.status === "rejected") errors.customers = customersResult.reason instanceof Error ? customersResult.reason.message : "Failed to load customers";
   if (vehiclesResult.status === "rejected") errors.vehicles = vehiclesResult.reason instanceof Error ? vehiclesResult.reason.message : "Failed to load vehicles";
-  if (catalogResult.status === "rejected" || (catalogResult.status === "fulfilled" && catalogResult.value.error)) errors.catalog = "Failed to load service catalog";
+  if (catalogResult.status === "rejected") errors.catalog = "Failed to load service catalog";
 
   const timezone = workspaceResult.status === "fulfilled" && workspaceResult.value.data?.timezone ? String(workspaceResult.value.data.timezone) : DEFAULT_TIMEZONE;
   const customers = z.array(customerApiSchema).parse(customerRows).map(mapCustomer);
@@ -157,7 +168,7 @@ export async function fetchAppointmentsPageData(): Promise<AppointmentsPageData>
   const serviceCatalog = catalogRows.map(mapCatalog);
 
   const legacySettings = settingsResult.status === "fulfilled" ? settingsResult.value : null;
-  const scheduling = scheduleResult.status === "fulfilled" ? scheduleResult.value.data : null;
+  const scheduling = scheduleResult.status === "fulfilled" ? scheduleResult.value.settings : null;
   const rawDayHours = scheduling?.day_hours && typeof scheduling.day_hours === "object" && !Array.isArray(scheduling.day_hours) ? scheduling.day_hours as Record<string, any> : {};
   const configuredWorkingDays = Object.entries(rawDayHours)
     .filter(([, value]) => value && typeof value === "object" && (value as { is_open?: boolean }).is_open === true)
@@ -181,8 +192,11 @@ export interface AppointmentPickerOption { id: string; title: string | null; sta
 async function workspaceTimezone(): Promise<string> {
   const context = await resolveCurrentWorkspace();
   if (!context) return DEFAULT_TIMEZONE;
-  const { data } = await (productionSupabase as any).from("workspaces").select("timezone").eq("id", context.workspaceId).maybeSingle();
-  return data?.timezone || DEFAULT_TIMEZONE;
+  const response = await apiClient.get<{ data: { timezone: string | null } | null }>(
+    "/v1/appointments/workspace-context",
+    { query: { selected_workspace_id: context.workspaceId } },
+  );
+  return response.data?.timezone || DEFAULT_TIMEZONE;
 }
 
 export async function fetchAppointmentPickerOption(appointmentId: string): Promise<AppointmentPickerOption | null> {

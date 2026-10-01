@@ -2,7 +2,7 @@
  * Van Detail Query - Read operations for van detail page.
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface VanDetailData {
@@ -73,31 +73,30 @@ export async function fetchVanDetail(vanId: string): Promise<VanDetailResult> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return { van: null, territories: [], inventory: [], appointments: [], technicians: [], warehouseItems: [] };
 
-  // ⚡ Parallel fetch: all six queries run concurrently
-  const [vanRes, terrRes, invRes, apptsRes, techRes, whRes] = await Promise.all([
-    supabase.from("vans").select("*").eq("id", vanId).eq("user_id", user.id).single(),
-    supabase.from("van_territories").select("*").eq("van_id", vanId).order("zip_code"),
-    supabase.from("van_inventory").select("*, inventory_items(name, sku, quantity)").eq("van_id", vanId),
-    supabase.from("appointments")
-      .select("id, title, scheduled_date, scheduled_time, status, guest_name")
-      .eq("assigned_van_id", vanId)
-      .order("scheduled_date", { ascending: false })
-      .limit(50),
-    supabase.from("technicians").select("id, name").eq("user_id", user.id).eq("is_active", true).order("name"),
-    supabase.from("inventory_items").select("id, name, sku, quantity").eq("user_id", user.id).order("name"),
-  ]);
+  const { data } = await apiClient.get<{
+    data: {
+      van: VanDetailData | null;
+      territories: VanTerritory[];
+      inventory: Record<string, any>[];
+      appointments: VanAppointment[];
+      technicians: VanTechnician[];
+      warehouseItems: WarehouseItem[];
+    };
+  }>(`/v1/vans/${vanId}/detail`);
 
-  const van = vanRes.data as VanDetailData | null;
-  const territories = (terrRes.data || []) as VanTerritory[];
-  const inventory = (invRes.data || []).map((i: any) => ({
+  const inventory = (data?.inventory || []).map((i: any) => ({
     ...i,
     item_name: i.inventory_items?.name,
     item_sku: i.inventory_items?.sku,
     warehouse_qty: i.inventory_items?.quantity,
   })) as VanInventoryItem[];
-  const appointments = (apptsRes.data || []) as VanAppointment[];
-  const technicians = (techRes.data || []) as VanTechnician[];
-  const warehouseItems = (whRes.data || []) as WarehouseItem[];
 
-  return { van, territories, inventory, appointments, technicians, warehouseItems };
+  return {
+    van: (data?.van ?? null) as VanDetailData | null,
+    territories: (data?.territories ?? []) as VanTerritory[],
+    inventory,
+    appointments: (data?.appointments ?? []) as VanAppointment[],
+    technicians: (data?.technicians ?? []) as VanTechnician[],
+    warehouseItems: (data?.warehouseItems ?? []) as WarehouseItem[],
+  };
 }

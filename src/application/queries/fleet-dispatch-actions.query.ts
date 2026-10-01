@@ -1,6 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
-
-const db = supabase as any;
+import { apiClient } from "@/lib/api-client";
 
 export type FleetNextAction = {
   kind: "request" | "work_order" | "exception" | "approval" | "delivery" | "invoice";
@@ -37,18 +35,25 @@ export type FleetFailureWorklists = {
 };
 
 export async function fetchFleetNextActions(): Promise<{ generatedAt: string; items: FleetNextAction[] }> {
-  const { data, error } = await db.rpc("get_fleet_dispatch_next_actions_v1", { p_limit: 150 });
-  if (error) throw error;
-  return { generatedAt: String(data?.generated_at ?? new Date().toISOString()), items: data?.items ?? [] };
+  const { data } = await apiClient.get<{ data: { generatedAt: string; items: FleetNextAction[] } }>(
+    "/v1/fleet/dispatch-actions",
+  );
+  return {
+    generatedAt: String(data?.generatedAt ?? new Date().toISOString()),
+    items: data?.items ?? [],
+  };
 }
 
 export async function fetchFleetFailureWorklists(): Promise<FleetFailureWorklists> {
-  const { data, error } = await db.rpc("get_fleet_operations_failures_v1", { p_limit: 150 });
-  if (error) throw error;
-  return { generated_at: String(data?.generated_at ?? new Date().toISOString()), dead_letters: data?.dead_letters ?? [], outbox: data?.outbox ?? [], invoices: data?.invoices ?? [] };
+  const { data } = await apiClient.get<{ data: FleetFailureWorklists }>("/v1/fleet/operations-failures");
+  return {
+    generated_at: String(data?.generated_at ?? new Date().toISOString()),
+    dead_letters: data?.dead_letters ?? [],
+    outbox: data?.outbox ?? [],
+    invoices: data?.invoices ?? [],
+  };
 }
 
 export async function retryFleetOperationalFailure(kind: "dead_letter" | "outbox", id: string): Promise<void> {
-  const { error } = await db.rpc("retry_fleet_operational_failure_v1", { p_kind: kind, p_id: id });
-  if (error) throw error;
+  await apiClient.post(`/v1/fleet/operations-failures/${id}/retry`, { kind });
 }

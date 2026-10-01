@@ -1,6 +1,14 @@
-/** Real-time technician status against canonical workspace membership, presence, and appointment state. */
-import { useCallback, useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+/** Real-time technician status against canonical workspace membership, presence, and appointment state.
+ *
+ * Phase 2: the membership/presence/appointment reads go through the typed API
+ * client (`@/lib/api-client`) to `GET /v1/dispatch/technician-state`. Change
+ * detection polls the same endpoint — there is no apiClient equivalent for
+ * realtime channels. A new current appointment surfaces the "New job assigned"
+ * toast; with polling a cancellation is indistinguishable from a normal
+ * completion, so no cancelled toast is fired.
+ */
+import { useCallback, useEffect, useRef, useState } from "react";
+import { apiClient } from "@/lib/api-client";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 import { toast } from "@/components/ui/sonner";
 import {
@@ -14,13 +22,10 @@ import {
 } from "@/application/commands/tech-dispatch.command";
 import {
   deriveDispatchStatusFromAppointment,
-  isClosedDispatchStatus,
   normalizeOperationalTechnicianStatus,
   toLatLng,
   type TechnicianOperationalStatus,
 } from "@/lib/dispatch-state";
-
-const db = supabase as any;
 
 export interface TechOperationalState {
   technician_id: string;
@@ -29,12 +34,6 @@ export interface TechOperationalState {
   shift_active: boolean;
   location_enabled: boolean;
   current_location: { lat: number; lng: number } | null;
-}
-
-export interface RealTimeUpdate {
-  type: "job_assigned" | "job_cancelled" | "route_updated" | "urgent_message" | "status_sync";
-  action?: "INSERT" | "UPDATE" | "DELETE";
-  payload: unknown;
 }
 
 function metadataDispatchStatus(value: unknown): string | undefined {
@@ -54,26 +53,25 @@ export function useRealTimeTechStatus(technician_id?: string) {
     if (!workspaceId) { setState(null); setLoading(false); return; }
 
     try {
-      const [{ data: member, error: memberError }, { data: presence, error: presenceError }] = await Promise.all([
-        db.from("workspace_members").select("user_id,role,is_active").eq("workspace_id", workspaceId).eq("user_id", technician_id).eq("is_active", true).maybeSingle(),
-        db.from("technician_presence").select("status,current_location,current_appointment_id,clocked_in_at").eq("workspace_id", workspaceId).eq("user_id", technician_id).maybeSingle(),
-      ]);
-      if (memberError) throw memberError;
-      if (presenceError) throw presenceError;
+      const response = await apiClient.get<{
+        data: {
+          member: { user_id: string; role: string; is_active: boolean } | null;
+          presence: {
+            status: string;
+            current_location: { lat?: unknown; lng?: unknown } | null;
+            current_appointment_id: string | null;
+            clocked_in_at: string | null;
+          } | null;
+          appointments: Array<{ id: string; status: string; metadata: unknown; starts_at: string }>;
+        };
+      }>("/v1/dispatch/technician-state", { query: { technician_id } });
+      const member = response.data.member;
+      const presence = response.data.presence;
       if (!member) { setState(null); setAssignedUserId(null); return; }
 
       setAssignedUserId(technician_id);
-      const { data: appointments, error: appointmentError } = await db
-        .from("appointments")
-        .select("id,status,metadata,starts_at")
-        .eq("workspace_id", workspaceId)
-        .eq("assigned_user_id", technician_id)
-        .not("status", "in", '("completed","cancelled","no_show")')
-        .order("starts_at", { ascending: true })
-        .limit(20);
-      if (appointmentError) throw appointmentError;
-
-      const appointment = (appointments ?? []).find((row: any) => {
+      const appointments = response.data.appointments ?? [];
+      const appointment = appointments.find((row) => {
         const dispatch = deriveDispatchStatusFromAppointment(row.status, metadataDispatchStatus(row.metadata));
         return dispatch === "in_progress" || dispatch === "arrived" || dispatch === "en_route" || dispatch === "acknowledged" || dispatch === "assigned";
       }) ?? null;
@@ -108,36 +106,27 @@ export function useRealTimeTechStatus(technician_id?: string) {
 
   useEffect(() => { void fetchTechState(); }, [fetchTechState]);
 
-  const handleRealTimeUpdate = useCallback((update: RealTimeUpdate) => {
-    void fetchTechState();
-    if (update.type === "job_assigned") toast.success("New job assigned!", { description: "Check your Today tab for details" });
-    if (update.type === "job_cancelled") toast.info("Job cancelled", { description: "Your schedule has been updated" });
-  }, [fetchTechState]);
+  // Poll the technician state; the "new job assigned" toast fires when a
+  // current appointment appears that was not there on the previous poll.
+  const prevAppointmentIdRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    const prev = prevAppointmentIdRef.current;
+    const next = state?.current_appointment_id ?? null;
+    if (prev !== undefined && prev !== next && prev === null && next !== null) {
+      toast.success("New job assigned!", { description: "Check your Today tab for details" });
+    }
+    prevAppointmentIdRef.current = next;
+  }, [state]);
 
   useEffect(() => {
     if (!technician_id || !assignedUserId) return;
     const workspaceId = getSelectedWorkspaceId();
     if (!workspaceId) return;
-    const channel = supabase.channel(`tech-dispatch-${technician_id}`);
-
-    channel.on("postgres_changes", { event: "*", schema: "public", table: "appointments", filter: `assigned_user_id=eq.${assignedUserId}` }, (payload) => {
-      const next = (payload.new ?? {}) as { status?: unknown; metadata?: unknown };
-      const prev = (payload.old ?? {}) as { status?: unknown; metadata?: unknown };
-      const nextDispatch = deriveDispatchStatusFromAppointment(next.status, metadataDispatchStatus(next.metadata));
-      const prevDispatch = deriveDispatchStatusFromAppointment(prev.status, metadataDispatchStatus(prev.metadata));
-      const type: RealTimeUpdate["type"] = payload.eventType === "INSERT"
-        ? "job_assigned"
-        : payload.eventType === "DELETE" || (isClosedDispatchStatus(nextDispatch) && !isClosedDispatchStatus(prevDispatch))
-          ? "job_cancelled"
-          : "status_sync";
-      handleRealTimeUpdate({ type, action: payload.eventType as RealTimeUpdate["action"], payload });
-    });
-
-    channel.on("postgres_changes", { event: "*", schema: "public", table: "dispatch_events", filter: `technician_id=eq.${technician_id}` }, (payload) => handleRealTimeUpdate({ type: "status_sync", payload }));
-    channel.on("postgres_changes", { event: "*", schema: "public", table: "technician_presence", filter: `user_id=eq.${technician_id}` }, (payload) => handleRealTimeUpdate({ type: "status_sync", payload }));
-    channel.subscribe();
-    return () => { void supabase.removeChannel(channel); };
-  }, [assignedUserId, handleRealTimeUpdate, technician_id]);
+    const timer = setInterval(() => {
+      void fetchTechState();
+    }, 20_000);
+    return () => { clearInterval(timer); };
+  }, [assignedUserId, fetchTechState, technician_id]);
 
   const transitionToEnRoute = async (appointment_id: string, location?: { lat: number; lng: number }) => { if (!technician_id) return; await markEnRoute(appointment_id, location); await fetchTechState(); toast.success("En route to job"); };
   const transitionToArrived = async (appointment_id: string, location?: { lat: number; lng: number }) => { if (!technician_id) return; await markArrived(appointment_id, location); await fetchTechState(); toast.success("Marked as arrived"); };

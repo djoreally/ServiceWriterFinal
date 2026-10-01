@@ -1,7 +1,7 @@
 /**
- * Recurring Expenses — Write operations.
+ * Recurring Expenses — Write operations via the Hono billing API.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 import type { RecurringFrequency } from "@/application/queries/recurring-expenses.query";
 
 export interface RecurringExpenseInput {
@@ -23,32 +23,43 @@ export interface RecurringExpenseInput {
   autopost?: boolean;
 }
 
+function toError(error: unknown): Error {
+  return new Error(error instanceof ApiClientError ? error.message : "Recurring expense request failed");
+}
+
 export async function createRecurringExpense(userId: string, input: RecurringExpenseInput) {
-  const { data, error } = await supabase
-    .from("recurring_expenses" as any)
-    .insert([{ user_id: userId, interval_count: 1, is_active: true, autopost: true, ...input }])
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
+  try {
+    const { data } = await apiClient.post<{ data: Record<string, unknown> }>("/v1/billing/recurring-expenses", input);
+    return data;
+  } catch (error) {
+    throw toError(error);
+  }
 }
 
 export async function updateRecurringExpense(id: string, patch: Partial<RecurringExpenseInput>) {
-  const { data, error } = await supabase
-    .from("recurring_expenses" as any)
-    .update(patch)
-    .eq("id", id)
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
+  try {
+    const { data } = await apiClient.put<{ data: Record<string, unknown> }>(`/v1/billing/recurring-expenses/${id}`, patch);
+    return data;
+  } catch (error) {
+    throw toError(error);
+  }
 }
 
 export async function deleteRecurringExpense(id: string) {
-  const { error } = await supabase.from("recurring_expenses" as any).delete().eq("id", id);
-  if (error) throw error;
+  try {
+    await apiClient.delete(`/v1/billing/recurring-expenses/${id}`);
+  } catch (error) {
+    throw toError(error);
+  }
 }
 
 export async function toggleRecurringExpenseActive(id: string, isActive: boolean) {
-  return updateRecurringExpense(id, { is_active: isActive });
+  try {
+    const { data } = await apiClient.patch<{ data: Record<string, unknown> }>(`/v1/billing/recurring-expenses/${id}`, {
+      is_active: isActive,
+    });
+    return data;
+  } catch (error) {
+    throw toError(error);
+  }
 }

@@ -1,6 +1,8 @@
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { createNotification } from "@/application/commands/notifications.command";
+import { apiClient } from "@/lib/api-client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { defaultTirePricingRule, calculateTireServiceTotal } from "@/lib/tire-pricing";
 import { defaultDetailingRule } from "@/lib/detailing-pricing";
 import { saveDetailingPricingRulesForService } from "../detailing-pricing.command";
@@ -26,6 +28,16 @@ jest.mock("@/integrations/supabase/client", () => ({
     auth: { signUp: jest.fn() },
   },
 }));
+jest.mock("@/lib/api-client", () => ({
+  apiClient: {
+    get: jest.fn(),
+    post: jest.fn(),
+    put: jest.fn(),
+    patch: jest.fn(),
+    delete: jest.fn(),
+  },
+}));
+jest.mock("@/application/queries/settings.query", () => ({ resolveCurrentWorkspace: jest.fn() }));
 jest.mock("@/lib/auth/current-user", () => ({ getCurrentAuthUser: jest.fn() }));
 jest.mock("@/application/commands/notifications.command", () => ({ createNotification: jest.fn() }));
 
@@ -33,21 +45,28 @@ const rpc = supabase.rpc as jest.Mock;
 const from = supabase.from as jest.Mock;
 const authUser = getCurrentAuthUser as jest.Mock;
 const createNotificationMock = createNotification as jest.Mock;
+const resolveWorkspace = resolveCurrentWorkspace as jest.Mock;
+const apiPut = apiClient.put as jest.Mock;
+const apiGet = apiClient.get as jest.Mock;
+const apiPost = apiClient.post as jest.Mock;
 
 describe("coverage-critical persistence contracts", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     authUser.mockResolvedValue({ data: { user: { id: "provider-1" } }, error: null });
+    resolveWorkspace.mockResolvedValue({ workspaceId: "ws-1" });
     rpc.mockResolvedValue({ data: null, error: null });
     createNotificationMock.mockResolvedValue(true);
   });
 
-  it("serializes service-scoped detailing rules through the RPC", async () => {
+  it("serializes service-scoped detailing rules through the API", async () => {
     const rule = defaultDetailingRule("large", "heavy");
+    apiPost.mockResolvedValue({ data: null });
     await saveDetailingPricingRulesForService("service-detailing", [rule]);
-    expect(rpc).toHaveBeenCalledWith("replace_detailing_pricing_rules_for_service", {
-      p_service_catalog_id: "service-detailing",
-      p_rules: [expect.objectContaining({
+    expect(apiPost).toHaveBeenCalledWith("/v1/detailing-pricing/rules-for-service", {
+      workspace_id: "ws-1",
+      service_catalog_id: "service-detailing",
+      rules: [expect.objectContaining({
         size_tier: "large",
         condition: "heavy",
         price_multiplier: rule.priceMultiplier,
@@ -56,31 +75,26 @@ describe("coverage-critical persistence contracts", () => {
     });
   });
 
-  it("rejects pricing writes without an authenticated provider", async () => {
-    authUser.mockResolvedValue({ data: { user: null }, error: null });
-    await expect(saveTireServicePricingRule(defaultTirePricingRule("service-tire"))).rejects.toThrow("Not authenticated");
-    await expect(saveDetailingPricingRulesForService(null, [defaultDetailingRule("compact", "light")])).rejects.toThrow("Not authenticated");
-    expect(rpc).not.toHaveBeenCalled();
+  it("rejects pricing writes without an authenticated workspace", async () => {
+    resolveWorkspace.mockResolvedValue(null);
+    await expect(saveTireServicePricingRule(defaultTirePricingRule("service-tire"))).rejects.toThrow("Select a workspace before saving tire pricing.");
+    await expect(saveDetailingPricingRulesForService(null, [defaultDetailingRule("compact", "light")])).rejects.toThrow("Select a workspace before saving detailing pricing.");
+    expect(apiPut).not.toHaveBeenCalled();
+    expect(apiPost).not.toHaveBeenCalled();
   });
 
   it("persists tire policy fields and normalizes legacy query rows", async () => {
     const rule = { ...defaultTirePricingRule("service-tire"), baseInstallationPrice: 44, maximumQuantity: 6, allowsManualFitment: false };
-    const upsert = jest.fn().mockResolvedValue({ error: null });
-    from.mockReturnValueOnce({ upsert });
+    apiPut.mockResolvedValue({ data: null });
     await saveTireServicePricingRule(rule);
-    expect(upsert).toHaveBeenCalledWith(expect.objectContaining({
-      user_id: "provider-1",
-      service_catalog_id: "service-tire",
-      base_installation_price: 44,
-      maximum_quantity: 6,
-      allows_manual_fitment: false,
-    }), { onConflict: "user_id,service_catalog_id" });
+    expect(apiPut).toHaveBeenCalledWith("/v1/tire-pricing/rules", {
+      rule,
+      selected_workspace_id: "ws-1",
+    });
 
-    const select = jest.fn().mockReturnThis();
-    const order = jest.fn().mockResolvedValue({ data: [{ service_catalog_id: "service-tire", base_installation_price: "22.5", allows_manual_fitment: false }], error: null });
-    from.mockReturnValueOnce({ select, order });
+    apiGet.mockResolvedValue({ data: [{ service_catalog_id: "service-tire", base_installation_price: "22.5", allows_manual_fitment: false }] });
     const rows = await fetchTireServicePricingRules();
-    expect(order).toHaveBeenCalledWith("created_at");
+    expect(apiGet).toHaveBeenCalledWith("/v1/tire-pricing/rules", { query: { selected_workspace_id: "ws-1" } });
     expect(rows[0]).toMatchObject({ serviceCatalogId: "service-tire", baseInstallationPrice: 22.5, allowsManualFitment: false, maximumQuantity: 4 });
   });
 

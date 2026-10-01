@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { uploadAsset, type AssetRecord } from "@/application/commands/assets.command";
-import { supabase } from "@/integrations/supabase/client";
+import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { logAssetEvent } from "@/lib/assets/logger";
 
 export type UploadStatus = "queued" | "uploading" | "success" | "error";
@@ -28,8 +28,7 @@ export function useAssetUploads(onComplete?: (asset: AssetRecord) => void) {
 
   useEffect(() => {
     let cancelled = false;
-    supabase.auth
-      .getUser()
+    void getCurrentAuthUser()
       .then(({ data: { user } }) => {
         if (!cancelled) userIdRef.current = user?.id ?? null;
       })

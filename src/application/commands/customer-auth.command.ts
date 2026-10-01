@@ -1,10 +1,14 @@
 /**
  * Customer Auth Commands — Write operations for customer portal authentication.
+ *
+ * Pre-session auth wiring (sign-in / sign-up / password reset) intentionally
+ * keeps the browser Supabase auth client: raw credentials must never travel
+ * through a Hono endpoint. Only the post-session account-linking RPC is
+ * relocated behind the API boundary.
  */
-import type { SupabaseClient } from "@supabase/supabase-js";
-import { authSupabase, supabase } from "@/integrations/supabase/client";
-
-const canonicalSupabase = supabase as unknown as SupabaseClient;
+import { authSupabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
+import { getCurrentAuthUser } from "@/lib/auth/current-user";
 
 export async function signInCustomer(email: string, password: string) {
   return authSupabase.auth.signInWithPassword({ email, password });
@@ -43,16 +47,15 @@ export async function createCustomerAccount(
   _phone?: string,
   _providerId?: string | null,
 ) {
-  const { data: { session } } = await authSupabase.auth.getSession();
-  if (!session) {
+  const { data: { user } } = await getCurrentAuthUser();
+  if (!user) {
     // Email-confirmation signups do not have an authenticated session yet.
     // CustomerDashboard links the account immediately after confirmation.
     return { data: null, error: null };
   }
 
-  const result = await canonicalSupabase.rpc("link_customer_portal_account_v1");
-  if (result.error) throw result.error;
-  return result;
+  const { data } = await apiClient.post<{ data: unknown[] }>("/v1/crm/customer-portal/accounts/link", {});
+  return { data, error: null };
 }
 
 export async function resetPassword(email: string, redirectTo: string) {

@@ -1,13 +1,15 @@
-/** Quotes Commands — canonical workspace-scoped writes plus conversion. */
+/**
+ * Quotes Commands — canonical workspace-scoped writes plus conversion.
+ *
+ * Phase 2: all data access goes through the typed API client
+ * (`@/lib/api-client`) to the documents Hono router. Exported signatures
+ * are unchanged.
+ */
 import { z } from "zod";
-import { productionSupabase } from "@/integrations/supabase/client";
-import type { Database, Json } from "@/integrations/supabase/types.production";
-import { nextApi } from "@/lib/nextApiClient";
+import type { Json } from "@/integrations/supabase/types.production";
+import { apiClient } from "@/lib/api-client";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
-
-type QuoteInsert = Database["public"]["Tables"]["quotes"]["Insert"];
-type QuoteUpdate = Database["public"]["Tables"]["quotes"]["Update"];
 
 const createdCustomerSchema = z.object({ id: z.string().uuid() }).passthrough();
 const createdVehicleSchema = z.object({
@@ -94,7 +96,7 @@ export async function createQuote(data: LegacyQuoteWrite) {
     const { data: { user } } = await getCurrentAuthUser();
     if (!user) return { data: null, error: new Error("Not authenticated") };
     const total = Number(data.total_cost ?? 0);
-    const payload: QuoteInsert = {
+    const response = await apiClient.post<{ data: unknown }>(`/v1/quotes`, {
       workspace_id,
       customer_id: data.customer_id,
       vehicle_id: data.vehicle_id || null,
@@ -105,9 +107,8 @@ export async function createQuote(data: LegacyQuoteWrite) {
       expires_at: data.valid_until || null,
       created_by: user.id,
       metadata: metadataFromQuote(data),
-    };
-    const { data: row, error } = await productionSupabase.from("quotes").insert(payload).select().single();
-    return { data: row ?? null, error: error ?? null };
+    });
+    return { data: response.data ?? null, error: null };
   } catch (error) {
     return { data: null, error: error instanceof Error ? error : new Error("Failed to create quote") };
   }
@@ -117,12 +118,14 @@ export async function updateQuote(id: string, data: LegacyQuoteWrite) {
   try {
     const workspace_id = currentWorkspace();
     if (data.customer_id === null) return { data: null, error: new Error("A quote must belong to a customer.") };
-    const { data: current, error: currentError } = await productionSupabase.from("quotes")
-      .select("metadata,total,subtotal,tax_total,status").eq("workspace_id", workspace_id).eq("id", id).single();
-    if (currentError) return { data: null, error: currentError };
-    if (current?.status === "converted") return { data: null, error: new Error("Converted quotes are immutable.") };
 
-    const updates: QuoteUpdate = { metadata: metadataFromQuote(data, object(current?.metadata)) };
+    // The server reads the current row, rejects converted quotes, and merges
+    // metadata_patch into the stored metadata — equivalent to the legacy
+    // client-side merge.
+    const updates: Record<string, unknown> = {
+      workspace_id,
+      metadata_patch: metadataFromQuote(data),
+    };
     if (data.customer_id !== undefined) updates.customer_id = data.customer_id;
     if (data.vehicle_id !== undefined) updates.vehicle_id = data.vehicle_id || null;
     if (data.status !== undefined) updates.status = canonicalStatus(data.status);
@@ -132,9 +135,8 @@ export async function updateQuote(id: string, data: LegacyQuoteWrite) {
       updates.tax_total = 0;
       updates.total = Number(data.total_cost);
     }
-    const { data: row, error } = await productionSupabase.from("quotes")
-      .update(updates).eq("workspace_id", workspace_id).eq("id", id).select().single();
-    return { data: row ?? null, error: error ?? null };
+    const response = await apiClient.patch<{ data: unknown }>(`/v1/quotes/${encodeURIComponent(id)}`, updates);
+    return { data: response.data ?? null, error: null };
   } catch (error) {
     return { data: null, error: error instanceof Error ? error : new Error("Failed to update quote") };
   }
@@ -142,39 +144,62 @@ export async function updateQuote(id: string, data: LegacyQuoteWrite) {
 
 /** UI delete archives a quote without destroying its header or line-item history. */
 export async function deleteQuote(id: string) {
-  const workspace_id = currentWorkspace();
-  const { data: quote, error: readError } = await productionSupabase.from("quotes")
-    .select("status,metadata").eq("workspace_id", workspace_id).eq("id", id).single();
-  if (readError) return { data: null, error: readError };
-  if (quote?.status === "converted") return { data: null, error: new Error("Converted quotes cannot be deleted.") };
-
-  const metadata = {
-    ...object(quote?.metadata),
-    archived_at: new Date().toISOString(),
-    archived_reason: "user_delete",
-  };
-  return productionSupabase.from("quotes")
-    .update({ status: "declined", metadata })
-    .eq("workspace_id", workspace_id)
-    .eq("id", id)
-    .select()
-    .single();
+  try {
+    const workspace_id = currentWorkspace();
+    const response = await apiClient.delete<{ data: unknown }>(
+      `/v1/quotes/${encodeURIComponent(id)}`,
+      { query: { workspace_id } },
+    );
+    return { data: response.data ?? null, error: null };
+  } catch (error) {
+    return { data: null, error: error instanceof Error ? error : new Error("Failed to delete quote") };
+  }
 }
 
 /** Draft-edit helper: line replacement is allowed before conversion. */
 export async function deleteQuoteItems(quoteId: string) {
-  const workspace_id = currentWorkspace();
-  const { data: quote, error } = await productionSupabase.from("quotes")
-    .select("status").eq("workspace_id", workspace_id).eq("id", quoteId).single();
-  if (error) return { data: null, error };
-  if (quote?.status === "converted") return { data: null, error: new Error("Converted quote items are immutable.") };
-  return productionSupabase.from("quote_items").delete().eq("workspace_id", workspace_id).eq("quote_id", quoteId);
+  try {
+    const workspace_id = currentWorkspace();
+    await apiClient.delete<{ data: null }>(
+      `/v1/quotes/${encodeURIComponent(quoteId)}/items`,
+      { query: { workspace_id } },
+    );
+    return { data: null, error: null };
+  } catch (error) {
+    return { data: null, error: error instanceof Error ? error : new Error("Failed to delete quote items") };
+  }
 }
 
 export async function insertQuoteItems(items: LegacyQuoteItemWrite[]) {
-  const workspace_id = currentWorkspace();
-  const rows = items.map((item) => ({ ...item, workspace_id }));
-  return productionSupabase.from("quote_items").insert(rows);
+  try {
+    const workspace_id = currentWorkspace();
+    const byQuote = new Map<string, LegacyQuoteItemWrite[]>();
+    for (const item of items) {
+      const group = byQuote.get(item.quote_id) ?? [];
+      group.push(item);
+      byQuote.set(item.quote_id, group);
+    }
+    const inserted: unknown[] = [];
+    for (const [quoteId, group] of byQuote) {
+      const response = await apiClient.post<{ data: unknown[] }>(
+        `/v1/quotes/${encodeURIComponent(quoteId)}/items`,
+        {
+          workspace_id,
+          items: group.map((item) => ({
+            inventory_item_id: item.inventory_item_id ?? null,
+            description: item.description,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            total_price: item.total_price,
+          })),
+        },
+      );
+      inserted.push(...(response.data ?? []));
+    }
+    return { data: inserted, error: null };
+  } catch (error) {
+    return { data: null, error: error instanceof Error ? error : new Error("Failed to insert quote items") };
+  }
 }
 
 export async function updateQuoteStatus(id: string, status: string) {
@@ -182,13 +207,24 @@ export async function updateQuoteStatus(id: string, status: string) {
   const canonical = canonicalStatus(status);
   if (canonical === "approved" || canonical === "declined") {
     try {
-      const response = await nextApi.quotes.updateStatus(id, { workspace_id, status: canonical });
+      const response = await apiClient.post<{ data: unknown }>(
+        `/v1/quotes/${encodeURIComponent(id)}/status`,
+        { workspace_id, status: canonical },
+      );
       return { data: response.data, error: null };
     } catch (error) {
       return { data: null, error: error instanceof Error ? error : new Error("Failed to update quote status") };
     }
   }
-  return productionSupabase.from("quotes").update({ status: canonical }).eq("workspace_id", workspace_id).eq("id", id);
+  try {
+    const response = await apiClient.patch<{ data: unknown }>(
+      `/v1/quotes/${encodeURIComponent(id)}`,
+      { workspace_id, status: canonical },
+    );
+    return { data: response.data, error: null };
+  } catch (error) {
+    return { data: null, error: error instanceof Error ? error : new Error("Failed to update quote status") };
+  }
 }
 
 export interface ConvertQuoteInput {
@@ -197,6 +233,7 @@ export interface ConvertQuoteInput {
   serviceDate?: string;
   technicianId?: string | null;
   appointmentId?: string | null;
+  workOrderId?: string | null;
   internalNotes?: string | null;
   expectedQuoteUpdatedAt?: string | null;
 }
@@ -206,15 +243,19 @@ export async function convertQuoteToServiceRecord(input: ConvertQuoteInput): Pro
   if (!workspace_id) return { data: null, error: new Error("Select a workspace before converting a quote.") };
   const idempotency_key = input.idempotencyKey ?? crypto.randomUUID();
   try {
-    const response = await nextApi.quotes.convert(input.quoteId, {
-      workspace_id,
-      idempotency_key,
-      service_date: input.serviceDate,
-      technician_id: input.technicianId ?? null,
-      appointment_id: input.appointmentId ?? null,
-      internal_notes: input.internalNotes ?? null,
-      expected_quote_updated_at: input.expectedQuoteUpdatedAt ?? null,
-    });
+    const response = await apiClient.post<{ data: unknown }>(
+      `/v1/quotes/${encodeURIComponent(input.quoteId)}/convert`,
+      {
+        workspace_id,
+        idempotency_key,
+        service_date: input.serviceDate,
+        technician_id: input.technicianId ?? null,
+        appointment_id: input.appointmentId ?? null,
+        work_order_id: input.workOrderId ?? null,
+        internal_notes: input.internalNotes ?? null,
+        expected_quote_updated_at: input.expectedQuoteUpdatedAt ?? null,
+      },
+    );
     return { data: response.data, error: null };
   } catch (error) {
     return { data: null, error: error instanceof Error ? error : new Error("Quote conversion failed.") };
@@ -229,7 +270,12 @@ function splitName(name: string): { first_name: string; last_name: string } {
 export async function createQuoteCustomer(_userId: string, data: { name: string; email: string | null; phone: string | null }) {
   try {
     const workspace_id = currentWorkspace();
-    const response = await nextApi.customers.create({ workspace_id, ...splitName(data.name), email: data.email || undefined, phone: data.phone || undefined });
+    const response = await apiClient.post<{ data: unknown }>(`/v1/customers`, {
+      workspace_id,
+      ...splitName(data.name),
+      email: data.email || undefined,
+      phone: data.phone || undefined,
+    });
     const row = createdCustomerSchema.parse(response.data);
     return { data: { ...row, name: data.name }, error: null };
   } catch (error) {
@@ -247,7 +293,10 @@ export async function createQuoteVehicle(_userId: string, data: {
 }) {
   try {
     const workspace_id = currentWorkspace();
-    const response = await nextApi.vehicles.create({ workspace_id, ...data });
+    const response = await apiClient.post<{ data: unknown }>(`/v1/vehicles`, {
+      workspace_id,
+      ...data,
+    });
     return { data: createdVehicleSchema.parse(response.data), error: null };
   } catch (error) {
     return { data: null, error: error instanceof Error ? error : new Error("Failed to create vehicle") };

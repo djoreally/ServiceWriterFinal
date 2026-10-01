@@ -1,9 +1,11 @@
 /** Vehicles Query - vehicle overview reads through the canonical Next.js API. */
 
 import type { Vehicle, Customer } from "@/shared/types";
+import { apiClient } from "@/lib/api-client";
 import { getOfflineDatabase } from "@/offline/database";
 import { isOfflineEligibleForCurrentUser } from "@/offline/rollout";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+import { listAllCustomers } from "@/application/queries/customers.query";
 import { z } from "zod";
 
 export interface VehicleOverviewResult {
@@ -139,16 +141,19 @@ export async function fetchVehicleOverviewFromOffline(): Promise<VehicleOverview
 }
 
 async function loadVehicleOverview(workspaceId: string): Promise<VehicleOverviewResult> {
-  const { nextApi } = await import("@/lib/nextApiClient");
-  const [vehicleResponse, customerResponse, serviceResponse] = await Promise.all([
-    nextApi.vehicles.list(workspaceId),
-    nextApi.customers.list(workspaceId),
-    nextApi.serviceRecords.list(workspaceId),
+  const [vehiclesData, customersData, serviceRecordsData] = await Promise.all([
+    apiClient
+      .get<{ data: unknown[] }>("/v1/vehicles", { query: { workspace_id: workspaceId } })
+      .then((response) => response.data),
+    listAllCustomers(workspaceId),
+    apiClient
+      .get<{ data: unknown[] }>("/v1/service-records", { query: { workspace_id: workspaceId } })
+      .then((response) => response.data),
   ]);
 
-  const apiVehicles = z.array(apiVehicleSchema).parse(vehicleResponse.data);
-  const apiCustomers = z.array(apiCustomerSchema).parse(customerResponse.data);
-  const serviceRecords = z.array(apiServiceRecordSchema).parse(serviceResponse.data);
+  const apiVehicles = z.array(apiVehicleSchema).parse(vehiclesData);
+  const apiCustomers = z.array(apiCustomerSchema).parse(customersData);
+  const serviceRecords = z.array(apiServiceRecordSchema).parse(serviceRecordsData);
 
   const customers = apiCustomers.map((customer) => ({
     id: customer.id,

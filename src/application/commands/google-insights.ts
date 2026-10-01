@@ -1,4 +1,5 @@
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
+import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 export const GOOGLE_INSIGHTS_REDIRECT_PATH = "/google-calendar/callback";
@@ -39,32 +40,20 @@ export interface GoogleAnalyticsOverview {
   }>;
 }
 
-async function invoke(body: Record<string, unknown>) {
-  const [{ data: { session } }, workspace] = await Promise.all([
-    supabase.auth.getSession(),
+async function invoke(body: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const [{ data: { user } }, workspace] = await Promise.all([
+    getCurrentAuthUser(),
     resolveCurrentWorkspace(),
   ]);
-  if (!session) throw new Error("Not authenticated");
+  if (!user) throw new Error("Not authenticated");
   if (!workspace?.workspaceId) throw new Error("No active workspace selected");
-  const { data, error } = await supabase.functions.invoke("google-insights", {
-    headers: { Authorization: `Bearer ${session.access_token}` },
-    body: { ...body, workspace_id: workspace.workspaceId },
-  });
-  if (error) {
-    const context = (error as { context?: { text?: () => Promise<string> } }).context;
-    if (context?.text) {
-      const raw = await context.text().catch(() => "");
-      try {
-        const parsed = JSON.parse(raw) as { error?: string };
-        if (parsed?.error) throw new Error(parsed.error);
-      } catch (parseError) {
-        if (parseError instanceof Error && parseError.message && !(parseError instanceof SyntaxError)) throw parseError;
-      }
-    }
-    throw error;
-  }
-  if (data?.error) throw new Error(data.error);
-  return data;
+  const response = await apiClient.post<{ data: Record<string, unknown> | null }>(
+    "/v1/platform/edge/google-insights",
+    { body: { ...body, workspace_id: workspace.workspaceId } },
+  );
+  const data = response.data;
+  if (data?.error) throw new Error(String(data.error));
+  return data ?? {};
 }
 
 export interface GoogleBusinessReview {
@@ -93,21 +82,22 @@ export interface GoogleBusinessPerformance {
   directionRequests: number;
 }
 
-export const startGoogleInsightsOAuth = (redirectUri: string) => invoke({ mode: "oauth_start", redirect_uri: redirectUri });
+export const startGoogleInsightsOAuth = (redirectUri: string) =>
+  invoke({ mode: "oauth_start", redirect_uri: redirectUri }) as unknown as Promise<{ url: string }>;
 export const completeGoogleInsightsOAuth = (code: string, state: string, redirectUri: string) => invoke({ mode: "oauth_callback", code, state, redirect_uri: redirectUri });
-export const fetchGoogleInsightsStatus = () => invoke({ mode: "status" }) as Promise<GoogleInsightsStatus>;
-export const fetchGoogleInsightsResources = () => invoke({ mode: "resources" }) as Promise<GoogleInsightsResources>;
+export const fetchGoogleInsightsStatus = () => invoke({ mode: "status" }) as unknown as Promise<GoogleInsightsStatus>;
+export const fetchGoogleInsightsResources = () => invoke({ mode: "resources" }) as unknown as Promise<GoogleInsightsResources>;
 export const selectGoogleInsightsResources = (analyticsPropertyId: string | null, businessLocationId: string | null) => invoke({ mode: "select", analytics_property_id: analyticsPropertyId, business_location_id: businessLocationId });
-export const fetchGoogleAnalyticsOverview = (days = 30) => invoke({ mode: "analytics_overview", days }) as Promise<GoogleAnalyticsOverview>;
+export const fetchGoogleAnalyticsOverview = (days = 30) => invoke({ mode: "analytics_overview", days }) as unknown as Promise<GoogleAnalyticsOverview>;
 export const disconnectGoogleInsights = () => invoke({ mode: "disconnect" });
 
-export const fetchGbpOverview = () => invoke({ mode: "gbp_overview" }) as Promise<GoogleBusinessOverview>;
+export const fetchGbpOverview = () => invoke({ mode: "gbp_overview" }) as unknown as Promise<GoogleBusinessOverview>;
 export const fetchGbpReviews = (pageToken?: string | null) =>
-  invoke({ mode: "gbp_reviews", page_size: 20, page_token: pageToken ?? null }) as Promise<{
+  invoke({ mode: "gbp_reviews", page_size: 20, page_token: pageToken ?? null }) as unknown as Promise<{
     reviews: GoogleBusinessReview[];
     averageRating: number | null;
     totalReviewCount: number;
     nextPageToken: string | null;
   }>;
-export const fetchGbpPerformance = (days = 30) => invoke({ mode: "gbp_performance", days }) as Promise<GoogleBusinessPerformance>;
+export const fetchGbpPerformance = (days = 30) => invoke({ mode: "gbp_performance", days }) as unknown as Promise<GoogleBusinessPerformance>;
 export const replyToGbpReview = (reviewId: string, comment: string) => invoke({ mode: "gbp_reply", review_id: reviewId, comment });

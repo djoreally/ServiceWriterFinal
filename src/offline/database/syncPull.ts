@@ -1,5 +1,5 @@
 import { Q, type Model } from '@nozbe/watermelondb';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/api-client';
 import { getOfflineDatabase } from './index';
 import { isOfflineEligibleForUser } from '../rollout';
 import { emitOfflineObservability } from '../observability';
@@ -26,6 +26,53 @@ interface SyncRow {
   updated_at?: string | null;
 }
 
+interface AppointmentPullRow extends SyncRow {
+  title?: string | null;
+  status?: string | null;
+  scheduled_date?: string | null;
+  scheduled_time?: string | null;
+  customer_id?: string | null;
+  vehicle_id?: string | null;
+  assigned_technician_id?: string | null;
+  dispatch_notes?: string | null;
+}
+
+interface CustomerPullRow extends SyncRow {
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+}
+
+interface FleetWorkOrderPullRow extends SyncRow {
+  order_number?: string | null;
+  status?: string | null;
+  priority?: string | null;
+  scheduled_date?: string | null;
+  service_type?: string | null;
+  po_number?: string | null;
+  total?: number | null;
+  fleet_vehicle_id?: string | null;
+  fleet_client_id?: string | null;
+}
+
+interface VehiclePullRow extends SyncRow {
+  customer_id?: string | null;
+  make?: string | null;
+  model?: string | null;
+  year?: number | null;
+  vin?: string | null;
+}
+
+interface ServiceCatalogPullRow extends SyncRow {
+  name?: string | null;
+  category?: string | null;
+  default_price?: number | null;
+  is_active?: boolean | null;
+  sort_order?: number | null;
+}
+
+const PULL_PAGE_SIZE = 100; // server paginationSchema max
+
 function readRaw(model: Model, key: string): unknown {
   return Reflect.get(model._raw, key);
 }
@@ -51,19 +98,59 @@ async function getCurrentUserId(): Promise<string | null> {
   return data.user?.id ?? null;
 }
 
-async function getCurrentTechnicianId(userId: string): Promise<string | null> {
-  const { data, error } = await supabase
-    .from('technicians')
-    .select('id')
-    .eq('auth_user_id', userId)
-    .maybeSingle();
-
-  if (error) {
-    console.warn('[offline] unable to resolve technician for pull sync', error.message);
+/**
+ * Resolve the caller's workspace through the sanctioned API path.
+ * The Hono layer derives it server-side from the auth token.
+ */
+async function resolveWorkspaceId(): Promise<string | null> {
+  try {
+    const { workspaceId } = await apiClient.get<{ workspaceId: string | null }>(
+      '/v1/workspace-context',
+    );
+    return workspaceId ?? null;
+  } catch (error) {
+    console.warn('[offline] unable to resolve workspace for pull sync', error);
     return null;
   }
+}
 
-  return data?.id ?? null;
+/**
+ * Page through a workspace-scoped list endpoint until every row is fetched.
+ * The server endpoints return `{ data, pagination }`.
+ */
+async function fetchAllPages<T>(path: string, workspaceId: string): Promise<T[]> {
+  const rows: T[] = [];
+  let offset = 0;
+  for (;;) {
+    const page = await apiClient.get<{ data: T[]; pagination?: { limit: number; offset: number } }>(
+      path,
+      { query: { workspace_id: workspaceId, limit: PULL_PAGE_SIZE, offset } },
+    );
+    const batch = page.data ?? [];
+    rows.push(...batch);
+    if (batch.length < PULL_PAGE_SIZE) break;
+    offset += PULL_PAGE_SIZE;
+  }
+  return rows;
+}
+
+function isFreshAfterCursor(row: SyncRow, cursor: string | null): boolean {
+  if (!cursor) return true;
+  const stamp = toEpoch(row.updated_at);
+  if (stamp === undefined) return false;
+  return stamp > Date.parse(cursor);
+}
+
+async function getCurrentTechnicianId(): Promise<string | null> {
+  try {
+    const { data } = await apiClient.get<{ data: { technician_id: string | null } }>(
+      '/v1/tech-app/technician-id',
+    );
+    return data?.technician_id ?? null;
+  } catch (error) {
+    console.warn('[offline] unable to resolve technician for pull sync', error);
+    return null;
+  }
 }
 
 async function getCursor(entity: PullEntity): Promise<string | null> {
@@ -125,19 +212,8 @@ async function markMissingAsDeletedFromIdList(
   });
 }
 
-async function markMissingAsDeleted(
-  entity: 'appointments' | 'customers' | 'vehicles' | 'fleet_work_orders' | 'service_catalog',
-  tableName: string,
-  userId: string,
-): Promise<void> {
-  const source = await supabase.from(entity).select('id').eq('user_id', userId);
-  if (source.error) {
-    console.warn(`[offline] deletion reconcile skipped for ${entity}`, source.error.message);
-    return;
-  }
-
-  const activeIds = new Set<string>((source.data ?? []).map((row) => String(row.id)));
-  await markMissingAsDeletedFromIdList(tableName, activeIds);
+function activeIdsOf<T extends SyncRow>(rows: T[]): Set<string> {
+  return new Set(rows.map((row) => String(row.id)));
 }
 
 function shouldAcceptServerRecord(localRecord: Model, serverUpdatedAt?: number): boolean {
@@ -223,21 +299,12 @@ function getLatestCursor(rows: SyncRow[], currentCursor: string | null): string 
   return candidate ?? currentCursor;
 }
 
-async function pullAppointments(userId: string): Promise<void> {
+async function pullAppointments(workspaceId: string): Promise<void> {
   const cursor = await getCursor(ENTITY_APPOINTMENTS);
-  let query = supabase
-    .from('appointments')
-    .select('id,title,status,scheduled_date,scheduled_time,customer_id,vehicle_id,updated_at')
-    .eq('user_id', userId)
-    .order('updated_at', { ascending: true });
+  const rows = await fetchAllPages<AppointmentPullRow>('/v1/appointments', workspaceId);
+  const fresh = rows.filter((row) => isFreshAfterCursor(row, cursor));
 
-  if (cursor) query = query.gt('updated_at', cursor);
-
-  const response = await query;
-  if (response.error) throw new Error(`[offline] appointments pull failed: ${response.error.message}`);
-
-  const rows = response.data ?? [];
-  await upsertRows('offline_appointments', rows, (record, row) => {
+  await upsertRows('offline_appointments', fresh, (record, row) => {
     writeRaw(record, {
       title: row.title,
       status: row.status,
@@ -250,47 +317,29 @@ async function pullAppointments(userId: string): Promise<void> {
 
   const nextCursor = getLatestCursor(rows, cursor);
   if (nextCursor) await setCursor(ENTITY_APPOINTMENTS, nextCursor);
-  await markMissingAsDeleted(ENTITY_APPOINTMENTS, 'offline_appointments', userId);
+  await markMissingAsDeletedFromIdList('offline_appointments', activeIdsOf(rows));
 }
 
-async function pullCustomers(userId: string): Promise<void> {
+async function pullCustomers(workspaceId: string): Promise<void> {
   const cursor = await getCursor(ENTITY_CUSTOMERS);
-  let query = supabase
-    .from('customers')
-    .select('id,name,email,phone,updated_at')
-    .eq('user_id', userId)
-    .order('updated_at', { ascending: true });
+  const rows = await fetchAllPages<CustomerPullRow>('/v1/customers', workspaceId);
+  const fresh = rows.filter((row) => isFreshAfterCursor(row, cursor));
 
-  if (cursor) query = query.gt('updated_at', cursor);
-
-  const response = await query;
-  if (response.error) throw new Error(`[offline] customers pull failed: ${response.error.message}`);
-
-  const rows = response.data ?? [];
-  await upsertRows('offline_customers', rows, (record, row) => {
+  await upsertRows('offline_customers', fresh, (record, row) => {
     writeRaw(record, { name: row.name, email: row.email, phone: row.phone });
   });
 
   const nextCursor = getLatestCursor(rows, cursor);
   if (nextCursor) await setCursor(ENTITY_CUSTOMERS, nextCursor);
-  await markMissingAsDeleted(ENTITY_CUSTOMERS, 'offline_customers', userId);
+  await markMissingAsDeletedFromIdList('offline_customers', activeIdsOf(rows));
 }
 
-async function pullVehicles(userId: string): Promise<void> {
+async function pullVehicles(workspaceId: string): Promise<void> {
   const cursor = await getCursor(ENTITY_VEHICLES);
-  let query = supabase
-    .from('vehicles')
-    .select('id,customer_id,make,model,year,vin,updated_at')
-    .eq('user_id', userId)
-    .order('updated_at', { ascending: true });
+  const rows = await fetchAllPages<VehiclePullRow>('/v1/vehicles', workspaceId);
+  const fresh = rows.filter((row) => isFreshAfterCursor(row, cursor));
 
-  if (cursor) query = query.gt('updated_at', cursor);
-
-  const response = await query;
-  if (response.error) throw new Error(`[offline] vehicles pull failed: ${response.error.message}`);
-
-  const rows = response.data ?? [];
-  await upsertRows('offline_vehicles', rows, (record, row) => {
+  await upsertRows('offline_vehicles', fresh, (record, row) => {
     writeRaw(record, {
       customer_server_id: row.customer_id,
       make: row.make,
@@ -302,24 +351,18 @@ async function pullVehicles(userId: string): Promise<void> {
 
   const nextCursor = getLatestCursor(rows, cursor);
   if (nextCursor) await setCursor(ENTITY_VEHICLES, nextCursor);
-  await markMissingAsDeleted(ENTITY_VEHICLES, 'offline_vehicles', userId);
+  await markMissingAsDeletedFromIdList('offline_vehicles', activeIdsOf(rows));
 }
 
-async function pullFleetWorkOrders(userId: string): Promise<void> {
+async function pullFleetWorkOrders(): Promise<void> {
   const cursor = await getCursor(ENTITY_FLEET_WORK_ORDERS);
-  let query = supabase
-    .from('fleet_work_orders')
-    .select('id,order_number,status,priority,scheduled_date,service_type,po_number,total,fleet_vehicle_id,fleet_client_id,updated_at')
-    .eq('user_id', userId)
-    .order('updated_at', { ascending: true });
+  // The fleet_work_orders table is user_id-scoped (not workspace-scoped), so
+  // the server endpoint scopes by the caller — no workspace_id is sent.
+  const { data } = await apiClient.get<{ data: FleetWorkOrderPullRow[] }>('/v1/fleet/work-orders');
+  const rows = data ?? [];
+  const fresh = rows.filter((row) => isFreshAfterCursor(row, cursor));
 
-  if (cursor) query = query.gt('updated_at', cursor);
-
-  const response = await query;
-  if (response.error) throw new Error(`[offline] fleet work order pull failed: ${response.error.message}`);
-
-  const rows = response.data ?? [];
-  await upsertRows('offline_fleet_work_orders', rows, (record, row) => {
+  await upsertRows('offline_fleet_work_orders', fresh, (record, row) => {
     writeRaw(record, {
       order_number: row.order_number,
       status: row.status,
@@ -335,24 +378,20 @@ async function pullFleetWorkOrders(userId: string): Promise<void> {
 
   const nextCursor = getLatestCursor(rows, cursor);
   if (nextCursor) await setCursor(ENTITY_FLEET_WORK_ORDERS, nextCursor);
-  await markMissingAsDeleted(ENTITY_FLEET_WORK_ORDERS, 'offline_fleet_work_orders', userId);
+  await markMissingAsDeletedFromIdList('offline_fleet_work_orders', activeIdsOf(rows));
 }
 
-async function pullServiceCatalog(userId: string): Promise<void> {
+async function pullServiceCatalog(workspaceId: string): Promise<void> {
   const cursor = await getCursor(ENTITY_SERVICE_CATALOG);
-  let query = supabase
-    .from('service_catalog')
-    .select('id,name,category,default_price,is_active,sort_order,updated_at')
-    .eq('user_id', userId)
-    .order('updated_at', { ascending: true });
+  // Note: the server endpoint returns only is_active catalog rows; inactive
+  // items will no longer be pulled (previously the pull was unfiltered).
+  const { data } = await apiClient.get<{ data: ServiceCatalogPullRow[] }>('/v1/service-catalog', {
+    query: { workspace_id: workspaceId },
+  });
+  const rows = data ?? [];
+  const fresh = rows.filter((row) => isFreshAfterCursor(row, cursor));
 
-  if (cursor) query = query.gt('updated_at', cursor);
-
-  const response = await query;
-  if (response.error) throw new Error(`[offline] service catalog pull failed: ${response.error.message}`);
-
-  const rows = response.data ?? [];
-  await upsertRows('offline_service_catalog', rows, (record, row) => {
+  await upsertRows('offline_service_catalog', fresh, (record, row) => {
     writeRaw(record, {
       name: row.name,
       category: row.category,
@@ -364,29 +403,23 @@ async function pullServiceCatalog(userId: string): Promise<void> {
 
   const nextCursor = getLatestCursor(rows, cursor);
   if (nextCursor) await setCursor(ENTITY_SERVICE_CATALOG, nextCursor);
-  await markMissingAsDeleted(ENTITY_SERVICE_CATALOG, 'offline_service_catalog', userId);
+  await markMissingAsDeletedFromIdList('offline_service_catalog', activeIdsOf(rows));
 }
 
-async function pullTechnicianMessages(userId: string): Promise<void> {
-  const technicianId = await getCurrentTechnicianId(userId);
+async function pullTechnicianMessages(workspaceId: string): Promise<void> {
+  const technicianId = await getCurrentTechnicianId();
   if (!technicianId) {
     return;
   }
 
   const cursor = await getCursor(ENTITY_TECH_MESSAGES);
-  let query = supabase
-    .from('appointments')
-    .select('id,dispatch_notes,updated_at')
-    .eq('assigned_technician_id', technicianId)
-    .not('dispatch_notes', 'is', null)
-    .order('updated_at', { ascending: true });
+  const appointments = await fetchAllPages<AppointmentPullRow>('/v1/appointments', workspaceId);
+  const matching = appointments.filter(
+    (row) => row.assigned_technician_id === technicianId && row.dispatch_notes != null,
+  );
+  const fresh = matching.filter((row) => isFreshAfterCursor(row, cursor));
 
-  if (cursor) query = query.gt('updated_at', cursor);
-
-  const response = await query;
-  if (response.error) throw new Error(`[offline] technician message pull failed: ${response.error.message}`);
-
-  const rows = (response.data ?? []).map((row) => ({
+  const rows = fresh.map((row) => ({
     id: row.id,
     appointment_id: row.id,
     dispatch_notes: row.dispatch_notes,
@@ -406,11 +439,12 @@ async function pullTechnicianMessages(userId: string): Promise<void> {
     });
   });
 
-  const nextCursor = getLatestCursor(rows, cursor);
+  const nextCursor = getLatestCursor(matching, cursor);
   if (nextCursor) await setCursor(ENTITY_TECH_MESSAGES, nextCursor);
 
-  const activeIds = new Set<string>(rows.map((row) => String(row.id)));
-  await markMissingAsDeletedFromIdList('offline_technician_messages', activeIds);
+  // Deletion reconcile runs against the full matching set (not the
+  // cursor-filtered window) so unchanged messages are never marked deleted.
+  await markMissingAsDeletedFromIdList('offline_technician_messages', activeIdsOf(matching));
 }
 
 export async function runOfflinePullSync(): Promise<void> {
@@ -424,11 +458,14 @@ export async function runOfflinePullSync(): Promise<void> {
     return;
   }
 
-  await pullAppointments(userId);
-  await pullCustomers(userId);
-  await pullVehicles(userId);
-  await pullFleetWorkOrders(userId);
-  await pullServiceCatalog(userId);
-  await pullTechnicianMessages(userId);
+  const workspaceId = await resolveWorkspaceId();
+  if (!workspaceId) return;
+
+  await pullAppointments(workspaceId);
+  await pullCustomers(workspaceId);
+  await pullVehicles(workspaceId);
+  await pullFleetWorkOrders();
+  await pullServiceCatalog(workspaceId);
+  await pullTechnicianMessages(workspaceId);
   await emitOfflineObservability('pull_sync');
 }

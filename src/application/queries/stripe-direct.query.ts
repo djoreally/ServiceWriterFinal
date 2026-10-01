@@ -1,5 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
-import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 
 export interface StripeDirectStatus {
   mode: "connect" | "direct";
@@ -13,57 +12,44 @@ export interface StripeDirectStatus {
   checkedAt: string | null;
 }
 
-async function authHeaders() {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error("Please sign in to manage Stripe");
-  return {
-    Authorization: `Bearer ${session.access_token}`,
-    "Content-Type": "application/json",
-  };
-}
-
-async function currentWorkspaceId() {
-  const context = await resolveCurrentWorkspace();
-  if (!context) throw new Error("No active workspace");
-  return context.workspaceId;
-}
-
-async function parseResponse(response: Response): Promise<StripeDirectStatus> {
-  const payload = await response.json().catch(() => null) as { data?: StripeDirectStatus; error?: { message?: string } } | null;
-  if (!response.ok || !payload?.data) {
-    throw new Error(payload?.error?.message || "Stripe configuration request failed");
+function toError(error: unknown, fallback: string): Error {
+  if (error instanceof ApiClientError) {
+    if (error.status === 401) return new Error("Please sign in to manage Stripe");
+    if (error.code === "workspace_missing") return new Error("No active workspace");
+    return new Error(error.message);
   }
-  return payload.data;
+  return new Error(fallback);
 }
 
 export async function fetchStripeDirectStatus(): Promise<StripeDirectStatus> {
-  const workspaceId = await currentWorkspaceId();
-  const response = await fetch(`/api/v1/payments/stripe-direct?workspace_id=${encodeURIComponent(workspaceId)}`, {
-    headers: await authHeaders(),
-  });
-  return parseResponse(response);
+  try {
+    // Workspace is resolved server-side from the auth token; it is never
+    // passed from the client.
+    const { data } = await apiClient.get<{ data: StripeDirectStatus }>("/v1/payments/stripe-direct");
+    return data;
+  } catch (error) {
+    throw toError(error, "Stripe configuration request failed");
+  }
 }
 
 export async function configureStripeDirect(accountId: string, secretKey: string, webhookSecret: string): Promise<StripeDirectStatus> {
-  const workspaceId = await currentWorkspaceId();
-  const response = await fetch("/api/v1/payments/stripe-direct", {
-    method: "PUT",
-    headers: await authHeaders(),
-    body: JSON.stringify({
-      workspace_id: workspaceId,
+  try {
+    const { data } = await apiClient.put<{ data: StripeDirectStatus }>("/v1/payments/stripe-direct", {
       account_id: accountId,
       secret_key: secretKey,
       webhook_secret: webhookSecret,
-    }),
-  });
-  return parseResponse(response);
+    });
+    return data;
+  } catch (error) {
+    throw toError(error, "Stripe configuration request failed");
+  }
 }
 
 export async function disconnectStripeDirect(): Promise<StripeDirectStatus> {
-  const workspaceId = await currentWorkspaceId();
-  const response = await fetch(`/api/v1/payments/stripe-direct?workspace_id=${encodeURIComponent(workspaceId)}`, {
-    method: "DELETE",
-    headers: await authHeaders(),
-  });
-  return parseResponse(response);
+  try {
+    const { data } = await apiClient.delete<{ data: StripeDirectStatus }>("/v1/payments/stripe-direct");
+    return data;
+  } catch (error) {
+    throw toError(error, "Stripe configuration request failed");
+  }
 }

@@ -364,6 +364,14 @@ jest.mock("@/integrations/supabase/client", () => {
 
 jest.mock("@/lib/nextApiClient", () => ({
   nextApi: {
+    workspaces: async () => [
+      {
+        workspace_id: "00000000-0000-4000-8000-000000000001",
+        user_id: mockOwner,
+        is_active: true,
+        workspaces: { is_active: true },
+      },
+    ],
     dispatch: {
       assign:       async (payload: DispatchApiPayload) => {
         const result = await supabase.rpc("assign_dispatch_job_v1", {
@@ -387,6 +395,55 @@ jest.mock("@/lib/nextApiClient", () => ({
 
 jest.mock("@/application/queries/job-thread.query", () => ({
   openCommunicationThreadsForJobs: jest.fn(async () => undefined),
+}));
+
+/**
+ * In-memory emulation of the dispatch read-model HTTP surface. The technician
+ * dashboard now reads through GET /v1/dispatch/operational-jobs, so the mock
+ * serves the same appointment rows the emulated `dispatch_operational_jobs_v1`
+ * view would return, built from the shared mockStore.
+ */
+jest.mock("@/lib/api-client", () => ({
+  apiClient: {
+    get: jest.fn(async (path: string, options?: { query?: Record<string, unknown> }) => {
+      if (typeof path === "string" && path.startsWith("/v1/dispatch/operational-jobs")) {
+        const query = (options?.query ?? {}) as Record<string, string>;
+        const appointments = mockStore.appointments
+          .filter(
+            (appointment) =>
+              (!query.from || appointment.scheduled_date >= query.from) &&
+              (!query.to || appointment.scheduled_date <= query.to),
+          )
+          .map((appointment) => {
+            const startsAt = `${appointment.scheduled_date}T${appointment.scheduled_time}`;
+            return {
+              id: appointment.id,
+              workspace_id: "00000000-0000-4000-8000-000000000001",
+              status: appointment.status,
+              starts_at: startsAt,
+              ends_at: new Date(new Date(startsAt).getTime() + appointment.duration_minutes * 60_000).toISOString(),
+              assigned_user_id: appointment.assigned_technician_id,
+              updated_at: appointment.updated_at,
+              metadata: {
+                title: appointment.title,
+                duration_minutes: appointment.duration_minutes,
+                dispatch_status: appointment.dispatch_status,
+                dispatch_notes: appointment.dispatch_notes,
+              },
+              customers: null,
+              vehicles: null,
+              locations: null,
+            };
+          });
+        return { data: { appointments, work_orders: [], members: [] } };
+      }
+      return { data: null };
+    }),
+    post: jest.fn(async () => ({ data: null })),
+    put: jest.fn(async () => ({ data: null })),
+    patch: jest.fn(async () => ({ data: null })),
+    delete: jest.fn(async () => ({ data: null })),
+  },
 }));
 
 import {

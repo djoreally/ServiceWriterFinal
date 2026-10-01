@@ -2,9 +2,8 @@
  * SMS Credits Query — prepaid message credit balance, bundle catalog,
  * and purchase history for the Messaging settings card.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface SmsCreditBalance {
   included_units: number;
   purchased_units: number;
@@ -49,32 +48,21 @@ const EMPTY_BALANCE: SmsCreditBalance = {
 };
 
 export async function fetchSmsCreditBalance(): Promise<SmsCreditBalance> {
-  const { data: userData } = await getCurrentAuthUser();
-  const uid = userData.user?.id;
-  if (!uid) return EMPTY_BALANCE;
-  const { data, error } = await supabase.rpc("sms_credit_balance_v1", { p_user_id: uid });
-  if (error) throw error;
-  return { ...EMPTY_BALANCE, ...((data ?? {}) as Partial<SmsCreditBalance>) };
+  try {
+    const { data } = await apiClient.get<{ data: Partial<SmsCreditBalance> | null }>("/v1/sms-credits/balance");
+    return { ...EMPTY_BALANCE, ...(data ?? {}) };
+  } catch (error) {
+    if (error instanceof ApiClientError && error.status === 401) return EMPTY_BALANCE;
+    throw error;
+  }
 }
 
 export async function fetchSmsBundles(): Promise<SmsBundle[]> {
-  const { data, error } = await supabase
-    .from("message_bundles")
-    .select("bundle_key, name, credit_units, price_cents, renewal_period")
-    .eq("channel", "sms")
-    .eq("is_active", true)
-    .not("bundle_key", "is", null)
-    .order("price_cents", { ascending: true });
-  if (error) throw error;
-  return (data ?? []) as SmsBundle[];
+  const { data } = await apiClient.get<{ data: SmsBundle[] }>("/v1/sms-credits/bundles");
+  return data ?? [];
 }
 
 export async function fetchSmsCreditPurchases(): Promise<SmsCreditPurchase[]> {
-  const { data, error } = await supabase
-    .from("sms_credit_purchases")
-    .select("id, bundle_key, units, kind, amount_cents, created_at")
-    .order("created_at", { ascending: false })
-    .limit(10);
-  if (error) throw error;
-  return (data ?? []) as SmsCreditPurchase[];
+  const { data } = await apiClient.get<{ data: SmsCreditPurchase[] }>("/v1/sms-credits/purchases");
+  return data ?? [];
 }

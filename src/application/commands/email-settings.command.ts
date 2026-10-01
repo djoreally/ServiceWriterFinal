@@ -1,49 +1,42 @@
 /**
  * Email Settings Commands — Write operations for email configuration.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export async function saveEmailSettings(payload: Record<string, unknown>) {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) throw new Error("Not authenticated");
-  const { data: workspaceOwnerId, error: ownerError } = await supabase.rpc("current_workspace_owner_user_id");
-  if (ownerError) throw ownerError;
-  const settingsUserId = workspaceOwnerId || user.id;
-
-  const { data: existing } = await (supabase as any)
-    .from("email_settings")
-    .select("id")
-    .eq("user_id", settingsUserId)
-    .maybeSingle();
-
-  const fullPayload = { ...payload, user_id: settingsUserId };
-
-  if (existing) {
-    return (supabase as any)
-      .from("email_settings")
-      .update(fullPayload)
-      .eq("user_id", settingsUserId);
-  } else {
-    return (supabase as any)
-      .from("email_settings")
-      .insert(fullPayload);
-  }
+  const { data } = await apiClient.put<{ data: unknown; error: null }>("/v1/email-settings", payload);
+  return { data, error: null };
 }
 
 export async function encryptSmtpPassword(plainPassword: string) {
-  return (supabase as any).rpc("encrypt_smtp_password", { plain_password: plainPassword });
+  const { data } = await apiClient.post<{ data: string | null; error: null }>(
+    "/v1/email-settings/encrypt-password",
+    { plain_password: plainPassword },
+  );
+  return { data, error: null };
 }
 
 /** SMTP and IMAP credentials share the same server-side encryption primitive. */
 export const encryptEmailPassword = encryptSmtpPassword;
 
+export interface EmailConnectionTestResult {
+  success?: boolean;
+  message?: string;
+  error?: string;
+}
+
 export async function invokeTestEmail(userId: string) {
-  return supabase.functions.invoke("test-email-settings", {
-    body: { user_id: userId },
-  });
+  const { data } = await apiClient.post<{ data: EmailConnectionTestResult | null; error: null }>(
+    "/v1/email-settings/test-outgoing",
+    { user_id: userId },
+  );
+  return { data, error: null };
 }
 
 export async function invokeTestIncomingEmail() {
-  return supabase.functions.invoke("fleet-email-mailbox", { body: { action: "test" } });
+  const { data } = await apiClient.post<{ data: EmailConnectionTestResult | null; error: null }>(
+    "/v1/email-settings/test-incoming",
+    {},
+  );
+  return { data, error: null };
 }

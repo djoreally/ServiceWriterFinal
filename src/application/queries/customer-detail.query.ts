@@ -1,6 +1,6 @@
 /** Customer Detail Query - canonical customer history bundle. */
 import { z } from "zod";
-import { coreApiFetch } from "@/lib/coreApiFetch";
+import { apiClient } from "@/lib/api-client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 export interface CustomerDetailCustomer {
@@ -183,11 +183,10 @@ export async function fetchCustomerDetail(customerId: string): Promise<CustomerD
 
   let response: z.infer<typeof summarySchema>;
   try {
-    response = summarySchema.parse(
-      await coreApiFetch<unknown>(
-        `/v1/customers/${customerId}/summary?workspace_id=${encodeURIComponent(context.workspaceId)}`,
-      ),
-    );
+    const payload = await apiClient.get<unknown>(`/v1/customers/${customerId}/summary`, {
+      query: { workspace_id: context.workspaceId },
+    });
+    response = summarySchema.parse(payload);
   } catch {
     return null;
   }

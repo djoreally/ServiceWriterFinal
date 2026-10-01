@@ -2,11 +2,9 @@
  * Assets Queries — read-only access to the user's asset library.
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import type { AssetRecord } from "@/application/commands/assets.command";
 import type { AssetType } from "@/lib/assets/validation";
-
-const BUCKET = "assets";
 
 export interface ListAssetsParams {
   search?: string;
@@ -35,61 +33,35 @@ export async function listAssets(
     folder,
   } = params;
 
-  let q = supabase
-    .from("assets")
-    .select("*", { count: "exact" })
-    .is("deleted_at", null);
-
-  if (folder === null) q = q.is("folder", null);
-  else if (typeof folder === "string") q = q.eq("folder", folder);
-
-  if (assetType !== "all") q = q.eq("asset_type", assetType);
-  if (search && search.trim()) {
-    q = q.ilike("original_filename", `%${search.trim()}%`);
-  }
-
-  switch (sort) {
-    case "oldest":
-      q = q.order("created_at", { ascending: true });
-      break;
-    case "name":
-      q = q.order("original_filename", { ascending: true });
-      break;
-    case "size":
-      q = q.order("file_size", { ascending: false });
-      break;
-    case "newest":
-    default:
-      q = q.order("created_at", { ascending: false });
-  }
-
-  q = q.range(offset, offset + limit - 1);
-
-  const { data, error, count } = await q;
-  if (error) throw error;
-  return { items: (data ?? []) as AssetRecord[], total: count ?? 0 };
+  const response = await apiClient.get<{ data: ListAssetsResult }>("/v1/assets", {
+    query: {
+      ...(search?.trim() ? { search: search.trim() } : {}),
+      ...(assetType !== "all" ? { asset_type: assetType } : {}),
+      sort,
+      limit,
+      offset,
+      ...(folder === null ? { folder_null: "true" } : {}),
+      ...(typeof folder === "string" ? { folder } : {}),
+    },
+  });
+  return { items: response.data.items ?? [], total: response.data.total ?? 0 };
 }
 
 export async function getAssetSignedUrl(
   storagePath: string,
   expiresInSeconds = 3600,
 ): Promise<string> {
-  const { data, error } = await supabase.storage
-    .from(BUCKET)
-    .createSignedUrl(storagePath, expiresInSeconds);
-  if (error || !data?.signedUrl) {
-    throw new Error(error?.message || "Failed to create signed URL");
+  const response = await apiClient.get<{ data: { signed_url: string | null } }>("/v1/assets/signed-url", {
+    query: { storage_path: storagePath, expires_in: expiresInSeconds },
+  });
+  const signedUrl = response.data.signed_url;
+  if (!signedUrl) {
+    throw new Error("Failed to create signed URL");
   }
-  return data.signedUrl;
+  return signedUrl;
 }
 
 export async function getAssetById(id: string): Promise<AssetRecord | null> {
-  const { data, error } = await supabase
-    .from("assets")
-    .select("*")
-    .eq("id", id)
-    .is("deleted_at", null)
-    .maybeSingle();
-  if (error) throw error;
-  return (data as AssetRecord) ?? null;
+  const response = await apiClient.get<{ data: AssetRecord | null }>(`/v1/assets/${id}`);
+  return response.data ?? null;
 }

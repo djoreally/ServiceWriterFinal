@@ -1,35 +1,11 @@
 /**
  * Fleet Import Commands — Bulk insert clients and vehicles from CSV/Excel
- * 
+ *
  * Validates and maps user-provided rows to the fleet_clients and fleet_vehicles tables.
  * Inserts in batches of 100 to avoid payload limits.
  */
 
-import { supabase } from "@/integrations/supabase/client";
-
-/* ────────── Shared helpers ────────── */
-
-const BATCH_SIZE = 100;
-
-async function batchInsert<T extends Record<string, unknown>>(
-  table: string,
-  rows: T[]
-): Promise<{ inserted: number; errors: string[] }> {
-  const errors: string[] = [];
-  let inserted = 0;
-
-  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-    const batch = rows.slice(i, i + BATCH_SIZE);
-    const { error } = await (supabase as any).from(table).insert(batch);
-    if (error) {
-      errors.push(`Rows ${i + 1}–${i + batch.length}: ${error.message}`);
-    } else {
-      inserted += batch.length;
-    }
-  }
-
-  return { inserted, errors };
-}
+import { apiClient } from "@/lib/api-client";
 
 /* ────────── Client import ────────── */
 
@@ -96,26 +72,11 @@ export async function importFleetClients(
   userId: string,
   clients: ImportClientRow[]
 ): Promise<{ inserted: number; errors: string[] }> {
-  const rows = clients.map((c) => ({
-    user_id: userId,
-    company_name: c.company_name,
-    billing_email: c.billing_email || null,
-    phone: c.phone || null,
-    address: c.address || null,
-    city: c.city || null,
-    state: c.state || null,
-    postal_code: c.postal_code || null,
-    payment_terms: c.payment_terms || "net_30",
-    notes: c.notes || null,
-    ap_contact_name: c.ap_contact_name || null,
-    ap_contact_email: c.ap_contact_email || null,
-    ap_contact_phone: c.ap_contact_phone || null,
-    fleet_manager_name: c.fleet_manager_name || null,
-    fleet_manager_email: c.fleet_manager_email || null,
-    fleet_manager_phone: c.fleet_manager_phone || null,
-  }));
-
-  return batchInsert("fleet_clients", rows);
+  const { data } = await apiClient.post<{ data: { inserted: number; errors: string[] } }>(
+    "/v1/fleet/import/clients",
+    { clients },
+  );
+  return data;
 }
 
 /* ────────── Vehicle import ────────── */
@@ -199,35 +160,21 @@ export async function importFleetVehicles(
   userId: string,
   vehicles: ImportVehicleRow[]
 ): Promise<{ inserted: number; errors: string[] }> {
-  const rows = vehicles.map((v) => ({
-    user_id: userId,
-    fleet_client_id: v.fleet_client_id,
-    year: v.year ?? null,
-    make: v.make || null,
-    model: v.model || null,
-    vin: v.vin || null,
-    license_plate: v.license_plate || null,
-    unit_number: v.unit_number || null,
-    color: v.color || null,
-    engine: v.engine || null,
-    fuel_type: v.fuel_type || null,
-    mileage: v.mileage ?? null,
-    status: v.status || "active",
-    notes: v.notes || null,
-  }));
-
-  return batchInsert("fleet_vehicles", rows);
+  const { data } = await apiClient.post<{ data: { inserted: number; errors: string[] } }>(
+    "/v1/fleet/import/vehicles",
+    { vehicles },
+  );
+  return data;
 }
 
 /** Fetch all fleet clients for the user (used to build clientMap for vehicle import) */
 export async function fetchFleetClientMap(userId: string): Promise<Map<string, string>> {
-  const { data } = await supabase
-    .from("fleet_clients")
-    .select("id, company_name")
-    .eq("user_id", userId);
+  const { data } = await apiClient.get<{ data: Array<{ id: string; company_name: string }> }>(
+    "/v1/fleet/clients/map",
+  );
 
   const map = new Map<string, string>();
-  (data || []).forEach((c: any) => {
+  (data || []).forEach((c) => {
     map.set(c.company_name.toLowerCase(), c.id);
   });
   return map;

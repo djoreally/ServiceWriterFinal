@@ -1,7 +1,7 @@
 /**
  * Checkout Catalog Query - Fetch public service catalog for booking checkout upsells.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 
 export interface CheckoutCatalogItem {
   id: string;
@@ -14,9 +14,13 @@ export interface CheckoutCatalogItem {
 
 /** Fetch public service catalog for a business user (used in checkout upsell step). */
 export async function fetchCheckoutCatalog(businessUserId: string): Promise<CheckoutCatalogItem[]> {
-  const { data, error } = await supabase.rpc("get_public_service_catalog", {
-    business_user_id: businessUserId,
-  });
-  if (error) return [];
-  return (data as CheckoutCatalogItem[]) ?? [];
+  try {
+    const { data } = await apiClient.get<{ data: CheckoutCatalogItem[] }>("/v1/billing/checkout-catalog", {
+      query: { business_user_id: businessUserId },
+    });
+    return data ?? [];
+  } catch (error) {
+    if (error instanceof ApiClientError) return [];
+    throw error;
+  }
 }

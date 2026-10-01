@@ -1,11 +1,9 @@
 import { AppLayout } from "@/components/layout/AppLayout";
 import { NewsletterSequence } from "@/components/marketing/NewsletterSequence";
-import { MarketingSiteFooter, MarketingSiteHeader } from "@/components/layout/MarketingSiteChrome";
 
 const Newsletter = () => {
   return (
     <div className="min-h-screen bg-background">
-      <MarketingSiteHeader />
       <AppLayout title="Newsletter Sequences">
         <div className="space-y-6">
           <div>
@@ -18,7 +16,6 @@ const Newsletter = () => {
           <NewsletterSequence />
         </div>
       </AppLayout>
-      <MarketingSiteFooter />
     </div>
   );
 };

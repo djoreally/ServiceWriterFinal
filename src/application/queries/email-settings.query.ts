@@ -1,20 +1,18 @@
 /**
  * Email Settings Query — Read operations for email configuration.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
-export async function fetchEmailSettings() {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) return null;
+import type { Database } from "@/integrations/supabase/types";
 
-  const { data: workspaceOwnerId, error: ownerError } = await supabase.rpc("current_workspace_owner_user_id");
-  if (ownerError) throw ownerError;
-  const { data, error } = await (supabase as any)
-    .from("email_settings")
-    .select("*")
-    .eq("user_id", workspaceOwnerId || user.id)
-    .maybeSingle();
-  if (error) throw error;
-  return data;
+export type EmailSettingsRow = Database["public"]["Tables"]["email_settings"]["Row"];
+
+export async function fetchEmailSettings(): Promise<EmailSettingsRow | null> {
+  try {
+    const { data } = await apiClient.get<{ data: EmailSettingsRow | null }>("/v1/email-settings");
+    return data ?? null;
+  } catch (error) {
+    if (error instanceof ApiClientError && error.status === 401) return null;
+    throw error;
+  }
 }

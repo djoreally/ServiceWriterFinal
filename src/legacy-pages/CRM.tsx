@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Activity, ArrowRight, Megaphone, UsersRound } from "lucide-react";
+import { Activity, ArrowRight, Clapperboard, HeartHandshake, Mail, Megaphone, UsersRound } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useWorkspaceSelection } from "@/hooks/useWorkspaceSelection";
 import { ApiClientError, nextApi } from "@/lib/nextApiClient";
@@ -151,6 +151,19 @@ export default function CRM() {
               <SummaryCard icon={Megaphone} label="Campaigns" value={String(campaigns.length)} detail={`${campaigns.filter((campaign) => campaign.approval_state === "draft").length} drafts awaiting review`} />
             </section>
 
+            <section className="rounded-xl border bg-card" aria-label="Growth and marketing tools">
+              <div className="border-b p-4">
+                <h2 className="font-semibold">Growth &amp; marketing</h2>
+                <p className="text-xs text-muted-foreground">Every growth tool lives here in the CRM — campaigns, reviews, retention, and reputation.</p>
+              </div>
+              <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-4">
+                <GrowthToolLink to="/crm/growth" icon={Megaphone} label="Growth Tools" detail="Segments, campaigns, reviews, automation, analytics" />
+                <GrowthToolLink to="/crm/newsletter" icon={Mail} label="Newsletter" detail="Sequences, templates, and subscribers" />
+                <GrowthToolLink to="/crm/videos" icon={Clapperboard} label="Marketing Videos" detail="Video library and publishing" />
+                <GrowthToolLink to="/crm/retention" icon={HeartHandshake} label="Retention Engine" detail="Win-back automation and verification" />
+              </div>
+            </section>
+
             <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
               <section className="rounded-xl border bg-card">
                 <div className="flex items-center justify-between border-b p-4"><div><h2 className="font-semibold">Customer follow-up queue</h2><p className="text-xs text-muted-foreground">All canonical customers projected into CRM; attention reflects due or at-risk follow-up only.</p></div><Link className="text-sm font-semibold text-primary" to="/customers">Operations customers</Link></div>
@@ -171,4 +184,16 @@ export default function CRM() {
 
 function SummaryCard({ icon: Icon, label, value, detail }: { icon: typeof UsersRound; label: string; value: string; detail: string }) {
   return <div className="rounded-xl border bg-card p-4"><div className="flex items-center gap-2 text-sm text-muted-foreground"><Icon className="h-4 w-4 text-primary" />{label}</div><p className="mt-3 text-2xl font-bold">{value}</p><p className="mt-1 text-xs text-muted-foreground">{detail}</p></div>;
+}
+
+function GrowthToolLink({ to, icon: Icon, label, detail }: { to: string; icon: typeof UsersRound; label: string; detail: string }) {
+  return (
+    <Link to={to} className="group flex items-start gap-3 rounded-lg border p-3 transition-colors hover:bg-muted/50">
+      <div className="rounded-md bg-primary/10 p-2 text-primary"><Icon className="h-4 w-4" /></div>
+      <div className="min-w-0 flex-1">
+        <p className="flex items-center gap-1 text-sm font-medium leading-none">{label}<ArrowRight className="h-3.5 w-3.5 text-muted-foreground transition-transform group-hover:translate-x-0.5" /></p>
+        <p className="mt-1 text-xs text-muted-foreground line-clamp-2">{detail}</p>
+      </div>
+    </Link>
+  );
 }

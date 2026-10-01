@@ -1,12 +1,12 @@
 /** Vehicle Detail Commands — canonical workspace-scoped vehicle writes. */
-import { nextApi } from "@/lib/nextApiClient";
+import { apiClient } from "@/lib/api-client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 async function updateVehicle(vehicleId: string, data: Record<string, unknown>) {
   try {
     const context = await resolveCurrentWorkspace();
     if (!context) throw new Error("No active workspace is available.");
-    const response = await nextApi.vehicles.update(vehicleId, {
+    const response = await apiClient.patch<{ data: unknown }>(`/v1/vehicles/${encodeURIComponent(vehicleId)}`, {
       workspace_id: context.workspaceId,
       ...data,
     });

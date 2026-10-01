@@ -7,6 +7,7 @@ import {
   productionSupabase,
   supabase,
 } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { isTransientBackendError } from "@/lib/transient-backend";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
@@ -104,7 +105,7 @@ export async function signInWithPassword(email: string, password: string): Promi
 
     return { error: getSafeSignInError(error) };
   }
-  void supabase.rpc("record_auth_security_event_v1", { p_event_type: "login_success" });
+  void apiClient.post("/v1/platform/auth/security-event", { event_type: "login_success" });
   return {};
 }
 
@@ -159,7 +160,7 @@ export async function requestPasswordReset(email: string): Promise<void> {
 export async function updatePassword(password: string): Promise<{ error?: string }> {
   const { error } = await authSupabase.auth.updateUser({ password });
   if (error) return { error: "This reset link is invalid or has expired. Request a new one." };
-  void supabase.rpc("record_auth_security_event_v1", { p_event_type: "password_reset_completed" });
+  void apiClient.post("/v1/platform/auth/security-event", { event_type: "password_reset_completed" });
   return {};
 }
 

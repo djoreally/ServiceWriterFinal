@@ -1,7 +1,7 @@
 /**
  * Onboarding check query - determines if user needs onboarding
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface OnboardingCheckResult {
@@ -15,25 +15,5 @@ export async function checkOnboardingStatus(): Promise<OnboardingCheckResult> {
 
   // Team members (manager/dispatcher/technician) belong to someone else's tenant.
   // They never go through onboarding — that's the owner's responsibility.
-  const { data: link } = await supabase
-    .from("team_user_links")
-    .select("id")
-    .eq("member_user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-
-  if (link) {
-    return { authenticated: true, onboardingCompleted: true };
-  }
-
-  const { data: profile } = await supabase
-    .from("business_profiles")
-    .select("onboarding_completed")
-    .eq("user_id", user.id)
-    .maybeSingle();
-
-  return {
-    authenticated: true,
-    onboardingCompleted: !!profile?.onboarding_completed,
-  };
+  return apiClient.get<OnboardingCheckResult>("/v1/platform/onboarding/status");
 }

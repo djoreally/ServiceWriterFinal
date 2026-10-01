@@ -1,3 +1,3 @@
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 export interface PublicTireInventoryItem { id:string; name:string; sku:string|null; tire_size:string; tire_load_index:string|null; tire_speed_rating:string|null; tire_season:string|null; tire_position:string|null; available_quantity:number; sell_price:number; image_url:string|null }
-export async function fetchPublicTireInventory(businessUserId:string,tireSize:string){ if(!businessUserId||!tireSize)return []; const {data,error}=await supabase.rpc("get_public_tire_inventory" as never,{p_business_user_id:businessUserId,p_tire_size:tireSize} as never); if(error)throw error; return (data||[]) as PublicTireInventoryItem[]; }
+export async function fetchPublicTireInventory(businessUserId:string,tireSize:string){ if(!businessUserId||!tireSize)return []; const { data } = await apiClient.post<{ data: PublicTireInventoryItem[] }>("/v1/tire-pricing/public-inventory", { business_user_id: businessUserId, tire_size: tireSize }); return (data||[]) as PublicTireInventoryItem[]; }

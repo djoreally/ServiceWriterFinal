@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { useAuth } from '@packages/auth';
+import { apiClient, ApiClientError } from '@/lib/api-client';
 
 export type CanonicalPlanName = 'basic' | 'pro' | 'fleet';
 export type PlanName = CanonicalPlanName | 'free' | 'payg' | 'business' | 'enterprise';
@@ -180,15 +181,6 @@ async function withSubscriptionTimeout<T>(promise: Promise<T>): Promise<T> {
   return Promise.race([promise, new Promise<T>((_, reject) => window.setTimeout(() => reject(new Error('Subscription check timed out')), SUBSCRIPTION_TIMEOUT_MS))]);
 }
 
-async function readJson(response: Response) {
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const message = (data as { error?: { message?: string } })?.error?.message ?? 'Billing request failed';
-    throw new Error(message);
-  }
-  return data;
-}
-
 const SubscriptionContext = createContext<SubscriptionContextType>({
   subscription: null, loading: true, error: null, hasFeature: () => false, canUse: () => true,
   isAtLimit: () => false, isOverLimit: () => false, refresh: async () => {}, upgrade: async () => null,
@@ -237,18 +229,15 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
     }
 
     try {
-      const response = await withSubscriptionTimeout(fetch('/api/v1/billing/subscription', {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-        cache: 'no-store',
-      }));
-      const normalized = normalizeWorkspaceBilling(await readJson(response));
+      const data = await withSubscriptionTimeout(apiClient.get('/v1/billing/subscription'));
+      const normalized = normalizeWorkspaceBilling(data);
       cachedSubscriptionDecision = { userId: user.id, checkedAt: Date.now(), subscription: normalized };
       setSubscription(normalized);
       setError(null);
     } catch (err) {
       console.error('Failed to fetch subscription:', err);
       setSubscription((previous) => previous ?? basicState);
-      setError(err instanceof Error ? err.message : 'Failed to fetch subscription');
+      setError(err instanceof ApiClientError ? err.message : err instanceof Error ? err.message : 'Failed to fetch subscription');
     } finally {
       setLoading(false);
     }
@@ -291,24 +280,20 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
 
     try {
       const planTier = canonicalPlan(planName);
-      const response = await fetch('/api/v1/billing/checkout', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workspace_id: subscription?.workspace_id ?? undefined,
-          plan_tier: planTier,
-          billing_interval: options.billingInterval ?? subscription?.billing_interval ?? 'monthly',
-          payments_addon_active: options.paymentsAddonActive ?? false,
-          additional_technician_quantity: options.additionalTechnicianQuantity ?? 0,
-        }),
+      // The workspace is resolved server-side from the auth token; it is
+      // never passed from the client.
+      const data = await apiClient.post<{ url?: string; redirect_url?: string; free?: boolean }>('/v1/billing/checkout', {
+        plan_tier: planTier,
+        billing_interval: options.billingInterval ?? subscription?.billing_interval ?? 'monthly',
+        payments_addon_active: options.paymentsAddonActive ?? false,
+        additional_technician_quantity: options.additionalTechnicianQuantity ?? 0,
       });
-      const data = await readJson(response) as { url?: string; redirect_url?: string; free?: boolean };
       setError(null);
       if (data.free) await fetchSubscription(true);
       return data.url ?? data.redirect_url ?? null;
     } catch (err) {
       console.error('Failed to create checkout session:', err);
-      setError(err instanceof Error ? err.message : 'Failed to create checkout session');
+      setError(err instanceof ApiClientError ? err.message : err instanceof Error ? err.message : 'Failed to create checkout session');
       return null;
     }
   }, [session, subscription, fetchSubscription]);
@@ -316,16 +301,13 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
   const manageSubscription = useCallback(async (): Promise<string | null> => {
     if (!session?.access_token) return null;
     try {
-      const response = await fetch('/api/v1/billing/portal', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workspace_id: subscription?.workspace_id ?? undefined }),
-      });
-      const data = await readJson(response) as { url?: string };
+      // The workspace is resolved server-side from the auth token; it is
+      // never passed from the client.
+      const data = await apiClient.post<{ url?: string }>('/v1/billing/portal', {});
       setError(null);
       return data.url ?? null;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to open subscription management');
+      setError(err instanceof ApiClientError ? err.message : err instanceof Error ? err.message : 'Unable to open subscription management');
       return null;
     }
   }, [session, subscription?.workspace_id]);

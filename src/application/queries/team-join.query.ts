@@ -2,6 +2,7 @@
  * Team Join Query — Handles team invitation flow
  */
 
+import { apiClient } from "@/lib/api-client";
 import { supabase } from "@/integrations/supabase/client";
 
 export function buildTeamJoinRedirectUrl(origin: string, token?: string | null): string {
@@ -13,11 +14,13 @@ export function buildTeamJoinRedirectUrl(origin: string, token?: string | null):
 }
 
 export async function fetchTeamInvitation(token: string) {
-  return supabase.rpc("get_team_invitation", { p_token: token });
+  return apiClient.get("/v1/platform/team/invitation", {
+    query: { token },
+  });
 }
 
 export async function acceptTeamInvitation(token: string) {
-  return supabase.rpc("accept_team_invitation", { p_invitation_token: token });
+  return apiClient.post("/v1/platform/team/accept-invitation", { token });
 }
 
 export async function signUpForTeam(email: string, password: string, redirectTo: string) {

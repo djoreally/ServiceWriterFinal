@@ -1,49 +1,36 @@
 /**
- * Tests for approveAndPromoteIntakeDocument — verifies that approving a parsed
- * fuel, service, or general expense receipt creates the correct linked records
- * without throwing runtime errors.
+ * Tests for the Phase 2 document-intake application layer — verifies that
+ * approveAndPromoteIntakeDocument delegates to the documents Hono router
+ * and maps the response shapes.
  */
-jest.mock("@/integrations/supabase/client", () => ({
-  supabase: {
-    from: jest.fn(),
-    rpc: jest.fn(async () => ({ data: [], error: null })),
-    storage: {
-      from: jest.fn(() => ({
-        createSignedUrl: jest.fn(async () => ({ data: { signedUrl: "https://signed.example/x" }, error: null })),
-      })),
-    },
+jest.mock("@/lib/api-client", () => ({
+  apiClient: {
+    get: jest.fn(),
+    post: jest.fn(),
+    patch: jest.fn(),
+    delete: jest.fn(),
+  },
+  ApiClientError: class ApiClientError extends Error {
+    constructor(
+      public status: number,
+      public code: string,
+      message: string,
+    ) {
+      super(message);
+      this.name = "ApiClientError";
+    }
   },
 }));
 
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import {
   approveAndPromoteIntakeDocument,
   type DocumentIntakeRow,
 } from "@/application/queries/document-intake.query";
 
-type Row = Record<string, unknown>;
-
-function makeBuilder(opts: { selectReturn?: { data: Row | null; error: unknown } } = {}) {
-  interface Builder {
-    insert: jest.Mock<Builder>;
-    update: jest.Mock<Builder>;
-    eq: jest.Mock<Builder>;
-    select: jest.Mock<Builder>;
-    single: jest.Mock<Promise<{ data: Row | null; error: unknown }>>;
-    then: (resolve: (value: { data: null; error: null }) => unknown) => Promise<unknown>;
-  }
-  const builder = {} as Builder;
-  Object.assign(builder, {
-    insert: jest.fn(() => builder),
-    update: jest.fn(() => builder),
-    eq: jest.fn(() => builder),
-    select: jest.fn(() => builder),
-    single: jest.fn(async () => opts.selectReturn ?? { data: { id: "generated-id" }, error: null }),
-    then: (resolve: (v: { data: null; error: null }) => unknown) =>
-      Promise.resolve({ data: null, error: null }).then(resolve),
-  });
-  return builder;
-}
+const mockPost = apiClient.post as jest.Mock;
+const mockGet = apiClient.get as jest.Mock;
+const mockPatch = apiClient.patch as jest.Mock;
 
 const baseDoc = (overrides: Partial<DocumentIntakeRow>): DocumentIntakeRow => ({
   id: "doc-1",
@@ -77,22 +64,13 @@ const baseDoc = (overrides: Partial<DocumentIntakeRow>): DocumentIntakeRow => ({
 });
 
 describe("approveAndPromoteIntakeDocument", () => {
-  const mockFrom = supabase.from as jest.Mock;
-  const mockRpc = supabase.rpc as jest.Mock;
-
   beforeEach(() => {
-    mockFrom.mockReset();
-    mockRpc.mockResolvedValue({ data: [], error: null });
+    jest.clearAllMocks();
   });
 
-  it("creates a fuel log for fuel-profile documents", async () => {
-    const fuelInsertBuilder = makeBuilder({ selectReturn: { data: { id: "fuel-log-99" }, error: null } });
-    const docUpdateBuilder = makeBuilder();
-
-    mockFrom.mockImplementation((table: string) => {
-      if (table === "fleet_fuel_logs") return fuelInsertBuilder;
-      if (table === "document_intake") return docUpdateBuilder;
-      throw new Error(`Unexpected table: ${table}`);
+  it("posts to the approve endpoint and maps fuel-log ids", async () => {
+    mockPost.mockResolvedValue({
+      data: { expense_id: null, work_order_id: null, fuel_log_id: "fuel-log-99" },
     });
 
     const doc = baseDoc({
@@ -109,20 +87,12 @@ describe("approveAndPromoteIntakeDocument", () => {
     const result = await approveAndPromoteIntakeDocument(doc, "user-1");
     expect(result.fuelLogId).toBe("fuel-log-99");
     expect(result.expenseId).toBeUndefined();
-    expect(fuelInsertBuilder.insert).toHaveBeenCalledTimes(1);
-    expect(docUpdateBuilder.update).toHaveBeenCalledWith(
-      expect.objectContaining({ review_status: "approved", promoted_fuel_log_id: "fuel-log-99" }),
-    );
+    expect(mockPost).toHaveBeenCalledWith("/v1/document-intake/doc-1/approve");
   });
 
-  it("creates an expense (with VIN/mileage notes) for service documents", async () => {
-    const expenseBuilder = makeBuilder({ selectReturn: { data: { id: "exp-77" }, error: null } });
-    const docUpdateBuilder = makeBuilder();
-
-    mockFrom.mockImplementation((table: string) => {
-      if (table === "expenses") return expenseBuilder;
-      if (table === "document_intake") return docUpdateBuilder;
-      throw new Error(`Unexpected table: ${table}`);
+  it("posts to the approve endpoint and maps expense ids", async () => {
+    mockPost.mockResolvedValue({
+      data: { expense_id: "exp-77", work_order_id: null, fuel_log_id: null },
     });
 
     const doc = baseDoc({
@@ -142,53 +112,47 @@ describe("approveAndPromoteIntakeDocument", () => {
 
     const result = await approveAndPromoteIntakeDocument(doc, "user-1");
     expect(result.expenseId).toBe("exp-77");
-    const insertedExpense = expenseBuilder.insert.mock.calls[0][0][0];
-    expect(insertedExpense.vendor_name_raw).toBe("Sprinter Specialists");
-    expect(insertedExpense.total_amount).toBe(128.44);
-    expect(insertedExpense.notes).toContain("VIN: W1Y4ECHY6MT076871");
-    expect(insertedExpense.notes).toContain("229.52");
   });
 
-  it("creates a plain expense for general receipts (no line items insert when empty)", async () => {
-    const expenseBuilder = makeBuilder({ selectReturn: { data: { id: "exp-1" }, error: null } });
-    const docUpdateBuilder = makeBuilder();
-    const lineItemBuilder = makeBuilder();
-
-    mockFrom.mockImplementation((table: string) => {
-      if (table === "expenses") return expenseBuilder;
-      if (table === "expense_line_items") return lineItemBuilder;
-      if (table === "document_intake") return docUpdateBuilder;
-      throw new Error(`Unexpected table: ${table}`);
-    });
-
-    const doc = baseDoc({
-      profile: "general",
-      parsed_json: {
-        vendor_name: "Office Depot",
-        transaction_date: "2026-04-18",
-        subtotal: 25,
-        tax_amount: 2,
-        total_amount: 27,
-      } as DocumentIntakeRow["parsed_json"],
-    });
-
-    const result = await approveAndPromoteIntakeDocument(doc, "user-1");
-    expect(result.expenseId).toBe("exp-1");
-    expect(lineItemBuilder.insert).not.toHaveBeenCalled();
-  });
-
-  it("returns existing IDs without re-inserting when already approved", async () => {
+  it("returns existing IDs without a network call when already approved", async () => {
     const doc = baseDoc({
       review_status: "approved",
       promoted_expense_id: "exp-already",
     });
     const result = await approveAndPromoteIntakeDocument(doc, "user-1");
     expect(result.expenseId).toBe("exp-already");
-    expect(mockFrom).not.toHaveBeenCalled();
+    expect(mockPost).not.toHaveBeenCalled();
   });
 
   it("throws when there is no parsed data to promote", async () => {
     const doc = baseDoc({ parsed_json: null });
     await expect(approveAndPromoteIntakeDocument(doc, "user-1")).rejects.toThrow(/parse it first/i);
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+});
+
+describe("intake query reads", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it("fetches intake documents through the list endpoint", async () => {
+    const { fetchIntakeDocuments } = await import("@/application/queries/document-intake.query");
+    mockGet.mockResolvedValue({ data: [{ id: "doc-1" }] });
+    const rows = await fetchIntakeDocuments("user-1", { reviewStatus: "pending_review" });
+    expect(rows).toEqual([{ id: "doc-1" }]);
+    expect(mockGet).toHaveBeenCalledWith("/v1/document-intake", {
+      query: { review_status: "pending_review", profile: undefined },
+    });
+  });
+
+  it("rejects documents through the patch endpoint", async () => {
+    const { rejectIntakeDocument } = await import("@/application/queries/document-intake.query");
+    mockPatch.mockResolvedValue({ data: null });
+    await rejectIntakeDocument("doc-9", "duplicate");
+    expect(mockPatch).toHaveBeenCalledWith("/v1/document-intake/doc-9", {
+      review_status: "rejected",
+      rejection_reason: "duplicate",
+    });
   });
 });

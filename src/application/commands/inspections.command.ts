@@ -1,8 +1,12 @@
 /**
  * Inspections Commands - Write operations for inspection templates and items.
+ *
+ * Phase 2: all data access goes through the typed API client
+ * (`@/lib/api-client`) to the appointments Hono router. Exported signatures
+ * are unchanged.
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface TemplatePayload {
@@ -22,41 +26,27 @@ export async function createInspectionTemplate(payload: TemplatePayload): Promis
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("Authentication required");
 
-  const { error } = await supabase.from("inspection_templates").insert({
-    user_id: user.id,
-    ...payload,
-  });
-  if (error) throw error;
+  await apiClient.post("/v1/inspections/templates", payload);
 }
 
 export async function updateInspectionTemplate(
   id: string,
   payload: TemplatePayload
 ): Promise<void> {
-  const { error } = await supabase
-    .from("inspection_templates")
-    .update(payload)
-    .eq("id", id);
-  if (error) throw error;
+  await apiClient.patch(`/v1/inspections/templates/${encodeURIComponent(id)}`, payload);
 }
 
 export async function deleteInspectionTemplate(id: string): Promise<void> {
-  const { error } = await supabase
-    .from("inspection_templates")
-    .delete()
-    .eq("id", id);
-  if (error) throw error;
+  await apiClient.delete(`/v1/inspections/templates/${encodeURIComponent(id)}`);
 }
 
 export async function toggleInspectionTemplateActive(
   id: string,
   currentlyActive: boolean
 ): Promise<void> {
-  const { error } = await supabase
-    .from("inspection_templates")
-    .update({ is_active: !currentlyActive })
-    .eq("id", id);
-  if (error) throw error;
+  await apiClient.patch(`/v1/inspections/templates/${encodeURIComponent(id)}`, {
+    is_active: !currentlyActive,
+  });
 }
 
 export async function addInspectionItem(
@@ -64,18 +54,12 @@ export async function addInspectionItem(
   payload: ItemPayload,
   sortOrder: number
 ): Promise<void> {
-  const { error } = await supabase.from("inspection_items").insert({
-    template_id: templateId,
-    sort_order: sortOrder,
+  await apiClient.post(`/v1/inspections/templates/${encodeURIComponent(templateId)}/items`, {
     ...payload,
+    sort_order: sortOrder,
   });
-  if (error) throw error;
 }
 
 export async function deleteInspectionItem(id: string): Promise<void> {
-  const { error } = await supabase
-    .from("inspection_items")
-    .delete()
-    .eq("id", id);
-  if (error) throw error;
+  await apiClient.delete(`/v1/inspections/items/${encodeURIComponent(id)}`);
 }

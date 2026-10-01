@@ -1,5 +1,5 @@
 /** Team Dashboard Query — canonical appointment schema. */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 
 export interface TechProfile {
@@ -44,23 +44,29 @@ export async function getAuthUser() {
 }
 
 export async function fetchTechProfile(authUserId: string): Promise<TechProfile | null> {
-  const { data, error } = await supabase.from("technicians").select("*").eq("auth_user_id", authUserId).single();
-  if (error || !data) return null;
+  const response = await apiClient.get<{ data: (Record<string, unknown> & { working_hours: unknown }) | null }>(
+    "/v1/team/dashboard/profile",
+    { query: { auth_user_id: authUserId } },
+  );
+  const data = response.data;
+  if (!data) return null;
   return { ...data, working_hours: data.working_hours as TechProfile["working_hours"] } as TechProfile;
 }
 
+interface AssignmentRow {
+  id: string;
+  starts_at: string | null;
+  ends_at: string | null;
+  status: string;
+  notes: string | null;
+  metadata: unknown;
+}
+
 export async function fetchTeamAssignments(technicianId: string): Promise<TeamAssignment[]> {
-  const db = supabase as any;
-  const { data: tech } = await db.from("technicians").select("auth_user_id").eq("id", technicianId).maybeSingle();
-  if (!tech?.auth_user_id) return [];
-  const { data, error } = await db.from("appointments")
-    .select("id,starts_at,ends_at,status,notes,metadata")
-    .eq("assigned_user_id", tech.auth_user_id)
-    .gte("starts_at", new Date().toISOString())
-    .not("status", "in", '("cancelled","completed","no_show")')
-    .order("starts_at");
-  if (error) throw error;
-  return (data ?? []).map((row: any) => {
+  const response = await apiClient.get<{ data: AssignmentRow[] }>("/v1/team/dashboard/assignments", {
+    query: { technician_id: technicianId },
+  });
+  return (response.data ?? []).map((row) => {
     const m = meta(row.metadata);
     return {
       id: row.id,

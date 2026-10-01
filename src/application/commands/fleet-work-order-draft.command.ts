@@ -5,8 +5,7 @@
  *   draft → validated → approved → scheduled → in_progress → completed → closed
  */
 
-import { supabase } from "@/integrations/supabase/client";
-import type { Database, Json } from "@/integrations/supabase/types";
+import { apiClient } from "@/lib/api-client";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export type WorkOrderDraftStatus =
@@ -92,100 +91,31 @@ export interface WorkOrderDraftRecord extends WorkOrderDraftPayload {
   updated_at?: string;
 }
 
-type DraftInsert = Database["public"]["Tables"]["fleet_work_order_drafts"]["Insert"];
-type DraftUpdate = Database["public"]["Tables"]["fleet_work_order_drafts"]["Update"];
-type DraftRow = Database["public"]["Tables"]["fleet_work_order_drafts"]["Row"];
-
-function toJson(value: unknown): Json {
-  return JSON.parse(JSON.stringify(value)) as Json;
-}
-
-function draftUpdatePayload(patch: Partial<WorkOrderDraftPayload>): DraftUpdate {
-  const { selected_vehicles, service_package, add_ons, ...scalars } = patch;
-  return {
-    ...scalars,
-    ...(selected_vehicles === undefined ? {} : { selected_vehicles: toJson(selected_vehicles) }),
-    ...(service_package === undefined ? {} : { service_package: service_package === null ? null : toJson(service_package) }),
-    ...(add_ons === undefined ? {} : { add_ons: toJson(add_ons) }),
-  };
-}
-
-function draftRecord(row: DraftRow): WorkOrderDraftRecord {
-  return {
-    ...row,
-    selected_vehicles: Array.isArray(row.selected_vehicles) ? row.selected_vehicles as unknown as DraftVehicleRef[] : [],
-    service_package: row.service_package && typeof row.service_package === "object" && !Array.isArray(row.service_package)
-      ? row.service_package as unknown as DraftServicePackage
-      : null,
-    add_ons: Array.isArray(row.add_ons) ? row.add_ons as unknown as DraftAddOn[] : [],
-    estimated_subtotal: row.estimated_subtotal ?? 0,
-    estimated_discount: row.estimated_discount ?? 0,
-    estimated_tax: row.estimated_tax ?? 0,
-    estimated_total: row.estimated_total ?? 0,
-    source_type: row.source_type as WorkOrderSourceType,
-    status: row.status as WorkOrderDraftStatus,
-  };
-}
-
-function jsonRecord(value: Json): Record<string, Json | undefined> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-}
-
 async function requireUserId(): Promise<string> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("You must be signed in.");
   return user.id;
 }
 
-async function requireWorkspaceOwnerId(): Promise<string> {
-  await requireUserId();
-  const { data, error } = await supabase.rpc("current_workspace_owner_user_id");
-  if (error || !data) throw error ?? new Error("No active Fleet workspace.");
-  return String(data);
-}
-
 export async function createDraft(payload: WorkOrderDraftPayload): Promise<{ id: string }> {
-  const userId = await requireWorkspaceOwnerId();
-  const actorId = await requireUserId();
-  const insert: DraftInsert = {
-    ...draftUpdatePayload(payload),
-    user_id: userId,
-    created_by: actorId,
-    status: payload.status ?? "draft",
-  };
-  const { data, error } = await supabase
-    .from("fleet_work_order_drafts")
-    .insert(insert)
-    .select("id")
-    .single();
-  if (error) throw error;
-  return { id: String(data.id) };
+  await requireUserId();
+  const { data } = await apiClient.post<{ data: { id: string } }>("/v1/fleet/work-order-drafts", { payload });
+  return data;
 }
 
 export async function updateDraft(id: string, patch: Partial<WorkOrderDraftPayload>): Promise<void> {
-  const { error } = await supabase
-    .from("fleet_work_order_drafts")
-    .update(draftUpdatePayload(patch))
-    .eq("id", id);
-  if (error) throw error;
+  await apiClient.patch(`/v1/fleet/work-order-drafts/${id}`, { patch });
 }
 
 export async function deleteDraft(id: string): Promise<void> {
-  const { error } = await supabase
-    .from("fleet_work_order_drafts")
-    .delete()
-    .eq("id", id);
-  if (error) throw error;
+  await apiClient.delete(`/v1/fleet/work-order-drafts/${id}`);
 }
 
 export async function fetchDraft(id: string): Promise<WorkOrderDraftRecord | null> {
-  const { data, error } = await supabase
-    .from("fleet_work_order_drafts")
-    .select("*")
-    .eq("id", id)
-    .maybeSingle();
-  if (error) throw error;
-  return data ? draftRecord(data) : null;
+  const { data } = await apiClient.get<{ data: WorkOrderDraftRecord | null }>(
+    `/v1/fleet/work-order-drafts/${id}`,
+  );
+  return data ?? null;
 }
 
 // ---------- Server-authoritative helpers (Sprint 2) ----------
@@ -200,10 +130,9 @@ export interface ServerValidationEntry {
 }
 
 export async function validateDraftOnServer(draftId: string): Promise<ServerValidationEntry[]> {
-  const { data, error } = await supabase.rpc("validate_fleet_work_order_draft", {
-    _draft_id: draftId,
-  });
-  if (error) throw error;
+  const { data } = await apiClient.post<{ data: ServerValidationEntry[] }>(
+    `/v1/fleet/work-order-drafts/${draftId}/validate`,
+  );
   return data ?? [];
 }
 
@@ -217,11 +146,14 @@ export interface DraftPricingResult {
   contract_override_applied: boolean;
 }
 
+function jsonRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
 export async function resolveDraftPricing(draftId: string): Promise<DraftPricingResult> {
-  const { data, error } = await supabase.rpc("resolve_fleet_work_order_draft_pricing", {
-    _draft_id: draftId,
-  });
-  if (error) throw error;
+  const { data } = await apiClient.post<{ data: unknown }>(
+    `/v1/fleet/work-order-drafts/${draftId}/pricing`,
+  );
   const result = jsonRecord(data);
   return {
     subtotal: typeof result.subtotal === "number" ? result.subtotal : 0,
@@ -235,10 +167,7 @@ export async function resolveDraftPricing(draftId: string): Promise<DraftPricing
 }
 
 export async function approveDraft(draftId: string): Promise<void> {
-  const { error } = await supabase.rpc("approve_fleet_work_order_draft", {
-    _draft_id: draftId,
-  });
-  if (error) throw error;
+  await apiClient.post(`/v1/fleet/work-order-drafts/${draftId}/approve`);
 }
 
 /**
@@ -251,32 +180,10 @@ export async function promoteDraft(
   draftId: string,
   opts: { onProgress?: (done: number, total: number) => void; autoApprove?: boolean } = {},
 ): Promise<{ createdIds: string[] }> {
-  const draft = await fetchDraft(draftId);
-  if (!draft) throw new Error("Draft not found.");
-
-  if (draft.status !== "approved" && opts.autoApprove === false) {
-    throw new Error("Draft must be approved before it can be promoted.");
-  }
-
-  if (!draft.customer_id) throw new Error("Draft missing customer.");
-  if (!Array.isArray(draft.selected_vehicles) || draft.selected_vehicles.length === 0) {
-    throw new Error("Draft has no vehicles selected.");
-  }
-  if (!draft.service_package) throw new Error("Draft missing service package.");
-
-  const { data, error } = await supabase.rpc("promote_fleet_work_order_draft_v2", { p_draft_id: draftId });
-  if (error) throw error;
-  const createdIds = (data ?? []).map(String);
-  // A Fleet Job is the site visit; each promoted work order remains the
-  // vehicle-specific service record. Multi-vehicle drafts therefore become
-  // one dispatchable job immediately rather than requiring a second grouping step.
-  if (createdIds.length > 0) {
-    const { error: jobError } = await supabase.rpc("create_fleet_job_for_work_orders_v1", {
-      p_work_order_ids: createdIds,
-      p_notes: draft.notes || "Created from multi-vehicle site visit",
-    });
-    if (jobError) throw jobError;
-  }
-  opts.onProgress?.(createdIds.length, createdIds.length);
-  return { createdIds };
+  const { data } = await apiClient.post<{ data: { createdIds: string[] } }>(
+    `/v1/fleet/work-order-drafts/${draftId}/promote`,
+    { auto_approve: opts.autoApprove ?? null },
+  );
+  opts.onProgress?.(data.createdIds.length, data.createdIds.length);
+  return { createdIds: data.createdIds };
 }

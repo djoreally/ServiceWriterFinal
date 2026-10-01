@@ -1,4 +1,4 @@
-import { productionSupabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 export interface BusinessPreferencesData {
@@ -26,31 +26,10 @@ export async function fetchBusinessPreferences(): Promise<BusinessPreferencesDat
   if (inFlight?.key === key) return inFlight.promise;
 
   const promise = (async () => {
-    const [{ data: workspace, error: workspaceError }, { data: settings, error: settingsError }] = await Promise.all([
-      productionSupabase
-        .from("workspaces")
-        .select("timezone,currency_code")
-        .eq("id", context.workspaceId)
-        .maybeSingle(),
-      productionSupabase
-        .from("workspace_settings")
-        .select("terminology,operational_settings")
-        .eq("workspace_id", context.workspaceId)
-        .maybeSingle(),
-    ]);
-    if (workspaceError) throw workspaceError;
-    if (settingsError) throw settingsError;
-
-    const operational = settings?.operational_settings && typeof settings.operational_settings === "object" && !Array.isArray(settings.operational_settings)
-      ? settings.operational_settings as Record<string, unknown>
-      : {};
-
-    const result: BusinessPreferencesData = {
-      date_format: typeof operational.date_format === "string" ? operational.date_format : null,
-      timezone: workspace?.timezone ?? null,
-      currency: workspace?.currency_code?.trim?.() ?? workspace?.currency_code ?? null,
-      terminology: settings?.terminology ?? null,
-    };
+    const result = await apiClient.get<BusinessPreferencesData>(
+      "/v1/platform/business-preferences",
+      { query: { selected_workspace_id: context.workspaceId } },
+    );
     cached = { key, expiresAt: Date.now() + CACHE_TTL_MS, data: result };
     return result;
   })().finally(() => {

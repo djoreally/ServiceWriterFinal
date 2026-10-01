@@ -1,9 +1,9 @@
 /**
  * VIN Lookup Query
- * Wraps the quickvin-lookup Edge Function.
+ * Wraps the quickvin-lookup provider endpoint.
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 
 export interface VinLookupResult {
   vin: string;
@@ -16,11 +16,19 @@ export interface VinLookupResult {
 }
 
 export async function lookupVin(licensePlate: string, state: string): Promise<VinLookupResult> {
-  const { data, error } = await supabase.functions.invoke("carfax-quickvin", {
-    body: { licensePlate, state },
-  });
-
-  if (error) throw error;
+  let data: Record<string, any> | null;
+  try {
+    const response = await apiClient.post<{ data: Record<string, any> | null }>("/v1/vin/plate-lookup", {
+      licensePlate,
+      state,
+    });
+    data = response.data;
+  } catch (error) {
+    if (error instanceof ApiClientError) {
+      throw new Error(error.message || "Vehicle not found");
+    }
+    throw error;
+  }
 
   if (data?.success && data.vehicle) {
     return {

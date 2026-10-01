@@ -1,5 +1,10 @@
-/** Appointment service line items from the canonical workspace schema. */
-import { productionSupabase } from "@/integrations/supabase/client";
+/** Appointment service line items from the canonical workspace schema.
+ *
+ * Phase 2: data access goes through the typed API client
+ * (`@/lib/api-client`) to the appointments Hono router. Exported signatures
+ * are unchanged.
+ */
+import { apiClient } from "@/lib/api-client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 export interface AppointmentServiceRow {
@@ -39,16 +44,13 @@ type ItemRow = {
 export async function fetchAppointmentServices(appointmentId: string, serviceCatalogId?: string | null): Promise<{ services: AppointmentServiceRow[]; catalogService: CatalogServiceInfo | null }> {
   const context = await resolveCurrentWorkspace();
   if (!context) throw new Error("No active workspace is available.");
-  const { data, error } = await productionSupabase
-    .from("appointment_items")
-    .select("id,appointment_id,description,quantity,unit_price,service_catalog_id,is_prepaid,added_at_service,created_at,service_catalog(id,name,description,labor_price)")
-    .eq("workspace_id", context.workspaceId)
-    .eq("appointment_id", appointmentId)
-    .order("sort_order", { ascending: true })
-    .order("created_at", { ascending: true });
-  if (error) throw error;
+  const response = await apiClient.get<{ data: { items: ItemRow[]; catalog_service: { id: string; name: string; description: string | null; labor_price: number | string | null } | null } }>(
+    `/v1/appointments/${encodeURIComponent(appointmentId)}/services`,
+    { query: { ...(serviceCatalogId ? { service_catalog_id: serviceCatalogId } : {}), selected_workspace_id: context.workspaceId } },
+  );
+  const items = response.data?.items ?? [];
 
-  const services = ((data ?? []) as unknown as ItemRow[]).map((item) => ({
+  const services = (items as unknown as ItemRow[]).map((item) => ({
     id: item.id, appointment_id: item.appointment_id,
     name: item.service_catalog?.name ?? item.description,
     description: item.service_catalog?.description ?? item.description ?? null,
@@ -58,29 +60,16 @@ export async function fetchAppointmentServices(appointmentId: string, serviceCat
   }));
   if (services.length) return { services, catalogService: null };
 
-  const appointment = await productionSupabase.from("appointments").select("metadata")
-    .eq("workspace_id", context.workspaceId).eq("id", appointmentId).maybeSingle();
-  if (appointment.error) throw appointment.error;
-  const metadata = appointment.data?.metadata && typeof appointment.data.metadata === "object" && !Array.isArray(appointment.data.metadata)
-    ? appointment.data.metadata as Record<string, unknown> : {};
-  const metadataCatalogId = typeof metadata.service_catalog_id === "string" ? metadata.service_catalog_id : null;
-  const catalogId = serviceCatalogId ?? metadataCatalogId;
-  if (!catalogId) return { services, catalogService: null };
-
-  const { data: catalog, error: catalogError } = await productionSupabase
-    .from("service_catalog").select("id,name,description,labor_price")
-    .eq("workspace_id", context.workspaceId).eq("id", catalogId).maybeSingle();
-  if (catalogError) throw catalogError;
+  const catalog = response.data?.catalog_service ?? null;
   return { services, catalogService: catalog ? { id: catalog.id, name: catalog.name, description: catalog.description, default_price: Number(catalog.labor_price) } : null };
 }
 
 export async function fetchFeeSettings(): Promise<FeeSettings | null> {
   const context = await resolveCurrentWorkspace();
   if (!context) return null;
-  const { data, error } = await productionSupabase
-    .from("workspace_settings")
-    .select("waste_oil_fee_enabled,waste_oil_fee,shop_fee_enabled,shop_fee_type,shop_fee_value,shop_fee_description,surcharge_enabled,surcharge_type,surcharge_value,surcharge_description")
-    .eq("workspace_id", context.workspaceId).maybeSingle();
-  if (error) throw error;
-  return data as FeeSettings | null;
+  const response = await apiClient.get<{ data: FeeSettings | null }>(
+    "/v1/appointments/fee-settings",
+    { query: { selected_workspace_id: context.workspaceId } },
+  );
+  return response.data ?? null;
 }

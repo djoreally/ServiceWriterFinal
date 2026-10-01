@@ -1,57 +1,83 @@
 import { createNotification } from "../notifications.command";
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 
-jest.mock("@/integrations/supabase/client", () => ({
-  supabase: { from: jest.fn() },
+jest.mock("@/lib/api-client", () => ({
+  apiClient: { post: jest.fn() },
+  ApiClientError: class ApiClientError extends Error {
+    constructor(
+      public status: number,
+      public code: string,
+      message: string,
+    ) {
+      super(message);
+      this.name = "ApiClientError";
+    }
+  },
 }));
-jest.mock("@/lib/auth/current-user", () => ({ getCurrentAuthUser: jest.fn() }));
 
-const from = supabase.from as jest.Mock;
-const authUser = getCurrentAuthUser as jest.Mock;
+const post = apiClient.post as jest.Mock;
 
 describe("createNotification", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    authUser.mockResolvedValue({ data: { user: { id: "user-1" } }, error: null });
   });
 
-  it("upserts a workspace-scoped notification on the user/dedupe conflict key", async () => {
-    const upsert = jest.fn().mockResolvedValue({ error: null });
-    from.mockReturnValue({ upsert });
+  it("posts a workspace-scoped notification to /v1/notifications", async () => {
+    post.mockResolvedValue(undefined);
 
-    await expect(createNotification({
+    await expect(
+      createNotification({
+        type: "new_booking",
+        title: "New booking",
+        message: "A new booking was created",
+        workspaceId: "workspace-1",
+        dedupeKey: "booking:appointment-1:new_booking",
+        sourceEventId: "appointment-1",
+        metadata: { appointment_id: "appointment-1" },
+      }),
+    ).resolves.toBe(true);
+
+    expect(post).toHaveBeenCalledWith("/v1/notifications", {
       type: "new_booking",
       title: "New booking",
       message: "A new booking was created",
-      workspaceId: "workspace-1",
-      dedupeKey: "booking:appointment-1:new_booking",
-      sourceEventId: "appointment-1",
       metadata: { appointment_id: "appointment-1" },
-    })).resolves.toBe(true);
-
-    expect(upsert).toHaveBeenCalledWith({
-      user_id: "user-1",
       workspace_id: "workspace-1",
-      type: "new_booking",
-      title: "New booking",
-      message: "A new booking was created",
-      metadata: { appointment_id: "appointment-1" },
       dedupe_key: "booking:appointment-1:new_booking",
       source_event_id: "appointment-1",
-    }, {
-      onConflict: "user_id,dedupe_key",
-      ignoreDuplicates: true,
     });
   });
 
-  it("does not write when there is no authenticated user", async () => {
-    authUser.mockResolvedValue({ data: { user: null }, error: null });
-    await expect(createNotification({
-      type: "email_sent",
-      title: "Email sent",
-      message: "The email was sent",
-    })).resolves.toBe(false);
-    expect(from).not.toHaveBeenCalled();
+  it("generates a fallback dedupe key when none is provided", async () => {
+    post.mockResolvedValue(undefined);
+
+    await expect(
+      createNotification({
+        type: "email_sent",
+        title: "Email sent",
+        message: "The email was sent",
+      }),
+    ).resolves.toBe(true);
+
+    expect(post).toHaveBeenCalledWith(
+      "/v1/notifications",
+      expect.objectContaining({
+        workspace_id: null,
+        source_event_id: null,
+        dedupe_key: expect.stringMatching(/^manual:email_sent:/),
+      }),
+    );
+  });
+
+  it("returns false on 401 without throwing", async () => {
+    post.mockRejectedValue(new ApiClientError(401, "unauthenticated", "Unauthorized"));
+
+    await expect(
+      createNotification({
+        type: "email_sent",
+        title: "Email sent",
+        message: "The email was sent",
+      }),
+    ).resolves.toBe(false);
   });
 });

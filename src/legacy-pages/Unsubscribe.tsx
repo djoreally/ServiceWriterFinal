@@ -1,8 +1,6 @@
-import { SUPABASE_URL_RESOLVED } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-
-const FN_BASE = `${SUPABASE_URL_RESOLVED}/functions/v1/newsletter-unsubscribe`;
 
 export default function Unsubscribe() {
   const [params] = useSearchParams();
@@ -18,21 +16,16 @@ export default function Unsubscribe() {
     }
     (async () => {
       try {
-        const resp = await fetch(FN_BASE, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ token }),
-        });
-        if (resp.ok) {
-          setState("done");
-          setMessage("You're unsubscribed. You'll no longer receive our newsletter.");
-        } else {
-          setState("error");
-          setMessage("That unsubscribe link isn't valid or has already been used.");
-        }
-      } catch {
+        await apiClient.post("/v1/newsletter/unsubscribe", { token });
+        setState("done");
+        setMessage("You're unsubscribed. You'll no longer receive our newsletter.");
+      } catch (error) {
         setState("error");
-        setMessage("Something went wrong. Please try again later.");
+        setMessage(
+          error instanceof ApiClientError
+            ? "That unsubscribe link isn't valid or has already been used."
+            : "Something went wrong. Please try again later.",
+        );
       }
     })();
   }, [token]);

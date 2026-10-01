@@ -2,7 +2,7 @@
  * Fleet Contact Commands - Write operations for fleet contacts.
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface FleetContactPayload {
@@ -29,12 +29,9 @@ export interface FleetContactPayload {
  * Fetch active fleet clients for the dropdown.
  */
 export async function fetchFleetClientOptionsForContact(userId: string): Promise<{ id: string; company_name: string }[]> {
-  const { data } = await supabase
-    .from("fleet_clients")
-    .select("id, company_name")
-    .eq("user_id", userId)
-    .eq("status", "active")
-    .order("company_name");
+  const { data } = await apiClient.get<{ data: { id: string; company_name: string }[] }>(
+    "/v1/fleet/clients/options",
+  );
   return data ?? [];
 }
 
@@ -42,11 +39,7 @@ export async function fetchFleetClientOptionsForContact(userId: string): Promise
  * Create a new fleet contact.
  */
 export async function createFleetContact(userId: string, payload: FleetContactPayload): Promise<void> {
-  const { error } = await supabase.from("fleet_contacts").insert({
-    user_id: userId,
-    ...payload,
-  });
-  if (error) throw error;
+  await apiClient.post("/v1/fleet/contacts", { payload });
 }
 
 /**
@@ -59,13 +52,7 @@ export async function updateFleetContact(
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("Unauthorized");
 
-  const { error } = await supabase
-    .from("fleet_contacts")
-    .update(payload)
-    .eq("id", contactId)
-    .eq("user_id", user.id);
-
-  if (error) throw error;
+  await apiClient.patch(`/v1/fleet/contacts/${contactId}`, { payload });
 }
 
 /**
@@ -75,11 +62,5 @@ export async function deleteFleetContact(contactId: string): Promise<void> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("Unauthorized");
 
-  const { error } = await supabase
-    .from("fleet_contacts")
-    .delete()
-    .eq("id", contactId)
-    .eq("user_id", user.id);
-
-  if (error) throw error;
+  await apiClient.delete(`/v1/fleet/contacts/${contactId}`);
 }

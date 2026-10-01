@@ -4,7 +4,7 @@
  * propagating failures into React Query / Suspense / the app shell.
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import {
   listAssets,
   getAssetSignedUrl,
@@ -12,8 +12,6 @@ import {
   type ListAssetsResult,
 } from "@/application/queries/assets.query";
 import { logAssetEvent } from "./logger";
-
-const BUCKET = "assets";
 
 export interface SafeListAssetsResult extends ListAssetsResult {
   degraded: boolean;
@@ -50,22 +48,16 @@ export async function safeGetSignedUrl(
 export type InfraStatus = "ok" | "unavailable" | "unknown";
 
 /**
- * Probes the assets storage bucket with a 3s timeout. Used as a one-time
+ * Probes the assets API with a 3s timeout. Used as a one-time
  * health check inside the Assets tab. NEVER throws; never blocks boot.
  */
 export async function verifyAssetsInfrastructure(): Promise<InfraStatus> {
   try {
-    const probe = supabase.storage.from(BUCKET).list("", { limit: 1 });
+    const probe = apiClient.get("/v1/assets", { query: { limit: 1 } });
     const timeout = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error("infra_probe_timeout")), 3000),
     );
-    const { error } = (await Promise.race([probe, timeout])) as Awaited<
-      typeof probe
-    >;
-    if (error) {
-      logAssetEvent("infra_probe_failed", { reason: error.message });
-      return "unavailable";
-    }
+    await Promise.race([probe, timeout]);
     return "ok";
   } catch (e) {
     logAssetEvent("infra_probe_failed", {

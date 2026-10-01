@@ -1,7 +1,7 @@
 /** Vehicle Detail Queries — canonical vehicle detail compatibility adapters. */
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
-import { coreApiFetch } from "@/lib/coreApiFetch";
+import { apiClient } from "@/lib/api-client";
 import type { Database } from "@/integrations/supabase/types.production";
 
 export async function getCurrentUser() {
@@ -55,9 +55,11 @@ async function fetchSummary(vehicleId: string): Promise<VehicleSummary> {
   const cacheKey = `${context.workspaceId}:${vehicleId}`;
   let request = summaryCache.get(cacheKey);
   if (!request) {
-    request = coreApiFetch<{ data: VehicleSummary }>(
-      `/v1/vehicles/${vehicleId}/summary?workspace_id=${encodeURIComponent(context.workspaceId)}`,
-    ).then((response) => response.data);
+    request = apiClient
+      .get<{ data: VehicleSummary }>(`/v1/vehicles/${vehicleId}/summary`, {
+        query: { workspace_id: context.workspaceId },
+      })
+      .then((response) => response.data);
     summaryCache.set(cacheKey, request);
     request.finally(() => setTimeout(() => summaryCache.delete(cacheKey), 1000));
   }
@@ -96,8 +98,9 @@ export async function fetchCustomerById(customerId: string) {
   try {
     const context = await resolveCurrentWorkspace();
     if (!context) return { data: null, error: null };
-    const response = await coreApiFetch<{ data: CustomerPreview }>(
-      `/v1/customers/${customerId}?workspace_id=${encodeURIComponent(context.workspaceId)}`,
+    const response = await apiClient.get<{ data: CustomerPreview }>(
+      `/v1/customers/${customerId}`,
+      { query: { workspace_id: context.workspaceId } },
     );
     const customer = response.data;
     return {

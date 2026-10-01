@@ -1,8 +1,8 @@
 /**
- * Cash Drawer Query — Read-only data access for cash drawer management.
+ * Cash Drawer Query — Read-only data access for cash drawer management via the Hono billing API.
  * All write operations have been moved to cash-drawer.command.ts.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface CashDrawerConfig {
@@ -49,58 +49,56 @@ export interface CashDrawerSession {
   status: string;
 }
 
-export async function fetchCashDrawerData(userId: string) {
-  const [profileRes, eventsRes, sessionsRes] = await Promise.all([
-    supabase
-      .from("business_profiles")
-      .select("cash_drawer_enabled, cash_drawer_type, cash_drawer_config, cash_drawer_open_on_cash_payment, cash_drawer_require_reason, stripe_charges_enabled")
-      .eq("user_id", userId)
-      .maybeSingle(),
-    supabase
-      .from("cash_drawer_events")
-      .select("*")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(20),
-    supabase
-      .from("cash_drawer_sessions")
-      .select("*")
-      .eq("user_id", userId)
-      .order("started_at", { ascending: false })
-      .limit(10),
-  ]);
+interface CashDrawerBundle {
+  profile: Record<string, unknown> | null;
+  events: CashDrawerEvent[];
+  sessions: CashDrawerSession[];
+}
 
-  const profile = profileRes.data;
+export async function fetchCashDrawerData(userId: string) {
+  let bundle: CashDrawerBundle;
+  try {
+    const response = await apiClient.get<{ data: CashDrawerBundle }>("/v1/billing/cash-drawer");
+    bundle = response.data;
+  } catch (error) {
+    throw error instanceof ApiClientError ? new Error(error.message) : error;
+  }
+
+  const profile = bundle.profile ?? {};
   const settings: CashDrawerSettings = {
-    cash_drawer_enabled: profile?.cash_drawer_enabled ?? false,
-    cash_drawer_type: profile?.cash_drawer_type ?? "none",
-    cash_drawer_config: (profile?.cash_drawer_config as CashDrawerConfig) ?? {},
-    cash_drawer_open_on_cash_payment: profile?.cash_drawer_open_on_cash_payment ?? true,
-    cash_drawer_require_reason: profile?.cash_drawer_require_reason ?? false,
+    cash_drawer_enabled: Boolean(profile.cash_drawer_enabled),
+    cash_drawer_type: (profile.cash_drawer_type as string) ?? "none",
+    cash_drawer_config: (profile.cash_drawer_config as CashDrawerConfig) ?? {},
+    cash_drawer_open_on_cash_payment: (profile.cash_drawer_open_on_cash_payment as boolean) ?? true,
+    cash_drawer_require_reason: Boolean(profile.cash_drawer_require_reason),
   };
 
-  const sessions = (sessionsRes.data ?? []) as CashDrawerSession[];
+  const sessions = bundle.sessions ?? [];
   const activeSession = sessions.find(s => s.status === "open") || null;
 
   return {
     settings,
-    stripeConnected: profile?.stripe_charges_enabled ?? false,
-    events: (eventsRes.data ?? []) as CashDrawerEvent[],
+    stripeConnected: Boolean(profile.stripe_charges_enabled),
+    events: bundle.events ?? [],
     sessions,
     activeSession,
   };
 }
 
 export async function discoverStripeTerminalReaders(): Promise<Array<{ id: string; label: string; status: string }>> {
-  const response = await supabase.functions.invoke("stripe-terminal-readers", {
-    body: { action: "list" },
-  });
-  if (response.error) throw new Error(response.error.message);
-  return (response.data?.readers || []).map((r: any) => ({
-    id: r.id,
-    label: r.label || r.id,
-    status: r.status,
-  }));
+  try {
+    const response = await apiClient.post<{ readers?: Array<{ id: string; label?: string; status: string }> }>(
+      "/v1/billing/stripe-terminal-readers",
+      {},
+    );
+    return (response.readers || []).map((r) => ({
+      id: r.id,
+      label: r.label || r.id,
+      status: r.status,
+    }));
+  } catch (error) {
+    throw error instanceof ApiClientError ? new Error(error.message) : error;
+  }
 }
 
 export async function getCurrentUserId(): Promise<string | null> {

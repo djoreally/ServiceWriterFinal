@@ -1,19 +1,35 @@
-import { supabase } from "@/integrations/supabase/client";
-import { fetchTechnicianIdByAuthUserId, getCurrentAuthUserId } from "@/application/queries/tech-app.query";
+import { apiClient } from "@/lib/api-client";
+import { resetCurrentAuthUserCache } from "@/lib/auth/current-user";
+import { getCurrentAuthUserId } from "@/application/queries/tech-app.query";
 import { buildTransitionIdempotencyKey } from "@/lib/offline-transition-policy";
 import { sendJobThreadHumanMessage } from "@/application/commands/job-thread.command";
 import { normalizeTechNotificationPreferences, type TechnicianNotificationPreferences } from "@/lib/technician-notification-preferences";
 
 export async function clockInCurrentTechnician() {
-  return supabase.rpc("clock_in");
+  const response = await apiClient.post<{ data: unknown }>("/v1/tech-app/clock-in", {});
+  return { data: response.data, error: null };
 }
 
 export async function clockOutCurrentTechnician() {
-  return supabase.rpc("clock_out");
+  const response = await apiClient.post<{ data: unknown }>("/v1/tech-app/clock-out", {});
+  return { data: response.data, error: null };
 }
 
+/**
+ * Local-scope sign-out: no sanctioned server endpoint revokes the session, so
+ * this mirrors `supabase.auth.signOut({ scope: "local" })` — the cached user
+ * is reset and the stored session tokens are removed.
+ */
 export async function signOutCurrentUser() {
-  return supabase.auth.signOut();
+  resetCurrentAuthUserCache();
+  if (typeof window !== "undefined") {
+    for (const key of Object.keys(window.localStorage)) {
+      if (/^sb-.*-auth-token(-code-verifier)?$/.test(key)) {
+        window.localStorage.removeItem(key);
+      }
+    }
+  }
+  return { error: null };
 }
 
 export async function saveTechNotificationPreferences(preferences: Partial<TechnicianNotificationPreferences> | boolean) {
@@ -24,28 +40,21 @@ export async function saveTechNotificationPreferences(preferences: Partial<Techn
     ? normalizeTechNotificationPreferences({ pushNotificationsEnabled: preferences })
     : normalizeTechNotificationPreferences(preferences);
 
-  const client = supabase as any;
-  const { error } = await client
-    .from("technician_notification_preferences")
-    .upsert(
-      {
-        user_id: authUserId,
-        push_notifications_enabled: normalized.pushNotificationsEnabled,
-        dispatch_push_enabled: normalized.dispatchPushEnabled,
-        customer_sms_enabled: normalized.customerSmsEnabled,
-        customer_email_enabled: normalized.customerEmailEnabled,
-        offline_cache_enabled: normalized.offlineCacheEnabled,
-      },
-      { onConflict: "user_id" },
-    );
+  try {
+    await apiClient.post("/v1/tech-app/notification-settings", {
+      push_notifications_enabled: normalized.pushNotificationsEnabled,
+      dispatch_push_enabled: normalized.dispatchPushEnabled,
+      customer_sms_enabled: normalized.customerSmsEnabled,
+      customer_email_enabled: normalized.customerEmailEnabled,
+      offline_cache_enabled: normalized.offlineCacheEnabled,
+    });
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : "Failed to save preferences" };
+  }
 
-  return { error: error?.message ?? null };
+  return { error: null };
 }
 
-/**
- * Applies a signed delta server-side so two devices adjusting the same van line
- * cannot clobber each other with a stale absolute quantity.
- */
 /**
  * Van stock only ever moves through the ledger RPC. Every movement is an
  * append-only entry keyed by an idempotency key, so an offline replay cannot
@@ -61,21 +70,31 @@ export async function recordVanInventoryMovement(params: {
   note?: string | null;
 }) {
   const idempotencyKey = params.idempotencyKey ?? crypto.randomUUID();
-  const { data, error } = await (supabase as any).rpc("record_inventory_movement_v1", {
-    p_van_inventory_id: params.vanInventoryId,
-    p_entry_type: params.entryType,
-    p_quantity: params.quantity,
-    p_idempotency_key: idempotencyKey,
-    p_job_id: params.jobId ?? null,
-    p_job_source: params.jobSource ?? null,
-    p_note: params.note ?? null,
-  });
-
-  return {
-    quantity: (data?.quantity as number | undefined) ?? null,
-    idempotencyKey,
-    error: error?.message ?? null,
-  };
+  try {
+    const response = await apiClient.post<{ data: { quantity?: number } | null }>(
+      "/v1/tech-app/van-inventory-movements",
+      {
+        van_inventory_id: params.vanInventoryId,
+        entry_type: params.entryType,
+        quantity: params.quantity,
+        idempotency_key: idempotencyKey,
+        job_id: params.jobId ?? null,
+        job_source: params.jobSource ?? null,
+        note: params.note ?? null,
+      },
+    );
+    return {
+      quantity: (response.data?.quantity as number | undefined) ?? null,
+      idempotencyKey,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      quantity: null,
+      idempotencyKey,
+      error: error instanceof Error ? error.message : "Failed to record movement",
+    };
+  }
 }
 
 export async function requestVanRestock(params: {
@@ -83,12 +102,16 @@ export async function requestVanRestock(params: {
   items: Array<{ van_inventory_id: string; name: string; quantity: number }>;
   note?: string | null;
 }) {
-  const { data, error } = await (supabase as any).rpc("create_inventory_restock_request_v1", {
-    p_van_id: params.vanId,
-    p_items: params.items,
-    p_note: params.note ?? null,
-  });
-  return { requestId: (data as string | null) ?? null, error: error?.message ?? null };
+  try {
+    const response = await apiClient.post<{ data: string | null }>("/v1/tech-app/van-restock-requests", {
+      van_id: params.vanId,
+      items: params.items,
+      note: params.note ?? null,
+    });
+    return { requestId: response.data ?? null, error: null };
+  } catch (error) {
+    return { requestId: null, error: error instanceof Error ? error.message : "Failed to request restock" };
+  }
 }
 
 /**
@@ -170,17 +193,19 @@ export async function updateTechJobDispatchStatus(
     expectedUpdatedAt: options?.expectedUpdatedAt ?? null,
   });
 
-  const { data, error } = await (supabase as any).rpc("technician_transition_job_v1", {
-    p_job_id: jobId,
-    p_source: isFleet ? "fleet_work_order" : "appointment",
-    p_next_status: nextStatus,
-    p_notes: notes ?? null,
-    p_idempotency_key: idempotencyKey,
-    p_expected_updated_at: options?.expectedUpdatedAt ?? null,
-  });
-
-  if (error) return { error: mapTransitionError(error.message ?? "Status change failed.") };
-  return { error: null, replayed: Boolean(data?.replayed) };
+  try {
+    const response = await apiClient.post<{ data: { replayed?: boolean } | null }>("/v1/tech-app/job-transition", {
+      job_id: jobId,
+      source: isFleet ? "fleet_work_order" : "appointment",
+      next_status: nextStatus,
+      notes: notes ?? null,
+      idempotency_key: idempotencyKey,
+      expected_updated_at: options?.expectedUpdatedAt ?? null,
+    });
+    return { error: null, replayed: Boolean(response.data?.replayed) };
+  } catch (error) {
+    return { error: mapTransitionError(error instanceof Error ? error.message : "Status change failed.") };
+  }
 }
 
 interface UploadTechJobPhotoParams {
@@ -208,36 +233,19 @@ export async function uploadTechJobPhoto({
     return { data: null, error: new Error("Not authenticated") };
   }
 
-  const technicianId = await fetchTechnicianIdByAuthUserId(authUserId);
+  const form = new FormData();
+  form.append("file", file);
+  form.append("appointment_id", appointmentId);
+  form.append("business_user_id", businessUserId);
+  form.append("photo_type", photoType);
+  form.append("is_required", isRequired ? "true" : "false");
 
-  const fileExt = file.name.split(".").pop();
-  const fileName = `${appointmentId}/${photoType}-${Date.now()}.${fileExt}`;
-  const storagePath = `${businessUserId}/${fileName}`;
-
-  const { error: uploadError } = await supabase.storage
-    .from("job-photos")
-    .upload(storagePath, file, { contentType: file.type });
-
-  if (uploadError) {
-    return { data: null, error: uploadError };
+  try {
+    const response = await apiClient.post<{ data: Record<string, unknown> }>("/v1/tech-app/job-photos", form);
+    return { data: response.data ?? null, error: null };
+  } catch (error) {
+    return { data: null, error };
   }
-
-  const { data, error } = await supabase
-    .from("job_photos")
-    .insert({
-      appointment_id: appointmentId,
-      user_id: businessUserId,
-      technician_id: technicianId,
-      photo_type: photoType,
-      storage_path: storagePath,
-      file_name: file.name,
-      file_size: file.size,
-      is_required: isRequired,
-    })
-    .select()
-    .single();
-
-  return { data, error };
 }
 
 /**
@@ -252,36 +260,15 @@ export async function sendTechnicianEtaEmail(params: {
   distanceMiles?: number | null;
   notes?: string | null;
 }): Promise<{ deduped: boolean }> {
-  const { data, error } = await supabase.functions.invoke("send-technician-eta", {
-    body: {
-      appointmentId: params.appointmentId,
-      etaMinutes: params.etaMinutes ?? null,
-      etaLabel: params.etaLabel ?? null,
-      distanceMiles: params.distanceMiles ?? null,
-      notes: params.notes ?? null,
-    },
+  const response = await apiClient.post<{ data: { deduped: boolean } }>("/v1/tech-app/send-eta", {
+    appointment_id: params.appointmentId,
+    eta_minutes: params.etaMinutes ?? null,
+    eta_label: params.etaLabel ?? null,
+    distance_miles: params.distanceMiles ?? null,
+    notes: params.notes ?? null,
   });
 
-  if (error) {
-    let details = error.message;
-    const context = (error as { context?: { text?: () => Promise<string> } }).context;
-    if (context?.text) {
-      try {
-        const raw = await context.text();
-        const parsed = JSON.parse(raw) as { error?: string };
-        if (parsed?.error) details = parsed.error;
-      } catch {
-        /* keep original message */
-      }
-    }
-    throw new Error(details);
-  }
-
-  if (data && (data as { error?: string }).error) {
-    throw new Error((data as { error: string }).error);
-  }
-
-  return { deduped: Boolean((data as { deduped?: boolean } | null)?.deduped) };
+  return { deduped: Boolean(response.data?.deduped) };
 }
 
 // Customer-facing messages are NOT sent from the device. They go through
@@ -290,14 +277,12 @@ export async function sendTechnicianEtaEmail(params: {
 
 
 export async function saveTechJobNotes(jobId: string, notes: string, isFleet: boolean = false) {
-  if (isFleet) {
-    return supabase.rpc("save_technician_fleet_job_notes_v1" as never, { p_job_id: jobId, p_notes: notes } as never);
-  }
-
-  return supabase
-    .from("appointments")
-    .update({ notes, updated_at: new Date().toISOString() })
-    .eq("id", jobId);
+  const response = await apiClient.post<{ data: unknown }>("/v1/tech-app/job-notes", {
+    job_id: jobId,
+    notes,
+    is_fleet: isFleet,
+  });
+  return { data: response.data, error: null };
 }
 
 interface SaveTechRecommendationParams {
@@ -312,7 +297,7 @@ interface SaveTechRecommendationParams {
 }
 
 export async function saveTechRecommendation(params: SaveTechRecommendationParams) {
-  return supabase.from("declined_services").insert({
+  const response = await apiClient.post<{ data: unknown }>("/v1/tech-app/recommendations", {
     user_id: params.userId,
     customer_id: params.customerId,
     vehicle_id: params.vehicleId,
@@ -320,10 +305,9 @@ export async function saveTechRecommendation(params: SaveTechRecommendationParam
     recommended_service: params.recommendedService,
     estimated_cost: params.estimatedCost,
     urgency: params.urgency,
-    decline_notes: params.notes,
-    declined_at: new Date().toISOString(),
-    follow_up_status: "pending",
+    notes: params.notes,
   });
+  return { data: response.data, error: null };
 }
 
 const STEP_ERROR_MESSAGES: Record<string, string> = {
@@ -344,15 +328,17 @@ export async function advanceJobExecutionStep(params: {
   evidenceUrl?: string | null;
   notes?: string | null;
 }): Promise<{ error: string | null }> {
-  const { error } = await (supabase as any).rpc("advance_job_execution_step_v1", {
-    p_step_id: params.stepId,
-    p_status: params.status,
-    p_evidence_url: params.evidenceUrl ?? null,
-    p_notes: params.notes ?? null,
-  });
-
-  if (!error) return { error: null };
-  const raw = error.message ?? "Step could not be updated.";
-  const code = Object.keys(STEP_ERROR_MESSAGES).find((key) => raw.includes(key));
-  return { error: code ? STEP_ERROR_MESSAGES[code] : raw };
+  try {
+    await apiClient.post("/v1/tech-app/execution-steps/advance", {
+      step_id: params.stepId,
+      status: params.status,
+      evidence_url: params.evidenceUrl ?? null,
+      notes: params.notes ?? null,
+    });
+    return { error: null };
+  } catch (error) {
+    const raw = error instanceof Error ? error.message : "Step could not be updated.";
+    const code = Object.keys(STEP_ERROR_MESSAGES).find((key) => raw.includes(key));
+    return { error: code ? STEP_ERROR_MESSAGES[code] : raw };
+  }
 }

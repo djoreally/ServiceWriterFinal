@@ -1,9 +1,9 @@
 /**
  * CARFAX Service History Query
- * Wraps the carfax-service-history Edge Function call.
+ * Wraps the carfax-service-history provider call (currently unavailable).
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 
 export interface CarfaxServiceRecord {
   date: string;
@@ -23,11 +23,16 @@ export interface CarfaxLookupResult {
 }
 
 export async function lookupCarfaxServiceHistory(vin: string): Promise<CarfaxLookupResult> {
-  const { data, error } = await supabase.functions.invoke("carfax-service-history", {
-    body: { vin },
-  });
-
-  if (error) throw error;
+  let data: Record<string, any> | null;
+  try {
+    const response = await apiClient.post<{ data: Record<string, any> | null }>("/v1/carfax/service-history", { vin });
+    data = response.data;
+  } catch (error) {
+    if (error instanceof ApiClientError && (error.status === 501 || error.code === "provider_not_configured")) {
+      return { integrationUnavailable: true, success: false, hasServiceHistory: false, recordCount: 0, services: [], error: error.message || "CARFAX API not configured" };
+    }
+    throw error;
+  }
 
   if (data?.integrationUnavailable) {
     return { integrationUnavailable: true, success: false, hasServiceHistory: false, recordCount: 0, services: [], error: data.error || "CARFAX API not configured" };

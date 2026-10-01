@@ -1,5 +1,5 @@
 import { addDays, format } from "date-fns";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { matchesTechLifecycleFilter } from "@/lib/tech-job-state";
 import { buildCommandCenterBuckets } from "@/lib/command-center-filters";
 import { fetchOperationalJobsByDateRange, type OperationalJobRow } from "@/application/queries/operational-jobs.query";
@@ -32,156 +32,16 @@ export interface TechnicianAppContext {
   data_fresh_at: string;
 }
 
-function getSupabaseErrorCode(error: unknown): string | undefined {
-  return typeof error === "object" && error !== null && "code" in error
-    ? String((error as { code?: unknown }).code ?? "")
-    : undefined;
-}
-
-function shouldUseTechnicianContextFallback(error: unknown): boolean {
-  const code = getSupabaseErrorCode(error);
-  const message = error instanceof Error ? error.message : String(error ?? "");
-
-  return (
-    code === "PGRST202" ||
-    message.includes("get_technician_app_context_v1") ||
-    message.includes("record \"v_shift\" is not assigned yet") ||
-    message.includes("record \"v_van\" is not assigned yet")
-  );
-}
-
-async function fetchTechnicianAppContextFallback(): Promise<TechnicianAppContext> {
-  const {
-    data: { user },
-  } = await getCurrentAuthUser();
-
-  const now = new Date().toISOString();
-  if (!user?.id) {
-    return {
-      user_id: "",
-      workspace_user_id: "",
-      technician_id: null,
-      technician_name: "Technician",
-      role: "technician",
-      is_admin_preview: false,
-      access_state: "unauthenticated",
-      presence_state: "off_shift",
-      field_status: null,
-      shift_id: null,
-      shift_status: null,
-      clock_in: null,
-      van_id: null,
-      van_name: null,
-      push_notifications_enabled: true,
-      data_fresh_at: now,
-    };
-  }
-
-  const { data: tech } = await supabase
-    .from("technicians")
-    .select("id, user_id, name, status, auth_user_id, invitation_id, is_active")
-    .eq("auth_user_id", user.id)
-    .maybeSingle();
-
-  const technician = tech as {
-    id: string;
-    user_id: string;
-    name: string | null;
-    status: string | null;
-    auth_user_id: string | null;
-    invitation_id: string | null;
-    is_active: boolean | null;
-  } | null;
-
-  if (!technician) {
-    return {
-      user_id: user.id,
-      workspace_user_id: user.id,
-      technician_id: null,
-      technician_name: "Workspace Preview",
-      role: "admin",
-      is_admin_preview: true,
-      access_state: "admin_preview",
-      presence_state: "off_shift",
-      field_status: null,
-      shift_id: null,
-      shift_status: null,
-      clock_in: null,
-      van_id: null,
-      van_name: null,
-      push_notifications_enabled: true,
-      data_fresh_at: now,
-    };
-  }
-
-  const [shiftResult, vanResult, preferencesResult] = await Promise.all([
-    supabase
-      .from("time_clock_entries")
-      .select("id, clock_in, status")
-      .eq("user_id", user.id)
-      .in("status", ["active", "on_break"])
-      .order("clock_in", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-    supabase
-      .from("vans")
-      .select("id, name")
-      .eq("assigned_technician_id", technician.id)
-      .eq("is_active", true)
-      .limit(1)
-      .maybeSingle(),
-    supabase
-      .from("technician_notification_preferences")
-      .select("push_notifications_enabled")
-      .eq("user_id", user.id)
-      .maybeSingle(),
-  ]);
-
-  const shift = shiftResult.data as { id: string; clock_in: string | null; status: string | null } | null;
-  const van = vanResult.data as { id: string; name: string | null } | null;
-  const preferences = preferencesResult.data as { push_notifications_enabled: boolean | null } | null;
-  const accessState = technician.is_active === false ? "deactivated" : "linked";
-  const presenceState = accessState === "deactivated"
-    ? "deactivated"
-    : !shift
-      ? "off_shift"
-      : shift.status === "on_break"
-        ? "on_break"
-        : ["en_route", "arrived", "in_progress"].includes(technician.status ?? "")
-          ? technician.status ?? "available"
-          : "available";
-
-  return {
-    user_id: user.id,
-    workspace_user_id: technician.user_id,
-    technician_id: technician.id,
-    technician_name: technician.name || "Technician",
-    role: "technician",
-    is_admin_preview: false,
-    access_state: accessState,
-    presence_state: presenceState,
-    field_status: technician.status,
-    shift_id: shift?.id ?? null,
-    shift_status: shift?.status ?? null,
-    clock_in: shift?.clock_in ?? null,
-    van_id: van?.id ?? null,
-    van_name: van?.name ?? null,
-    push_notifications_enabled: preferences?.push_notifications_enabled ?? true,
-    data_fresh_at: now,
-  };
-}
-
 export async function fetchTechnicianAppContext(): Promise<TechnicianAppContext> {
-  const { data, error } = await supabase.rpc("get_technician_app_context_v1" as never);
-  if (!error && data) return data as unknown as TechnicianAppContext;
-  if (!shouldUseTechnicianContextFallback(error)) throw error;
-  return fetchTechnicianAppContextFallback();
+  const response = await apiClient.post<{ data: TechnicianAppContext }>("/v1/tech-app/context", {});
+  return response.data;
 }
 
 export async function fetchTechnicianJobWorkspace(jobId: string): Promise<Record<string, unknown>> {
-  const { data, error } = await supabase.rpc("get_technician_job_workspace_v1" as never, { p_job_id: jobId } as never);
-  if (error) throw error;
-  return data as unknown as Record<string, unknown>;
+  const response = await apiClient.post<{ data: Record<string, unknown> | null }>("/v1/tech-app/job-workspace", {
+    job_id: jobId,
+  });
+  return (response.data ?? {}) as Record<string, unknown>;
 }
 
 /** Phase 1 — Mission Control: canonical technician session (shift + mission board). */
@@ -227,9 +87,8 @@ export interface TechSession {
 }
 
 export async function fetchTechnicianSession(): Promise<TechSession> {
-  const { data, error } = await supabase.rpc("get_technician_session_v2" as never);
-  if (error) throw error;
-  const session = data as unknown as TechSession;
+  const response = await apiClient.post<{ data: TechSession | null }>("/v1/tech-app/session", {});
+  const session = (response.data ?? {}) as unknown as TechSession;
   return { ...session, jobs: (session?.jobs ?? []) as TechSessionJob[] };
 }
 
@@ -268,9 +127,10 @@ export interface TechJobWorkspace {
 }
 
 export async function fetchTechnicianJobWorkspaceV2(jobId: string): Promise<TechJobWorkspace> {
-  const { data, error } = await supabase.rpc("get_technician_job_workspace_v2" as never, { p_job_id: jobId } as never);
-  if (error) throw error;
-  const workspace = data as unknown as TechJobWorkspace;
+  const response = await apiClient.post<{ data: TechJobWorkspace | null }>("/v1/tech-app/job-workspace-v2", {
+    job_id: jobId,
+  });
+  const workspace = (response.data ?? {}) as unknown as TechJobWorkspace;
   return { ...workspace, checklist: workspace?.checklist ?? [], parts: workspace?.parts ?? [] };
 }
 
@@ -299,15 +159,6 @@ interface TechOperationalJob {
   fleet_job_number?: string | null;
   fleet_vehicle_count?: number | null;
 }
-
-interface FleetLineItemRow {
-  id: string;
-  description: string | null;
-  quantity: number | null;
-  unit_price: number | null;
-}
-
-const EMPTY_QUERY_RESULT: { data: null; error: null } = { data: null, error: null };
 
 interface FleetAssignmentRow {
   id: string;
@@ -340,14 +191,9 @@ export async function getCurrentAuthUserId(): Promise<string | null> {
   return user?.id ?? null;
 }
 
-export async function fetchTechnicianIdByAuthUserId(authUserId: string): Promise<string | null> {
-  const { data } = await supabase
-    .from("technicians")
-    .select("id")
-    .eq("auth_user_id", authUserId)
-    .maybeSingle();
-
-  return (data as { id?: string } | null)?.id ?? null;
+export async function fetchTechnicianIdByAuthUserId(_authUserId: string): Promise<string | null> {
+  const response = await apiClient.get<{ data: string | null }>("/v1/tech-app/technician-id");
+  return response.data ?? null;
 }
 
 export async function fetchTechMoreDataForCurrentUser() {
@@ -356,24 +202,13 @@ export async function fetchTechMoreDataForCurrentUser() {
     return { tech: null, clockEntry: null };
   }
 
-  const [techResult, clockResult] = await Promise.all([
-    supabase
-      .from("technicians")
-      .select("id, name, email, status, performance_score, vans(name)")
-      .eq("auth_user_id", authUserId)
-      .single(),
-    supabase
-      .from("time_clock_entries")
-      .select("id, clock_in, status")
-      .eq("user_id", authUserId)
-      .in("status", ["active", "on_break"])
-      .order("clock_in", { ascending: false })
-      .limit(1),
-  ]);
+  const response = await apiClient.get<{
+    data: { tech: Record<string, unknown> | null; clockEntry: Record<string, unknown> | null };
+  }>("/v1/tech-app/more-data");
 
   return {
-    tech: (techResult.data as Record<string, unknown> | null) ?? null,
-    clockEntry: (clockResult.data?.[0] as Record<string, unknown> | null) ?? null,
+    tech: response.data.tech ?? null,
+    clockEntry: response.data.clockEntry ?? null,
   };
 }
 
@@ -400,11 +235,9 @@ export async function fetchTechTodayData(identity: TechIdentityLike) {
 
   const [{ data, error }, clockResult] = await Promise.all([
     fetchOperationalJobsByDateRange(scopeUserId, today, nextWeek),
-    supabase
-      .from("time_clock_entries")
-      .select("clock_in, clock_out")
-      .eq("user_id", identity.userId)
-      .gte("clock_in", `${today}T00:00:00`),
+    apiClient.get<{ data: Array<Record<string, unknown>> }>("/v1/tech-app/clock-entries", {
+      query: { user_id: identity.userId, from: `${today}T00:00:00` },
+    }),
   ]);
   if (error) throw error;
 
@@ -496,31 +329,14 @@ export async function fetchTechInventoryDataForCurrentUser() {
     return { vanId: null, vanName: "", items: [] as Array<Record<string, unknown>> };
   }
 
-  const techId = await fetchTechnicianIdByAuthUserId(authUserId);
-  if (!techId) {
-    return { vanId: null, vanName: "", items: [] as Array<Record<string, unknown>> };
-  }
-
-  const { data: vanData } = await supabase
-    .from("vans")
-    .select("id, name")
-    .eq("assigned_technician_id", techId)
-    .limit(1)
-    .maybeSingle();
-
-  if (!vanData) {
-    return { vanId: null, vanName: "", items: [] as Array<Record<string, unknown>> };
-  }
-
-  const { data } = await supabase
-    .from("van_inventory")
-    .select("id, quantity, min_quantity, inventory_items(id, name, sku, category, unit_cost)")
-    .eq("van_id", vanData.id);
+  const response = await apiClient.get<{
+    data: { vanId: string | null; vanName: string; items: Array<Record<string, unknown>> };
+  }>("/v1/tech-app/inventory");
 
   return {
-    vanId: vanData.id,
-    vanName: vanData.name,
-    items: (data ?? []) as Array<Record<string, unknown>>,
+    vanId: response.data.vanId,
+    vanName: response.data.vanName,
+    items: response.data.items ?? [],
   };
 }
 
@@ -530,28 +346,13 @@ export async function fetchTechProfileDataForCurrentUser() {
     return { tech: null, skills: [] as Array<Record<string, unknown>> };
   }
 
-  const { data: techData } = await supabase
-    .from("technicians")
-    .select("id, name, email, phone, status, performance_score, customer_rating_avg, vans(name)")
-    .eq("auth_user_id", authUserId)
-    .single();
-
-  if (!techData) {
-    return { tech: null, skills: [] as Array<Record<string, unknown>> };
-  }
-
-  const { data: skillsData } = await supabase
-    .from("technician_skills")
-    .select("id, skill_type, certification_level, is_active")
-    .eq("is_active", true)
-    .eq("technician_id", techData.id);
+  const response = await apiClient.get<{
+    data: { tech: Record<string, unknown> | null; skills: Array<Record<string, unknown>> };
+  }>("/v1/tech-app/profile");
 
   return {
-    tech: {
-      ...(techData as Record<string, unknown>),
-      total_jobs_completed: null as number | null,
-    },
-    skills: (skillsData ?? []) as Array<Record<string, unknown>>,
+    tech: response.data.tech ?? null,
+    skills: response.data.skills ?? [],
   };
 }
 
@@ -561,13 +362,16 @@ export async function fetchTechNotificationSettingsForCurrentUser() {
     return normalizeTechNotificationPreferences(null);
   }
 
-  const { data, error } = await supabase
-    .from("technician_notification_preferences")
-    .select("push_notifications_enabled, dispatch_push_enabled, customer_sms_enabled, customer_email_enabled, offline_cache_enabled")
-    .eq("user_id", authUserId)
-    .maybeSingle();
-
-  if (error) throw error;
+  const response = await apiClient.get<{
+    data: {
+      push_notifications_enabled?: boolean | null;
+      dispatch_push_enabled?: boolean | null;
+      customer_sms_enabled?: boolean | null;
+      customer_email_enabled?: boolean | null;
+      offline_cache_enabled?: boolean | null;
+    } | null;
+  }>("/v1/tech-app/notification-settings");
+  const data = response.data;
 
   return normalizeTechNotificationPreferences({
     pushNotificationsEnabled: data?.push_notifications_enabled,
@@ -602,188 +406,33 @@ export async function fetchTechMessagesDataForCurrentUser() {
     };
   }
 
-  const { data: techData } = await supabase
-    .from("technicians")
-    .select("id")
-    .eq("auth_user_id", authUserId)
-    .single();
-
-  if (!techData) {
-    return {
-      techId: null,
-      humanMessages: [] as Array<Record<string, unknown>>,
-      statusNotes: [] as Array<Record<string, unknown>>,
-      activeJobs: [] as Array<Record<string, unknown>>,
-      activeJobsError: null,
-      eventsError: null,
-      notesError: null,
+  const response = await apiClient.get<{
+    data: {
+      techId: string | null;
+      humanMessages: Array<Record<string, unknown>>;
+      statusNotes: Array<Record<string, unknown>>;
+      activeJobs: Array<Record<string, unknown>>;
+      activeJobsError: string | null;
+      eventsError: string | null;
+      notesError: string | null;
     };
-  }
+  }>("/v1/tech-app/messages-data");
 
-  const [{ data: events, error: eventsError }, { data: activeJobs, error: activeJobsError }, { data: notes, error: notesError }] = await Promise.all([
-    supabase
-      .from("dispatch_events")
-      .select("id, appointment_id, event_type, notes, created_at, performed_by")
-      .eq("technician_id", techData.id)
-      .eq("event_type", "note_added")
-      .order("created_at", { ascending: false })
-      .limit(40),
-    supabase
-      .from("appointments")
-      .select("id, title, scheduled_date, scheduled_time, dispatch_status, status")
-      .eq("assigned_technician_id", techData.id)
-      .not("status", "in", '("completed","cancelled")')
-      .or("dispatch_status.is.null,dispatch_status.not.in.(completed,cancelled)")
-      .order("scheduled_date", { ascending: true })
-      .order("scheduled_time", { ascending: true })
-      .limit(25),
-    supabase
-      .from("appointments")
-      .select("id, dispatch_notes, updated_at, dispatch_status, status")
-      .eq("assigned_technician_id", techData.id)
-      .not("dispatch_notes", "is", null)
-      .order("updated_at", { ascending: false })
-      .limit(40),
-  ]);
-
-  return {
-    techId: techData.id,
-    humanMessages: (events ?? []) as Array<Record<string, unknown>>,
-    statusNotes: (notes ?? []) as Array<Record<string, unknown>>,
-    activeJobs: (activeJobs ?? []) as Array<Record<string, unknown>>,
-    activeJobsError,
-    eventsError,
-    notesError,
-  };
+  return response.data;
 }
 
 export async function fetchTechJobDetailBundle(jobId: string) {
-  // The canonical workspace RPC is the ONLY authority for which table a job lives
-  // in. There is no catch-all fallback to broader direct table reads: a failing
-  // RPC surfaces an explicit error instead of silently widening data access.
-  const workspaceJob = await fetchTechnicianJobWorkspace(jobId);
-  const source = workspaceJob?.source as string | undefined;
-  if (!source) {
-    throw new Error("Job access could not be resolved for this technician.");
-  }
-  // Try Retail first
-  const retailResult = source !== "fleet_work_order" ? await supabase
-
-    .from("appointments")
-    .select(
-      `
-        id, scheduled_date, scheduled_time, estimated_duration_minutes,
-        dispatch_status, job_priority, status, location_address, location_lat, location_lng,
-        notes, dispatch_notes, estimated_cost, payment_status,
-        user_id, customer_id, vehicle_id,
-        customers(name, phone, email),
-        vehicles(year, make, model, color, vin, license_plate),
-        service_catalog(name),
-        technicians(id, name),
-        vans(name)
-      `,
-    )
-    .eq("id", jobId)
-    .maybeSingle() : EMPTY_QUERY_RESULT;
-
-  if (retailResult.data) {
-    const [servicesResult, photosResult] = await Promise.all([
-      supabase
-        .from("appointment_services")
-        .select("id, quantity, is_prepaid, service_catalog(name, price)")
-        .eq("appointment_id", jobId),
-      supabase
-        .from("job_photos")
-        .select("id, photo_type, storage_path, file_name, created_at")
-        .eq("appointment_id", jobId)
-        .order("created_at", { ascending: false }),
-    ]);
-
-    return {
-      job: { ...retailResult.data, is_fleet: false } as Record<string, unknown>,
-      jobError: null as string | null,
-      services: (servicesResult.data ?? []) as Array<Record<string, unknown>>,
-      servicesError: servicesResult.error,
-      photos: (photosResult.data ?? []) as Array<Record<string, unknown>>,
-      photosError: photosResult.error,
+  const response = await apiClient.get<{
+    data: {
+      job: Record<string, unknown> | null;
+      jobError: string | null;
+      services: Array<Record<string, unknown>>;
+      servicesError: string | null;
+      photos: Array<Record<string, unknown>>;
+      photosError: string | null;
     };
-  }
-
-  // Try Fleet (also the fallback when the workspace RPC could not classify the job)
-  const fleetResult = source !== "appointment" ? await supabase
-
-    .from("fleet_work_orders")
-    .select(
-      `
-        id, scheduled_date, scheduled_time, status, priority, service_type, description, notes, technician_notes,
-        fleet_client_id, fleet_vehicle_id, fleet_location_id, user_id,
-        fleet_clients(company_name, phone),
-        fleet_vehicles(year, make, model, color, vin, license_plate, mileage),
-        fleet_locations(address, name, latitude, longitude),
-        technicians(id, name),
-        vans(name)
-      `,
-    )
-    .eq("id", jobId)
-    .maybeSingle() : EMPTY_QUERY_RESULT;
-
-  if (fleetResult.data) {
-    const f = fleetResult.data;
-    // Map Fleet to Job structure
-    const mappedJob = {
-      id: f.id,
-      scheduled_date: f.scheduled_date,
-      scheduled_time: f.scheduled_time,
-      estimated_duration_minutes: 60,
-      dispatch_status: f.status,
-      status: f.status,
-      job_priority: f.priority,
-      location_address: f.fleet_locations?.address || f.fleet_locations?.name,
-      location_lat: f.fleet_locations?.latitude ?? null,
-      location_lng: f.fleet_locations?.longitude ?? null,
-      notes: f.technician_notes,
-      dispatch_notes: f.description,
-      estimated_cost: null,
-      payment_status: null,
-      user_id: f.user_id,
-      customer_id: null,
-      vehicle_id: f.fleet_vehicle_id,
-      customers: { name: f.fleet_clients?.company_name, phone: f.fleet_clients?.phone, email: null },
-      vehicles: f.fleet_vehicles,
-      service_catalog: { name: f.service_type || "Fleet Service" },
-      technicians: f.technicians,
-      vans: f.vans,
-      is_fleet: true
-    };
-
-    const lineItems = await supabase
-      .from("fleet_work_order_line_items")
-      .select("id, description, quantity, unit_price")
-      .eq("fleet_work_order_id", jobId);
-
-    return {
-      job: mappedJob as Record<string, unknown>,
-      jobError: null as string | null,
-      services: ((lineItems.data ?? []) as FleetLineItemRow[]).map((li) => ({
-        id: li.id,
-        service_catalog: { name: li.description, price: li.unit_price },
-        quantity: li.quantity,
-        is_prepaid: false
-      })) as Array<Record<string, unknown>>,
-      servicesError: null as string | null,
-      photos: [] as Array<Record<string, unknown>>,
-      photosError: null as string | null,
-    };
-  }
-
-  return {
-    job: null,
-    jobError: new Error("Job not found") as unknown as string | null,
-    services: [] as Array<Record<string, unknown>>,
-    servicesError: null as string | null,
-    photos: [] as Array<Record<string, unknown>>,
-    photosError: null as string | null,
-  };
+  }>("/v1/tech-app/job-detail", { query: { job_id: jobId } });
+  return response.data;
 }
 
 export interface TechFleetAssignment {
@@ -809,30 +458,15 @@ export interface TechFleetAssignment {
  */
 export async function fetchTechFleetAssignments(identity: TechIdentityLike & { isAdmin?: boolean }): Promise<TechFleetAssignment[]> {
   const scopeUserId = identity.businessUserId || identity.userId;
-  let query = supabase
-    .from("fleet_work_orders")
-    .select(
-      `id, order_number, scheduled_date, scheduled_time, status, priority, service_type, description, total, fleet_job_id,
-       fleet_jobs(job_number),
-       fleet_clients(company_name),
-       fleet_locations(name, address),
-       fleet_vehicles(year, make, model, unit_number, license_plate)`,
-    )
-    .order("scheduled_date", { ascending: true })
-    .order("scheduled_time", { ascending: true })
-    .limit(200);
+  const response = await apiClient.get<{ data: FleetAssignmentRow[] }>("/v1/tech-app/fleet-assignments", {
+    query: {
+      tech_id: identity.techId && !identity.isAdmin ? identity.techId : undefined,
+      is_admin: identity.isAdmin ? "true" : "false",
+      user_id: scopeUserId || undefined,
+    },
+  });
 
-
-  if (identity.techId && !identity.isAdmin) {
-    query = query.eq("assigned_technician_id", identity.techId);
-  } else if (scopeUserId) {
-    query = query.eq("user_id", scopeUserId);
-  }
-
-  const { data, error } = await query;
-  if (error) throw error;
-
-  return ((data ?? []) as unknown as FleetAssignmentRow[]).map((row) => {
+  return ((response.data ?? []) as unknown as FleetAssignmentRow[]).map((row) => {
     const vehicle = row.fleet_vehicles;
     const vehicleLabel = vehicle
       ? [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ") +

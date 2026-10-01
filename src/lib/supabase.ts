@@ -70,3 +70,20 @@ export function createSupabaseAdminClient() {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 }
+
+export function supabasePublishableKey(): string {
+  // The publishable key is public by design (it ships in client bundles).
+  return publishableSupabaseKey();
+}
+
+export function supabaseFunctionsBaseUrl(): string {
+  return `${serverSupabaseUrl().replace(/\/$/, "")}/functions/v1`;
+}
+
+export function createSupabaseAnonServerClient() {
+  // Server-side client with no session attached. PostgREST RLS sees the
+  // anonymous role, mirroring what the logged-out browser client could read.
+  return createClient(serverSupabaseUrl(), publishableSupabaseKey(), {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}

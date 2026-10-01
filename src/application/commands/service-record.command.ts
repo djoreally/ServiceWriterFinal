@@ -125,6 +125,8 @@ export async function completeAppointmentWithServiceRecord(
   },
 ): Promise<{ success: boolean; serviceId?: string; error?: string }> {
   try {
+    // Completion must not mutate inventory: oil usage is reporting-only, so the
+    // canonical closeout stores the verified quarts without consuming reservations.
     const workspace_id = workspaceId();
     const completion = await nextApi.appointments.complete(appointmentId, workspace_id);
     const closeout = completion.data as { service_record_id?: string } | null;

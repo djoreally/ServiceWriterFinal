@@ -8,6 +8,7 @@ const conversionRequestSchema = z.object({
   service_date: z.string().date().optional(),
   technician_id: z.string().uuid().nullable().optional(),
   appointment_id: z.string().uuid().nullable().optional(),
+  work_order_id: z.string().uuid().nullable().optional(),
   internal_notes: z.string().trim().max(10000).nullable().optional(),
   expected_quote_updated_at: z.string().datetime().nullable().optional(),
 }).strict();
@@ -46,7 +47,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       p_service_date: body.service_date ?? null,
       p_technician_id: body.technician_id ?? null,
       p_appointment_id: body.appointment_id ?? null,
-      p_work_order_id: null,
+      p_work_order_id: body.work_order_id ?? null,
       p_internal_notes: body.internal_notes ?? null,
       p_expected_quote_updated_at: body.expected_quote_updated_at ?? null,
     });

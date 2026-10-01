@@ -1,20 +1,22 @@
-/** Appointment Detail Commands — canonical appointment writes. */
+/**
+ * Appointment Detail Commands — canonical appointment writes.
+ *
+ * Phase 2: all data access goes through the typed API client
+ * (`@/lib/api-client`) to the appointments Hono router. Exported signatures
+ * are unchanged. The server resolves the workspace from the auth token.
+ */
 import { errorMessage } from "@/lib/error-message";
-import { productionSupabase } from "@/integrations/supabase/client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { trackAppointmentStatusChanged } from "@/lib/posthog/analytics";
 import { nextApi } from "@/lib/nextApiClient";
+import { apiClient } from "@/lib/api-client";
 
-const db = productionSupabase as any;
-
-async function readCurrentStatus(workspaceId: string, id: string): Promise<string | undefined> {
-  const { data } = await db
-    .from("appointments")
-    .select("status,workspace_id")
-    .eq("workspace_id", workspaceId)
-    .eq("id", id)
-    .maybeSingle();
-  return data?.status ?? undefined;
+async function readCurrentStatus(_workspaceId: string, id: string): Promise<string | undefined> {
+  const response = await apiClient.get<{ data: { status?: string } | null }>(
+    `/v1/appointments/${encodeURIComponent(id)}`,
+    { query: { selected_workspace_id: (await resolveCurrentWorkspace())?.workspaceId } },
+  );
+  return response.data?.status ?? undefined;
 }
 
 export async function updateAppointmentStatus(id: string, status: string) {
@@ -61,21 +63,10 @@ export async function deleteAppointment(id: string) {
 /** Start the job through a role-limited canonical endpoint. */
 export async function startAppointmentJob(appointmentId: string): Promise<{ success: boolean; alreadyStarted?: boolean; error?: string }> {
   try {
-    const context = await resolveCurrentWorkspace();
-    if (!context) throw new Error("No active workspace is available.");
-    const { data: { session } } = await productionSupabase.auth.getSession();
-    if (!session?.access_token) throw new Error("Authentication required to start this appointment.");
-    const response = await fetch(`/api/v1/appointments/${encodeURIComponent(appointmentId)}/start`, {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${session.access_token}`,
-      },
-      body: JSON.stringify({ workspace_id: context.workspaceId }),
-    });
-    const body = await response.json().catch(() => ({})) as { data?: { already_started?: boolean }; error?: { message?: string } };
-    if (!response.ok) throw new Error(body.error?.message || "Failed to start job");
+    const body = await apiClient.post<{ data?: { already_started?: boolean } }>(
+      `/v1/appointments/${encodeURIComponent(appointmentId)}/start`,
+      {},
+    );
     return { success: true, alreadyStarted: body.data?.already_started === true };
   } catch (err: unknown) {
     return { success: false, error: errorMessage(err, "Failed to start job") };

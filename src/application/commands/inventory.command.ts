@@ -2,10 +2,9 @@
  * Inventory Command - canonical workspace-scoped mutations.
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
-const db = supabase as any;
 
 export interface InventoryItemWritePayload {
   name: string;
@@ -34,61 +33,37 @@ async function requireWorkspace() {
 }
 
 export async function uploadInventoryImage(file: File): Promise<string> {
-  const { user, workspaceId } = await requireWorkspace();
+  const { workspaceId } = await requireWorkspace();
   if (!file.type.startsWith("image/")) throw new Error("Please upload an image file");
-  const ext = file.name.split(".").pop() || "jpg";
-  const filePath = `inventory/${workspaceId}/${user.id}/${crypto.randomUUID()}.${ext}`;
-  const { error } = await supabase.storage.from("service-images").upload(filePath, file, { upsert: false, contentType: file.type });
-  if (error) throw new Error(error.message);
-  return supabase.storage.from("service-images").getPublicUrl(filePath).data.publicUrl;
+  const form = new FormData();
+  form.append("file", file);
+  form.append("workspace_id", workspaceId);
+  const data = await apiClient.post<{ data: { public_url: string } }>("/v1/inventory/images", form);
+  return data.data.public_url;
 }
 
 export async function createInventoryItem(payload: InventoryItemWritePayload): Promise<void> {
-  const { user, workspaceId } = await requireWorkspace();
-  const { quantity, ...itemFields } = payload;
-  const { data, error } = await db
-    .from("inventory_items")
-    .insert({ ...itemFields, quantity: 0, workspace_id: workspaceId, user_id: user.id, is_active: true })
-    .select("id")
-    .single();
-  if (error) throw new Error(error.message);
-  const stockResult = await db.rpc("set_inventory_item_stock", { p_item_id: data.id, p_quantity: quantity, p_reason: "initial stock" });
-  if (stockResult.error) throw new Error(stockResult.error.message);
+  const { workspaceId } = await requireWorkspace();
+  await apiClient.post("/v1/inventory/items", { workspace_id: workspaceId, item: payload });
 }
 
 export async function updateInventoryItem(id: string, payload: InventoryItemWritePayload): Promise<void> {
   const { workspaceId } = await requireWorkspace();
-  const { quantity, ...itemFields } = payload;
-  const { error } = await db
-    .from("inventory_items")
-    .update(itemFields)
-    .eq("workspace_id", workspaceId)
-    .eq("id", id)
-    .eq("is_active", true);
-  if (error) throw new Error(error.message);
-  const stockResult = await db.rpc("set_inventory_item_stock", { p_item_id: id, p_quantity: quantity, p_reason: "inventory item edit" });
-  if (stockResult.error) throw new Error(stockResult.error.message);
+  await apiClient.patch(`/v1/inventory/items/${id}`, { workspace_id: workspaceId, item: payload });
 }
 
 export async function deleteInventoryItem(id: string): Promise<void> {
   const { workspaceId } = await requireWorkspace();
-  const { error } = await db
-    .from("inventory_items")
-    .update({ is_active: false, updated_at: new Date().toISOString() })
-    .eq("workspace_id", workspaceId)
-    .eq("id", id);
-  if (error) throw new Error(error.message);
+  await apiClient.delete(`/v1/inventory/items/${id}`, { query: { workspace_id: workspaceId } });
 }
 
 export async function transferInventoryToVan(params: { itemId: string; vanId: string; quantity: number }): Promise<void> {
   await requireWorkspace();
-  const { error } = await db.rpc("transfer_inventory_stock", {
-    p_item_id: params.itemId,
-    p_to_location_id: params.vanId,
-    p_quantity: params.quantity,
-    p_idempotency_key: `inventory-transfer-${crypto.randomUUID()}`,
+  await apiClient.post("/v1/inventory/transfer", {
+    item_id: params.itemId,
+    to_location_id: params.vanId,
+    quantity: params.quantity,
   });
-  if (error) throw new Error(error.message);
 }
 
 export async function reconcileServiceOilUsage(params: {
@@ -97,12 +72,11 @@ export async function reconcileServiceOilUsage(params: {
   locationId?: string | null;
 }): Promise<string> {
   await requireWorkspace();
-  const { data, error } = await db.rpc("reconcile_service_oil_usage", {
-    p_service_record_id: params.serviceRecordId,
-    p_inventory_item_id: params.inventoryItemId,
-    p_location_id: params.locationId ?? null,
+  const data = await apiClient.post<{ data: { movement_id: string | null } }>("/v1/inventory/reconcile-oil", {
+    service_record_id: params.serviceRecordId,
+    inventory_item_id: params.inventoryItemId,
+    location_id: params.locationId ?? null,
   });
-  if (error) throw new Error(error.message);
-  if (!data) throw new Error("Oil usage reconciliation did not return a movement");
-  return String(data);
+  if (!data.data.movement_id) throw new Error("Oil usage reconciliation did not return a movement");
+  return String(data.data.movement_id);
 }

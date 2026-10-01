@@ -1,10 +1,9 @@
 /** Service Catalog Query — canonical workspace adapter. */
-import { productionSupabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/api-client';
 import { getOfflineDatabase } from '@/offline/database';
 import { isOfflineEligibleForCurrentUser } from '@/offline/rollout';
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
-const db = productionSupabase as any;
 
 export interface CatalogItem {
   id: string; name: string; description: string | null; category: string | null; category_id: string | null; default_price: number;
@@ -69,9 +68,15 @@ export function invalidateCatalogItems(workspaceId?: string): void {
 }
 
 async function loadCatalogItems(workspaceId: string): Promise<CatalogItem[]> {
-  const { data, error } = await db.from('service_catalog').select('id,workspace_id,name,description,category,estimated_minutes,labor_price,is_active,created_at,metadata').eq('workspace_id', workspaceId).order('name');
-  if (error) { if (await isOfflineEligibleForCurrentUser()) return fetchCatalogItemsFromOffline(); throw error; }
-  return (data ?? []).map((row: any) => mapCatalogRow(row)).sort((a: CatalogItem, b: CatalogItem) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+  try {
+    const response = await apiClient.get<{ data: Array<Record<string, any>> }>("/v1/catalog/items", {
+      query: { workspace_id: workspaceId },
+    });
+    return (response.data ?? []).map((row) => mapCatalogRow(row)).sort((a: CatalogItem, b: CatalogItem) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+  } catch (error) {
+    if (await isOfflineEligibleForCurrentUser()) return fetchCatalogItemsFromOffline();
+    throw error;
+  }
 }
 
 export async function fetchCatalogItems(): Promise<CatalogItem[]> {

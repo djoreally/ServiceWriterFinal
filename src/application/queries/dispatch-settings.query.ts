@@ -1,8 +1,12 @@
 /**
  * Dispatch Settings Query — Read-only data access for dispatch algorithm config.
  * All write operations have been moved to dispatch-settings.command.ts.
+ *
+ * Phase 2: reads go through the typed API client (`@/lib/api-client`) to the
+ * dispatch Hono router (`GET /v1/dispatch/settings`). Exported signatures
+ * are unchanged. The server verifies user_id matches the caller.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface DispatchConfig {
   auto_dispatch_enabled: boolean;
@@ -14,13 +18,21 @@ export interface DispatchConfig {
   dispatch_fleet_performance_threshold: number;
 }
 
-export async function fetchDispatchConfig(userId: string): Promise<DispatchConfig | null> {
-  const { data } = await supabase
-    .from("business_profiles")
-    .select("auto_dispatch_enabled, dispatch_weight_distance, dispatch_weight_load, dispatch_weight_performance, dispatch_weight_fairness, dispatch_weight_route, dispatch_fleet_performance_threshold")
-    .eq("user_id", userId)
-    .maybeSingle();
+type DispatchSettingsRow = {
+  auto_dispatch_enabled: boolean | null;
+  dispatch_weight_distance: number | null;
+  dispatch_weight_load: number | null;
+  dispatch_weight_performance: number | null;
+  dispatch_weight_fairness: number | null;
+  dispatch_weight_route: number | null;
+  dispatch_fleet_performance_threshold: number | null;
+};
 
+export async function fetchDispatchConfig(userId: string): Promise<DispatchConfig | null> {
+  const response = await apiClient.get<{ data: DispatchSettingsRow | null }>("/v1/dispatch/settings", {
+    query: { user_id: userId },
+  });
+  const data = response.data;
   if (!data) return null;
 
   return {
