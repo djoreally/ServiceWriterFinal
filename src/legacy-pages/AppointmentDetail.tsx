@@ -572,11 +572,10 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
                 <AppointmentServicesList
                   appointmentId={appointment.id}
                   appointmentStatus={appointment.status}
-                  estimatedCost={appointment.estimated_cost}
-                  taxAmount={appointment.tax_amount}
                   serviceCatalogId={appointment.service_catalog_id}
                   isPrepaid={isPrepaid}
                   canonicalFinancials={financials}
+                  onChanged={fetchAppointment}
                 />
               </TabsContent>
 
