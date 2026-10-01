@@ -140,12 +140,13 @@ async function reconcileInvoiceEvent(event: Stripe.Event, invoice: Stripe.Invoic
     .eq("id", paymentId)
     .maybeSingle();
   if (reconciledError) throw reconciledError;
+  const paymentRow = reconciled as any;
 
-  if (reconciled?.customer_id) {
+  if (paymentRow?.customer_id) {
     const [{ data: customer, error: customerError }, { data: invoiceRow, error: invoiceError }, { data: workspace, error: workspaceError }] = await Promise.all([
-      admin.from("customers").select("first_name,last_name,email").eq("workspace_id", workspaceId).eq("id", reconciled.customer_id).maybeSingle(),
-      reconciled.invoice_id
-        ? admin.from("invoices").select("invoice_number").eq("workspace_id", workspaceId).eq("id", reconciled.invoice_id).maybeSingle()
+      admin.from("customers").select("first_name,last_name,email").eq("workspace_id", workspaceId).eq("id", paymentRow.customer_id).maybeSingle(),
+      paymentRow.invoice_id
+        ? admin.from("invoices").select("invoice_number").eq("workspace_id", workspaceId).eq("id", paymentRow.invoice_id).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
       admin.from("workspaces").select("name,timezone").eq("id", workspaceId).single(),
     ]);
@@ -153,26 +154,30 @@ async function reconcileInvoiceEvent(event: Stripe.Event, invoice: Stripe.Invoic
     if (invoiceError) throw invoiceError;
     if (workspaceError) throw workspaceError;
 
-    if (customer?.email) {
+    const customerRow = customer as any;
+    const invoiceRecord = invoiceRow as any;
+    const workspaceRecord = workspace as any;
+
+    if (customerRow?.email) {
       await dispatchPaymentLifecycle({
         eventKey: paid ? LIFECYCLE_EVENT_KEYS.paymentReceipt : LIFECYCLE_EVENT_KEYS.paymentFailed,
         eventId: paymentId + ":" + event.id,
         payment: {
-          id: reconciled.id,
+          id: paymentRow.id,
           workspace_id: workspaceId,
-          customer_id: reconciled.customer_id,
-          invoice_id: reconciled.invoice_id,
-          status: reconciled.status,
-          amount: reconciled.amount,
-          currency_code: reconciled.currency_code,
-          paid_at: reconciled.paid_at,
-          metadata: object(reconciled.metadata),
-          customer_email: customer.email,
-          customer_name: [customer.first_name, customer.last_name].filter(Boolean).join(" "),
-          invoice_number: invoiceRow?.invoice_number,
+          customer_id: paymentRow.customer_id,
+          invoice_id: paymentRow.invoice_id,
+          status: paymentRow.status,
+          amount: paymentRow.amount,
+          currency_code: paymentRow.currency_code,
+          paid_at: paymentRow.paid_at,
+          metadata: object(paymentRow.metadata),
+          customer_email: customerRow.email,
+          customer_name: [customerRow.first_name, customerRow.last_name].filter(Boolean).join(" "),
+          invoice_number: invoiceRecord?.invoice_number,
         },
-        workspaceName: workspace?.name ?? "Service Writer",
-        workspaceTimezone: workspace?.timezone ?? "UTC",
+        workspaceName: workspaceRecord?.name ?? "Service Writer",
+        workspaceTimezone: workspaceRecord?.timezone ?? "UTC",
         actionUrl: invoice.hosted_invoice_url ?? "",
       });
     }
