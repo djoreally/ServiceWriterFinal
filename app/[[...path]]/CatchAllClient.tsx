@@ -6,7 +6,6 @@ import { usePathname } from "next/navigation";
 import { TenantPublicShell } from "@/components/routing/TenantPublicShell";
 import { getTenantSlugFromHostname, isMigratedPath } from "@/lib/migratedRoutes";
 import TenantBooking from "@/legacy-pages/TenantBooking";
-import NotFound from "@/legacy-pages/NotFound";
 
 /**
  * Browser-only tenant catch-all + SPA fallback.
@@ -39,15 +38,10 @@ export default function CatchAllClient() {
     );
   }
 
-  if (isMigratedPath(pathname ?? "/")) {
-    return (
-      <TenantPublicShell>
-        <Routes>
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </TenantPublicShell>
-    );
-  }
+  // Migrated App Router routes are rendered by their own page.tsx files.
+  // The optional catch-all may coexist in the route tree, but it must never
+  // paint a legacy NotFound surface over a migrated page.
+  if (isMigratedPath(pathname ?? "/")) return null;
 
   return null;
 }
