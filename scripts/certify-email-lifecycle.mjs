@@ -98,7 +98,7 @@ const criticalProducers = [
   ["appointment_booking_sequence.assignment_changed", "app/api/v1/dispatch/assign/route.ts"],
   ["quotes_and_service_authorization.quote_approved", "app/api/v1/quotes/[id]/status/route.ts"],
   ["quotes_and_service_authorization.quote_declined", "app/api/v1/quotes/[id]/status/route.ts"],
-  ["invoice_and_payment_sequence.invoice_created", "src/server/messaging/invoice-events.ts"],
+  ["invoice_and_payment_sequence.invoice_created", "app/api/v1/invoices/route.ts"],
   ["invoice_and_payment_sequence.payment_requested", "app/api/v1/payments/actions/route.ts"],
   ["invoice_and_payment_sequence.payment_receipt", "app/api/v1/payments/route.ts"],
   ["invoice_and_payment_sequence.payment_failed", "app/api/v1/payments/[id]/route.ts"],
