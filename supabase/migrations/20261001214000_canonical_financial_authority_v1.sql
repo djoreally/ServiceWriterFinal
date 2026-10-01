@@ -229,8 +229,126 @@ select
   a.workspace_id,
   a.id,
   case
-    when nullif(svc->>'id','') is not null
-      and exists(select 1 from public.service_catalog sc where sc.id = (svc->>'id')::uuid and sc.workspace_id = a.workspace_id)
+    when coalesce(svc->>'id','') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}
+  'service',
+  coalesce(nullif(svc->>'name',''), 'Service'),
+  greatest(coalesce(nullif(svc->>'quantity','')::numeric, 1), 0.0001),
+  greatest(coalesce(nullif(svc->>'price','')::numeric, 0), 0),
+  false,
+  false,
+  row_number() over(partition by a.id order by vehicle.ordinality, service.ordinality) - 1,
+  pg_catalog.jsonb_build_object(
+    'source','public_booking_snapshot_recovery',
+    'vehicle_id', a.vehicle_id::text,
+    'price_source','immutable_booking_configuration'
+  )
+from public.appointments a
+cross join lateral jsonb_array_elements(
+  coalesce(a.metadata->'booking_configuration'->'vehicles','[]'::jsonb)
+) with ordinality as vehicle(value, ordinality)
+cross join lateral jsonb_array_elements(
+  coalesce(vehicle.value->'services','[]'::jsonb)
+) with ordinality as service(svc, ordinality)
+where a.source = 'public_booking'
+  and not exists(
+    select 1 from public.appointment_items ai
+    where ai.workspace_id = a.workspace_id and ai.appointment_id = a.id
+  )
+  and jsonb_typeof(coalesce(vehicle.value->'services','[]'::jsonb)) = 'array';
+
+-- Reconcile every appointment touched by the recovery, and any public booking
+-- still marked as pending/missing canonical pricing.
+do $$
+declare r record;
+begin
+  for r in
+    select a.id
+    from public.appointments a
+    where a.source='public_booking'
+      and (
+        exists(select 1 from public.appointment_items ai where ai.appointment_id=a.id and ai.workspace_id=a.workspace_id)
+        or coalesce(a.metadata->>'pricing_state','') in ('pending_canonical_items','missing_lines')
+      )
+  loop
+    perform public.sync_appointment_invoice_v1(r.id);
+  end loop;
+end;
+$$;
+
+-- Runtime certification surface. This reports mismatches; it does not mutate.
+create or replace function public.financial_integrity_issues_v1(p_workspace_id uuid)
+returns table(
+  entity_type text,
+  entity_id uuid,
+  issue_code text,
+  expected numeric,
+  actual numeric,
+  detail text
+)
+language sql
+security invoker
+set search_path = ''
+as $$
+  with quote_line_totals as (
+    select q.id, q.subtotal, q.tax_total, q.total,
+           coalesce(sum(qi.total_price),0) line_subtotal
+    from public.quotes q
+    left join public.quote_items qi on qi.quote_id=q.id and qi.workspace_id=q.workspace_id
+    where q.workspace_id=p_workspace_id
+    group by q.id,q.subtotal,q.tax_total,q.total
+  ),
+  invoice_line_totals as (
+    select i.id, i.subtotal, i.tax_total, i.total, i.amount_paid,
+           coalesce(sum(il.quantity*il.unit_price),0) line_subtotal
+    from public.invoices i
+    left join public.invoice_lines il on il.invoice_id=i.id and il.workspace_id=i.workspace_id
+    where i.workspace_id=p_workspace_id and i.status::text <> 'void'
+    group by i.id,i.subtotal,i.tax_total,i.total,i.amount_paid
+  ),
+  service_line_totals as (
+    select sr.id,sr.subtotal,sr.tax_amount,sr.discount_amount,sr.total_amount,
+           coalesce(sum(sli.total_price),0) line_subtotal
+    from public.service_records sr
+    left join public.service_record_line_items sli on sli.service_record_id=sr.id and sli.workspace_id=sr.workspace_id
+    where sr.workspace_id=p_workspace_id and sr.status <> 'voided'
+    group by sr.id,sr.subtotal,sr.tax_amount,sr.discount_amount,sr.total_amount
+  )
+  select 'quote',id,'quote_subtotal_mismatch',public.money_round_v1(line_subtotal,2),public.money_round_v1(coalesce(subtotal,0),2),'quote header subtotal must equal persisted quote lines'
+  from quote_line_totals where public.money_round_v1(line_subtotal,2) <> public.money_round_v1(coalesce(subtotal,0),2)
+  union all
+  select 'quote',id,'quote_total_mismatch',public.money_round_v1(coalesce(subtotal,0)+coalesce(tax_total,0),2),public.money_round_v1(coalesce(total,0),2),'quote total must equal subtotal + tax'
+  from quote_line_totals where public.money_round_v1(coalesce(subtotal,0)+coalesce(tax_total,0),2) <> public.money_round_v1(coalesce(total,0),2)
+  union all
+  select 'invoice',id,'invoice_subtotal_mismatch',public.money_round_v1(line_subtotal,2),public.money_round_v1(coalesce(subtotal,0),2),'invoice header subtotal must equal persisted invoice lines'
+  from invoice_line_totals where public.money_round_v1(line_subtotal,2) <> public.money_round_v1(coalesce(subtotal,0),2)
+  union all
+  select 'invoice',id,'invoice_total_mismatch',public.money_round_v1(coalesce(subtotal,0)+coalesce(tax_total,0),2),public.money_round_v1(coalesce(total,0),2),'invoice total must equal subtotal + tax'
+  from invoice_line_totals where public.money_round_v1(coalesce(subtotal,0)+coalesce(tax_total,0),2) <> public.money_round_v1(coalesce(total,0),2)
+  union all
+  select 'invoice',id,'invoice_overpaid',public.money_round_v1(coalesce(total,0),2),public.money_round_v1(coalesce(amount_paid,0),2),'amount paid cannot exceed invoice total'
+  from invoice_line_totals where coalesce(amount_paid,0) > coalesce(total,0) + 0.009
+  union all
+  select 'service_record',id,'service_subtotal_mismatch',public.money_round_v1(line_subtotal,2),public.money_round_v1(coalesce(subtotal,0),2),'service record subtotal must equal persisted service lines'
+  from service_line_totals where public.money_round_v1(line_subtotal,2) <> public.money_round_v1(coalesce(subtotal,0),2)
+  union all
+  select 'service_record',id,'service_total_mismatch',public.money_round_v1(coalesce(subtotal,0)-coalesce(discount_amount,0)+coalesce(tax_amount,0),2),public.money_round_v1(coalesce(total_amount,0),2),'service total must equal subtotal - discount + tax'
+  from service_line_totals where public.money_round_v1(coalesce(subtotal,0)-coalesce(discount_amount,0)+coalesce(tax_amount,0),2) <> public.money_round_v1(coalesce(total_amount,0),2)
+  union all
+  select 'appointment',a.id,'appointment_missing_commercial_lines',null,null,'appointment has no persisted commercial line items'
+  from public.appointments a
+  where a.workspace_id=p_workspace_id
+    and a.status::text not in ('cancelled','no_show')
+    and a.source in ('public_booking','staff')
+    and not exists(select 1 from public.appointment_items ai where ai.workspace_id=a.workspace_id and ai.appointment_id=a.id);
+$$;
+
+revoke all on function public.financial_integrity_issues_v1(uuid) from public, anon;
+grant execute on function public.financial_integrity_issues_v1(uuid) to authenticated, service_role;
+
+      and exists(
+        select 1 from public.service_catalog sc
+        where sc.id = (svc->>'id')::uuid and sc.workspace_id = a.workspace_id
+      )
     then (svc->>'id')::uuid
     else null
   end,
