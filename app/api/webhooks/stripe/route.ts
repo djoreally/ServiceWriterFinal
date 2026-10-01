@@ -133,28 +133,54 @@ async function reconcileInvoiceEvent(event: Stripe.Event, invoice: Stripe.Invoic
   const { error: updateError } = failed ? await query.in("status", ["pending", "failed"]) : await query;
   if (updateError) throw updateError;
 
-  const { data: reconciled } = await admin
+  const { data: reconciled, error: reconciledError } = await admin
     .from("payments")
-    .select("id,customer_id,invoice_id,status,amount,currency_code,paid_at,metadata,customers(first_name,last_name,email),invoices(invoice_number)")
+    .select("id,workspace_id,customer_id,invoice_id,status,amount,currency_code,paid_at,metadata")
     .eq("workspace_id", workspaceId)
     .eq("id", paymentId)
     .maybeSingle();
-  const customer = Array.isArray(reconciled?.customers) ? reconciled.customers[0] : reconciled?.customers;
-  if (reconciled && customer?.email) {
-    const { data: workspace } = await admin.from("workspaces").select("name,timezone").eq("id", workspaceId).single();
-    await dispatchPaymentLifecycle({
-      eventKey: paid ? LIFECYCLE_EVENT_KEYS.paymentReceipt : LIFECYCLE_EVENT_KEYS.paymentFailed,
-      eventId: paymentId + ":" + event.id,
-      payment: {
-        ...reconciled,
-        customer_email: customer.email,
-        customer_name: [customer.first_name, customer.last_name].filter(Boolean).join(" "),
-        invoice_number: Array.isArray(reconciled.invoices) ? reconciled.invoices[0]?.invoice_number : reconciled.invoices?.invoice_number,
-      },
-      workspaceName: workspace?.name ?? "Service Writer",
-      workspaceTimezone: workspace?.timezone ?? "UTC",
-      actionUrl: invoice.hosted_invoice_url ?? undefined,
-    });
+  if (reconciledError) throw reconciledError;
+  const paymentRow = reconciled as any;
+
+  if (paymentRow?.customer_id) {
+    const [{ data: customer, error: customerError }, { data: invoiceRow, error: invoiceError }, { data: workspace, error: workspaceError }] = await Promise.all([
+      admin.from("customers").select("first_name,last_name,email").eq("workspace_id", workspaceId).eq("id", paymentRow.customer_id).maybeSingle(),
+      paymentRow.invoice_id
+        ? admin.from("invoices").select("invoice_number").eq("workspace_id", workspaceId).eq("id", paymentRow.invoice_id).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+      admin.from("workspaces").select("name,timezone").eq("id", workspaceId).single(),
+    ]);
+    if (customerError) throw customerError;
+    if (invoiceError) throw invoiceError;
+    if (workspaceError) throw workspaceError;
+
+    const customerRow = customer as any;
+    const invoiceRecord = invoiceRow as any;
+    const workspaceRecord = workspace as any;
+
+    if (customerRow?.email) {
+      await dispatchPaymentLifecycle({
+        eventKey: paid ? LIFECYCLE_EVENT_KEYS.paymentReceipt : LIFECYCLE_EVENT_KEYS.paymentFailed,
+        eventId: paymentId + ":" + event.id,
+        payment: {
+          id: paymentRow.id,
+          workspace_id: workspaceId,
+          customer_id: paymentRow.customer_id,
+          invoice_id: paymentRow.invoice_id,
+          status: paymentRow.status,
+          amount: paymentRow.amount,
+          currency_code: paymentRow.currency_code,
+          paid_at: paymentRow.paid_at,
+          metadata: object(paymentRow.metadata),
+          customer_email: customerRow.email,
+          customer_name: [customerRow.first_name, customerRow.last_name].filter(Boolean).join(" "),
+          invoice_number: invoiceRecord?.invoice_number,
+        },
+        workspaceName: workspaceRecord?.name ?? "Service Writer",
+        workspaceTimezone: workspaceRecord?.timezone ?? "UTC",
+        actionUrl: invoice.hosted_invoice_url ?? "",
+      });
+    }
   }
   return { received: true };
 }
