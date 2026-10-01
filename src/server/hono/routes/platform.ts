@@ -2161,7 +2161,7 @@ async function loadCanonicalOnboardingProfile(supabase: any, userId: string) {
   if (!workspaceId) return { workspaceId: null, workspace: null, settings: null, profile: null };
 
   const [{ data: workspace, error: workspaceError }, { data: settings, error: settingsError }] = await Promise.all([
-    supabase.from("workspaces").select("id,name,timezone,currency_code,is_active").eq("id", workspaceId).maybeSingle(),
+    supabase.from("workspaces").select("id,name,timezone,currency_code,is_active,created_at").eq("id", workspaceId).maybeSingle(),
     supabase.from("workspace_settings").select("*").eq("workspace_id", workspaceId).maybeSingle(),
   ]);
   if (workspaceError) throw workspaceError;
@@ -2410,18 +2410,13 @@ platformRouter.get("/v1/platform/onboarding/site-import/latest", async (c) => {
 
 platformRouter.get("/v1/platform/dashboard/onboarding-info", async (c) => {
   const { supabase, user } = await requireAuth(c);
-  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id, readWorkspaceHint(c));
-  if (!workspaceId) {
-    return json({ hasUser: true, onboardingCompleted: false, ownerName: null, resolved: true });
-  }
-  const { data, error } = await (supabase as any).from("workspace_settings")
-    .select("owner_name")
-    .eq("workspace_id", workspaceId)
-    .maybeSingle();
-  if (error) {
-    return json({ hasUser: true, onboardingCompleted: false, ownerName: null, resolved: false });
-  }
-  return json({ hasUser: true, onboardingCompleted: true, ownerName: data?.owner_name ?? null, resolved: true });
+  const canonical = await loadCanonicalOnboardingProfile(supabase, user.id);
+  return json({
+    hasUser: true,
+    onboardingCompleted: Boolean(canonical.profile?.onboarding_completed),
+    ownerName: canonical.settings?.owner_name ?? null,
+    resolved: Boolean(canonical.workspace && canonical.settings),
+  });
 });
 
 platformRouter.get("/v1/platform/dashboard/overview", async (c) => {
@@ -3873,16 +3868,25 @@ platformRouter.get("/v1/platform/link-health", async (c) => {
 });
 
 platformRouter.get("/v1/platform/posthog-organization", async (c) => {
-  const { supabase } = await requireAuth(c);
+  const { supabase, user } = await requireAuth(c);
   const url = new URL(c.req.url);
-  const organizationId = z.string().min(1).parse(url.searchParams.get("organization_id") ?? "");
-  const { data, error } = await (supabase as any)
-    .from("business_profiles")
-    .select("business_name, created_at, onboarding_completed, marketplace_opt_in, stripe_onboarding_complete, stripe_charges_enabled, sms_transactional_enabled, sms_marketing_enabled, marketing_email_enabled")
-    .eq("user_id", organizationId)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  return json(data ?? null);
+  const organizationId = z.string().uuid().parse(url.searchParams.get("organization_id") ?? "");
+  if (organizationId !== user.id) throw new ApiError(403, "Organization analytics access denied", "forbidden");
+
+  const canonical = await loadCanonicalOnboardingProfile(supabase, user.id);
+  if (!canonical.workspace) return json(null);
+  const operational = readOperationalObject(canonical.settings?.operational_settings);
+  return json({
+    business_name: canonical.workspace.name,
+    created_at: canonical.workspace.created_at ?? null,
+    onboarding_completed: Boolean(canonical.profile?.onboarding_completed),
+    marketplace_opt_in: canonical.settings?.marketplace_opt_in ?? false,
+    stripe_onboarding_complete: operational.stripe_onboarding_complete === true,
+    stripe_charges_enabled: operational.stripe_charges_enabled === true,
+    sms_transactional_enabled: operational.sms_transactional_enabled === true,
+    sms_marketing_enabled: operational.sms_marketing_enabled === true,
+    marketing_email_enabled: operational.marketing_email_enabled === true,
+  });
 });
 
 // Weather guard (realtime subscriptions stay client-side; see weather-guard.query.ts).
