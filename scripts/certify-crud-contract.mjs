@@ -18,6 +18,8 @@ const failures = [];
 function methods(file) {
   if (!fs.existsSync(file)) { failures.push(`missing route: ${file}`); return new Set(); }
   const source = fs.readFileSync(file, "utf8");
+  if (file.startsWith("app/api/v1/") && !source.includes("requireWorkspaceMember(") && !file.includes("invitations")) failures.push(`${file}: mutable workspace route must enforce requireWorkspaceMember`);
+  if (file.startsWith("app/api/v1/") && !source.includes("workspace_id") && !source.includes("workspaceId") && !file.includes("invitations")) failures.push(`${file}: mutable workspace route must bind workspace identity`);
   return new Set([...source.matchAll(/export\s+async\s+function\s+(GET|POST|PUT|PATCH|DELETE)\b/g)].map((m) => m[1]));
 }
 for (const [name, collection, member, collectionRequired, memberRequired] of resources) {
