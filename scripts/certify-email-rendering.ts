@@ -1,6 +1,7 @@
 import {
   LIFECYCLE_TEMPLATES,
   LIFECYCLE_TEMPLATE_COUNT,
+  getLifecycleTemplate,
   renderLifecycleEmail,
 } from "../src/server/messaging/lifecycle-templates";
 import { NEWSLETTER_ISSUES } from "../src/server/newsletter/moms-content";
@@ -14,6 +15,7 @@ if (LIFECYCLE_TEMPLATE_COUNT !== 177) {
 }
 
 for (const template of Object.values(LIFECYCLE_TEMPLATES)) {
+  const effectiveTemplate = getLifecycleTemplate(template.key);
   const source = [
     template.subject,
     template.preview,
@@ -26,7 +28,7 @@ for (const template of Object.values(LIFECYCLE_TEMPLATES)) {
     [...source.matchAll(variablePattern)].map((match) => match[1]),
   );
   required.add("email.primary_action_url");
-  if (template.purpose === "marketing") required.add("email.preferences_url");
+  if (effectiveTemplate.purpose === "marketing") required.add("email.preferences_url");
 
   const variables: Record<string, string> = {};
   for (const key of required) {
