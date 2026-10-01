@@ -9,7 +9,7 @@
 import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@packages/auth";
-import { productionSupabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export type GateReason =
   | "ok"
@@ -28,38 +28,27 @@ interface State {
   loading: boolean;
 }
 
-async function decisionForUser(userId: string): Promise<AccessGateDecision> {
+async function decisionForUser(_userId: string): Promise<AccessGateDecision> {
   try {
-    const membership = await productionSupabase
-      .from("workspace_members")
-      .select("workspace_id")
-      .eq("user_id", userId)
-      .eq("is_active", true)
-      .limit(1)
-      .maybeSingle();
-    if (membership.error) throw membership.error;
-    if (membership.data?.workspace_id) {
-      return { allowed: true, reason: "ok", redirectTo: null };
-    }
+    const status = await apiClient.get<{
+      authenticated: boolean;
+      onboardingCompleted: boolean;
+      verified?: boolean;
+    }>("/v1/platform/onboarding/status");
 
-    const ownedWorkspace = await productionSupabase
-      .from("workspaces")
-      .select("id")
-      .eq("created_by", userId)
-      .eq("is_active", true)
-      .limit(1)
-      .maybeSingle();
-    if (ownedWorkspace.error) throw ownedWorkspace.error;
-    if (ownedWorkspace.data?.id) {
-      return { allowed: true, reason: "ok", redirectTo: null };
+    if (!status.authenticated) {
+      return { allowed: false, reason: "unauthenticated", redirectTo: "/login" };
     }
-
-    return { allowed: false, reason: "onboarding_required", redirectTo: "/onboarding" };
+    if (!status.onboardingCompleted) {
+      return { allowed: false, reason: "onboarding_required", redirectTo: "/onboarding" };
+    }
+    return { allowed: true, reason: "ok", redirectTo: null };
   } catch (error) {
-    console.warn("[useAppAccessGate] canonical workspace check failed:", error);
-    // A transient workspace read must not lock an already-authenticated user out
-    // of the application; route-level authorization remains authoritative.
-    return { allowed: true, reason: "error", redirectTo: null };
+    console.warn("[useAppAccessGate] verified onboarding check failed:", error);
+    // Fail closed. An authenticated owner must never reach the dashboard when
+    // onboarding persistence cannot be verified. Team members are explicitly
+    // exempted by the server-side onboarding status contract.
+    return { allowed: false, reason: "onboarding_required", redirectTo: "/onboarding" };
   }
 }
 
