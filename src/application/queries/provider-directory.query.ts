@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface ProviderDirectoryItem {
   user_id: string;
@@ -51,13 +51,18 @@ export async function searchProviderDirectory(
   const limit = options.limit ?? 25;
   const offset = options.offset ?? 0;
 
-  const { data, error } = await supabase.rpc("search_public_providers", {
-    search_text: normalized.length > 0 ? normalized : null,
-    p_limit: limit,
-    p_offset: offset,
-  } as never);
+  const { data, error } = await apiClient.get<{
+    data: (ProviderDirectoryItem & { total_count?: number })[];
+    error: unknown;
+  }>("/v1/platform/provider-directory/search", {
+    query: {
+      search_text: normalized.length > 0 ? normalized : "",
+      limit,
+      offset,
+    },
+  });
 
-  const rows = (data || []) as (ProviderDirectoryItem & { total_count?: number })[];
+  const rows = data || [];
 
   const normalizedData = rows
     .filter((provider) => Boolean(provider.booking_slug))
@@ -76,12 +81,9 @@ export async function searchProviderDirectory(
 export async function fetchDirectoryProviderProfile(
   slug: string
 ): Promise<{ data: DirectoryProviderProfile | null; error: unknown }> {
-  const { data, error } = await supabase.rpc("get_directory_provider_profile", {
-    booking_slug_param: slug,
-  } as never);
-
-  const rows = (data || []) as DirectoryProviderProfile[];
-  return { data: rows[0] ?? null, error };
+  return apiClient.get("/v1/platform/provider-directory/profile", {
+    query: { slug },
+  });
 }
 
 
@@ -90,15 +92,7 @@ export async function fetchProviderDirectoryServices(
 ): Promise<{ data: ProviderServiceItem[]; error: unknown }> {
   if (!providerIds.length) return { data: [], error: null };
 
-  const { data, error } = await supabase
-    .from("service_catalog")
-    .select("user_id, name, default_price")
-    .eq("is_active", true)
-    .in("user_id", providerIds)
-    .limit(500);
-
-  return {
-    data: (data || []) as ProviderServiceItem[],
-    error,
-  };
+  return apiClient.get("/v1/platform/provider-directory/services", {
+    query: { provider_ids: providerIds.join(",") },
+  });
 }

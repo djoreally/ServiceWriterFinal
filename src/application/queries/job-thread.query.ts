@@ -1,8 +1,7 @@
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import type { JobCommunicationRole } from "@packages/shared/lifecycle";
 import { mapOperationalSourceToJobSource } from "@/lib/job-thread-source";
 
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export type JobSource = "appointment" | "fleet_work_order";
 
 export interface JobThreadTimelineItem {
@@ -56,49 +55,28 @@ interface JobThreadExceptionRow {
   created_by: string | null;
 }
 
+interface TimelineBundle {
+  thread_id: string;
+  messages: JobThreadMessageRow[];
+  events: JobThreadEventRow[];
+  exceptions: JobThreadExceptionRow[];
+}
+
 export async function ensureJobThread(jobId: string, jobSource: JobSource) {
-  const { data: auth } = await getCurrentAuthUser();
-  const userId = auth.user?.id;
-  if (!userId) throw new Error("Not authenticated");
-
-  const client = supabase as any;
-  const { data, error } = await client.rpc("ensure_job_thread", {
-    p_job_id: jobId,
-    p_job_source: jobSource,
-    p_created_by: userId,
+  const response = await apiClient.post<{ data: { thread_id: string } }>("/v1/job-threads/ensure", {
+    job_id: jobId,
+    job_source: jobSource,
   });
-
-  if (error) throw error;
-  return data as string;
+  return response.data.thread_id as string;
 }
 
 export async function fetchJobThreadTimeline(jobId: string, jobSource: JobSource): Promise<JobThreadTimelineItem[]> {
-  const threadId = await ensureJobThread(jobId, jobSource);
-  const client = supabase as any;
+  const response = await apiClient.get<{ data: TimelineBundle }>("/v1/job-threads/timeline", {
+    query: { job_id: jobId, job_source: jobSource },
+  });
+  const { messages: messagesRes, events: eventsRes, exceptions: exceptionsRes } = response.data;
 
-  const [messagesRes, eventsRes, exceptionsRes] = await Promise.all([
-    client
-      .from("job_thread_messages")
-      .select("id, thread_id, sender_id, sender_role, content, attachments, channel, recipient, created_at, job_message_deliveries(status, last_error, delivered_at)")
-      .eq("thread_id", threadId)
-      .order("created_at", { ascending: true }),
-    client
-      .from("job_thread_events")
-      .select("id, thread_id, event_type, metadata, created_at, created_by")
-      .eq("thread_id", threadId)
-      .order("created_at", { ascending: true }),
-    client
-      .from("job_thread_exceptions")
-      .select("id, thread_id, exception_type, note, attachments, created_at, created_by")
-      .eq("thread_id", threadId)
-      .order("created_at", { ascending: true }),
-  ]);
-
-  if (messagesRes.error) throw messagesRes.error;
-  if (eventsRes.error) throw eventsRes.error;
-  if (exceptionsRes.error) throw exceptionsRes.error;
-
-  const messages = ((messagesRes.data ?? []) as JobThreadMessageRow[]).map((m) => ({
+  const messages = ((messagesRes ?? []) as JobThreadMessageRow[]).map((m) => ({
     id: m.id,
     thread_id: m.thread_id,
     item_type: "human_message" as const,
@@ -114,7 +92,7 @@ export async function fetchJobThreadTimeline(jobId: string, jobSource: JobSource
     },
   }));
 
-  const events = ((eventsRes.data ?? []) as JobThreadEventRow[]).map((e) => ({
+  const events = ((eventsRes ?? []) as JobThreadEventRow[]).map((e) => ({
     id: e.id,
     thread_id: e.thread_id,
     item_type: "system_event" as const,
@@ -126,7 +104,7 @@ export async function fetchJobThreadTimeline(jobId: string, jobSource: JobSource
     },
   }));
 
-  const exceptions = ((exceptionsRes.data ?? []) as JobThreadExceptionRow[]).map((x) => ({
+  const exceptions = ((exceptionsRes ?? []) as JobThreadExceptionRow[]).map((x) => ({
     id: x.id,
     thread_id: x.thread_id,
     item_type: "exception" as const,
@@ -143,16 +121,65 @@ export async function fetchJobThreadTimeline(jobId: string, jobSource: JobSource
 }
 
 export async function markJobThreadRead(threadId: string) {
-  const { error } = await (supabase as any).rpc("mark_job_thread_read_v1", { p_thread_id: threadId });
-  if (error) throw error;
+  await apiClient.post(`/v1/job-threads/${encodeURIComponent(threadId)}/read`, {});
 }
 
+const SUBSCRIBE_POLL_MS = 15000;
+
+/**
+ * Subscribe to timeline changes.
+ *
+ * There is no realtime primitive on the sanctioned API client, so this polls
+ * the timeline bundle and invokes the callback when a new item appears. The
+ * exported signature (returns an unsubscribe function) is unchanged.
+ */
 export function subscribeJobThreadTimeline(threadId: string, onChange: () => void) {
-  const channel = supabase.channel(`tech-job-thread-${threadId}`)
-    .on("postgres_changes", { event: "INSERT", schema: "public", table: "job_thread_messages", filter: `thread_id=eq.${threadId}` }, onChange)
-    .on("postgres_changes", { event: "INSERT", schema: "public", table: "job_thread_events", filter: `thread_id=eq.${threadId}` }, onChange)
-    .subscribe();
-  return () => { void supabase.removeChannel(channel); };
+  let timer: ReturnType<typeof setInterval> | null = null;
+  let stopped = false;
+  let lastFingerprint: string | undefined;
+
+  const fingerprint = (bundle: TimelineBundle): string => {
+    const ids = [
+      ...(bundle.messages ?? []).map((m) => m.id),
+      ...(bundle.events ?? []).map((e) => e.id),
+      ...(bundle.exceptions ?? []).map((x) => x.id),
+    ].sort().join(",");
+    return `${ids}`;
+  };
+
+  const check = async () => {
+    if (stopped) return;
+    try {
+      const items = await fetchJobThreadTimelineById(threadId);
+      const current = fingerprint(items);
+      if (lastFingerprint === undefined) {
+        lastFingerprint = current;
+        return;
+      }
+      if (current !== lastFingerprint) {
+        lastFingerprint = current;
+        onChange();
+      }
+    } catch {
+      // Transient failure — retry on the next tick.
+    }
+  };
+
+  void check();
+  timer = setInterval(() => { void check(); }, SUBSCRIBE_POLL_MS);
+
+  return () => {
+    stopped = true;
+    if (timer) clearInterval(timer);
+  };
+}
+
+/** Timeline bundle fetch by thread id, for the polling subscriber. */
+async function fetchJobThreadTimelineById(threadId: string): Promise<TimelineBundle> {
+  const response = await apiClient.get<{ data: TimelineBundle }>("/v1/job-threads/timeline-by-id", {
+    query: { thread_id: threadId },
+  });
+  return response.data;
 }
 
 export async function openCommunicationThreadForJob(params: {

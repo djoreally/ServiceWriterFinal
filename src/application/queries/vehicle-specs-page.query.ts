@@ -2,7 +2,8 @@
  * Vehicle Specs Page Query — Abstracts data access for VehicleSpecs page.
  * Separates DB/edge-function calls from UI logic.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
+import type { Database } from "@/integrations/supabase/types";
 
 export interface VinDecodeData {
   year?: number | null;
@@ -15,64 +16,118 @@ export interface VinDecodeData {
   } | null;
 }
 
+type VehicleSpecificationRow = Database["public"]["Tables"]["vehicle_specifications"]["Row"];
+type FilterCrossReferenceRow = Database["public"]["Tables"]["filter_cross_references"]["Row"];
+
+type QueryResult<T> = { data: T | null; error: Error | null };
+
+function toError(error: unknown): Error {
+  return error instanceof Error ? error : new Error("Request failed");
+}
+
 /** Count total vehicle specifications records. */
-export async function countVehicleSpecs() {
-  return supabase.from("vehicle_specifications").select("*", { count: "exact", head: true });
+export async function countVehicleSpecs(): Promise<{ count: number | null; data: unknown; error: Error | null }> {
+  try {
+    const { data } = await apiClient.get<{ data: { count: number } }>("/v1/vehicle-specs/count");
+    return { count: data?.count ?? 0, data: [], error: null };
+  } catch (error) {
+    return { count: null, data: null, error: toError(error) };
+  }
 }
 
 /** Count total filter application records. */
-export async function countFilterApplications() {
-  return supabase.from("filter_applications").select("*", { count: "exact", head: true });
+export async function countFilterApplications(): Promise<{ count: number | null; data: unknown; error: Error | null }> {
+  try {
+    const { data } = await apiClient.get<{ data: { count: number } }>("/v1/filter-applications/count");
+    return { count: data?.count ?? 0, data: [], error: null };
+  } catch (error) {
+    return { count: null, data: null, error: toError(error) };
+  }
 }
 
 /** Search vehicle specifications by year/make/model. */
-export async function searchVehicleSpecs(year?: number, make?: string, model?: string) {
-  let query = supabase.from("vehicle_specifications").select("*");
-  if (year) query = query.eq("year", year);
-  if (make) query = query.ilike("make", make);
-  if (model) query = query.ilike("model", `%${model}%`);
-  return query.order("year", { ascending: false }).limit(100);
+export async function searchVehicleSpecs(year?: number, make?: string, model?: string): Promise<QueryResult<VehicleSpecificationRow[]>> {
+  try {
+    const { data } = await apiClient.get<{ data: VehicleSpecificationRow[] }>("/v1/vehicle-specs/search", {
+      query: { year, make, model },
+    });
+    return { data: data ?? [], error: null };
+  } catch (error) {
+    return { data: null, error: toError(error) };
+  }
 }
 
-/** Decode a VIN via edge function. */
-export async function decodeVin(vin: string) {
-  return supabase.functions.invoke<VinDecodeData>("vin-decode", {
-    body: { vin: vin.toUpperCase() },
-  });
+/** Decode a VIN via provider endpoint. */
+export async function decodeVin(vin: string): Promise<QueryResult<VinDecodeData>> {
+  try {
+    const { data } = await apiClient.post<{ data: VinDecodeData }>("/v1/vin/decode", { vin: vin.toUpperCase() });
+    return { data: data ?? null, error: null };
+  } catch (error) {
+    if (error instanceof ApiClientError && error.status === 501) {
+      return { data: null, error: new Error("VIN decode provider is not configured") };
+    }
+    return { data: null, error: toError(error) };
+  }
 }
 
 /** Search filter cross-references by part number. */
-export async function searchFilterCrossRefs(partNumber: string) {
-  return supabase
-    .from("filter_cross_references")
-    .select("*")
-    .or(`source_part_number.ilike.%${partNumber}%,target_part_number.ilike.%${partNumber}%`)
-    .limit(50);
+export async function searchFilterCrossRefs(partNumber: string): Promise<QueryResult<FilterCrossReferenceRow[]>> {
+  try {
+    const { data } = await apiClient.get<{ data: FilterCrossReferenceRow[] }>("/v1/filter-cross-refs/search", {
+      query: { part_number: partNumber },
+    });
+    return { data: data ?? [], error: null };
+  } catch (error) {
+    return { data: null, error: toError(error) };
+  }
 }
 
-/** Invoke vehicle-maintenance edge function. */
-export async function fetchMaintenanceSchedule(body: Record<string, unknown>) {
-  return supabase.functions.invoke("vehicle-maintenance", { body });
+/** Invoke vehicle-maintenance provider endpoint. */
+export async function fetchMaintenanceSchedule(body: Record<string, unknown>): Promise<QueryResult<any>> {
+  try {
+    const { data } = await apiClient.post<{ data: any }>("/v1/vehicle-maintenance/schedule", body);
+    return { data: data ?? null, error: null };
+  } catch (error) {
+    return { data: null, error: toError(error) };
+  }
 }
 
-/** Invoke quickvin-lookup edge function (plate decoder). */
-export async function decodePlate(licensePlate: string, state: string) {
-  return supabase.functions.invoke("quickvin-lookup", {
-    body: { licensePlate, state },
-  });
+/** Invoke quickvin-lookup provider endpoint (plate decoder). */
+export async function decodePlate(licensePlate: string, state: string): Promise<QueryResult<any>> {
+  try {
+    const { data } = await apiClient.post<{ data: any }>("/v1/vin/plate-lookup", { licensePlate, state });
+    return { data: data ?? null, error: null };
+  } catch (error) {
+    return { data: null, error: toError(error) };
+  }
 }
 
-/** Invoke ymmt-specs edge function for TWB data. */
-export async function fetchYmmtSpecs(body: Record<string, unknown>) {
-  return supabase.functions.invoke("ymmt-specs", { body });
+/** Invoke ymmt-specs provider endpoint for TWB data. */
+export async function fetchYmmtSpecs(body: Record<string, unknown>): Promise<QueryResult<any>> {
+  try {
+    const { data } = await apiClient.post<{ data: any }>("/v1/ymmt-specs", body);
+    return { data: data ?? null, error: null };
+  } catch (error) {
+    return { data: null, error: toError(error) };
+  }
 }
 
-/** Invoke seed-vehicle-specs edge function with a chunk. */
-export async function seedVehicleSpecsChunk(specs: unknown[]) {
-  return supabase.functions.invoke("seed-vehicle-specs", { body: { specs } });
+/** Invoke seed-vehicle-specs provider endpoint with a chunk. */
+export async function seedVehicleSpecsChunk(specs: unknown[]): Promise<QueryResult<any>> {
+  try {
+    const { data } = await apiClient.post<{ data: any }>("/v1/vehicle-specs/seed", { specs });
+    return { data: data ?? null, error: null };
+  } catch (error) {
+    return { data: null, error: toError(error) };
+  }
 }
 
-/** Invoke seed-filters edge function. */
-export async function seedFilters(body: unknown) {
-  return supabase.functions.invoke("seed-filters", { body });
+/** Invoke seed-filters provider endpoint. */
+export async function seedFilters(body: unknown): Promise<QueryResult<any>> {
+  try {
+    const { data } = await apiClient.post<{ data: any }>("/v1/filter-applications/seed", body);
+    return { data: data ?? null, error: null };
+  } catch (error) {
+    return { data: null, error: toError(error) };
+  }
 }

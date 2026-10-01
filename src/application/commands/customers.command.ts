@@ -3,7 +3,7 @@
  */
 
 import { z } from "zod";
-import { nextApi } from "@/lib/nextApiClient";
+import { apiClient } from "@/lib/api-client";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 import { invalidateCustomerOverview } from "@/application/queries/customers.query";
 import { invalidateVehicleOverview } from "@/application/queries/vehicles.query";
@@ -51,7 +51,7 @@ export async function createCustomerAndReturn(
   payload: CustomerWritePayload,
 ): Promise<{ id: string; name: string; email: string | null; phone: string | null }> {
   const workspace_id = requireSelectedWorkspaceId();
-  const response = await nextApi.customers.create({
+  const response = await apiClient.post<{ data: unknown }>("/v1/customers", {
     workspace_id,
     ...splitCustomerName(payload.name),
     email: payload.email || undefined,
@@ -71,7 +71,7 @@ export async function createCustomerAndReturn(
 
 export async function updateCustomer(id: string, payload: CustomerWritePayload): Promise<void> {
   const workspace_id = requireSelectedWorkspaceId();
-  await nextApi.customers.update(id, {
+  await apiClient.patch<{ data: unknown }>(`/v1/customers/${encodeURIComponent(id)}`, {
     workspace_id,
     ...splitCustomerName(payload.name),
     email: payload.email,
@@ -84,6 +84,8 @@ export async function updateCustomer(id: string, payload: CustomerWritePayload):
 
 export async function deleteCustomer(id: string): Promise<void> {
   const workspace_id = requireSelectedWorkspaceId();
-  await nextApi.customers.remove(workspace_id, id);
+  await apiClient.delete<{ data: unknown }>(`/v1/customers/${encodeURIComponent(id)}`, {
+    query: { workspace_id },
+  });
   invalidateCustomerRelatedCaches(workspace_id);
 }

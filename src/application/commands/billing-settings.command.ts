@@ -1,12 +1,14 @@
 /**
  * Billing Settings Commands — Stripe checkout for messaging add-ons.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 
 export async function startMessagingAddonCheckout(bundleKey: string): Promise<{ url?: string }> {
-  const { data, error } = await supabase.functions.invoke("create-messaging-addon-checkout", {
-    body: { bundleKey },
-  });
-  if (error) throw error;
-  return (data ?? {}) as { url?: string };
+  try {
+    return await apiClient.post<{ url?: string }>("/v1/billing/messaging-addon-checkout", {
+      bundle_key: bundleKey,
+    });
+  } catch (error) {
+    throw new Error(error instanceof ApiClientError ? error.message : "Failed to start checkout");
+  }
 }

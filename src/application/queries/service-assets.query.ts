@@ -1,5 +1,5 @@
 /** Queries for CRM ↔ Assets linkage. Asset storage itself is not yet rebuilt on Final. */
-import { productionSupabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import type { AssetRecord } from "@/application/commands/assets.command";
 
@@ -16,20 +16,26 @@ function object(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+interface ServiceRecordBundle {
+  id: string;
+  customer_id: string | null;
+  work_performed: string | null;
+  metadata: unknown;
+  completed_at: string | null;
+  created_at: string;
+  customers: { first_name: string | null; last_name: string | null; company_name: string | null } | null;
+}
+
 /** Lightweight search across canonical service records + linked customer name. */
 export async function searchServicesForLinking(query: string, limit = 25): Promise<ServiceSummary[]> {
   const context = await resolveCurrentWorkspace();
   if (!context) return [];
-  const { data, error } = await productionSupabase.from("service_records")
-    .select("id,customer_id,work_performed,metadata,completed_at,created_at,customers(first_name,last_name,company_name)")
-    .eq("workspace_id", context.workspaceId)
-    .neq("status", "voided")
-    .order("completed_at", { ascending: false, nullsFirst: false })
-    .limit(Math.max(limit * 4, limit));
-  if (error) throw error;
+  const response = await apiClient.get<{ data: ServiceRecordBundle[] }>("/v1/service-records/search-for-linking", {
+    query: { workspace_id: context.workspaceId, limit },
+  });
 
   const term = query.trim().toLowerCase();
-  return (data ?? [])
+  return (response.data ?? [])
     .map((row): ServiceSummary => {
       const metadata = object(row.metadata);
       const customer = row.customers;

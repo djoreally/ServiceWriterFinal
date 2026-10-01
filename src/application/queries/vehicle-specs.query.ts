@@ -6,6 +6,7 @@
  * and gives oil/tire consumers one canonical fitment contract.
  */
 
+import { apiClient } from "@/lib/api-client";
 import type { Json } from "../../integrations/supabase/types";
 
 export interface VehicleSpecRow {
@@ -29,13 +30,7 @@ type CatalogResult<T> = Promise<{ data: T | null; error: CatalogError | null }>;
 
 async function invokeCatalog<T>(body: Record<string, unknown>): CatalogResult<T> {
   try {
-    const response = await fetch("/api/v1/public-vehicle-catalog", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const payload = await response.json().catch(() => ({})) as T & { error?: string };
-    if (!response.ok) return { data: null, error: { message: payload.error || "Vehicle catalog lookup failed" } };
+    const payload = await apiClient.post<T & { error?: string }>("/v1/public-vehicle-catalog", body);
     return { data: payload, error: null };
   } catch (error) {
     return { data: null, error: { message: error instanceof Error ? error.message : "Vehicle catalog lookup failed" } };

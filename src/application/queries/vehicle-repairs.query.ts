@@ -1,9 +1,9 @@
 /**
  * Vehicle Repairs Query
- * Wraps the vehicle-repairs Edge Function to fetch vehicle-specific part costs and labor ranges.
+ * Wraps the vehicle-repairs provider endpoint to fetch vehicle-specific part costs and labor ranges.
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 
 export interface RepairCostDetail {
   name: "part" | "labor" | "total";
@@ -56,11 +56,17 @@ export async function fetchVehicleRepairs(vin: string, businessId?: string): Pro
     throw new Error("A valid 17-character VIN is required for repair estimation.");
   }
 
-  const { data, error } = await supabase.functions.invoke("vehicle-repairs", {
-    body: { vin, businessId },
-  });
-
-  if (error) {
+  let data: VehicleRepairsResponse | null;
+  try {
+    const response = await apiClient.post<{ data: VehicleRepairsResponse }>(
+      "/v1/vehicles/repairs/estimate",
+      { vin, businessId },
+    );
+    data = response.data;
+  } catch (error) {
+    if (error instanceof ApiClientError && (error.status === 501 || error.code === "provider_not_configured")) {
+      throw new VehicleRepairsUnavailableError();
+    }
     throw new VehicleRepairsUnavailableError();
   }
 

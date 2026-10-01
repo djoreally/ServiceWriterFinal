@@ -2,26 +2,18 @@
  * SMS Credits Commands — checkout for prepaid credit packs, low-balance
  * threshold, and test sends through the single `send-sms` outbound door.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export async function startSmsCreditCheckout(bundleKey: string): Promise<{ url?: string }> {
-  const { data, error } = await supabase.functions.invoke("create-messaging-addon-checkout", {
-    body: { bundleKey },
-  });
-  if (error) throw error;
+  const { data } = await apiClient.post<{ data: { url?: string } | null; error: null }>(
+    "/v1/sms-credits/checkout",
+    { bundleKey },
+  );
   return (data ?? {}) as { url?: string };
 }
 
 export async function updateSmsLowBalanceThreshold(threshold: number): Promise<void> {
-  const { data: userData } = await getCurrentAuthUser();
-  const uid = userData.user?.id;
-  if (!uid) throw new Error("Not signed in");
-  const { error } = await supabase
-    .from("business_profiles")
-    .update({ sms_low_balance_threshold: Math.max(0, Math.round(threshold)) })
-    .eq("user_id", uid);
-  if (error) throw error;
+  await apiClient.put("/v1/sms-credits/threshold", { threshold });
 }
 
 /**
@@ -33,15 +25,11 @@ export async function updateSmsChannelToggles(patch: {
   transactional?: boolean;
   marketing?: boolean;
 }): Promise<void> {
-  const { data: userData } = await getCurrentAuthUser();
-  const uid = userData.user?.id;
-  if (!uid) throw new Error("Not signed in");
-  const update: { sms_transactional_enabled?: boolean; sms_marketing_enabled?: boolean } = {};
-  if (typeof patch.transactional === "boolean") update.sms_transactional_enabled = patch.transactional;
-  if (typeof patch.marketing === "boolean") update.sms_marketing_enabled = patch.marketing;
+  const update: { transactional?: boolean; marketing?: boolean } = {};
+  if (typeof patch.transactional === "boolean") update.transactional = patch.transactional;
+  if (typeof patch.marketing === "boolean") update.marketing = patch.marketing;
   if (Object.keys(update).length === 0) return;
-  const { error } = await supabase.from("business_profiles").update(update).eq("user_id", uid);
-  if (error) throw error;
+  await apiClient.put("/v1/sms-credits/channel-toggles", update);
 }
 
 
@@ -55,9 +43,11 @@ export interface SendSmsResponse {
 }
 
 export async function sendTestSms(to: string, message: string): Promise<SendSmsResponse> {
-  const { data, error } = await supabase.functions.invoke("send-sms", {
-    body: { to, message, messageClass: "transactional", messageType: "test" },
+  const { data } = await apiClient.post<{ data: SendSmsResponse | null; error: null }>("/v1/sms/send", {
+    to,
+    message,
+    messageClass: "transactional",
+    messageType: "test",
   });
-  if (error) throw error;
   return (data ?? { sent: false }) as SendSmsResponse;
 }

@@ -1,7 +1,7 @@
 /**
  * Booking Submit Queries — Read operations for the booking submission flow.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 /**
  * Compatibility boundary for the former owner-user-scoped fallback.
@@ -18,9 +18,8 @@ export async function findCustomerByEmail(_legacyUserId: string, _email: string)
 
 /** Fetch van technician assignment data after van auto-assignment. */
 export async function fetchVanForAssignment(vanId: string) {
-  return supabase
-    .from("vans")
-    .select("assigned_technician_id")
-    .eq("id", vanId)
-    .single();
+  return apiClient.get<{
+    data: { assigned_technician_id: string | null } | null;
+    error: unknown;
+  }>("/v1/platform/booking/van-assignment", { query: { van_id: vanId } });
 }

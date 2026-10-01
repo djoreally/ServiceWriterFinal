@@ -1,5 +1,5 @@
 /** Service package writes through canonical workspace-scoped RPCs. */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 export interface PackageFormPayload {
@@ -8,10 +8,6 @@ export interface PackageFormPayload {
 }
 export interface PackageItemPayload { service_catalog_id: string; quantity: number; override_price: number | null; }
 
-function serializePackageItems(items: PackageItemPayload[]) {
-  return items.map((item) => ({ service_catalog_id: item.service_catalog_id, quantity: item.quantity, override_price: item.override_price }));
-}
-
 async function workspaceId(): Promise<string> {
   const context = await resolveCurrentWorkspace();
   if (!context) throw new Error("No active workspace is available.");
@@ -19,54 +15,56 @@ async function workspaceId(): Promise<string> {
 }
 
 export async function createServicePackage(payload: PackageFormPayload, items: PackageItemPayload[]): Promise<string> {
-  const id = await workspaceId();
-  const { data, error } = await (supabase as any).rpc("upsert_service_package", {
-    p_workspace_id: id,
-    p_name: payload.name,
-    p_description: payload.description,
-    p_package_price: payload.package_price,
-    p_discount_type: payload.discount_type,
-    p_discount_value: payload.discount_value,
-    p_is_active: payload.is_active,
-    p_estimated_duration: payload.estimated_duration,
-    p_items: serializePackageItems(items),
+  const selected_workspace_id = await workspaceId();
+  const { data } = await apiClient.post<{ data: string }>("/v1/platform/service-packages/upsert", {
+    selected_workspace_id,
+    name: payload.name,
+    description: payload.description,
+    package_price: payload.package_price,
+    discount_type: payload.discount_type,
+    discount_value: payload.discount_value,
+    is_active: payload.is_active,
+    estimated_duration: payload.estimated_duration,
+    items,
   });
-  if (error) throw error;
   return String(data);
 }
 
 export async function updateServicePackage(packageId: string, payload: PackageFormPayload, items: PackageItemPayload[]): Promise<void> {
-  const id = await workspaceId();
-  const { error } = await (supabase as any).rpc("upsert_service_package", {
-    p_workspace_id: id,
-    p_package_id: packageId,
-    p_name: payload.name,
-    p_description: payload.description,
-    p_package_price: payload.package_price,
-    p_discount_type: payload.discount_type,
-    p_discount_value: payload.discount_value,
-    p_is_active: payload.is_active,
-    p_estimated_duration: payload.estimated_duration,
-    p_items: serializePackageItems(items),
+  const selected_workspace_id = await workspaceId();
+  await apiClient.post("/v1/platform/service-packages/upsert", {
+    selected_workspace_id,
+    package_id: packageId,
+    name: payload.name,
+    description: payload.description,
+    package_price: payload.package_price,
+    discount_type: payload.discount_type,
+    discount_value: payload.discount_value,
+    is_active: payload.is_active,
+    estimated_duration: payload.estimated_duration,
+    items,
   });
-  if (error) throw error;
 }
 
 export async function deleteServicePackage(packageId: string): Promise<void> {
-  const id = await workspaceId();
-  const { error } = await (supabase as any).from("service_packages").delete().eq("workspace_id", id).eq("id", packageId);
-  if (error) throw error;
+  const selected_workspace_id = await workspaceId();
+  await apiClient.delete(`/v1/platform/service-packages/${encodeURIComponent(packageId)}`, {
+    query: { selected_workspace_id },
+  });
 }
 
 export async function toggleServicePackageActive(packageId: string, isActive: boolean): Promise<void> {
-  const id = await workspaceId();
-  const { error } = await (supabase as any).from("service_packages").update({ is_active: isActive, updated_at: new Date().toISOString() }).eq("workspace_id", id).eq("id", packageId);
-  if (error) throw error;
+  const selected_workspace_id = await workspaceId();
+  await apiClient.patch(`/v1/platform/service-packages/${encodeURIComponent(packageId)}/toggle`, {
+    selected_workspace_id,
+    is_active: isActive,
+  });
 }
 
 export async function loadTemplatePackages(): Promise<number> {
-  const id = await workspaceId();
-  const { data, error } = await (supabase as any).rpc("populate_workspace_service_packages", { p_workspace_id: id });
-  if (error) throw error;
+  const selected_workspace_id = await workspaceId();
+  const { data } = await apiClient.post<{ data: number }>("/v1/platform/service-packages/load-templates", {
+    selected_workspace_id,
+  });
   return Number(data ?? 0);
 }

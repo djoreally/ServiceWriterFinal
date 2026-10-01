@@ -1,7 +1,12 @@
 /**
  * Quick Service Query — canonical workspace-scoped reads for the Quick Service wizard.
+ *
+ * Phase 2: the service-catalog read goes through the typed API client
+ * (`@/lib/api-client`) to the appointments Hono router; customers/vehicles
+ * remain on the grandfathered `nextApi` wrapper. Exported signatures are
+ * unchanged.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { nextApi } from "@/lib/nextApiClient";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 import { getWorkspaceOwnerUserId } from "@/application/tenant-workspace";
@@ -26,18 +31,14 @@ function metadataObject(value: unknown): Record<string, unknown> {
 /** Fetch customers, vehicles, and active service catalog from the selected workspace only. */
 export async function fetchQuickServiceFormData() {
   const id = workspaceId();
-  const db = supabase as any;
-  const [customersResponse, vehiclesResponse, catalogRes] = await Promise.all([
+  const [customersResponse, vehiclesResponse, catalogResponse] = await Promise.all([
     nextApi.customers.list(id),
     nextApi.vehicles.list(id),
-    db
-      .from("service_catalog")
-      .select("id,name,description,labor_price,metadata")
-      .eq("workspace_id", id)
-      .eq("is_active", true)
-      .order("name"),
+    apiClient.get<{ data: Array<{ id: string; name: string; description: string | null; labor_price: number | string | null; metadata: unknown }> | null }>(
+      "/v1/appointments/service-catalog",
+      { query: { active: "true", selected_workspace_id: id } },
+    ),
   ]);
-  if (catalogRes.error) throw catalogRes.error;
 
   const customers = ((customersResponse.data ?? []) as Array<Record<string, unknown>>).map((row) => ({
     id: String(row.id),
@@ -50,7 +51,7 @@ export async function fetchQuickServiceFormData() {
     model: String(row.model ?? ""),
     year: Number(row.year ?? 0),
   }));
-  const catalog = ((catalogRes.data ?? []) as Array<Record<string, unknown>>).map((row) => {
+  const catalog = ((catalogResponse.data ?? []) as Array<Record<string, unknown>>).map((row) => {
     const metadata = metadataObject(row.metadata);
     return {
       id: String(row.id),

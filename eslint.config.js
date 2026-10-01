@@ -85,6 +85,7 @@ export default tseslint.config(
           "useInlineSearchPreview", "highlightSearchMatch", "useTechContext", "useAuth", "useRBAC",
           "useSessionSecurity", "hasRole", "isAdmin", "isResourceOwner", "canAccessTenant",
           "canModifyResource", "withPermission", "useFeatures",
+          "buildAdapterLocation",
         ],
       }],
       // JSX structural safety — supplementary to tsc, catches related issues at lint time.
@@ -205,6 +206,9 @@ export default tseslint.config(
       "src/pages/fleet-os/FleetHelpPage.tsx",
       "src/pages/fleet-os/work-orders/create/FleetWorkOrderCreatePage.tsx",
       "src/pages/tech-app/TechToday.tsx",
+      // TenantPublicShell only wires supabase.auth into AuthProvider
+      // (auth wiring, like NextClientShell) — no data access.
+      "src/components/routing/TenantPublicShell.tsx",
     ],
     rules: {
       "no-restricted-imports": "off",

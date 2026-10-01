@@ -1,38 +1,42 @@
-jest.mock("@/integrations/supabase/client", () => ({
-  supabase: { rpc: jest.fn(), from: jest.fn() },
+jest.mock("@/lib/api-client", () => ({
+  apiClient: {
+    get: jest.fn(),
+    post: jest.fn(),
+    patch: jest.fn(),
+    delete: jest.fn(),
+  },
+  ApiClientError: class ApiClientError extends Error {
+    constructor(
+      public status: number,
+      public code: string,
+      message: string,
+    ) {
+      super(message);
+      this.name = "ApiClientError";
+    }
+  },
 }));
-jest.mock("@/application/queries/invoices.query", () => ({
-  generateInvoiceNumber: jest.fn(),
+jest.mock("@/application/queries/workspaces.selection", () => ({
+  getSelectedWorkspaceId: jest.fn(() => "ws-1"),
 }));
 
-import { supabase } from "@/integrations/supabase/client";
-import { createInvoiceFromFleetWorkOrders, isMissingFleetInvoiceRpc } from "@/application/commands/invoices.command";
+import { apiClient } from "@/lib/api-client";
+import {
+  createInvoiceFromFleetWorkOrders,
+  previewFleetConsolidatedInvoice,
+  createInvoiceFromFleetWorkOrder,
+  isMissingFleetInvoiceRpc,
+} from "@/application/commands/invoices.command";
+
+const mockPost = apiClient.post as jest.Mock;
+const mockGet = apiClient.get as jest.Mock;
 
 describe("createInvoiceFromFleetWorkOrders", () => {
-  /** Preflight reads contract + PO linkage before the atomic RPC. */
-  function mockPreflight(ids: string[]) {
-    (supabase.from as jest.Mock).mockReturnValue({
-      select: () => ({
-        in: async () => ({
-          data: ids.map((id) => ({
-            id,
-            fleet_contract_id: `contract-${id}`,
-            fleet_purchase_order_id: `po-${id}`,
-            po_number: `PO-${id}`,
-          })),
-          error: null,
-        }),
-      }),
-    });
-  }
-
   beforeEach(() => jest.clearAllMocks());
 
-  it("uses the versioned UUID-safe RPC", async () => {
-    mockPreflight(["wo-1", "wo-2"]);
-    (supabase.rpc as jest.Mock).mockResolvedValue({
-      data: [{ invoice_id: "invoice-1", invoice_number: "INV-1", work_order_count: 2, line_item_count: 3, subtotal: 100, total: 108 }],
-      error: null,
+  it("posts the consolidated invoice to the documents router and maps the result", async () => {
+    mockPost.mockResolvedValue({
+      data: { invoice_id: "invoice-1", invoice_number: "INV-1", work_order_count: 2, line_item_count: 3, subtotal: 100, total: 108 },
     });
 
     const result = await createInvoiceFromFleetWorkOrders(["wo-1", "wo-2", "wo-1"], {
@@ -43,19 +47,15 @@ describe("createInvoiceFromFleetWorkOrders", () => {
       processingFeeValue: 3,
     });
 
-    expect(supabase.rpc).toHaveBeenCalledWith(
-      "create_fleet_consolidated_invoice_v3",
-      {
-        _work_order_ids: ["wo-1", "wo-2"],
-        _invoice_number: null,
-        _notes: null,
-        _tax_enabled: true,
-        _tax_rate: 8,
-        _processing_fee_enabled: true,
-        _processing_fee_type: "percentage",
-        _processing_fee_value: 3,
-      },
-    );
+    expect(mockPost).toHaveBeenCalledWith("/v1/invoices/fleet-consolidated", {
+      workspace_id: "ws-1",
+      work_order_ids: ["wo-1", "wo-2"],
+      tax_enabled: true,
+      tax_rate: 8,
+      processing_fee_enabled: true,
+      processing_fee_type: "percentage",
+      processing_fee_value: 3,
+    });
     expect(result).toEqual({
       invoice_id: "invoice-1",
       invoice_number: "INV-1",
@@ -68,19 +68,65 @@ describe("createInvoiceFromFleetWorkOrders", () => {
 
   it("does not call the mutation when no work orders are selected", async () => {
     await expect(createInvoiceFromFleetWorkOrders([])).rejects.toThrow("Select at least one completed work order");
-    expect(supabase.rpc).not.toHaveBeenCalled();
+    expect(mockPost).not.toHaveBeenCalled();
   });
 
-  it("surfaces an atomic RPC failure to the workflow", async () => {
-    mockPreflight(["wo-1", "wo-2"]);
-    (supabase.rpc as jest.Mock).mockResolvedValue({
-      data: null,
-      error: { message: "One or more work orders is already linked to an invoice" },
-    });
+  it("surfaces a server failure to the workflow", async () => {
+    mockPost.mockRejectedValue(new Error("One or more work orders is already linked to an invoice"));
 
     await expect(createInvoiceFromFleetWorkOrders(["wo-1", "wo-2"])).rejects.toThrow(
       "One or more work orders is already linked to an invoice",
     );
+  });
+});
+
+describe("previewFleetConsolidatedInvoice", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("fetches the preview from the documents router", async () => {
+    mockGet.mockResolvedValue({
+      data: { work_orders: [{ id: "wo-1" }], preview_total: 200 },
+    });
+
+    const result = await previewFleetConsolidatedInvoice(["wo-1", "wo-2"]);
+    expect(mockGet).toHaveBeenCalledWith("/v1/invoices/fleet-consolidated-preview", {
+      query: { workspace_id: "ws-1", work_order_ids: ["wo-1", "wo-2"] },
+    });
+    expect(result).toEqual({ work_orders: [{ id: "wo-1" }], preview_total: 200 });
+  });
+});
+
+describe("createInvoiceFromFleetWorkOrder", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("loads the work order payload from the server and forwards to createInvoice", async () => {
+    mockGet.mockResolvedValue({
+      data: {
+        invoice_number: "INV-2026-00009",
+        bill_to_type: "fleet",
+        customer_id: null,
+        fleet_client_id: "fleet-1",
+        line_items: [{ description: "Oil change", quantity: 1, unit_price: 80 }],
+        fee_overrides: {},
+      },
+    });
+    mockPost.mockResolvedValue({ data: { id: "invoice-9" } });
+
+    const result = await createInvoiceFromFleetWorkOrder("wo-1");
+    expect(mockGet).toHaveBeenCalledWith("/v1/invoices/from-fleet-work-order/wo-1", {
+      query: { workspace_id: "ws-1" },
+    });
+    expect(mockPost).toHaveBeenCalledWith(
+      "/v1/invoices",
+      expect.objectContaining({
+        workspace_id: "ws-1",
+        invoice_number: "INV-2026-00009",
+        bill_to_type: "fleet",
+        fleet_client_id: "fleet-1",
+        line_items: [{ description: "Oil change", quantity: 1, unit_price: 80, display_order: 0 }],
+      }),
+    );
+    expect(result).toEqual("invoice-9");
   });
 });
 

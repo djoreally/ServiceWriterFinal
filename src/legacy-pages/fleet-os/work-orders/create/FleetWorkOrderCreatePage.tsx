@@ -4,7 +4,7 @@ import { toast } from "@/components/ui/sonner";
 import { ArrowLeft } from "lucide-react";
 import { FleetOSLayout } from "@/components/layout/FleetOSLayout";
 import { Button } from "@/components/ui/button";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { fetchFleetWorkOrderCreateOptions, type FleetWorkOrderCreateOptions } from "@/application/queries";
 import { fetchDraft, promoteDraft } from "@/application/commands/fleet-work-order-draft.command";
 import { useAuth } from "@packages/auth";
@@ -81,11 +81,10 @@ const FleetWorkOrderCreatePage = () => {
         const [opts, techRes] = await Promise.all([
           fetchFleetWorkOrderCreateOptions(),
           user?.id
-            ? (async () => {
-                const { data: ownerId } = await (supabase as any).rpc("current_workspace_owner_user_id");
-                return supabase.from("technicians").select("id, name").eq("user_id", String(ownerId || user.id)).eq("is_active", true).order("name");
-              })()
-            : Promise.resolve({ data: [] as { id: string; name: string }[] } as any),
+            ? apiClient.get<{ data: { id: string; name: string }[] }>(
+                "/v1/fleet/work-order-create-technicians"
+              )
+            : Promise.resolve({ data: [] as { id: string; name: string }[] }),
         ]);
         setOptions(opts);
         setTechnicians((techRes as any).data || []);

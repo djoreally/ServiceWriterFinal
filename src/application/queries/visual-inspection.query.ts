@@ -1,7 +1,11 @@
 /**
  * Visual Inspection Query - Fetch inspection report data for customer-facing reports.
+ *
+ * Phase 2: data access goes through the typed API client
+ * (`@/lib/api-client`) to the appointments Hono router. Exported signatures
+ * are unchanged.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface InspectionResultRow {
   id: string;
@@ -56,49 +60,14 @@ export interface InspectionReportResult {
 
 /** Fetch all data needed for a visual inspection report. */
 export async function fetchInspectionReport(inspectionId: string): Promise<InspectionReportResult> {
-  // Fetch inspection
-  const { data: insp } = await (supabase as any)
-    .from("service_inspections")
-    .select("*")
-    .eq("id", inspectionId)
-    .single();
-
-  if (!insp) throw new Error("Inspection not found");
-
-  // Fetch results
-  const { data: res } = await (supabase as any)
-    .from("inspection_results")
-    .select("*")
-    .eq("inspection_id", inspectionId)
-    .order("sort_order");
-
-  let vehicle: InspectionVehicle | null = null;
-  let business: InspectionBusiness | null = null;
-
-  // Fetch vehicle if linked
-  if (insp.vehicle_id) {
-    const { data: veh } = await supabase
-      .from("vehicles")
-      .select("year, make, model, vin, license_plate, color, mileage")
-      .eq("id", insp.vehicle_id)
-      .single();
-    vehicle = veh;
+  try {
+    const response = await apiClient.get<{ data: InspectionReportResult | null }>(
+      `/v1/inspections/${encodeURIComponent(inspectionId)}/report`,
+    );
+    if (!response.data) throw new Error("Inspection not found");
+    return response.data;
+  } catch (error) {
+    if (error instanceof Error && error.message === "Inspection not found") throw error;
+    throw new Error("Inspection not found");
   }
-
-  // Fetch business profile
-  if (insp.user_id) {
-    const { data: biz } = await supabase
-      .from("business_profiles")
-      .select("business_name, phone, email, logo_url, service_address")
-      .eq("user_id", insp.user_id)
-      .single();
-    business = biz;
-  }
-
-  return {
-    inspection: insp as InspectionReportData,
-    results: (res || []) as InspectionResultRow[],
-    vehicle,
-    business,
-  };
 }

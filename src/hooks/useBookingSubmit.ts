@@ -45,7 +45,6 @@ import {
   type VehicleFilterMatch,
 } from "@/lib/bookingFilterMatch";
 
-import { supabase } from "@/integrations/supabase/client";
 import { nextApi } from "@/lib/nextApiClient";
 
 import { parseCheckoutError } from "@/components/booking/checkoutErrors.utils";

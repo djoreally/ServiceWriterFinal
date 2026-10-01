@@ -1,7 +1,7 @@
 /**
  * Admin CARFAX Settings Query — Read operations for platform-level CARFAX config.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface CarfaxConfig {
   enabled: boolean;
@@ -22,28 +22,11 @@ export interface CarfaxExportStats {
 }
 
 export async function fetchAdminCarfaxSettings(): Promise<CarfaxConfig | null> {
-  const { data } = await supabase
-    .from("platform_settings")
-    .select("value")
-    .eq("key", "carfax")
-    .maybeSingle();
-
-  return data?.value ? (data.value as unknown as CarfaxConfig) : null;
+  const { data } = await apiClient.get<{ data: CarfaxConfig | null }>("/v1/admin/carfax/settings");
+  return data ?? null;
 }
 
 export async function fetchCarfaxExportStats(): Promise<CarfaxExportStats> {
-  const [{ count }, { data: lastExport }] = await Promise.all([
-    supabase.from("carfax_exports").select("*", { count: "exact", head: true }),
-    supabase
-      .from("carfax_exports")
-      .select("created_at")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-  ]);
-
-  return {
-    total: count || 0,
-    lastExport: lastExport?.created_at || null,
-  };
+  const { data } = await apiClient.get<{ data: CarfaxExportStats }>("/v1/admin/carfax/export-stats");
+  return data ?? { total: 0, lastExport: null };
 }

@@ -1,5 +1,5 @@
 /** CARFAX Query — canonical workspace settings and service-history stats. */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
@@ -22,41 +22,15 @@ export interface CarfaxExportRecord {
 }
 export interface CarfaxDataStats { totalServices: number; validVins: number; missingData: number; }
 
-function object(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
-interface CarfaxServiceRow {
-  id: string;
-  vehicle_id: string | null;
-  vehicles: { vin?: string | null } | null;
-}
-
 export async function fetchCarfaxSettings(): Promise<CarfaxSettingsData | null> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return null;
   const context = await resolveCurrentWorkspace();
   if (!context) return null;
-  const client = supabase as any;
-  const [{ data: workspace }, { data: settings }] = await Promise.all([
-    client.from("workspaces").select("name").eq("id", context.workspaceId).maybeSingle(),
-    client.from("workspace_settings").select("phone,address_line1,address_line2,city,region,postal_code,website_url,operational_settings").eq("workspace_id", context.workspaceId).maybeSingle(),
-  ]);
-  if (!workspace) return null;
-  const operational = object(settings?.operational_settings);
-  const carfax = object(operational.carfax);
-  return {
-    carfax_location_id: typeof carfax.location_id === "string" ? carfax.location_id : "",
-    city: settings?.city || "",
-    state: settings?.region || "",
-    postal_code: settings?.postal_code || "",
-    website_url: settings?.website_url || "",
-    business_name: workspace.name || "",
-    address: [settings?.address_line1, settings?.address_line2].filter(Boolean).join(", "),
-    phone: settings?.phone || "",
-    carfax_activated: Boolean(carfax.location_id),
-    carfax_activation_date: typeof carfax.activation_date === "string" ? carfax.activation_date : null,
-  };
+  const { data } = await apiClient.get<{ data: CarfaxSettingsData | null }>("/v1/carfax/settings", {
+    query: { selected_workspace_id: context.workspaceId },
+  });
+  return data ?? null;
 }
 
 /** Final does not persist a CARFAX export-log table yet. */
@@ -67,13 +41,8 @@ export async function fetchCarfaxExports(): Promise<CarfaxExportRecord[]> {
 export async function fetchCarfaxDataStats(): Promise<CarfaxDataStats> {
   const context = await resolveCurrentWorkspace();
   if (!context) return { totalServices: 0, validVins: 0, missingData: 0 };
-  const { data, error } = await (supabase.from("service_records") as any)
-    .select("id,vehicle_id,vehicles(vin)")
-    .eq("workspace_id", context.workspaceId)
-    .eq("status", "completed");
-  if (error) throw error;
-  const rows = (data ?? []) as unknown as CarfaxServiceRow[];
-  const totalServices = rows.length;
-  const validVins = rows.filter((service) => service.vehicles?.vin?.length === 17).length;
-  return { totalServices, validVins, missingData: totalServices - validVins };
+  const { data } = await apiClient.get<{ data: CarfaxDataStats }>("/v1/carfax/data-stats", {
+    query: { selected_workspace_id: context.workspaceId },
+  });
+  return data ?? { totalServices: 0, validVins: 0, missingData: 0 };
 }

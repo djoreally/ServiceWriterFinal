@@ -1,10 +1,6 @@
 /** Fleet reporting over the canonical workspace-scoped Fleet OS schema. */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
-
-// Production Fleet OS was converged to workspace-scoped tables before the
-// generated TypeScript database file caught up. Keep that drift contained here.
-const db = supabase as any;
 
 export interface FleetReportStats {
   totalSpend: number;
@@ -26,13 +22,6 @@ export interface FleetReportPageData {
   stats: FleetReportStats;
   topVehicles: FleetTopVehicleSpendItem[];
 }
-
-type FleetRequestRow = {
-  vehicle_id: string | null;
-  location_id: string | null;
-  status: string | null;
-  requested_for: string | null;
-};
 
 const EMPTY: FleetReportPageData = {
   stats: {
@@ -59,28 +48,8 @@ export async function fetchFleetReportPageData(_userId: string): Promise<FleetRe
   const context = await resolveCurrentWorkspace();
   if (!context) return EMPTY;
 
-  const { data, error } = await db
-    .from("fleet_service_requests")
-    .select("vehicle_id,location_id,status,requested_for")
-    .eq("workspace_id", context.workspaceId);
-  if (error) throw error;
-
-  const requests = (data ?? []) as FleetRequestRow[];
-  const vehicleIds = new Set(requests.map((row) => row.vehicle_id).filter((id): id is string => Boolean(id)));
-  const locationIds = new Set(requests.map((row) => row.location_id).filter((id): id is string => Boolean(id)));
-  const terminal = new Set(["completed", "cancelled", "closed", "voided"]);
-  const now = Date.now();
-  const open = requests.filter((row) => !terminal.has(String(row.status ?? "").toLowerCase()));
-  const overdue = open.filter((row) => row.requested_for && Date.parse(row.requested_for) < now).length;
-
-  return {
-    stats: {
-      ...EMPTY.stats,
-      vehicleCount: vehicleIds.size,
-      locationCount: locationIds.size,
-      openApprovals: open.length,
-      overdueVehicles: overdue,
-    },
-    topVehicles: [],
-  };
+  const { data } = await apiClient.get<{ data: FleetReportPageData }>(
+    `/v1/fleet/reports?selected_workspace_id=${encodeURIComponent(context.workspaceId)}`,
+  );
+  return data ?? EMPTY;
 }

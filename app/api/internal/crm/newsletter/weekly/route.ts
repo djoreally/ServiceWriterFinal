@@ -1,6 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
-import { processDueNewsletterSubscribers } from "@/server/messaging/newsletter";
+import { processDueNewsletterSubscribers } from "@/server/crm/newsletter";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;

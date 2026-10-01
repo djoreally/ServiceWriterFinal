@@ -1,7 +1,7 @@
 /**
  * Booking Context Query — Read operations for geo-scheduling booking contexts.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import type {
   LocationSchedulingContext,
   VehicleSchedulingContext,
@@ -41,9 +41,10 @@ export async function fetchRouteSafeSlots(
   businessUserId: string,
   date: string
 ){
-  return supabase.functions.invoke<RouteSafeAvailabilityData>("route-safe-availability", {
-    body: { bookingContextId, businessUserId, date },
-  });
+  return apiClient.post<{ data: RouteSafeAvailabilityData | null; error: unknown }>(
+    "/v1/appointments/edge/route-safe-availability",
+    { body: { bookingContextId, businessUserId, date } },
+  );
 }
 
 /** Verify location via edge function (Step 1). */
@@ -52,7 +53,8 @@ export async function verifyLocation(
   businessUserId: string,
   sessionId?: string
 ){
-  return supabase.functions.invoke<VerifiedLocationData>("verify-location", {
-    body: { customerAddress, businessUserId, sessionId },
-  });
+  return apiClient.post<{ data: VerifiedLocationData | null; error: unknown }>(
+    "/v1/appointments/edge/verify-location",
+    { body: { customerAddress, businessUserId, sessionId } },
+  );
 }

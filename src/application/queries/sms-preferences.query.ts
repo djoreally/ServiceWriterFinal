@@ -1,7 +1,7 @@
 /**
  * SMS Preferences Query — legacy SMS automation settings per business.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface SmsPreferences {
@@ -30,14 +30,15 @@ export const DEFAULT_SMS_PREFERENCES: Omit<SmsPreferences, "user_id"> = {
 };
 
 export async function fetchSmsPreferences(): Promise<SmsPreferences | null> {
-  const { data: userData } = await getCurrentAuthUser();
-  const uid = userData.user?.id;
-  if (!uid) return null;
-  const { data, error } = await supabase
-    .from("sms_preferences")
-    .select("*")
-    .eq("user_id", uid)
-    .maybeSingle();
-  if (error) throw error;
-  return (data as SmsPreferences | null) ?? { user_id: uid, ...DEFAULT_SMS_PREFERENCES };
+  try {
+    const { data } = await apiClient.get<{ data: SmsPreferences | null }>("/v1/sms-preferences");
+    if (data) return data;
+    const { data: auth } = await getCurrentAuthUser();
+    const uid = auth.user?.id;
+    if (!uid) return null;
+    return { user_id: uid, ...DEFAULT_SMS_PREFERENCES };
+  } catch (error) {
+    if (error instanceof ApiClientError && error.status === 401) return null;
+    throw error;
+  }
 }

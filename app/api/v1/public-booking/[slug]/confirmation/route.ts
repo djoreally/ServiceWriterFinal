@@ -2,7 +2,7 @@ import { z } from "zod";
 import { createSupabaseAdminClient } from "@/lib/supabase";
 import { errorResponse, json } from "@/server/api";
 import { sendBookingConfirmation } from "@/server/messaging/booking-confirmation";
-import { enrollNewsletterFromBooking } from "@/server/messaging/newsletter";
+import { enrollNewsletterFromBooking } from "@/server/crm/newsletter";
 
 const slugSchema = z.string().trim().min(1).max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/i);
 const bodySchema = z.object({

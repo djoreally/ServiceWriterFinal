@@ -4,7 +4,7 @@
  * The VAPID public key is fetched from the edge function (never hardcoded), and the
  * subscription is stored per technician so the server can reach a specific device.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export type PushRegistrationState = "unsupported" | "denied" | "granted" | "prompt";
@@ -51,13 +51,13 @@ export async function registerTechPushDevice(): Promise<string | null> {
   await registration.update().catch(() => undefined);
   const readyRegistration = await navigator.serviceWorker.ready;
 
-  const publicKeyResponse = await fetch("/api/notifications/push/public-key", {
-    method: "GET",
-    credentials: "same-origin",
-    headers: { accept: "application/json" },
-  });
-  if (!publicKeyResponse.ok) return null;
-  const { publicKey } = await publicKeyResponse.json() as { publicKey?: string };
+  let publicKey: string | undefined;
+  try {
+    const payload = await apiClient.get<{ publicKey?: string }>("/notifications/push/public-key");
+    publicKey = payload?.publicKey;
+  } catch {
+    return null;
+  }
   if (!publicKey) return null;
 
   let subscription = await readyRegistration.pushManager.getSubscription();
@@ -82,20 +82,15 @@ export async function registerTechPushDevice(): Promise<string | null> {
   const userId = auth.user?.id;
   if (!userId) return null;
 
-  const { error: saveError } = await (supabase as any)
-    .from("tech_push_subscriptions")
-    .upsert(
-      {
-        user_id: userId,
-        endpoint: subscription.endpoint,
-        p256dh,
-        auth_key: authKey,
-        user_agent: navigator.userAgent.slice(0, 300),
-        disabled_at: null,
-      },
-      { onConflict: "endpoint" },
-    );
-
-  if (saveError) return null;
+  try {
+    await apiClient.post("/v1/tech-push/subscriptions", {
+      endpoint: subscription.endpoint,
+      p256dh,
+      auth_key: authKey,
+      user_agent: navigator.userAgent.slice(0, 300),
+    });
+  } catch {
+    return null;
+  }
   return subscription.endpoint;
 }

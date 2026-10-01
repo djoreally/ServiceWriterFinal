@@ -1,15 +1,31 @@
 /**
- * Isolated, fail-soft realtime subscription for the assets table.
- * - Subscribes only when userId is known.
- * - Caps reconnect attempts.
- * - Channel errors are non-fatal (logged, then the hook gives up silently).
+ * Isolated, fail-soft change watcher for the assets table.
+ *
+ * Realtime (postgres_changes) is not available through the API client, so this
+ * hook polls the canonical assets list and fires `onChange` only when the
+ * fingerprint (id + updated_at + status per row) changes.
+ * - Polls only when userId is known.
+ * - Channel errors are non-fatal (logged, then the hook keeps polling).
  */
 
 import { useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { logAssetEvent } from "@/lib/assets/logger";
 
-const MAX_RECONNECTS = 3;
+const POLL_INTERVAL_MS = 15_000;
+
+interface AssetFingerprintRow {
+  id: string;
+  updated_at?: string | null;
+  status?: string | null;
+}
+
+function fingerprint(rows: AssetFingerprintRow[]): string {
+  return rows
+    .map((row) => `${row.id}:${row.updated_at ?? ""}:${row.status ?? ""}`)
+    .sort()
+    .join("|");
+}
 
 export function useAssetsRealtime(
   userId: string | null | undefined,
@@ -19,62 +35,40 @@ export function useAssetsRealtime(
     if (!userId) return;
 
     let cancelled = false;
-    let attempts = 0;
-    let channel: ReturnType<typeof supabase.channel> | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastFingerprint: string | null = null;
 
-    const subscribe = () => {
+    const check = async () => {
       if (cancelled) return;
       try {
-        channel = supabase
-          .channel(`assets:${userId}`)
-          .on(
-            "postgres_changes",
-            {
-              event: "*",
-              schema: "public",
-              table: "assets",
-              filter: `user_id=eq.${userId}`,
-            },
-            () => {
-              try {
-                onChange();
-              } catch {
-                /* swallow consumer errors */
-              }
-            },
-          )
-          .subscribe((status) => {
-            if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
-              logAssetEvent("realtime_error", { status, attempts });
-              if (attempts < MAX_RECONNECTS && !cancelled) {
-                attempts += 1;
-                const backoff = Math.min(1000 * 2 ** attempts, 8000);
-                reconnectTimer = setTimeout(() => {
-                  if (channel) {
-                    void supabase.removeChannel(channel).catch(() => {});
-                    channel = null;
-                  }
-                  subscribe();
-                }, backoff);
-              }
-            }
-          });
-      } catch (e) {
+        const response = await apiClient.get<{ data: { items: AssetFingerprintRow[] } }>(
+          "/v1/assets",
+          { query: { limit: 100, offset: 0 } },
+        );
+        if (cancelled) return;
+        const next = fingerprint(response.data?.items ?? []);
+        if (lastFingerprint !== null && next !== lastFingerprint) {
+          try {
+            onChange();
+          } catch {
+            /* swallow consumer errors */
+          }
+        }
+        lastFingerprint = next;
+      } catch (error) {
         logAssetEvent("realtime_error", {
-          reason: (e as Error)?.message || "subscribe_threw",
+          reason: (error as Error)?.message || "poll_failed",
         });
       }
     };
 
-    subscribe();
+    void check();
+    const timer = setInterval(() => {
+      void check();
+    }, POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      if (channel) {
-        void supabase.removeChannel(channel).catch(() => {});
-      }
+      clearInterval(timer);
     };
   }, [userId, onChange]);
 }

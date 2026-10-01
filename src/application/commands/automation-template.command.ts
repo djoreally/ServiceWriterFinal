@@ -3,7 +3,7 @@
  * Seed prebuilt automation rules from templates, and run dry-run "test rule" simulations.
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import type { Json } from "@/integrations/supabase/types";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import {
@@ -13,8 +13,6 @@ import {
   type AutomationTemplate,
   type AutomationTemplateAction,
 } from "@/lib/retention/automation-templates";
-
-const db = supabase as any;
 
 export interface SeedAutomationResult {
   ruleId: string;
@@ -29,7 +27,6 @@ export async function seedAutomationTemplate(
   if (!template) throw new Error(`Unknown automation template: ${templateId}`);
 
   const record = {
-    user_id: userId,
     name: template.name,
     is_active: true,
     priority: template.priority,
@@ -40,14 +37,8 @@ export async function seedAutomationTemplate(
     frequency_guard_jsonb: { min_hours_between: template.cooldownHours } as Json,
   };
 
-  const { data, error } = await supabase
-    .from("automation_rules")
-    .insert(record)
-    .select("id, name")
-    .single();
-
-  if (error || !data) throw new Error(error?.message || "Failed to seed automation template");
-  return { ruleId: data.id, ruleName: data.name };
+  const { data } = await apiClient.post<{ data: { id: string } }>("/v1/crm/retention/automation-rules", record);
+  return { ruleId: data.id, ruleName: template.name };
 }
 
 export interface SeedAllDefaultsResult {
@@ -58,21 +49,13 @@ export interface SeedAllDefaultsResult {
 export async function seedAllDefaults(userId: string): Promise<SeedAllDefaultsResult> {
   if (!userId?.trim()) throw new Error("Cannot restore defaults before authentication is ready.");
 
-  const { data: automationRulesInserted, error: rulesError } = await db.rpc(
-    "seed_default_automation_rules",
-    { p_user_id: userId },
+  const { data } = await apiClient.post<{ data: { rules: number; segments: number } }>(
+    "/v1/crm/retention/seed-defaults",
+    {},
   );
-  if (rulesError) throw new Error(rulesError.message || "Failed to restore default automation rules");
-
-  const { data: customerSegmentsInserted, error: segmentsError } = await db.rpc(
-    "seed_default_customer_segments",
-    { p_user_id: userId },
-  );
-  if (segmentsError) throw new Error(segmentsError.message || "Failed to restore default customer segments");
-
   return {
-    automationRulesInserted: Number(automationRulesInserted || 0),
-    customerSegmentsInserted: Number(customerSegmentsInserted || 0),
+    automationRulesInserted: Number(data.rules || 0),
+    customerSegmentsInserted: Number(data.segments || 0),
   };
 }
 
@@ -100,26 +83,26 @@ export async function dryRunAutomationRule(
   ruleId: string,
   customerId?: string,
 ): Promise<DryRunRuleResult> {
-  const { data: rule, error } = await supabase
-    .from("automation_rules")
-    .select("id, name, trigger_jsonb, actions_jsonb")
-    .eq("id", ruleId)
-    .eq("user_id", userId)
-    .single();
+  const { data: rule } = await apiClient.get<{ data: {
+    id: string;
+    name: string;
+    trigger_jsonb: { type?: string } | null;
+    actions_jsonb: AutomationTemplateAction[] | null;
+  } }>(`/v1/crm/retention/automation-rules/${ruleId}`);
 
-  if (error || !rule) throw new Error("Rule not found");
+  if (!rule) throw new Error("Rule not found");
 
   let context: Record<string, string> = { ...SAMPLE_PREVIEW_CONTEXT };
   if (customerId) {
     const workspace = await resolveCurrentWorkspace();
     if (!workspace) throw new Error("No active workspace is available.");
-    const { data: cust, error: customerError } = await db
-      .from("customers")
-      .select("first_name,last_name,company_name,email,phone")
-      .eq("workspace_id", workspace.workspaceId)
-      .eq("id", customerId)
-      .maybeSingle();
-    if (customerError) throw customerError;
+    const { data: cust } = await apiClient.get<{ data: {
+      first_name: string | null;
+      last_name: string | null;
+      company_name: string | null;
+    } | null }>(`/v1/customers/${customerId}`, {
+      query: { workspace_id: workspace.workspaceId },
+    });
     if (cust) {
       const fullName = [cust.first_name, cust.last_name].filter(Boolean).join(" ") || cust.company_name || context.customer_name;
       context = {
@@ -130,8 +113,8 @@ export async function dryRunAutomationRule(
     }
   }
 
-  const trigger = (rule.trigger_jsonb as { type?: string } | null)?.type || "unknown";
-  const actions = (rule.actions_jsonb as unknown as AutomationTemplateAction[] | null) || [];
+  const trigger = rule.trigger_jsonb?.type || "unknown";
+  const actions = rule.actions_jsonb || [];
 
   const actionResults: DryRunActionResult[] = actions.map((a) => {
     try {

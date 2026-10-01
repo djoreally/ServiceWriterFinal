@@ -55,6 +55,13 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
   { match: "/tech-app", roles: TECH },
 
   // --- CRM workspace ----------------------------------------------------
+  // Growth-tool sub-pages keep their previous ADMIN-only status. These must
+  // precede the broader "/crm" rule: canAccessRoute uses first-match-wins,
+  // otherwise they would inherit the wider CRM role set (privilege expansion).
+  { match: "/crm/growth", roles: ADMIN },
+  { match: "/crm/newsletter", roles: ADMIN },
+  { match: "/crm/videos", roles: ADMIN },
+  { match: "/crm/retention", roles: ADMIN },
   { match: "/crm", roles: CRM },
   { match: "/settings/import", roles: ADMIN },
 
@@ -65,12 +72,6 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
   { match: "/vehicle-specs", roles: ADMIN },
   { match: "/admin", roles: ADMIN },
   { match: "/marketplace", roles: ADMIN },
-  { match: "/marketing", roles: ADMIN },
-  { match: "/marketing-videos", roles: ADMIN },
-  { match: "/growth-tools", roles: ADMIN },
-  { match: "/newsletter", roles: ADMIN },
-  { match: "/retention-engine", roles: ADMIN },
-  { match: "/retention-verify", roles: ADMIN },
   { match: "/assets", roles: ADMIN },
 
   // --- finance ----------------------------------------------------------

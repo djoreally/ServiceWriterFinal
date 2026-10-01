@@ -1,29 +1,49 @@
 /**
  * Fleet Client Detail Query — Read operations for FleetClientDetail page.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
+import type { Database } from "@/integrations/supabase/types";
+
+type RawResult<T> = { data: T | null; error: unknown };
+
+type FleetClientRow = Database["public"]["Tables"]["fleet_clients"]["Row"];
+type FleetVehicleRow = Database["public"]["Tables"]["fleet_vehicles"]["Row"];
+type FleetWorkOrderRow = Database["public"]["Tables"]["fleet_work_orders"]["Row"];
+type FleetLocationRow = Database["public"]["Tables"]["fleet_locations"]["Row"];
+type FleetContractRow = Database["public"]["Tables"]["fleet_contracts"]["Row"];
+type FleetPurchaseOrderRow = Database["public"]["Tables"]["fleet_purchase_orders"]["Row"];
+type FleetContactRow = Database["public"]["Tables"]["fleet_contacts"]["Row"];
+
+type ClientVehicleRow = FleetVehicleRow & {
+  fleet_locations: { name: string } | null;
+  fleet_contracts: { name: string } | null;
+};
+type ClientWorkOrderRow = FleetWorkOrderRow & {
+  fleet_vehicles: { year: number | null; make: string | null; model: string | null; unit_number: string | null } | null;
+};
+
+async function rawGet<T>(path: string): Promise<RawResult<T>> {
+  try {
+    const { data } = await apiClient.get<{ data: T }>(path);
+    return { data: data ?? null, error: null };
+  } catch (error) {
+    return { data: null, error };
+  }
+}
 
 /** Fetch a fleet client by ID. */
 export async function fetchFleetClient(id: string, userId: string) {
-  return supabase.from("fleet_clients").select("*").eq("id", id).eq("user_id", userId).single();
+  return rawGet<FleetClientRow>(`/v1/fleet/clients/${id}`);
 }
 
 /** Fetch entity counts for a client. */
 export async function fetchClientCounts(clientId: string) {
-  const [v, wo, loc, con, ct] = await Promise.all([
-    supabase.from("fleet_vehicles").select("id", { count: "exact", head: true }).eq("fleet_client_id", clientId),
-    supabase.from("fleet_work_orders").select("id", { count: "exact", head: true }).eq("fleet_client_id", clientId),
-    supabase.from("fleet_locations").select("id", { count: "exact", head: true }).eq("fleet_client_id", clientId),
-    supabase.from("fleet_contacts").select("id", { count: "exact", head: true }).eq("fleet_client_id", clientId),
-    supabase.from("fleet_contracts").select("id", { count: "exact", head: true }).eq("fleet_client_id", clientId),
-  ]);
-  return {
-    vehicles: v.count ?? 0,
-    workOrders: wo.count ?? 0,
-    locations: loc.count ?? 0,
-    contacts: con.count ?? 0,
-    contracts: ct.count ?? 0,
-  };
+  const { data } = await apiClient.get<{
+    data: { vehicles: number; workOrders: number; locations: number; contacts: number; contracts: number };
+  }>(`/v1/fleet/clients/${clientId}/counts`);
+  return (
+    data ?? { vehicles: 0, workOrders: 0, locations: 0, contacts: 0, contracts: 0 }
+  );
 }
 
 export interface FleetClientReadiness {
@@ -47,97 +67,59 @@ export function deriveFleetClientReadiness(counts: FleetClientReadiness["counts"
 
 /** Server-counted onboarding readiness. Contracts and POs are mandatory for automated invoicing. */
 export async function fetchFleetClientReadiness(clientId: string): Promise<FleetClientReadiness> {
-  const [contacts, locations, contracts, purchaseOrders, vehicles, incompleteVehicles] = await Promise.all([
-    supabase.from("fleet_contacts").select("id", { count: "exact", head: true }).eq("fleet_client_id", clientId),
-    supabase.from("fleet_locations").select("id", { count: "exact", head: true }).eq("fleet_client_id", clientId),
-    supabase.from("fleet_contracts").select("id", { count: "exact", head: true }).eq("fleet_client_id", clientId).eq("is_active", true),
-    supabase.from("fleet_purchase_orders").select("id", { count: "exact", head: true }).eq("fleet_client_id", clientId).in("status", ["open", "partially_used"]),
-    supabase.from("fleet_vehicles").select("id", { count: "exact", head: true }).eq("fleet_client_id", clientId),
-    supabase.from("fleet_vehicles").select("id", { count: "exact", head: true }).eq("fleet_client_id", clientId)
-      .or("vin.is.null,mileage.is.null,fleet_location_id.is.null,fleet_contract_id.is.null"),
-  ]);
-  const counts = {
-    contacts: contacts.count ?? 0,
-    locations: locations.count ?? 0,
-    contracts: contracts.count ?? 0,
-    purchaseOrders: purchaseOrders.count ?? 0,
-    vehicles: vehicles.count ?? 0,
-    incompleteVehicles: incompleteVehicles.count ?? 0,
+  const { data } = await apiClient.get<{ data: FleetClientReadiness["counts"] }>(
+    `/v1/fleet/clients/${clientId}/readiness-counts`,
+  );
+  const counts = data ?? {
+    contacts: 0,
+    locations: 0,
+    contracts: 0,
+    purchaseOrders: 0,
+    vehicles: 0,
+    incompleteVehicles: 0,
   };
   return deriveFleetClientReadiness(counts);
 }
 
 /** Fetch vehicles for a client. */
 export async function fetchClientVehicles(clientId: string) {
-  return supabase
-    .from("fleet_vehicles")
-    .select("*, fleet_locations(name), fleet_contracts(name)")
-    .eq("fleet_client_id", clientId)
-    .order("created_at", { ascending: false });
+  return rawGet<ClientVehicleRow[]>(`/v1/fleet/clients/${clientId}/vehicles`);
 }
 
 /** Fetch work orders for a client. */
 export async function fetchClientWorkOrders(clientId: string) {
-  return supabase
-    .from("fleet_work_orders")
-    .select("*, fleet_vehicles(year, make, model, unit_number)")
-    .eq("fleet_client_id", clientId)
-    .order("created_at", { ascending: false });
+  return rawGet<ClientWorkOrderRow[]>(`/v1/fleet/clients/${clientId}/work-orders`);
 }
 
 /** Fetch locations for a client. */
 export async function fetchClientLocations(clientId: string) {
-  return supabase
-    .from("fleet_locations")
-    .select("*")
-    .eq("fleet_client_id", clientId)
-    .order("name");
+  return rawGet<FleetLocationRow[]>(`/v1/fleet/clients/${clientId}/locations`);
 }
 
 /** Fetch contracts for a client. */
 export async function fetchClientContracts(clientId: string) {
-  return supabase
-    .from("fleet_contracts")
-    .select("*")
-    .eq("fleet_client_id", clientId)
-    .order("created_at", { ascending: false });
+  return rawGet<FleetContractRow[]>(`/v1/fleet/clients/${clientId}/contracts`);
 }
 
 /** Fetch invoiceable work orders for a client. */
 export async function fetchClientInvoices(clientId: string) {
-  return supabase
-    .from("fleet_work_orders")
-    .select("*, fleet_vehicles(year, make, model, unit_number)")
-    .eq("fleet_client_id", clientId)
-    .in("status", ["completed", "invoiced", "paid"])
-    .order("completed_at", { ascending: false });
+  return rawGet<ClientWorkOrderRow[]>(`/v1/fleet/clients/${clientId}/invoices`);
 }
 
 /** Fetch purchase orders for a client. */
 export async function fetchClientPurchaseOrders(clientId: string) {
-  return supabase
-    .from("fleet_purchase_orders")
-    .select("*")
-    .eq("fleet_client_id", clientId)
-    .order("created_at", { ascending: false });
+  return rawGet<FleetPurchaseOrderRow[]>(`/v1/fleet/clients/${clientId}/purchase-orders`);
 }
 
 /** Fetch report stats for a client. */
 export async function fetchClientReportStats(clientId: string) {
-  const [vRes, woRes] = await Promise.all([
-    supabase.from("fleet_vehicles").select("id", { count: "exact", head: true }).eq("fleet_client_id", clientId),
-    supabase.from("fleet_work_orders").select("id, total, status").eq("fleet_client_id", clientId),
-  ]);
-  const completed = (woRes.data ?? []).filter((order) => ["completed", "invoiced", "paid"].includes(order.status));
-  const totalSpend = completed.reduce((sum, order) => sum + (order.total || 0), 0);
-  return { totalSpend, vehicleCount: vRes.count ?? 0, woCount: (woRes.data ?? []).length };
+  const { data } = await apiClient.get<{
+    data: { totalSpend: number; vehicleCount: number; woCount: number };
+  }>(`/v1/fleet/clients/${clientId}/report-stats`);
+  return data ?? { totalSpend: 0, vehicleCount: 0, woCount: 0 };
 }
 
 /** Fetch contacts for a client. */
 export async function fetchClientContacts(clientId: string) {
-  return supabase
-    .from("fleet_contacts")
-    .select("*")
-    .eq("fleet_client_id", clientId)
-    .order("name");
+  return rawGet<FleetContactRow[]>(`/v1/fleet/clients/${clientId}/contacts`);
 }

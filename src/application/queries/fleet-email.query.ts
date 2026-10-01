@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface FleetEmailMessage {
   id: string;
@@ -32,26 +32,19 @@ export interface FleetMailboxConfiguration {
 }
 
 export async function fetchFleetMailboxConfiguration(): Promise<FleetMailboxConfiguration> {
-  const { data, error } = await (supabase as any).rpc("get_workspace_email_connection_status");
-  if (error) throw error;
-  const row = Array.isArray(data) ? data[0] : data;
-  if (!row) throw new Error("Workspace email settings are unavailable");
-  return row as FleetMailboxConfiguration;
+  const { data } = await apiClient.get<{ data: FleetMailboxConfiguration }>(
+    "/v1/fleet/email/mailbox-configuration",
+  );
+  return data as FleetMailboxConfiguration;
 }
 
 export async function fetchFleetEmailMessages(): Promise<FleetEmailMessage[]> {
-  const { data, error } = await (supabase as any)
-    .from("fleet_email_messages")
-    .select("id, thread_key, internet_message_id, direction, from_email, from_name, to_emails, subject, body_text, body_html, received_at, is_read")
-    .order("received_at", { ascending: false })
-    .limit(500);
-  if (error) throw error;
-  return (data ?? []) as unknown as FleetEmailMessage[];
+  const { data } = await apiClient.get<{ data: FleetEmailMessage[] }>("/v1/fleet/email/messages");
+  return (data ?? []) as FleetEmailMessage[];
 }
 
 export function subscribeToFleetEmailMessages(onChange: () => void) {
-  const channel = supabase.channel("fleet-email-mailbox")
-    .on("postgres_changes", { event: "*", schema: "public", table: "fleet_email_messages" }, onChange)
-    .subscribe();
-  return () => { void supabase.removeChannel(channel); };
+  // Realtime subscriptions are no longer wired to direct Supabase access.
+  // Poll the query instead; the returned function unsubscribes (no-op).
+  return () => {};
 }

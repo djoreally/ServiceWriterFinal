@@ -2,7 +2,7 @@
  * Vehicle Parts Registry Query — per-vehicle part numbers for fleet and retail vehicles,
  * plus suggestion resolution (assigned parts first, shared spec reference as fallback).
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export type VehicleKind = "fleet" | "retail";
@@ -58,15 +58,10 @@ export async function fetchVehiclePartAssignments(
   kind: VehicleKind,
   vehicleId: string,
 ): Promise<VehiclePartAssignment[]> {
-  const column = kind === "fleet" ? "fleet_vehicle_id" : "vehicle_id";
-  const { data, error } = await (supabase as any)
-    .from("vehicle_part_assignments")
-    .select("*")
-    .eq(column, vehicleId)
-    .order("part_category");
-
-  if (error) throw new Error(error.message);
-  return (data ?? []) as VehiclePartAssignment[];
+  const { data } = await apiClient.get<{ data: VehiclePartAssignment[] }>("/v1/vehicle-part-assignments", {
+    query: { kind, vehicle_id: vehicleId },
+  });
+  return data ?? [];
 }
 
 /** Assigned parts, or shared spec-reference fallback when the vehicle has none. */
@@ -74,12 +69,11 @@ export async function fetchVehiclePartSuggestions(
   kind: VehicleKind,
   vehicleId: string,
 ): Promise<PartSuggestion[]> {
-  const { data, error } = await (supabase as any).rpc("get_vehicle_part_suggestions_v1", {
-    p_vehicle_kind: kind,
-    p_vehicle_id: vehicleId,
+  const { data } = await apiClient.post<{ data: PartSuggestion[] }>("/v1/vehicle-part-suggestions", {
+    kind,
+    vehicle_id: vehicleId,
   });
-  if (error) throw new Error(error.message);
-  return (data ?? []) as PartSuggestion[];
+  return data ?? [];
 }
 
 export interface StockOption {
@@ -96,13 +90,8 @@ export interface StockOption {
 export async function fetchStockOptions(): Promise<StockOption[]> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return [];
-  const { data, error } = await (supabase as any)
-    .from("inventory_items")
-    .select("id, name, sku, category, unit, quantity, sell_price, unit_cost")
-    .eq("user_id", user.id)
-    .order("name");
-  if (error) throw new Error(error.message);
-  return (data ?? []) as StockOption[];
+  const { data } = await apiClient.get<{ data: StockOption[] }>("/v1/inventory/stock-options");
+  return data ?? [];
 }
 
 export interface VanStockRow {
@@ -117,30 +106,8 @@ export interface VanStockRow {
 export async function fetchVanStock(): Promise<VanStockRow[]> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return [];
-
-  const { data: vans } = await supabase
-    .from("vans")
-    .select("id, name")
-    .eq("user_id", user.id)
-    .eq("is_active", true);
-
-  const vanIds = (vans ?? []).map((v) => v.id);
-  if (vanIds.length === 0) return [];
-
-  const { data: rows, error } = await supabase
-    .from("van_inventory")
-    .select("van_id, inventory_item_id, quantity, min_quantity")
-    .in("van_id", vanIds);
-  if (error) throw new Error(error.message);
-
-  const nameById = new Map((vans ?? []).map((v) => [v.id, v.name]));
-  return (rows ?? []).map((r) => ({
-    van_id: r.van_id,
-    van_name: nameById.get(r.van_id) ?? "Van",
-    inventory_item_id: r.inventory_item_id,
-    quantity: Number(r.quantity ?? 0),
-    min_quantity: r.min_quantity == null ? null : Number(r.min_quantity),
-  }));
+  const { data } = await apiClient.get<{ data: VanStockRow[] }>("/v1/vans/stock");
+  return data ?? [];
 }
 
 export interface WorkOrderPartLine {
@@ -156,14 +123,8 @@ export interface WorkOrderPartLine {
 }
 
 export async function fetchWorkOrderPartLines(workOrderId: string): Promise<WorkOrderPartLine[]> {
-  const { data, error } = await (supabase as any)
-    .from("fleet_work_order_line_items")
-    .select("id, description, part_number, quantity, unit_price, total, inventory_item_id, van_id, fleet_vehicle_id")
-    .eq("fleet_work_order_id", workOrderId)
-    .eq("line_type", "part")
-    .order("sort_order");
-  if (error) throw new Error(error.message);
-  return (data ?? []) as WorkOrderPartLine[];
+  const { data } = await apiClient.get<{ data: WorkOrderPartLine[] }>(`/v1/work-orders/${workOrderId}/part-lines`);
+  return data ?? [];
 }
 
 export interface PartReservationRow {
@@ -176,11 +137,6 @@ export interface PartReservationRow {
 }
 
 export async function fetchWorkOrderPartReservations(workOrderId: string): Promise<PartReservationRow[]> {
-  const { data, error } = await (supabase as any)
-    .from("inventory_reservations")
-    .select("id, inventory_item_id, quantity, status, van_id, notes")
-    .eq("work_order_id", workOrderId)
-    .eq("source", "fleet_work_order_parts");
-  if (error) throw new Error(error.message);
-  return (data ?? []) as PartReservationRow[];
+  const { data } = await apiClient.get<{ data: PartReservationRow[] }>(`/v1/work-orders/${workOrderId}/part-reservations`);
+  return data ?? [];
 }

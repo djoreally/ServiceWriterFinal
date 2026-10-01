@@ -1,5 +1,10 @@
-/** Availability read models shared by public booking and internal scheduling. */
-import { productionSupabase as supabase } from "@/integrations/supabase/client";
+/** Availability read models shared by public booking and internal scheduling.
+ *
+ * Phase 2: data access goes through the typed API client
+ * (`@/lib/api-client`) to the appointments Hono router. Exported signatures
+ * are unchanged.
+ */
+import { apiClient } from "@/lib/api-client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 export interface AvailabilitySlot { time: string; available: boolean; }
@@ -23,30 +28,28 @@ function workspaceLocalToUtc(date: string, time: string, timezone: string): Date
 
 /** Public-booking compatibility path keyed by the workspace owner identity. */
 export async function fetchBookedSlots(tenantUserId: string, date: string): Promise<BookedSlot[]> {
-  const { data, error } = await supabase.rpc("get_booked_slots", { business_user_id: tenantUserId, booking_date: date });
-  if (error) throw new Error("Failed to fetch booked slots");
-  return (data || []).map((slot: BookedSlot) => ({ id: slot.id, scheduled_time: String(slot.scheduled_time).slice(0,5), duration_minutes: Number(slot.duration_minutes || 60) }));
+  const response = await apiClient.post<{ data: BookedSlot[] | null; error: unknown }>(
+    "/v1/appointments/booking-rpc",
+    { fn: "get_booked_slots", params: { business_user_id: tenantUserId, booking_date: date } },
+  );
+  if (response.error) throw new Error("Failed to fetch booked slots");
+  return (response.data || []).map((slot: BookedSlot) => ({ id: slot.id, scheduled_time: String(slot.scheduled_time).slice(0,5), duration_minutes: Number(slot.duration_minutes || 60) }));
 }
 
 /** Internal scheduler query bounded to one workspace-local day, including overnight overlaps. */
 export async function fetchWorkspaceBookedSlots(date: string): Promise<BookedSlot[]> {
   const context = await resolveCurrentWorkspace();
   if (!context) throw new Error("Select a workspace before checking availability.");
-  const db = supabase as any;
-  const { data: workspace, error: workspaceError } = await db.from("workspaces").select("timezone").eq("id",context.workspaceId).maybeSingle();
-  if (workspaceError) throw workspaceError;
-  const timezone = workspace?.timezone || "UTC";
+  const response = await apiClient.get<{ timezone: string; appointments: Array<{ id: string; starts_at: string; ends_at: string; status: string }> }>(
+    "/v1/appointments/day-appointments",
+    { query: { date, selected_workspace_id: context.workspaceId } },
+  );
+  const timezone = response.timezone || "UTC";
   const start = workspaceLocalToUtc(date,"00:00:00",timezone);
   const dateObj = new Date(`${date}T00:00:00Z`); dateObj.setUTCDate(dateObj.getUTCDate()+1);
   const nextDate = dateObj.toISOString().slice(0,10);
   const end = workspaceLocalToUtc(nextDate,"00:00:00",timezone);
-  const { data: appointments, error } = await db.from("appointments")
-    .select("id,starts_at,ends_at,status")
-    .eq("workspace_id",context.workspaceId)
-    .not("status","in",'("cancelled","no_show")')
-    .lt("starts_at",end.toISOString()).gt("ends_at",start.toISOString())
-    .order("starts_at",{ascending:true});
-  if (error) throw error;
+  const appointments = response.appointments ?? [];
   const timeFormatter = new Intl.DateTimeFormat("en-GB", { timeZone: timezone, hour:"2-digit", minute:"2-digit", hourCycle:"h23" });
   return (appointments || []).map((row:any) => {
     const clampedStart = new Date(Math.max(Date.parse(row.starts_at), start.getTime()));

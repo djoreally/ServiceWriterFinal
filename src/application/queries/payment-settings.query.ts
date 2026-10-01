@@ -1,9 +1,6 @@
-/** Payment Settings Query — canonical workspace-backed configuration. */
-import { productionSupabase } from "@/integrations/supabase/client";
+/** Payment Settings Query — canonical workspace-backed configuration, via the Hono billing API. */
+import { apiClient, ApiClientError } from "@/lib/api-client";
 import { resolveOilPricePerQuart } from "@/lib/oilPricing";
-import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
-
-const db = productionSupabase as any;
 
 export interface PaymentSettingsData {
   accept_deposits: boolean;
@@ -46,29 +43,26 @@ function object(value: unknown): Record<string, unknown> {
 }
 
 export async function fetchPaymentSettings(): Promise<{ settings: PaymentSettingsData; coupons: CouponCode[] }> {
-  const context = await resolveCurrentWorkspace();
-  if (!context) throw new Error("No active workspace is available.");
+  let response: { settingsRow: Record<string, unknown> | null; coupons: CouponCode[] };
+  try {
+    const { data } = await apiClient.get<{
+      data: { settingsRow: Record<string, unknown> | null; coupons: CouponCode[] };
+    }>("/v1/billing/payment-settings");
+    response = data;
+  } catch (error) {
+    if (error instanceof ApiClientError && error.code === "workspace_missing") {
+      throw new Error("No active workspace is available.");
+    }
+    throw error instanceof ApiClientError ? new Error(error.message) : error;
+  }
 
-  const [settingsRes, couponsRes] = await Promise.all([
-    db.from("workspace_settings")
-      .select("tax_rate,oil_price_per_quart,surcharge_enabled,surcharge_type,surcharge_value,surcharge_description,waste_oil_fee_enabled,waste_oil_fee,shop_fee_enabled,shop_fee_type,shop_fee_value,shop_fee_description,operational_settings")
-      .eq("workspace_id", context.workspaceId)
-      .maybeSingle(),
-    db.from("coupon_codes")
-      .select("*")
-      .eq("workspace_id", context.workspaceId)
-      .order("created_at", { ascending: false }),
-  ]);
-  if (settingsRes.error) throw settingsRes.error;
-  if (couponsRes.error) throw couponsRes.error;
-
-  const row = settingsRes.data ?? {};
+  const row = response.settingsRow ?? {};
   const operational = object(row.operational_settings);
   const settings: PaymentSettingsData = {
     accept_deposits: Boolean(operational.accept_deposits),
     deposit_percentage: Number(operational.deposit_percentage ?? 20),
     tax_rate: Number(row.tax_rate ?? 0),
-    oil_price_per_quart: resolveOilPricePerQuart(row.oil_price_per_quart),
+    oil_price_per_quart: resolveOilPricePerQuart(row.oil_price_per_quart as number | undefined),
     surcharge_enabled: Boolean(row.surcharge_enabled),
     surcharge_type: row.surcharge_type === "fixed" ? "fixed" : "percentage",
     surcharge_value: Number(row.surcharge_value ?? 3),
@@ -86,5 +80,5 @@ export async function fetchPaymentSettings(): Promise<{ settings: PaymentSetting
     phone_coupon_description: String(operational.phone_coupon_description || "Loyalty discount"),
   };
 
-  return { settings, coupons: (couponsRes.data ?? []) as CouponCode[] };
+  return { settings, coupons: response.coupons ?? [] };
 }

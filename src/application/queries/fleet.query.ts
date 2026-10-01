@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import type { Database } from "@/integrations/supabase/types";
 import { getOfflineDatabase } from "@/offline/database";
 import { isOfflineEligibleForCurrentUser } from "@/offline/rollout";
@@ -224,114 +224,12 @@ export interface FleetInvoiceSummary {
     model: string | null;
     unit_number: string | null;
   } | null;
-}
-
-/**
- * Fleet OS dashboard data
- * Centralizes the Supabase calls used by the FleetOS command center.
- */
+}/** Fetch fleet dashboard data: KPIs, recent orders, scheduled orders. */
 export async function fetchFleetDashboardData(userId: string): Promise<FleetDashboardData> {
-  const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-  const weekFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
-    .toISOString()
-    .split("T")[0];
-  const today = now.toISOString().split("T")[0];
-
-  const [
-    clientsRes,
-    vehiclesRes,
-    openWoRes,
-    completedRes,
-    recentRes,
-    scheduledRes,
-    dueVehiclesRes,
-    pendingInvRes,
-    posRes,
-  ] = await Promise.all([
-    supabase
-      .from("fleet_clients")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId)
-      .eq("status", "active"),
-    supabase.from("fleet_vehicles").select("id", { count: "exact", head: true }).eq("user_id", userId),
-    supabase
-      .from("fleet_work_orders")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId)
-      .in("status", ["draft", "scheduled", "in_progress"]),
-    supabase
-      .from("fleet_work_orders")
-      .select("id, total", { count: "exact" })
-      .eq("user_id", userId)
-      .eq("status", "completed")
-      .gte("completed_at", monthStart),
-    supabase
-      .from("fleet_work_orders")
-      .select(
-        "*, fleet_vehicles(year, make, model, unit_number), fleet_clients(company_name)"
-      )
-      .eq("user_id", userId)
-      .in("status", ["completed", "invoiced"])
-      .order("completed_at", { ascending: false })
-      .limit(5),
-    supabase
-      .from("fleet_work_orders")
-      .select(
-        "*, fleet_vehicles(year, make, model, unit_number), fleet_clients(company_name)"
-      )
-      .eq("user_id", userId)
-      .eq("status", "scheduled")
-      .lte("scheduled_date", weekFromNow)
-      .order("scheduled_date")
-      .limit(5),
-    supabase
-      .from("fleet_work_orders")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId)
-      .eq("status", "scheduled")
-      .lte("scheduled_date", today),
-    supabase
-      .from("fleet_work_orders")
-      .select("total")
-      .eq("user_id", userId)
-      .eq("status", "completed")
-      .eq("invoice_status", "pending"),
-    supabase
-      .from("fleet_purchase_orders")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId)
-      .in("status", ["open", "partially_used"]),
-  ]);
-
-  const monthlyTotal =
-    (completedRes.data as { total: number | null }[] | null)?.reduce(
-      (sum, o) => sum + (o.total || 0),
-      0
-    ) ?? 0;
-
-  const pendingInvTotal =
-    (pendingInvRes.data as { total: number | null }[] | null)?.reduce(
-      (sum, o) => sum + (o.total || 0),
-      0
-    ) ?? 0;
-
-  return {
-    stats: {
-      totalClients: clientsRes.count ?? 0,
-      totalVehicles: vehiclesRes.count ?? 0,
-      openWorkOrders: openWoRes.count ?? 0,
-      completedThisMonth: completedRes.count ?? 0,
-      monthlyRevenue: monthlyTotal,
-      overdueOrders: dueVehiclesRes.count ?? 0,
-      vehiclesDueThisWeek: (scheduledRes.data as FleetWorkOrderSummary[] | null)?.length ?? 0,
-      pendingInvoiceTotal: pendingInvTotal,
-      openPOs: posRes.count ?? 0,
-    },
-    recentOrders: (recentRes.data as FleetWorkOrderSummary[] | null) ?? [],
-    scheduledOrders: (scheduledRes.data as FleetWorkOrderSummary[] | null) ?? [],
-  };
+  const { data } = await apiClient.get<{ data: FleetDashboardData }>("/v1/fleet/dashboard");
+  return data as FleetDashboardData;
 }
+
 
 /**
  * List all fleet work orders for the current user.
@@ -377,107 +275,68 @@ async function fetchFleetWorkOrdersFromOffline(): Promise<FleetWorkOrderSummary[
     }) as unknown as FleetWorkOrderSummary)
     .filter((row) => Boolean(row.id && row.status && row.id !== ''))
     .sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
-}
-
+}/**
+ * List all fleet work orders for the current user.
+ */
 export async function fetchFleetWorkOrders(
   userId: string
 ): Promise<FleetWorkOrderSummary[]> {
-  const { data, error } = await supabase
-    .from("fleet_work_orders")
-    .select(
-      "*, fleet_vehicles(year, make, model, unit_number), fleet_clients(company_name), fleet_locations(name, address, city, state), fleet_jobs(id, job_number)"
-    )
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false });
-
-  if (error || !data) {
+  try {
+    const { data } = await apiClient.get<{ data: FleetWorkOrderSummary[] }>("/v1/fleet/work-orders");
+    return data ?? [];
+  } catch (error) {
     console.error("[fetchFleetWorkOrders] Error:", error);
     if (await isOfflineEligibleForCurrentUser()) {
       return fetchFleetWorkOrdersFromOffline();
     }
     return [];
   }
-
-  return data as FleetWorkOrderSummary[];
 }
+
 
 export interface FleetWorkOrderPageResult {
   rows: FleetWorkOrderSummary[];
   total: number;
   counts: Record<string, number>;
   aggregates: { open: number; active: number; priority: number };
+}export async function fetchFleetWorkOrdersPage(input: { userId: string; page: number; pageSize: number; search?: string; status?: string; clientId?: string; sort?: string }): Promise<FleetWorkOrderPageResult> {
+  const { data } = await apiClient.get<{ data: FleetWorkOrderPageResult }>("/v1/fleet/work-orders/page", {
+    query: {
+      page: input.page,
+      page_size: input.pageSize,
+      search: input.search,
+      status: input.status,
+      client_id: input.clientId,
+      sort: input.sort,
+    },
+  });
+  return data as FleetWorkOrderPageResult;
 }
 
-export async function fetchFleetWorkOrdersPage(input: { userId: string; page: number; pageSize: number; search?: string; status?: string; clientId?: string; sort?: string }): Promise<FleetWorkOrderPageResult> {
-  const openStatuses = ["draft", "pending_review", "scheduled", "assigned", "en_route", "arrived", "in_progress"];
-  let query = supabase.from("fleet_work_orders").select(fleetSchedulerSelect, { count: "exact" }).eq("user_id", input.userId);
-  if (input.status) query = query.eq("status", input.status);
-  if (input.clientId) query = query.eq("fleet_client_id", input.clientId);
-  if (input.search?.trim()) {
-    const value = input.search.trim().replace(/[,%()]/g, "");
-    query = query.or(`order_number.ilike.%${value}%,po_number.ilike.%${value}%,service_type.ilike.%${value}%`);
-  }
-  const sort = input.sort ?? "scheduled_desc";
-  const column = sort.startsWith("created") ? "created_at" : "scheduled_date";
-  query = query.order(column, { ascending: sort.endsWith("asc"), nullsFirst: false }).range((input.page - 1) * input.pageSize, input.page * input.pageSize - 1);
-  const statuses = ["draft", "pending_review", "scheduled", "assigned", "en_route", "arrived", "in_progress", "completed", "invoiced", "paid"];
-  const [page, open, active, priority, ...statusResults] = await Promise.all([
-    query,
-    supabase.from("fleet_work_orders").select("id", { count: "exact", head: true }).eq("user_id", input.userId).in("status", openStatuses),
-    supabase.from("fleet_work_orders").select("id", { count: "exact", head: true }).eq("user_id", input.userId).in("status", ["assigned", "en_route", "arrived", "in_progress"]),
-    supabase.from("fleet_work_orders").select("id", { count: "exact", head: true }).eq("user_id", input.userId).in("priority", ["high", "urgent"]).in("status", openStatuses),
-    ...statuses.map((status) => supabase.from("fleet_work_orders").select("id", { count: "exact", head: true }).eq("user_id", input.userId).eq("status", status)),
-  ]);
-  if (page.error) throw page.error;
-  return {
-    rows: (page.data ?? []) as FleetWorkOrderSummary[], total: page.count ?? 0,
-    counts: Object.fromEntries(statuses.map((status, index) => [status, statusResults[index].count ?? 0])),
-    aggregates: { open: open.count ?? 0, active: active.count ?? 0, priority: priority.count ?? 0 },
-  };
-}
 
 export interface FleetSchedulerWindow {
   scheduled: FleetWorkOrderSummary[];
   unscheduled: FleetWorkOrderSummary[];
   counts: { scheduled: number; unscheduled: number; exceptions: number };
 }
-
-const fleetSchedulerSelect = "*, fleet_vehicles(year, make, model, unit_number), fleet_clients(company_name), fleet_locations(name, address, city, state), fleet_jobs(id, job_number)";
-
 /** Date-windowed scheduler payload plus a bounded, separate unscheduled queue. */
 export async function fetchFleetSchedulerWindow(userId: string, startDate: string, endDate: string): Promise<FleetSchedulerWindow> {
-  const openStatuses = ["draft", "pending_review", "scheduled", "assigned", "en_route", "arrived", "in_progress"];
-  const [scheduled, unscheduled, scheduledCount, unscheduledCount, exceptionsCount] = await Promise.all([
-    supabase.from("fleet_work_orders").select(fleetSchedulerSelect).eq("user_id", userId).gte("scheduled_date", startDate).lte("scheduled_date", endDate).in("status", openStatuses).order("scheduled_date").order("scheduled_time").limit(500),
-    supabase.from("fleet_work_orders").select(fleetSchedulerSelect).eq("user_id", userId).is("scheduled_date", null).in("status", openStatuses).order("created_at", { ascending: false }).limit(100),
-    supabase.from("fleet_work_orders").select("id", { count: "exact", head: true }).eq("user_id", userId).gte("scheduled_date", startDate).lte("scheduled_date", endDate).in("status", openStatuses),
-    supabase.from("fleet_work_orders").select("id", { count: "exact", head: true }).eq("user_id", userId).is("scheduled_date", null).in("status", openStatuses),
-    supabase.from("fleet_work_orders").select("id", { count: "exact", head: true }).eq("user_id", userId).or("priority.eq.urgent,status.eq.pending_review").in("status", openStatuses),
-  ]);
-  if (scheduled.error) throw scheduled.error;
-  if (unscheduled.error) throw unscheduled.error;
-  return {
-    scheduled: (scheduled.data ?? []) as FleetWorkOrderSummary[],
-    unscheduled: (unscheduled.data ?? []) as FleetWorkOrderSummary[],
-    counts: { scheduled: scheduledCount.count ?? 0, unscheduled: unscheduledCount.count ?? 0, exceptions: exceptionsCount.count ?? 0 },
-  };
+  const { data } = await apiClient.get<{ data: FleetSchedulerWindow }>("/v1/fleet/scheduler-window", {
+    query: { start_date: startDate, end_date: endDate },
+  });
+  return data as FleetSchedulerWindow;
 }
-
 /** Invalidates only the scheduler window when a work-order row changes. */
 export function subscribeToFleetScheduler(userId: string, onInvalidate: () => void): () => void {
-  const channel = supabase.channel(`fleet-scheduler-${userId}`).on("postgres_changes", {
-    event: "*", schema: "public", table: "fleet_work_orders", filter: `user_id=eq.${userId}`,
-  }, onInvalidate).subscribe();
-  return () => { void supabase.removeChannel(channel); };
+  // Realtime subscriptions are no longer wired to direct Supabase access.
+  // Poll the query instead; the returned function unsubscribes (no-op).
+  return () => {};
 }
-
 export function subscribeToFleetList(userId: string, table: "fleet_work_orders" | "fleet_vehicles", onInvalidate: () => void): () => void {
-  const channel = supabase.channel(`${table}-page-${userId}`).on("postgres_changes", {
-    event: "*", schema: "public", table, filter: `user_id=eq.${userId}`,
-  }, onInvalidate).subscribe();
-  return () => { void supabase.removeChannel(channel); };
+  // Realtime subscriptions are no longer wired to direct Supabase access.
+  // Poll the query instead; the returned function unsubscribes (no-op).
+  return () => {};
 }
-
 /**
  * Fetch vans, technicians, and aggregate counts for the Fleet overview page.
  * Resolves the current user from auth internally.
@@ -494,69 +353,11 @@ export async function fetchFleetVansOverview(): Promise<{
     throw new Error("You must be logged in to view fleet.");
   }
 
-  const [vansRes, territoriesRes, inventoryRes, techRes] = await Promise.all([
-    supabase
-      .from("vans")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("name"),
-    supabase.from("van_territories").select("van_id"),
-    supabase.from("van_inventory").select("van_id"),
-    supabase
-      .from("technicians")
-      .select("id, name")
-      .eq("user_id", user.id)
-      .eq("is_active", true)
-      .order("name"),
-  ]);
-
-  const technicians: FleetTechnicianSummary[] =
-    (techRes.data as FleetTechnicianSummary[] | null) ?? [];
-
-  const vansRaw: VanRow[] = vansRes.data ?? [];
-  const territories: VanTerritoryRow[] = territoriesRes.data ?? [];
-  const inventory: VanInventoryRow[] = inventoryRes.data ?? [];
-
-  const techMap = new Map<string, string>();
-  technicians.forEach((t) => techMap.set(t.id, t.name));
-
-  const territoryMap = new Map<string, number>();
-  territories.forEach((t) => {
-    const key = String(t.van_id);
-    territoryMap.set(key, (territoryMap.get(key) || 0) + 1);
-  });
-
-  const inventoryMap = new Map<string, number>();
-  inventory.forEach((i) => {
-    const key = String(i.van_id);
-    inventoryMap.set(key, (inventoryMap.get(key) || 0) + 1);
-  });
-
-  const vans: FleetVanSummary[] = vansRaw.map((v) => {
-    const id = String(v.id);
-    return {
-      id,
-      name: v.name,
-      vin: v.vin ?? null,
-      license_plate: v.license_plate ?? null,
-      make: v.make ?? null,
-      model: v.model ?? null,
-      year: v.year ?? null,
-      status: v.status,
-      is_active: v.is_active,
-      assigned_technician_id: v.assigned_technician_id ?? null,
-      technician_name:
-        v.assigned_technician_id
-          ? techMap.get(v.assigned_technician_id) ?? null
-          : null,
-      territory_count: territoryMap.get(id) || 0,
-      inventory_count: inventoryMap.get(id) || 0,
-    };
-  });
-
-  return { vans, technicians };
+  const { data } = await apiClient.get<{
+    data: { vans: FleetVanSummary[]; technicians: FleetTechnicianSummary[] };
+  }>("/v1/fleet/vans-overview");
+  return { vans: data?.vans ?? [], technicians: data?.technicians ?? [] };
 }
-
 /**
  * List all fleet clients for the current user with simple stats
  * (vehicle and work order counts).
@@ -570,22 +371,14 @@ export async function fetchFleetClients(): Promise<FleetClientSummary[]> {
     throw new Error("You must be logged in to view fleet clients.");
   }
 
-  const { data, error } = await supabase
-    .from("fleet_clients")
-    .select(
-      "id, company_name, status, phone, billing_email, payment_terms, fleet_vehicles(id), fleet_work_orders(id)"
-    )
-    .eq("user_id", user.id)
-    .order("company_name");
-
-  if (error || !data) {
+  try {
+    const { data } = await apiClient.get<{ data: FleetClientSummary[] }>("/v1/fleet/clients");
+    return data ?? [];
+  } catch (error) {
     console.error("[fetchFleetClients] Error fetching fleet clients", error);
     return [];
   }
-
-  return data as unknown as FleetClientSummary[];
 }
-
 /**
  * List all fleet vehicles for the current user with basic relations.
  */
@@ -598,21 +391,15 @@ export async function fetchFleetVehiclesList(): Promise<FleetVehicleListItem[]> 
     throw new Error("You must be logged in to view fleet vehicles.");
   }
 
-  const { data, error } = await supabase
-    .from("fleet_vehicles")
-    .select(
-      "id, year, make, model, unit_number, vin, license_plate, mileage, status, fleet_client_id, fleet_location_id, fleet_contract_id, created_at, fleet_clients(company_name), fleet_locations(name), fleet_contracts(name)"
-    )
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false });
-
-  if (error || !data) {
+  try {
+    const { data } = await apiClient.get<{ data: FleetVehicleListItem[] }>("/v1/fleet/vehicles-list");
+    return data ?? [];
+  } catch (error) {
     console.error("[fetchFleetVehiclesList] Error fetching fleet vehicles", error);
     return [];
   }
-
-  return data as unknown as FleetVehicleListItem[];
 }
+
 
 export interface FleetVehiclePageOptions {
   page: number;
@@ -630,40 +417,26 @@ export interface FleetVehiclePageResult {
   rows: FleetVehicleListItem[];
   total: number;
   aggregates: { total: number; active: number; maintenance: number; incomplete: number };
-}
-
-/** Server-filtered vehicle list with exact counts; no full fleet download. */
+}/** Server-filtered vehicle list with exact counts; no full fleet download. */
 export async function fetchFleetVehiclesPage(options: FleetVehiclePageOptions): Promise<FleetVehiclePageResult> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("You must be logged in to view fleet vehicles.");
-  const select = "id, year, make, model, unit_number, vin, license_plate, mileage, status, fleet_client_id, fleet_location_id, fleet_contract_id, created_at, fleet_clients(company_name), fleet_locations(name), fleet_contracts(name)";
-  let query = supabase.from("fleet_vehicles").select(select, { count: "exact" }).eq("user_id", user.id);
-  if (options.search?.trim()) {
-    const value = options.search.trim().replace(/[,%()]/g, "");
-    query = query.or(`vin.ilike.%${value}%,unit_number.ilike.%${value}%,license_plate.ilike.%${value}%,make.ilike.%${value}%,model.ilike.%${value}%`);
-  }
-  if (options.clientId) query = query.eq("fleet_client_id", options.clientId);
-  if (options.status) query = query.eq("status", options.status);
-  if (options.locationId) query = query.eq("fleet_location_id", options.locationId);
-  if (options.contractId) query = query.eq("fleet_contract_id", options.contractId);
-  if (options.dataFilter === "missing_vin") query = query.is("vin", null);
-  if (options.dataFilter === "missing_location") query = query.is("fleet_location_id", null);
-  if (options.dataFilter === "missing_contract") query = query.is("fleet_contract_id", null);
-  const sortMap = {
-    recent: ["created_at", false], client: ["fleet_client_id", true], unit: ["unit_number", true], year_desc: ["year", false], mileage_desc: ["mileage", false],
-  } as const;
-  const [sortColumn, ascending] = sortMap[options.sort ?? "recent"];
-  query = query.order(sortColumn, { ascending }).range((options.page - 1) * options.pageSize, options.page * options.pageSize - 1);
-  const [page, total, active, maintenance, incomplete] = await Promise.all([
-    query,
-    supabase.from("fleet_vehicles").select("id", { count: "exact", head: true }).eq("user_id", user.id),
-    supabase.from("fleet_vehicles").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("status", "active"),
-    supabase.from("fleet_vehicles").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("status", "maintenance"),
-    supabase.from("fleet_vehicles").select("id", { count: "exact", head: true }).eq("user_id", user.id).or("vin.is.null,mileage.is.null,fleet_location_id.is.null,fleet_contract_id.is.null"),
-  ]);
-  if (page.error) throw page.error;
-  return { rows: (page.data ?? []) as FleetVehicleListItem[], total: page.count ?? 0, aggregates: { total: total.count ?? 0, active: active.count ?? 0, maintenance: maintenance.count ?? 0, incomplete: incomplete.count ?? 0 } };
+  const { data } = await apiClient.get<{ data: FleetVehiclePageResult }>("/v1/fleet/vehicles/page", {
+    query: {
+      page: options.page,
+      page_size: options.pageSize,
+      search: options.search,
+      client_id: options.clientId,
+      status: options.status,
+      location_id: options.locationId,
+      contract_id: options.contractId,
+      data_filter: options.dataFilter,
+      sort: options.sort,
+    },
+  });
+  return data as FleetVehiclePageResult;
 }
+
 
 /**
  * Options for the fleet vehicle creation form (clients, locations, contracts).
@@ -678,8 +451,9 @@ export interface FleetVehicleFormOptions {
 type FleetClientBasicRow = Pick<Database["public"]["Tables"]["fleet_clients"]["Row"], "id" | "company_name">;
 type FleetLocationBasicRow = Pick<Database["public"]["Tables"]["fleet_locations"]["Row"], "id" | "name" | "city" | "state" | "fleet_client_id">;
 type FleetContractBasicRow = Pick<Database["public"]["Tables"]["fleet_contracts"]["Row"], "id" | "name" | "fleet_client_id">;
-type FleetServiceRuleBasicRow = Pick<Database["public"]["Tables"]["fleet_service_rules"]["Row"], "id" | "service_class" | "fleet_client_id">;
-
+type FleetServiceRuleBasicRow = Pick<Database["public"]["Tables"]["fleet_service_rules"]["Row"], "id" | "service_class" | "fleet_client_id">;/**
+ * Options for the fleet vehicle creation form (clients, locations, contracts).
+ */
 export async function fetchFleetVehicleFormOptions(): Promise<FleetVehicleFormOptions> {
   const {
     data: { user },
@@ -689,54 +463,10 @@ export async function fetchFleetVehicleFormOptions(): Promise<FleetVehicleFormOp
     throw new Error("You must be logged in to manage fleet vehicles.");
   }
 
-  const [clientsRes, locationsRes, contractsRes, serviceProfilesRes] = await Promise.all([
-    supabase
-      .from("fleet_clients")
-      .select("id, company_name")
-      .eq("user_id", user.id)
-      .eq("status", "active")
-      .order("company_name"),
-    supabase
-      .from("fleet_locations")
-      .select("id, name, city, state, fleet_client_id")
-      .eq("user_id", user.id)
-      .order("name"),
-    supabase
-      .from("fleet_contracts")
-      .select("id, name, fleet_client_id")
-      .eq("user_id", user.id)
-      .eq("is_active", true),
-    supabase
-      .from("fleet_service_rules")
-      .select("id, service_class, fleet_client_id")
-      .eq("user_id", user.id)
-      .eq("is_active", true),
-  ]);
-
-  return {
-    clients: (clientsRes.data as FleetClientBasicRow[] | null)?.map((c) => ({
-      id: String(c.id),
-      company_name: c.company_name,
-    })) ?? [],
-    locations: (locationsRes.data as FleetLocationBasicRow[] | null)?.map((l) => ({
-      id: String(l.id),
-      name: l.name,
-      city: l.city ?? null,
-      state: l.state ?? null,
-      fleet_client_id: l.fleet_client_id ?? null,
-    })) ?? [],
-    contracts: (contractsRes.data as FleetContractBasicRow[] | null)?.map((c) => ({
-      id: String(c.id),
-      name: c.name,
-      fleet_client_id: c.fleet_client_id ?? null,
-    })) ?? [],
-    serviceProfiles: (serviceProfilesRes.data as FleetServiceRuleBasicRow[] | null)?.map((r) => ({
-      id: String(r.id),
-      service_class: r.service_class,
-      fleet_client_id: r.fleet_client_id ?? null,
-    })) ?? [],
-  };
+  const { data } = await apiClient.get<{ data: FleetVehicleFormOptions }>("/v1/fleet/vehicle-form-options");
+  return data as FleetVehicleFormOptions;
 }
+
 
 export interface FleetWorkOrderCreateOptions {
   clients: { id: string; company_name: string }[];
@@ -907,27 +637,16 @@ export interface FleetDomainSeparationHealth {
   fleetSchedulerVisibleCount: number;
   fleetMissingScheduleCount: number;
   legacyFleetAppointmentCount: number;
-}
-
-export async function fetchFleetLocations(): Promise<FleetLocationSummary[]> {
+}export async function fetchFleetLocations(): Promise<FleetLocationSummary[]> {
   const {
     data: { user },
   } = await getCurrentAuthUser();
 
   if (!user) throw new Error("Not authenticated");
 
-  const { data, error } = await supabase
-    .from("fleet_locations")
-    .select(
-      `id, fleet_client_id, name, address, city, state, postal_code, is_primary, service_window_start, service_window_end, site_contact_name, site_contact_phone, access_instructions, fleet_clients ( company_name )`
-    )
-    .eq("user_id", user.id)
-    .order("name", { ascending: true });
-
-  if (error) throw error;
-  return (data ?? []) as FleetLocationSummary[];
+  const { data } = await apiClient.get<{ data: FleetLocationSummary[] }>("/v1/fleet/locations");
+  return data ?? [];
 }
-
 export async function fetchFleetPurchaseOrders(): Promise<FleetPurchaseOrderSummary[]> {
   const {
     data: { user },
@@ -935,18 +654,9 @@ export async function fetchFleetPurchaseOrders(): Promise<FleetPurchaseOrderSumm
 
   if (!user) throw new Error("Not authenticated");
 
-  const { data, error } = await supabase
-    .from("fleet_purchase_orders")
-    .select(
-      `id, po_number, description, amount_limit, amount_used, status, issued_date, expiry_date, fleet_clients ( company_name )`
-    )
-    .eq("user_id", user.id)
-    .order("issued_date", { ascending: false });
-
-  if (error) throw error;
-  return (data ?? []) as FleetPurchaseOrderSummary[];
+  const { data } = await apiClient.get<{ data: FleetPurchaseOrderSummary[] }>("/v1/fleet/purchase-orders");
+  return data ?? [];
 }
-
 export async function fetchFleetContacts(): Promise<FleetContactSummary[]> {
   const {
     data: { user },
@@ -954,18 +664,9 @@ export async function fetchFleetContacts(): Promise<FleetContactSummary[]> {
 
   if (!user) throw new Error("Not authenticated");
 
-  const { data, error } = await supabase
-    .from("fleet_contacts")
-    .select(
-      `id, name, role, email, phone, is_primary, can_approve_work, receives_invoices, receives_reports, fleet_clients ( company_name )`
-    )
-    .eq("user_id", user.id)
-    .order("name", { ascending: true });
-
-  if (error) throw error;
-  return (data ?? []) as FleetContactSummary[];
+  const { data } = await apiClient.get<{ data: FleetContactSummary[] }>("/v1/fleet/contacts");
+  return data ?? [];
 }
-
 export async function fetchFleetContracts(): Promise<FleetContractSummary[]> {
   const {
     data: { user },
@@ -973,18 +674,11 @@ export async function fetchFleetContracts(): Promise<FleetContractSummary[]> {
 
   if (!user) throw new Error("Not authenticated");
 
-  const { data, error } = await supabase
-    .from("fleet_contracts")
-    .select(
-      `id, name, is_active, sla_hours, approval_threshold, invoice_frequency, start_date, end_date, pricing_rules, fleet_clients ( company_name )`
-    )
-    .eq("user_id", user.id)
-    .order("name", { ascending: true });
-
-  if (error) throw error;
-  return (data ?? []) as FleetContractSummary[];
+  const { data } = await apiClient.get<{ data: FleetContractSummary[] }>("/v1/fleet/contracts");
+  return ((data ?? []) as FleetContractSummary[]).sort((a, b) =>
+    String(a.name ?? "").localeCompare(String(b.name ?? ""))
+  );
 }
-
 export async function fetchFleetInvoices(): Promise<FleetInvoiceSummary[]> {
   const {
     data: { user },
@@ -992,19 +686,9 @@ export async function fetchFleetInvoices(): Promise<FleetInvoiceSummary[]> {
 
   if (!user) throw new Error("Not authenticated");
 
-  const { data, error } = await supabase
-    .from("fleet_work_orders")
-    .select(
-      `id, order_number, po_number, status, invoice_status, total, completed_at, fleet_clients ( company_name ), fleet_vehicles ( year, make, model, unit_number )`
-    )
-    .eq("user_id", user.id)
-    .in("status", ["completed", "invoiced", "paid"])
-    .order("completed_at", { ascending: false });
-
-  if (error) throw error;
-  return (data ?? []) as FleetInvoiceSummary[];
+  const { data } = await apiClient.get<{ data: FleetInvoiceSummary[] }>("/v1/fleet/work-order-invoices");
+  return data ?? [];
 }
-
 export async function fetchFleetReportsOverview(): Promise<FleetReportsOverviewResult> {
   const {
     data: { user },
@@ -1012,61 +696,9 @@ export async function fetchFleetReportsOverview(): Promise<FleetReportsOverviewR
 
   if (!user) throw new Error("Not authenticated");
 
-  const [vehicles, locations, workOrders, purchaseOrders] = await Promise.all([
-    supabase.from("fleet_vehicles").select("id").eq("user_id", user.id),
-    supabase.from("fleet_locations").select("id").eq("user_id", user.id).eq("is_primary", true),
-    supabase
-      .from("fleet_work_orders")
-      .select("id, status, completed_at, total, fleet_vehicle_id")
-      .eq("user_id", user.id),
-    supabase.from("fleet_purchase_orders").select("id, status").eq("user_id", user.id),
-  ]);
-
-  if (vehicles.error) throw vehicles.error;
-  if (locations.error) throw locations.error;
-  if (workOrders.error) throw workOrders.error;
-  if (purchaseOrders.error) throw purchaseOrders.error;
-
-  const now = new Date();
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-
-  const woData = (workOrders.data ?? []) as {
-    id: string;
-    status: string | null;
-    completed_at: string | null;
-    total: number | null;
-    fleet_vehicle_id: string | null;
-  }[];
-
-  const stats: FleetReportStats = {
-    totalVehicles: (vehicles.data ?? []).length,
-    activeLocations: (locations.data ?? []).length,
-    openWorkOrders: woData.filter((wo) => wo.status !== "completed" && wo.status !== "cancelled").length,
-    completedThisMonth: woData.filter((wo) => {
-      if (!wo.completed_at) return false;
-      const completed = new Date(wo.completed_at);
-      return completed >= startOfMonth && completed <= now;
-    }).length,
-    purchaseOrdersOpen: (purchaseOrders.data ?? []).filter((po) => po.status === "open").length,
-  };
-
-  const totalsByVehicle = new Map<string, { total: number; label: string }>();
-
-  for (const wo of woData) {
-    if (!wo.fleet_vehicle_id || !wo.total) continue;
-    const existing = totalsByVehicle.get(wo.fleet_vehicle_id) ?? { total: 0, label: wo.fleet_vehicle_id };
-    existing.total += wo.total;
-    totalsByVehicle.set(wo.fleet_vehicle_id, existing);
-  }
-
-  const topVehicles: FleetTopVehicleSpend[] = Array.from(totalsByVehicle.entries())
-    .map(([vehicleId, { total, label }]) => ({ vehicleId, label, totalSpend: total }))
-    .sort((a, b) => b.totalSpend - a.totalSpend)
-    .slice(0, 10);
-
-  return { stats, topVehicles };
+  const { data } = await apiClient.get<{ data: FleetReportsOverviewResult }>("/v1/fleet/reports-overview");
+  return data as FleetReportsOverviewResult;
 }
-
 export async function fetchFleetTodayWorkOrdersWithCheckins(): Promise<FleetTodayWorkOrdersResult> {
   const {
     data: { user },
@@ -1074,50 +706,9 @@ export async function fetchFleetTodayWorkOrdersWithCheckins(): Promise<FleetToda
 
   if (!user) throw new Error("Not authenticated");
 
-  const today = new Date();
-  const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
-  const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1).toISOString();
-
-  const todayStr = today.toISOString().split("T")[0];
-
-  const [workOrders, checkins] = await Promise.all([
-    supabase
-      .from("fleet_work_orders")
-      .select(
-        `id, order_number, status, scheduled_date, scheduled_time, scheduled_duration_minutes, fleet_vehicles ( id, unit_number, make, model, year ), fleet_clients ( company_name )`
-      )
-      .eq("user_id", user.id)
-      .in("status", ["scheduled", "in_progress"])
-      .eq("scheduled_date", todayStr)
-      .order("scheduled_time", { ascending: true }),
-    supabase
-      .from("fleet_checkins")
-      .select("id, created_at, type, notes, latitude, longitude, accuracy, fleet_work_order_id")
-      .eq("user_id", user.id)
-      .gte("created_at", startOfDay)
-      .lt("created_at", endOfDay),
-  ]);
-
-  if (workOrders.error) throw workOrders.error;
-  if (checkins.error) throw checkins.error;
-
-  const workOrdersTyped = (workOrders.data ?? []) as unknown as FleetWorkOrderDetail[];
-  const checkinsTyped = (checkins.data ?? []) as unknown as FleetCheckInRecord[];
-
-  const checkinsByWorkOrderId: Record<string, FleetCheckInRecord[]> = {};
-  for (const c of checkinsTyped) {
-    const key = c.fleet_work_order_id ?? "";
-    if (!key) continue;
-    if (!checkinsByWorkOrderId[key]) checkinsByWorkOrderId[key] = [];
-    checkinsByWorkOrderId[key].push(c);
-  }
-
-  return {
-    workOrders: workOrdersTyped,
-    checkinsByWorkOrderId,
-  };
+  const { data } = await apiClient.get<{ data: FleetTodayWorkOrdersResult }>("/v1/fleet/today-work-orders");
+  return data as FleetTodayWorkOrdersResult;
 }
-
 export async function fetchFleetWorkOrderCreateOptions(): Promise<FleetWorkOrderCreateOptions> {
   const {
     data: { user },
@@ -1126,167 +717,23 @@ export async function fetchFleetWorkOrderCreateOptions(): Promise<FleetWorkOrder
   if (!user) {
     throw new Error("You must be logged in to create fleet work orders.");
   }
-  const { data: workspaceOwner, error: workspaceError } = await (supabase as any).rpc("current_workspace_owner_user_id");
-  if (workspaceError || !workspaceOwner) throw workspaceError ?? new Error("No active Fleet workspace.");
-  const ownerId = String(workspaceOwner);
 
-  const [clientsRes, vehiclesRes, contractsRes, locationsRes, posRes, serviceRulesRes, contractServicesRes] =
-    await Promise.all([
-      supabase
-        .from("fleet_clients")
-        .select("id, company_name, status")
-        .eq("user_id", ownerId)
-        .eq("status", "active")
-        .order("company_name"),
-      supabase
-        .from("fleet_vehicles")
-        .select(
-          "id, fleet_client_id, fleet_location_id, fleet_contract_id, year, make, model, unit_number, vin, mileage, license_plate, notes, status"
-        )
-        .eq("user_id", ownerId)
-        .eq("status", "active")
-        .order("make"),
-      supabase
-        .from("fleet_contracts")
-        .select(
-          "id, fleet_client_id, name, sla_hours, approval_threshold, pricing_rules, is_active, start_date, end_date"
-        )
-        .eq("user_id", ownerId)
-        .eq("is_active", true),
-      supabase
-        .from("fleet_locations")
-        .select("id, fleet_client_id, name, address, city, state, service_window_start, service_window_end")
-        .eq("user_id", ownerId),
-      supabase
-        .from("fleet_purchase_orders")
-        .select(
-          "id, fleet_client_id, po_number, amount_limit, amount_authorized, amount_consumed, amount_used, status"
-        )
-        .eq("user_id", ownerId)
-        .in("status", ["open", "partially_used"]),
-      supabase
-        .from("fleet_service_rules")
-        .select(
-          "id, fleet_client_id, service_class, base_labor_package, interval_miles, interval_months, base_price, package_code, package_label, estimated_duration_minutes, includes"
-        )
-        .eq("user_id", ownerId)
-        .eq("is_active", true),
-      supabase
-        .from("fleet_contract_services")
-        .select(
-          "id, fleet_contract_id, service_catalog_id, custom_price, custom_label, is_active, service_catalog(name, default_price)"
-        )
-        .eq("user_id", ownerId)
-        .eq("is_active", true),
-    ]);
-
-  return {
-    clients:
-      (clientsRes.data as FleetClientBasicRow[] | null)?.map((c) => ({
-        id: String(c.id),
-        company_name: c.company_name,
-      })) ?? [],
-    vehicles:
-      (vehiclesRes.data as FleetVehicleOptionRow[] | null)?.map((v) => ({
-        id: String(v.id),
-        fleet_client_id: v.fleet_client_id ?? null,
-        fleet_location_id: v.fleet_location_id ?? null,
-        fleet_contract_id: v.fleet_contract_id ?? null,
-        year: v.year ?? null,
-        make: v.make ?? null,
-        model: v.model ?? null,
-        unit_number: v.unit_number ?? null,
-        vin: v.vin ?? null,
-        mileage: v.mileage ?? null,
-        license_plate: v.license_plate ?? null,
-        notes: v.notes ?? null,
-      })) ?? [],
-    contracts:
-      (contractsRes.data as FleetContractOptionRow[] | null)?.map((c) => ({
-        id: String(c.id),
-        fleet_client_id: c.fleet_client_id ?? null,
-        name: c.name ?? null,
-        sla_hours: c.sla_hours ?? null,
-        approval_threshold: c.approval_threshold ?? null,
-        pricing_rules: c.pricing_rules,
-        is_active: c.is_active ?? null,
-        start_date: c.start_date ?? null,
-        end_date: c.end_date ?? null,
-      })) ?? [],
-    locations:
-      (locationsRes.data as FleetLocationOptionRow[] | null)?.map((l) => ({
-        id: String(l.id),
-        fleet_client_id: l.fleet_client_id ?? null,
-        name: l.name ?? null,
-        address: l.address ?? null,
-        city: l.city ?? null,
-        state: l.state ?? null,
-        service_window_start: l.service_window_start ?? null,
-        service_window_end: l.service_window_end ?? null,
-      })) ?? [],
-    purchaseOrders:
-      (posRes.data as FleetPurchaseOrderOptionRow[] | null)?.map((p) => ({
-        id: String(p.id),
-        fleet_client_id: p.fleet_client_id ?? null,
-        po_number: p.po_number ?? null,
-        amount_limit: p.amount_limit ?? null,
-        amount_authorized: p.amount_authorized ?? null,
-        amount_consumed: p.amount_consumed ?? null,
-        amount_used: p.amount_used ?? null,
-        status: p.status ?? null,
-      })) ?? [],
-    serviceProfiles:
-      (serviceRulesRes.data as FleetServiceRuleOptionRow[] | null)?.map((rule) => ({
-        id: String(rule.id),
-        fleet_client_id: rule.fleet_client_id ?? null,
-        service_class: rule.service_class,
-        base_labor_package: rule.base_labor_package,
-        interval_miles: rule.interval_miles,
-        interval_months: rule.interval_months,
-        base_price: rule.base_price,
-        package_code: rule.package_code ?? null,
-        package_label: rule.package_label ?? null,
-        estimated_duration_minutes: rule.estimated_duration_minutes ?? null,
-        includes: Array.isArray(rule.includes) ? (rule.includes as string[]) : [],
-      })) ?? [],
-    contractServices:
-      ((contractServicesRes.data as Array<{
-        id: string;
-        fleet_contract_id: string;
-        service_catalog_id: string | null;
-        custom_price: number | null;
-        custom_label: string | null;
-        is_active: boolean;
-        service_catalog: { name: string | null; default_price: number | null } | null;
-      }> | null) ?? []).map((r) => ({
-        id: String(r.id),
-        fleet_contract_id: String(r.fleet_contract_id),
-        service_catalog_id: r.service_catalog_id ?? null,
-        custom_price: r.custom_price ?? null,
-        custom_label: r.custom_label ?? null,
-        is_active: r.is_active !== false,
-        catalog_name: r.service_catalog?.name ?? null,
-        catalog_default_price: r.service_catalog?.default_price ?? null,
-      })),
-  };
+  const { data } = await apiClient.get<{ data: FleetWorkOrderCreateOptions }>(
+    "/v1/fleet/work-order-create-options"
+  );
+  return data as FleetWorkOrderCreateOptions;
 }
-
 export async function fetchFleetVehicleEligibility(
   fleetClientId: string,
 ): Promise<FleetVehicleEligibility[]> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return [];
 
-  const { data, error } = await supabase
-    .from("fleet_service_schedules")
-    .select("fleet_vehicle_id, service_class, status, due_date, due_mileage, base_labor_package, estimated_price, rule_id")
-    .eq("user_id", user.id)
-    .eq("fleet_client_id", fleetClientId);
-
-  if (error) throw error;
-  return (data ?? []) as FleetVehicleEligibility[];
+  const { data } = await apiClient.get<{ data: FleetVehicleEligibility[] }>("/v1/fleet/vehicle-eligibility", {
+    query: { fleet_client_id: fleetClientId },
+  });
+  return data ?? [];
 }
-
 export async function fetchFleetWorkOrderDetail(
   workOrderId: string,
 ): Promise<FleetWorkOrderDetailResult> {
@@ -1298,80 +745,24 @@ export async function fetchFleetWorkOrderDetail(
     throw new Error("You must be logged in to view fleet work orders.");
   }
 
-  const [orderRes, lineItemsRes, logsRes, approvalsRes] = await Promise.all([
-    supabase
-      .from("fleet_work_orders")
-      .select(
-        "*, fleet_vehicles(id, year, make, model, unit_number, vin, mileage, license_plate), fleet_clients(id, company_name), fleet_contracts(id, name, sla_hours, approval_threshold, pricing_rules), fleet_locations(id, name, address, city, state), technicians!fleet_work_orders_assigned_technician_id_fkey(id, name, status, last_location_update)"
-      )
-      .eq("id", workOrderId)
-      .eq("user_id", user.id)
-      .single(),
-    supabase
-      .from("fleet_work_order_line_items")
-      .select("*")
-      .eq("fleet_work_order_id", workOrderId)
-      .eq("user_id", user.id)
-      .order("sort_order"),
-    supabase
-      .from("fleet_activity_logs")
-      .select("*")
-      .eq("fleet_work_order_id", workOrderId)
-      .order("created_at", { ascending: false }),
-    supabase
-      .from("fleet_approvals")
-      .select("*")
-      .eq("fleet_work_order_id", workOrderId)
-      .order("created_at", { ascending: false }),
-  ]);
-
-  return {
-    order: (orderRes.data as FleetWorkOrderDetail | null) ?? null,
-    lineItems: (lineItemsRes.data as FleetWorkOrderLineItem[] | null) ?? [],
-    activityLogs: (logsRes.data as FleetActivityLog[] | null) ?? [],
-    approvals: (approvalsRes.data as FleetApproval[] | null) ?? [],
-  };
+  const { data } = await apiClient.get<{ data: FleetWorkOrderDetailResult }>(
+    `/v1/fleet/work-orders/${workOrderId}/detail`
+  );
+  return data as FleetWorkOrderDetailResult;
 }
-
 export async function fetchAssignableTechnicians() {
-  const { data, error } = await supabase
-    .from("technicians")
-    .select("id,name")
-    .eq("is_active", true)
-    .order("name");
-  if (error) throw error;
+  const { data } = await apiClient.get<{ data: Array<{ id: string; name: string }> }>(
+    "/v1/fleet/assignable-technicians"
+  );
   return data ?? [];
 }
-
 export async function fetchFleetDomainSeparationHealth(userId: string): Promise<FleetDomainSeparationHealth> {
-  const schedulerStatuses = ["scheduled", "assigned", "in_progress"];
-
-  const [visibleRes, missingScheduleRes, legacyAppointmentsRes] = await Promise.all([
-    supabase
-      .from("fleet_work_orders")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId)
-      .in("status", schedulerStatuses)
-      .not("scheduled_date", "is", null),
-    supabase
-      .from("fleet_work_orders")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId)
-      .in("status", schedulerStatuses)
-      .is("scheduled_date", null),
-    supabase
-      .from("appointments")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", userId)
-      .eq("source", "fleet_work_order"),
-  ]);
-
-  return {
-    fleetSchedulerVisibleCount: visibleRes.count ?? 0,
-    fleetMissingScheduleCount: missingScheduleRes.count ?? 0,
-    legacyFleetAppointmentCount: legacyAppointmentsRes.count ?? 0,
-  };
+  const { data } = await apiClient.get<{ data: FleetDomainSeparationHealth }>(
+    "/v1/fleet/domain-separation-health"
+  );
+  return data as FleetDomainSeparationHealth;
 }
+
 
 // ── Ops feed ────────────────────────────────────────────────────────────────
 
@@ -1394,37 +785,26 @@ export interface FetchFleetOpsEventsParams {
   vehicleId?: string;
   workOrderId?: string;
   limit?: number;
+}export async function fetchFleetOpsEvents(params: FetchFleetOpsEventsParams): Promise<FleetOpsEvent[]> {
+  const { data } = await apiClient.get<{ data: FleetOpsEvent[] }>("/v1/fleet/ops-events", {
+    query: {
+      fleet_client_id: params.fleetClientId,
+      vehicle_id: params.vehicleId,
+      work_order_id: params.workOrderId,
+      limit: params.limit,
+    },
+  });
+  return data ?? [];
 }
-
-export async function fetchFleetOpsEvents(params: FetchFleetOpsEventsParams): Promise<FleetOpsEvent[]> {
-  let q = supabase
-    .from("fleet_ops_events")
-    .select("*")
-    .order("created_at", { ascending: false })
-    .limit(params.limit ?? 50);
-  if (params.fleetClientId) q = q.eq("fleet_client_id", params.fleetClientId);
-  if (params.vehicleId) q = q.eq("fleet_vehicle_id", params.vehicleId);
-  if (params.workOrderId) q = q.eq("fleet_work_order_id", params.workOrderId);
-  const { data } = await q;
-  return (data ?? []) as unknown as FleetOpsEvent[];
-}
-
 /** Subscribe to INSERTs on fleet_ops_events. Consumer filters by scope. */
 export function subscribeFleetOpsEvents(
   scopeKey: string,
   onInsert: (row: FleetOpsEvent) => void,
 ): { unsubscribe: () => void } {
-  const channel = supabase
-    .channel(`fleet-ops-${scopeKey}`)
-    .on(
-      "postgres_changes",
-      { event: "INSERT", schema: "public", table: "fleet_ops_events" },
-      (payload) => onInsert(payload.new as unknown as FleetOpsEvent),
-    )
-    .subscribe();
+  // Realtime subscriptions are no longer wired to direct Supabase access.
+  // Poll the query instead; the returned function unsubscribes (no-op).
   return {
-    unsubscribe: () => {
-      supabase.removeChannel(channel);
-    },
+    unsubscribe: () => {},
   };
 }
+

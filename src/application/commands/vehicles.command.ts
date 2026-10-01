@@ -4,7 +4,7 @@
  * All active vehicle mutations go through the authenticated Next API boundary.
  */
 
-import { ApiClientError, nextApi } from "@/lib/nextApiClient";
+import { ApiClientError, apiClient } from "@/lib/api-client";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 import { invalidateVehicleOverview } from "@/application/queries/vehicles.query";
 import { invalidateCustomerOverview } from "@/application/queries/customers.query";
@@ -42,20 +42,20 @@ function invalidateVehicleRelatedCaches(workspaceId: string): void {
 
 export async function createVehicle(payload: VehicleWritePayload): Promise<void> {
   const workspaceId = requireSelectedWorkspaceId();
-  await nextApi.vehicles.create(vehiclePayload(workspaceId, payload));
+  await apiClient.post("/v1/vehicles", vehiclePayload(workspaceId, payload));
   invalidateVehicleRelatedCaches(workspaceId);
 }
 
 export async function updateVehicle(id: string, payload: VehicleWritePayload): Promise<void> {
   const workspaceId = requireSelectedWorkspaceId();
-  await nextApi.vehicles.update(id, vehiclePayload(workspaceId, payload));
+  await apiClient.patch(`/v1/vehicles/${encodeURIComponent(id)}`, vehiclePayload(workspaceId, payload));
   invalidateVehicleRelatedCaches(workspaceId);
 }
 
 export async function updateVehicleOilType(id: string, oilType: string): Promise<void> {
   const workspaceId = requireSelectedWorkspaceId();
   try {
-    await nextApi.vehicles.update(id, { workspace_id: workspaceId, oil_type: oilType });
+    await apiClient.patch(`/v1/vehicles/${encodeURIComponent(id)}`, { workspace_id: workspaceId, oil_type: oilType });
     invalidateVehicleOverview(workspaceId);
   } catch (error) {
     // Appointment completion records the selected oil type in the canonical
@@ -75,6 +75,6 @@ export async function updateVehicleOilType(id: string, oilType: string): Promise
 
 export async function deleteVehicle(id: string): Promise<void> {
   const workspaceId = requireSelectedWorkspaceId();
-  await nextApi.vehicles.remove(workspaceId, id);
+  await apiClient.delete(`/v1/vehicles/${encodeURIComponent(id)}`, { query: { workspace_id: workspaceId } });
   invalidateVehicleRelatedCaches(workspaceId);
 }

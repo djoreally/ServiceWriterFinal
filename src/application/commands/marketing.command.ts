@@ -2,28 +2,22 @@
  * Marketing Commands - Write operations for testimonials and reviews.
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export async function updateTestimonialStatus(
   id: string,
   status: "approved" | "rejected"
 ): Promise<void> {
-  const { error } = await supabase
-    .from("testimonials")
-    .update({ status })
-    .eq("id", id);
-  if (error) throw error;
+  await apiClient.patch(`/v1/crm/marketing/testimonials/${id}`, { status });
 }
 
 export async function toggleTestimonialFeatured(
   id: string,
   currentlyFeatured: boolean
 ): Promise<void> {
-  const { error } = await supabase
-    .from("testimonials")
-    .update({ featured: !currentlyFeatured })
-    .eq("id", id);
-  if (error) throw error;
+  await apiClient.patch(`/v1/crm/marketing/testimonials/${id}/featured`, {
+    featured: !currentlyFeatured,
+  });
 }
 
 // ── Additional marketing commands ──────────────────────
@@ -34,15 +28,15 @@ export interface SendEmailBody {
 }
 
 export async function sendMarketingEmail(body: SendEmailBody): Promise<void> {
-  const { error } = await supabase.functions.invoke("send-email", { body });
-  if (error) throw error;
+  await apiClient.post("/v1/crm/marketing/email/send", body);
 }
 
 export async function markAbandonedBookingRecoverySent(id: string) {
-  return supabase
-    .from("abandoned_bookings")
-    .update({ recovery_sent_at: new Date().toISOString() } as never)
-    .eq("id", id);
+  const { data } = await apiClient.post<{ data: unknown }>(
+    `/v1/crm/marketing/abandoned-bookings/${id}/recovery-sent`,
+    {},
+  );
+  return { data, error: null };
 }
 
 export interface NewsletterSubscribeArgs {
@@ -54,9 +48,33 @@ export interface NewsletterSubscribeArgs {
   utm?: Record<string, string>;
 }
 
+export interface NewsletterCampaignSummary {
+  id: string;
+  subject: string;
+  segment: string;
+  send_at: string;
+  status: string;
+  total_recipients: number;
+  sent_count: number;
+  failed_count: number;
+  skipped_count: number;
+  finished_at: string | null;
+}
+
+interface InvokeOkResult {
+  ok?: boolean;
+  error?: string;
+}
+
+export interface NewsletterSubscribeResult extends InvokeOkResult {
+  subscriberId?: string;
+  unsubscribeToken?: string;
+}
+
 export async function subscribeToNewsletter(args: NewsletterSubscribeArgs) {
-  return supabase.functions.invoke("newsletter-subscribe", {
-    body: {
+  const { data } = await apiClient.post<{ data: NewsletterSubscribeResult | null }>(
+    "/v1/crm/marketing/newsletter/subscribe",
+    {
       workspaceUserId: args.workspaceUserId,
       email: args.email,
       name: args.name,
@@ -64,11 +82,15 @@ export async function subscribeToNewsletter(args: NewsletterSubscribeArgs) {
       segment: args.segment ?? "general",
       utm: args.utm ?? {},
     },
-  });
+  );
+  return { data, error: null as { message: string } | null };
 }
 
 export async function listScheduledNewsletterCampaigns() {
-  return supabase.functions.invoke("newsletter-campaign-schedule", { method: "GET" });
+  const { data } = await apiClient.get<{ data: { campaigns?: NewsletterCampaignSummary[] } | null }>(
+    "/v1/crm/marketing/newsletter/campaigns",
+  );
+  return { data, error: null as { message: string } | null };
 }
 
 export async function scheduleNewsletterCampaign(body: {
@@ -78,9 +100,14 @@ export async function scheduleNewsletterCampaign(body: {
   segment: string;
   sendAt: string;
 }) {
-  return supabase.functions.invoke("newsletter-campaign-schedule", { body });
+  const { data } = await apiClient.post<{ data: InvokeOkResult | null }>(
+    "/v1/crm/marketing/newsletter/campaigns",
+    body,
+  );
+  return { data, error: null as { message: string } | null };
 }
 
 export async function cancelScheduledNewsletterCampaign(id: string) {
-  return supabase.functions.invoke(`newsletter-campaign-schedule?id=${id}`, { method: "DELETE" });
+  const { data } = await apiClient.delete<{ data: unknown }>(`/v1/crm/marketing/newsletter/campaigns/${id}`);
+  return { data, error: null as { message: string } | null };
 }

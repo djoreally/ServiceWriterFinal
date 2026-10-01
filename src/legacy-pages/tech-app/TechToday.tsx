@@ -51,7 +51,6 @@ import { TechMissionAlerts } from "@/components/tech-app/TechMissionAlerts";
 import { useTechJobEta } from "@/hooks/useTechJobEta";
 import { useTechShiftManagement } from "@/hooks/useTechShiftManagement";
 import { toast } from "@/components/ui/sonner";
-import { supabase } from "@/integrations/supabase/client";
 import { useTechContext } from "./TechAppLayout";
 
 interface TechJob {
@@ -240,27 +239,18 @@ export default function TechToday() {
     if (identity) void Promise.resolve().then(() => fetchData());
   }, [identity, fetchData]);
 
-  // Live mission board: dispatch reassignments and status changes land without a
-  // manual pull. Channel name is stable and torn down on unmount to avoid leaks.
+  // Mission board refresh: dispatch reassignments and status changes land without
+  // a manual pull. Realtime channels are not available through the API client,
+  // so this polls on a steady interval instead.
   useEffect(() => {
     if (!identity?.businessUserId) return;
 
-    const channel = supabase
-      .channel(`tech-mission-board-${identity.businessUserId}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "appointments", filter: `user_id=eq.${identity.businessUserId}` },
-        () => fetchData(),
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "fleet_work_orders", filter: `user_id=eq.${identity.businessUserId}` },
-        () => fetchData(),
-      )
-      .subscribe();
+    const timer = setInterval(() => {
+      void fetchData();
+    }, 20_000);
 
     return () => {
-      supabase.removeChannel(channel);
+      clearInterval(timer);
     };
   }, [identity?.businessUserId, fetchData]);
 

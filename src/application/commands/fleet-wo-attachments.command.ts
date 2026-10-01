@@ -3,7 +3,7 @@
  * Files live in the private `fleet-wo-attachments` bucket under `${user_id}/${draft_id}/`.
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface DraftAttachment {
@@ -17,8 +17,6 @@ export interface DraftAttachment {
   signed_url?: string | null;
 }
 
-const BUCKET = "fleet-wo-attachments";
-
 async function requireUserId(): Promise<string> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("You must be signed in.");
@@ -26,25 +24,10 @@ async function requireUserId(): Promise<string> {
 }
 
 export async function listDraftAttachments(draftId: string): Promise<DraftAttachment[]> {
-  const { data, error } = await supabase
-    .from("fleet_work_order_draft_attachments")
-    .select("id, draft_id, storage_path, label, mime_type, size_bytes, created_at")
-    .eq("draft_id", draftId)
-    .order("created_at", { ascending: false });
-  if (error) throw error;
-
-  const rows = (data ?? []) as DraftAttachment[];
-  // Best-effort signed URLs (60 min).
-  const paths = rows.map((r) => r.storage_path);
-  if (paths.length === 0) return rows;
-  const { data: signed } = await supabase.storage.from(BUCKET).createSignedUrls(paths, 60 * 60);
-  const urlByPath = new Map<string, string | null>(
-    ((signed ?? []) as Array<{ path?: string | null; signedUrl?: string | null }>).map((s) => [
-      s.path ?? "",
-      s.signedUrl ?? null,
-    ]),
+  const { data } = await apiClient.get<{ data: DraftAttachment[] }>(
+    `/v1/fleet/work-order-drafts/${draftId}/attachments`,
   );
-  return rows.map((r) => ({ ...r, signed_url: urlByPath.get(r.storage_path) ?? null }));
+  return data ?? [];
 }
 
 export async function uploadDraftAttachment(
@@ -52,38 +35,19 @@ export async function uploadDraftAttachment(
   file: File,
   label?: string,
 ): Promise<DraftAttachment> {
-  const userId = await requireUserId();
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, "_");
-  const storage_path = `${userId}/${draftId}/${Date.now()}-${safeName}`;
+  await requireUserId();
 
-  const { error: upErr } = await supabase.storage.from(BUCKET).upload(storage_path, file, {
-    cacheControl: "3600",
-    upsert: false,
-    contentType: file.type || undefined,
-  });
-  if (upErr) throw upErr;
+  const form = new FormData();
+  form.append("file", file, file.name);
+  if (label !== undefined) form.append("label", label);
 
-  const { data, error } = await supabase
-    .from("fleet_work_order_draft_attachments")
-    .insert({
-      draft_id: draftId,
-      user_id: userId,
-      storage_path,
-      label: label ?? file.name,
-      mime_type: file.type || null,
-      size_bytes: file.size ?? null,
-    })
-    .select("id, draft_id, storage_path, label, mime_type, size_bytes, created_at")
-    .single();
-  if (error) throw error;
-  return data as DraftAttachment;
+  const { data } = await apiClient.post<{ data: DraftAttachment }>(
+    `/v1/fleet/work-order-drafts/${draftId}/attachments`,
+    form,
+  );
+  return data;
 }
 
 export async function deleteDraftAttachment(row: DraftAttachment): Promise<void> {
-  await supabase.storage.from(BUCKET).remove([row.storage_path]);
-  const { error } = await supabase
-    .from("fleet_work_order_draft_attachments")
-    .delete()
-    .eq("id", row.id);
-  if (error) throw error;
+  await apiClient.delete(`/v1/fleet/work-order-drafts/attachments/${row.id}`);
 }

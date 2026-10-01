@@ -1,5 +1,5 @@
 /** Canonical Technician Hub reads for Final. */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { fetchOperationalJobsByDate } from "@/application/queries/operational-jobs.query";
@@ -31,8 +31,13 @@ interface TechnicianMemberRow {
 export async function getCurrentUser() {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return null;
-  const { data: ownerId, error } = await (supabase as any).rpc("current_workspace_owner_user_id");
-  return !error && typeof ownerId === "string" && ownerId ? { ...user, id: ownerId } : user;
+  try {
+    const response = await apiClient.get<{ data: { owner_user_id: string | null } }>("/v1/tech-os/workspace-owner");
+    const ownerId = response.data?.owner_user_id;
+    return typeof ownerId === "string" && ownerId ? { ...user, id: ownerId } : user;
+  } catch {
+    return user;
+  }
 }
 
 export async function fetchTechnicianRoster(): Promise<{
@@ -44,11 +49,12 @@ export async function fetchTechnicianRoster(): Promise<{
     if (!context) return { data: [], error: null };
     const today = format(new Date(), "yyyy-MM-dd");
     const [membersRes, jobsRes] = await Promise.all([
-      (supabase as any).from("workspace_members")
-        .select("user_id,role,is_active,profiles!workspace_members_user_id_fkey(display_name,phone,avatar_url)")
-        .eq("workspace_id", context.workspaceId)
-        .in("role", ["technician", "owner", "manager"])
-        .order("created_at"),
+      apiClient.get<{ data: TechnicianMemberRow[] }>("/v1/tech-os/roster-members", {
+        query: { workspace_id: context.workspaceId, roles: "technician,owner,manager" },
+      }).then(
+        (response) => ({ data: response.data, error: null as unknown }),
+        (error: unknown) => ({ data: [] as TechnicianMemberRow[], error }),
+      ),
       fetchOperationalJobsByDate("", today),
     ]);
     if (membersRes.error) return { data: [], error: membersRes.error };
@@ -124,12 +130,14 @@ export async function fetchTechDetails(_techId: string) {
 }
 
 export async function fetchTeamOsTechnicianSnapshot(_fromDate: string, _toDate: string): Promise<TeamOsTechnicianSnapshot[]> {
-  const rpcResult = await (supabase as any).rpc("get_team_os_technician_snapshot_v1", {
-    p_from: _fromDate,
-    p_to: _toDate,
-  });
-  if (!rpcResult.error && Array.isArray(rpcResult.data)) {
-    return rpcResult.data as TeamOsTechnicianSnapshot[];
+  try {
+    const response = await apiClient.post<{ data: TeamOsTechnicianSnapshot[] | null }>("/v1/tech-os/snapshot", {
+      from: _fromDate,
+      to: _toDate,
+    });
+    if (Array.isArray(response.data)) return response.data;
+  } catch {
+    // Fall through to the roster-derived snapshot below.
   }
   const { data, error } = await fetchTechnicianRoster();
   if (error) throw error;

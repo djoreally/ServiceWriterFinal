@@ -1,7 +1,5 @@
-import { productionSupabase, supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
-
-const productionDb = productionSupabase as any;
 
 export interface TaxBreakdownItem {
   jurisdiction: string;
@@ -66,10 +64,9 @@ export interface PaymentSuccessBookingDetails {
   provider?: string;
 }
 
-function workspaceId(): string {
+function requireWorkspaceSelection(): void {
   const id = getSelectedWorkspaceId();
   if (!id) throw new Error("Select a workspace before viewing payments.");
-  return id;
 }
 
 function object(value: unknown): Record<string, unknown> {
@@ -165,48 +162,54 @@ function mapPayment(payment: PaymentApiRow): PaymentRecord {
 
 /**
  * Load the complete ledger in bounded database pages so KPI totals/export never
- * silently become "first 25 rows only" as the account grows.
+ * silently become "first 25 rows only" as the account grows. Pagination runs
+ * server-side; the row mapping stays here.
  */
 export async function fetchPaymentRecords(): Promise<PaymentRecord[]> {
-  const id = workspaceId();
-  const pageSize = 250;
-  const rows: PaymentApiRow[] = [];
-
-  for (let offset = 0; ; offset += pageSize) {
-    const { data, error } = await (supabase.from("payments") as any)
-      .select("id,amount,currency_code,status,provider,provider_payment_id,created_at,metadata,invoice_id,customer_id,customers(first_name,last_name,email)")
-      .eq("workspace_id", id)
-      .order("created_at", { ascending: false })
-      .range(offset, offset + pageSize - 1);
-    if (error) throw error;
-    const page = (data ?? []) as PaymentApiRow[];
-    rows.push(...page);
-    if (page.length < pageSize) break;
+  requireWorkspaceSelection();
+  try {
+    const { data } = await apiClient.get<{ data: PaymentApiRow[] }>("/v1/billing/payment-ledger");
+    return (data ?? []).map(mapPayment);
+  } catch (error) {
+    throw error instanceof ApiClientError ? new Error(error.message) : error;
   }
-
-  return rows.map(mapPayment);
 }
 
 /** Read the persisted Connect state for the selected workspace. */
 export async function fetchStripeAccountStatus(): Promise<StripeAccountStatus | null> {
-  const id = workspaceId();
-  const { data, error } = await productionDb
-    .from("workspace_settings")
-    .select("operational_settings")
-    .eq("workspace_id", id)
-    .maybeSingle();
-  if (error) throw error;
+  requireWorkspaceSelection();
+  try {
+    const { data } = await apiClient.get<{
+      data: { operational_settings: Record<string, unknown> | null } | null;
+    }>("/v1/billing/stripe-account-status");
+    const operational = object(data?.operational_settings);
+    const accountId = operational.stripe_account_id;
+    const connected = typeof accountId === "string" && accountId.trim().length > 0;
 
-  const operational = object(data?.operational_settings);
-  const accountId = operational.stripe_account_id;
-  const connected = typeof accountId === "string" && accountId.trim().length > 0;
+    return {
+      connected,
+      chargesEnabled: metadataBoolean(operational.stripe_charges_enabled),
+      payoutsEnabled: metadataBoolean(operational.stripe_payouts_enabled),
+      detailsSubmitted: metadataBoolean(operational.stripe_onboarding_complete),
+    };
+  } catch (error) {
+    throw error instanceof ApiClientError ? new Error(error.message) : error;
+  }
+}
 
-  return {
-    connected,
-    chargesEnabled: metadataBoolean(operational.stripe_charges_enabled),
-    payoutsEnabled: metadataBoolean(operational.stripe_payouts_enabled),
-    detailsSubmitted: metadataBoolean(operational.stripe_onboarding_complete),
-  };
+interface PaymentSuccessRow {
+  id: string;
+  workspace_id: string | null;
+  customer_id: string | null;
+  provider: string | null;
+  provider_payment_id: string | null;
+  amount: number | string | null;
+  currency_code: string | null;
+  status: string;
+  created_by: string | null;
+  metadata: unknown;
+  customers: PaymentCustomer | PaymentCustomer[] | null;
+  workspaces: { name?: string | null } | { name?: string | null }[] | null;
 }
 
 /**
@@ -216,34 +219,39 @@ export async function fetchStripeAccountStatus(): Promise<StripeAccountStatus | 
 export async function fetchPaymentSuccessBookingDetails(
   sessionId: string,
 ): Promise<PaymentSuccessBookingDetails | null> {
-  const matchColumn = sessionId.startsWith("cs_") ? "provider_payment_id" : "id";
-  const { data: paymentRecord, error } = await (supabase.from("payments") as any)
-    .select("id,workspace_id,customer_id,provider,provider_payment_id,amount,currency_code,status,created_by,metadata,customers(first_name,last_name,email),workspaces(name)")
-    .eq(matchColumn, sessionId)
-    .maybeSingle();
-  if (error) throw error;
-  if (!paymentRecord) return null;
+  try {
+    const { data: paymentRecord } = await apiClient.get<{ data: PaymentSuccessRow | null }>(
+      "/v1/billing/payment-success",
+      { query: { session_id: sessionId } },
+    );
+    if (!paymentRecord) return null;
 
-  const metadata = object(paymentRecord.metadata);
-  const customer = paymentRecord.customers;
-  const name = customerName(customer) ?? String(metadata.customer_name ?? "Customer");
+    const metadata = object(paymentRecord.metadata);
+    const customer = relatedCustomer(paymentRecord.customers);
+    const name = customerName(customer) ?? String(metadata.customer_name ?? "Customer");
+    const workspace = Array.isArray(paymentRecord.workspaces)
+      ? paymentRecord.workspaces[0] ?? null
+      : paymentRecord.workspaces;
 
-  return {
-    businessName: paymentRecord.workspaces?.name || "Auto Service",
-    customerName: name,
-    customerEmail: customer?.email ?? String(metadata.customer_email ?? ""),
-    scheduledDate: String(metadata.scheduled_date ?? metadata.scheduledDate ?? ""),
-    scheduledTime: String(metadata.scheduled_time ?? metadata.scheduledTime ?? ""),
-    serviceName: String(metadata.service_name ?? metadata.serviceName ?? "Auto Service"),
-    amount: Number(paymentRecord.amount ?? 0),
-    currency: paymentRecord.currency_code || "USD",
-    vehicleInfo: metadata.vehicle_info == null && metadata.vehicleInfo == null
-      ? undefined
-      : String(metadata.vehicle_info ?? metadata.vehicleInfo),
-    confirmationNumber: paymentRecord.id.slice(-8).toUpperCase(),
-    status: paymentRecord.status as "pending" | "succeeded" | "failed",
-    userId: paymentRecord.created_by ?? undefined,
-    appointmentId: metadata.appointment_id == null ? undefined : String(metadata.appointment_id),
-    provider: paymentRecord.provider ?? "stripe",
-  };
+    return {
+      businessName: workspace?.name || "Auto Service",
+      customerName: name,
+      customerEmail: customer?.email ?? String(metadata.customer_email ?? ""),
+      scheduledDate: String(metadata.scheduled_date ?? metadata.scheduledDate ?? ""),
+      scheduledTime: String(metadata.scheduled_time ?? metadata.scheduledTime ?? ""),
+      serviceName: String(metadata.service_name ?? metadata.serviceName ?? "Auto Service"),
+      amount: Number(paymentRecord.amount ?? 0),
+      currency: paymentRecord.currency_code || "USD",
+      vehicleInfo: metadata.vehicle_info == null && metadata.vehicleInfo == null
+        ? undefined
+        : String(metadata.vehicle_info ?? metadata.vehicleInfo),
+      confirmationNumber: paymentRecord.id.slice(-8).toUpperCase(),
+      status: paymentRecord.status as "pending" | "succeeded" | "failed",
+      userId: paymentRecord.created_by ?? undefined,
+      appointmentId: metadata.appointment_id == null ? undefined : String(metadata.appointment_id),
+      provider: paymentRecord.provider ?? "stripe",
+    };
+  } catch (error) {
+    throw error instanceof ApiClientError ? new Error(error.message) : error;
+  }
 }

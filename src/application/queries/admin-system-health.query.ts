@@ -2,7 +2,7 @@
  * Admin System Health Query
  * Checks database, auth, and storage health via lightweight probes.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface HealthStatus {
   database: "healthy" | "degraded" | "down";
@@ -19,35 +19,27 @@ export interface SystemMetrics {
   lastChecked: Date;
 }
 
+interface SystemHealthResponse {
+  health: HealthStatus;
+  metrics: {
+    databaseLatency: number;
+    authLatency: number;
+    storageUsed: number;
+    lastChecked: string;
+  };
+}
+
 export async function checkSystemHealth(): Promise<{ health: HealthStatus; metrics: Omit<SystemMetrics, 'activeConnections'> }> {
-  // Database probe
-  const dbStart = Date.now();
-  const { error: dbError } = await supabase
-    .from("platform_settings")
-    .select("id")
-    .limit(1);
-  const dbLatency = Date.now() - dbStart;
-
-  // Auth probe
-  const authStart = Date.now();
-  const { error: authError } = await supabase.auth.getSession();
-  const authLatency = Date.now() - authStart;
-
-  // Storage probe
-  const { data: buckets, error: storageError } = await supabase.storage.listBuckets();
-
+  const { health, metrics } = await apiClient.get<SystemHealthResponse>(
+    "/v1/platform/system-health",
+  );
   return {
-    health: {
-      database: dbError ? "down" : dbLatency > 500 ? "degraded" : "healthy",
-      auth: authError ? "down" : authLatency > 500 ? "degraded" : "healthy",
-      storage: storageError ? "down" : "healthy",
-      edgeFunctions: "healthy",
-    },
+    health,
     metrics: {
-      databaseLatency: dbLatency,
-      authLatency: authLatency,
-      storageUsed: buckets?.length || 0,
-      lastChecked: new Date(),
+      databaseLatency: metrics.databaseLatency,
+      authLatency: metrics.authLatency,
+      storageUsed: metrics.storageUsed,
+      lastChecked: new Date(metrics.lastChecked),
     },
   };
 }

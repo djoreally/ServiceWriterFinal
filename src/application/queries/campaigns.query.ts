@@ -1,7 +1,7 @@
 /**
  * Campaign Queries — Read operations for email marketing campaigns.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { CampaignStatus } from "@/lib/enums";
 import type { Database } from "@/integrations/supabase/types";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
@@ -29,13 +29,8 @@ export interface CampaignRow extends Omit<CampaignTableRow, "status" | "recipien
 }
 
 export async function fetchCampaigns(): Promise<CampaignRow[]> {
-  const user = await requireUser();
-  const { data, error } = await supabase
-    .from("email_marketing_campaigns")
-    .select("*")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false });
-  if (error) throw error;
+  await requireUser();
+  const { data } = await apiClient.get<{ data: CampaignTableRow[] }>("/v1/crm/marketing/email-campaigns");
   return (data ?? []).map((row) => {
     const rollup = row as CampaignTableRow & {
       delivered_count?: number | null;
@@ -64,13 +59,8 @@ export async function fetchCampaigns(): Promise<CampaignRow[]> {
 export async function fetchCampaignCustomerCount(): Promise<number> {
   const context = await resolveCurrentWorkspace();
   if (!context) return 0;
-  const db = supabase as any;
-  const { count, error } = await db
-    .from("customers")
-    .select("id", { count: "exact", head: true })
-    .eq("workspace_id", context.workspaceId)
-    .neq("status", "archived")
-    .not("email", "is", null);
-  if (error) throw error;
-  return count ?? 0;
+  const { data } = await apiClient.get<{ data: { count: number } }>("/v1/crm/marketing/email-campaigns/customer-count", {
+    query: { workspace_id: context.workspaceId },
+  });
+  return data.count ?? 0;
 }

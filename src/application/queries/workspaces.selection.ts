@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { WorkspaceMembership } from "@/lib/nextApiClient";
+import type { WorkspaceMembership } from "@/application/queries/workspaces.query";
 
 const selectedWorkspaceIdSchema = z.string().uuid();
 const SELECTED_WORKSPACE_KEY = "servicewriter.selected_workspace_id";

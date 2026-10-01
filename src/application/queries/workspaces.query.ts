@@ -1,4 +1,22 @@
-import { nextApi, type WorkspaceMembership } from "@/lib/nextApiClient";
+import { z } from "zod";
+import { apiClient, ApiClientError } from "@/lib/api-client";
+
+const workspaceMembershipSchema = z.object({
+  workspace_id: z.string().uuid(),
+  role: z.string().min(1),
+  is_active: z.boolean(),
+  workspaces: z.object({
+    id: z.string().uuid(),
+    name: z.string().min(1),
+    slug: z.string().min(1),
+    kind: z.string().min(1),
+    timezone: z.string().min(1),
+    currency_code: z.string().min(1),
+    is_active: z.boolean(),
+  }).nullable(),
+});
+
+export type WorkspaceMembership = z.infer<typeof workspaceMembershipSchema>;
 
 export {
   clearSelectedWorkspaceId,
@@ -10,6 +28,13 @@ export {
 const WORKSPACE_MEMBERSHIP_TTL_MS = 5 * 60 * 1000;
 let membershipCache: { value: WorkspaceMembership[]; expiresAt: number } | null = null;
 let membershipInFlight: Promise<WorkspaceMembership[]> | null = null;
+
+async function fetchWorkspaceMemberships(): Promise<WorkspaceMembership[]> {
+  const response = await apiClient.get<{ data: unknown[] }>("/v1/workspaces");
+  const parsed = z.array(workspaceMembershipSchema).safeParse(response.data);
+  if (!parsed.success) throw new ApiClientError(502, "invalid_api_response", "Workspace response was invalid");
+  return parsed.data;
+}
 
 /**
  * Workspace memberships are shell-level identity data. Multiple mounted
@@ -24,7 +49,7 @@ export async function listWorkspaceMemberships(options: { force?: boolean } = {}
 
   if (!options.force && membershipInFlight) return membershipInFlight;
 
-  const request = nextApi.workspaces()
+  const request = fetchWorkspaceMemberships()
     .then((memberships) => {
       membershipCache = {
         value: memberships,

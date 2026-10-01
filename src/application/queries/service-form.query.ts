@@ -1,5 +1,5 @@
 /** Service Record Form Query — canonical workspace lookups and writes. */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { nextApi } from "@/lib/nextApiClient";
 import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
@@ -26,16 +26,28 @@ export async function fetchServiceFormOptions() {
   const id = workspaceId();
   const [customersResponse, catalogResponse] = await Promise.all([
     nextApi.customers.list(id),
-    (supabase.from("service_catalog") as any).select("id,name,description,labor_price,estimated_minutes").eq("workspace_id", id).eq("is_active", true).order("name"),
+    apiClient.get<{ data: ServiceFormCatalogRow[] }>("/v1/service-catalog", {
+      query: { workspace_id: id },
+    }).then(
+      (response) => ({ data: response.data, error: null as unknown }),
+      (error: unknown) => ({ data: [] as ServiceFormCatalogRow[], error }),
+    ),
   ]);
   const customers = ((customersResponse.data ?? []) as unknown as ServiceFormCustomerRow[]).map((row) => ({ id: row.id, name: [row.first_name, row.last_name].filter(Boolean).join(" ").trim(), email: row.email ?? null, phone: row.phone ?? null }));
   const catalog = ((catalogResponse.data ?? []) as unknown as ServiceFormCatalogRow[]).map((row) => ({ id: row.id, name: row.name, description: row.description ?? null, default_price: Number(row.labor_price ?? 0), labor_rate: Number(row.labor_price ?? 0), estimated_duration: row.estimated_minutes != null ? Number(row.estimated_minutes) : null }));
-  return [{ data: customers, error: null }, { data: catalog, error: catalogResponse.error ?? null }] as const;
+  return [{ data: customers, error: null }, { data: catalog, error: catalogResponse.error }] as const;
 }
 
 export async function findVehicleByVin(_userId: string, vin: string) {
   const id = workspaceId();
-  return (supabase.from("vehicles") as any).select("id").eq("workspace_id", id).eq("vin", vin.trim().toUpperCase()).neq("status", "archived").maybeSingle();
+  try {
+    const response = await apiClient.get<{ data: { id: string } | null }>("/v1/vehicles/by-vin", {
+      query: { workspace_id: id, vin: vin.trim().toUpperCase() },
+    });
+    return { data: response.data, error: null };
+  } catch (error) {
+    return { data: null, error: error instanceof Error ? error : new Error("Request failed") };
+  }
 }
 
 /** Compatibility wrapper replacing the retired upsert_booking_vehicle RPC. */

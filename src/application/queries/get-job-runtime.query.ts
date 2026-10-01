@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import type { JobRuntime } from "@/domain/jobs/job-runtime";
 import {
   computeFinancialSummary,
@@ -44,48 +44,24 @@ function resolveBlockingIssues(rows: ChecklistRow[]): string[] {
 
 export async function getJobRuntime(jobId: string, trustContext?: TrustContext): Promise<JobRuntime> {
   const trust = trustContext ?? await buildTrustContext();
-  const client = supabase as any;
 
-  const { data: appointment, error } = await client
-    .from("appointments")
-    .select("id,workspace_id,customer_id,vehicle_id,status,starts_at,ends_at,assigned_user_id,metadata,created_at,updated_at,customers(id,first_name,last_name,phone,email),vehicles(id,vin,year,make,model)")
-    .eq("id", jobId)
-    .single();
-  if (error || !appointment) throw error || new Error("Job not found");
+  const response = await apiClient.get<{ data: {
+    appointment: any;
+    items: any[];
+    service: any | null;
+    invoice: any | null;
+    payments: any[];
+    checklist: ChecklistRow[];
+  } | null }>(`/v1/jobs/${encodeURIComponent(jobId)}/runtime`);
+  const bundle = response.data;
+  if (!bundle?.appointment) throw new Error("Job not found");
+  const appointment = bundle.appointment;
 
-  const [itemsResult, serviceResult, invoiceResult, paymentsResult, checklistResult] = await Promise.all([
-    client.from("appointment_items")
-      .select("service_catalog_id,description,quantity,unit_price,item_type")
-      .eq("workspace_id", appointment.workspace_id)
-      .eq("appointment_id", jobId)
-      .order("sort_order"),
-    client.from("service_records")
-      .select("id,subtotal,tax_amount,total_amount,status,started_at,completed_at,metadata")
-      .eq("workspace_id", appointment.workspace_id)
-      .eq("appointment_id", jobId)
-      .neq("status", "voided")
-      .maybeSingle(),
-    client.from("invoices")
-      .select("id,status,subtotal,tax_total,total,amount_paid,metadata")
-      .eq("workspace_id", appointment.workspace_id)
-      .eq("metadata->>appointment_id", jobId)
-      .neq("status", "void")
-      .order("created_at", { ascending: true })
-      .limit(1)
-      .maybeSingle(),
-    client.from("payments")
-      .select("amount,status,metadata")
-      .eq("workspace_id", appointment.workspace_id)
-      .eq("metadata->>appointment_id", jobId),
-    client.from("job_execution_checklists")
-      .select("status,is_required,step_name")
-      .eq("job_id", jobId)
-      .eq("job_source", "appointment"),
-  ]);
-
-  for (const result of [itemsResult, serviceResult, invoiceResult, paymentsResult, checklistResult]) {
-    if (result.error) throw result.error;
-  }
+  const itemsResult = { data: bundle.items, error: null };
+  const serviceResult = { data: bundle.service, error: null };
+  const invoiceResult = { data: bundle.invoice, error: null };
+  const paymentsResult = { data: bundle.payments, error: null };
+  const checklistResult = { data: bundle.checklist, error: null };
 
   const metadata = object(appointment.metadata);
   const serviceMetadata = object(serviceResult.data?.metadata);
@@ -117,8 +93,8 @@ export async function getJobRuntime(jobId: string, trustContext?: TrustContext):
       const paymentMetadata = object(p.metadata);
       const refundedDollars = Number(paymentMetadata.refunded_amount ?? paymentMetadata.refund_amount ?? 0);
       return {
-        amountCents: toCentsFromDollars(Number(p.amount || 0)),
-        refundAmountCents: toCentsFromDollars(refundedDollars),
+        amountCents: toCents(toCentsFromDollars(Number(p.amount || 0))),
+        refundAmountCents: toCents(toCentsFromDollars(refundedDollars)),
         status: p.status || "pending",
       };
     }),

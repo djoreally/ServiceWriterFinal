@@ -1,16 +1,8 @@
 /**
  * Receptionist Commands — configure and provision, update its voice/prompt, and deprovision it.
- * Thin wrappers over `receptionist-*` edge functions.
+ * Thin wrappers over the receptionist API endpoints.
  */
-import { supabase } from "@/integrations/supabase/client";
-
-async function invoke<T>(fn: string, body?: Record<string, unknown>): Promise<T> {
-  const { data, error } = await supabase.functions.invoke(fn, { body });
-  if (error) throw error;
-  const payload = (data ?? {}) as { error?: string } & T;
-  if (payload && "error" in payload && payload.error) throw new Error(payload.error);
-  return payload as T;
-}
+import { apiClient } from "@/lib/api-client";
 
 export interface ReceptionistUpdatePayload {
   voiceId: string;
@@ -19,11 +11,15 @@ export interface ReceptionistUpdatePayload {
 }
 
 export async function updateReceptionistConfig(payload: ReceptionistUpdatePayload): Promise<void> {
-  await invoke("receptionist-update", payload as unknown as Record<string, unknown>);
+  await apiClient.post("/v1/crm/receptionist/config", {
+    voiceId: payload.voiceId,
+    firstMessage: payload.firstMessage,
+    systemPrompt: payload.systemPrompt,
+  });
 }
 
 export async function deprovisionReceptionist(): Promise<void> {
-  await invoke("receptionist-deprovision", {});
+  await apiClient.post("/v1/crm/receptionist/deprovision", {});
 }
 
 export interface ReceptionistHealth {
@@ -34,5 +30,6 @@ export interface ReceptionistHealth {
 }
 
 export async function checkReceptionistHealth(): Promise<ReceptionistHealth> {
-  return invoke<ReceptionistHealth>("receptionist-health", {});
+  const { data } = await apiClient.get<{ data: ReceptionistHealth }>("/v1/crm/receptionist/health");
+  return data;
 }

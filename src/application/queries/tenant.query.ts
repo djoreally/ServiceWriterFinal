@@ -2,7 +2,7 @@
  * Tenant Query - Read operations for tenant/business profile data
  */
 
-import { nextApi } from "@/lib/nextApiClient";
+import { apiClient } from "@/lib/api-client";
 import { resolveOilPricePerQuart } from "@/lib/oilPricing";
 import { isReservedSubdomain } from "@/lib/reserved-subdomains";
 
@@ -110,7 +110,10 @@ export function resolveTenant(routeSlug?: string): TenantResolution {
  * stripe_charges_enabled as (charges_enabled AND account_id IS NOT NULL).
  */
 export async function fetchTenantProfile(bookingSlug: string): Promise<TenantProfileData | null> {
-  const response = await nextApi.publicBooking.get(bookingSlug, "profile");
+  const response = await apiClient.get<{ data: unknown }>(
+    `/v1/public-booking/${encodeURIComponent(bookingSlug)}`,
+    { query: { section: "profile" } },
+  );
   if (!response?.data) return null;
 
   const profile = response.data as Record<string, any>;

@@ -1,8 +1,8 @@
 /**
  * Customer messaging preferences commands — thin wrappers over the
- * `record-booking-consent` edge function so UI components don't touch supabase.
+ * messaging-consent API endpoint so UI components don't touch supabase.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface RecordBookingConsentParams {
   userId: string;
@@ -22,9 +22,9 @@ export interface RecordBookingConsentParams {
 
 export async function recordBookingConsent(params: RecordBookingConsentParams): Promise<void> {
   const { signature, ...body } = params;
-  const { error } = await supabase.functions.invoke("record-booking-consent", {
-    body,
-    headers: signature ? { "x-hmac-signature": signature } : {},
-  });
-  if (error) throw new Error(error.message || "Could not update preferences.");
+  try {
+    await apiClient.post("/v1/crm/messaging-consent", { ...body, signature });
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : "Could not update preferences.");
+  }
 }

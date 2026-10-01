@@ -1,7 +1,11 @@
 /**
  * Appointment Payments Query — Read operations for canonical payment records on appointments.
+ *
+ * Phase 2: data access goes through the typed API client
+ * (`@/lib/api-client`) to the appointments Hono router. Exported signatures
+ * are unchanged.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface AppointmentPaymentRow {
   id: string;
@@ -31,14 +35,10 @@ type CanonicalPaymentRow = {
 
 /** Fetch canonical payment rows whose metadata binds them to this appointment. */
 export async function fetchAppointmentPayments(appointmentId: string): Promise<AppointmentPaymentRow[]> {
-  const { data, error } = await supabase
-    .from("payments")
-    .select("id,amount,status,provider,provider_payment_id,created_at,updated_at,metadata")
-    .contains("metadata", { appointment_id: appointmentId })
-    .order("created_at", { ascending: false });
-
-  if (error) throw error;
-  return ((data || []) as unknown as CanonicalPaymentRow[]).map((row) => {
+  const response = await apiClient.get<{ data: CanonicalPaymentRow[] }>(
+    `/v1/appointments/${encodeURIComponent(appointmentId)}/payments`,
+  );
+  return ((response.data || []) as unknown as CanonicalPaymentRow[]).map((row) => {
     const metadata = row.metadata ?? {};
     const cents = Math.round(Number(row.amount || 0) * 100);
     return {

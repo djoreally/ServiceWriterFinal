@@ -1,13 +1,15 @@
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export async function fetchRewardsProductionHealth(providerId: string): Promise<Record<string, unknown>> {
-  const { data, error } = await supabase.rpc("get_rewards_production_health", { p_provider_id: providerId });
-  if (error) throw new Error(error.message);
+  const { data } = await apiClient.get<{ data: Record<string, unknown> }>("/v1/crm/loyalty/production-health", {
+    query: { provider_id: providerId },
+  });
   return (data || {}) as Record<string, unknown>;
 }
 
 export async function validateRewardsLaunchSignoff(providerId: string): Promise<Record<string, unknown>> {
-  const { data, error } = await supabase.rpc("validate_rewards_launch_signoff", { p_provider_id: providerId });
-  if (error) throw new Error(error.message);
+  const { data } = await apiClient.get<{ data: Record<string, unknown> }>("/v1/crm/loyalty/launch-signoff", {
+    query: { provider_id: providerId },
+  });
   return (data || {}) as Record<string, unknown>;
 }

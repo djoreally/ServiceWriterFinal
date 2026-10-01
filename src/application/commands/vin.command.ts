@@ -1,7 +1,7 @@
 /**
- * VIN scanning & decoding commands - wraps edge functions
+ * VIN scanning & decoding commands - wraps provider endpoints
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface VinDecodeResult {
   vin: string;
@@ -32,20 +32,16 @@ export interface VinDecodeResult {
   };
 }
 
-/** Send a base64 JPEG to the vin-ocr edge function */
+/** Send a base64 JPEG to the vin-ocr provider */
 export async function ocrVinFromImage(imageBase64: string): Promise<{ success: boolean; vin?: string; error?: string }> {
-  const { data, error } = await supabase.functions.invoke("vin-ocr", {
-    body: { imageBase64 },
+  const { data } = await apiClient.post<{ data: { success: boolean; vin?: string; error?: string } }>("/v1/vin/ocr", {
+    imageBase64,
   });
-  if (error) throw error;
   return data;
 }
 
-/** Decode a VIN via the vin-decode edge function */
+/** Decode a VIN via the vin-decode provider */
 export async function decodeVinNumber(vin: string): Promise<VinDecodeResult> {
-  const { data, error } = await supabase.functions.invoke("vin-decode", {
-    body: { vin },
-  });
-  if (error) throw error;
+  const { data } = await apiClient.post<{ data: VinDecodeResult }>("/v1/vin/decode", { vin });
   return data;
 }

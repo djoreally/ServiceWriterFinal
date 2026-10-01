@@ -2,7 +2,7 @@
  * Admin Platform Stats Query
  * Abstracts the get_platform_stats RPC call.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface PlatformStats {
   totalUsers: number;
@@ -14,25 +14,13 @@ export interface PlatformStats {
 }
 
 export async function fetchPlatformStats(): Promise<PlatformStats> {
-  const { data, error } = await supabase.rpc("get_platform_stats");
-
-  if (error) throw error;
-
-  const statsData = data as Partial<{
-    usersCount: number;
-    vehiclesCount: number;
-    servicesCount: number;
-    appointmentsCount: number;
-    totalRevenue: number;
-    shopsCount: number;
-  }> | null;
-
+  const data = await apiClient.get<PlatformStats>("/v1/platform/stats");
   return {
-    totalUsers: Number(statsData?.usersCount ?? 0),
-    totalVehicles: Number(statsData?.vehiclesCount ?? 0),
-    totalServices: Number(statsData?.servicesCount ?? 0),
-    totalAppointments: Number(statsData?.appointmentsCount ?? 0),
-    totalRevenue: Number(statsData?.totalRevenue ?? 0),
-    activeShops: Number(statsData?.shopsCount ?? 0),
+    totalUsers: Number(data?.totalUsers ?? 0),
+    totalVehicles: Number(data?.totalVehicles ?? 0),
+    totalServices: Number(data?.totalServices ?? 0),
+    totalAppointments: Number(data?.totalAppointments ?? 0),
+    totalRevenue: Number(data?.totalRevenue ?? 0),
+    activeShops: Number(data?.activeShops ?? 0),
   };
 }

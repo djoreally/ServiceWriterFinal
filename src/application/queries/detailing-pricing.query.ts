@@ -1,10 +1,6 @@
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import type { DetailingPricingRule } from "@/lib/detailing-pricing";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
-
-// Live production schema is ahead of generated Supabase types; keep the
-// compatibility boundary isolated here until types are regenerated.
-const db = supabase as any;
 
 type DetailingPricingRow = {
   id?: string;
@@ -39,21 +35,17 @@ function mapRule(row: DetailingPricingRow): DetailingPricingRule {
 }
 
 export async function fetchPublicDetailingPricingRules(businessUserId: string) {
-  const { data, error } = await db.rpc("get_public_detailing_pricing_rules", { p_business_user_id: businessUserId });
-  if (error) throw error;
-  return (data || []).map((row: DetailingPricingRow) => mapRule(row));
+  const response = await apiClient.get<{ data: DetailingPricingRow[] }>("/v1/detailing-pricing/public-rules", {
+    query: { business_user_id: businessUserId },
+  });
+  return (response.data || []).map((row: DetailingPricingRow) => mapRule(row));
 }
 
 export async function fetchDetailingPricingRules() {
   const context = await resolveCurrentWorkspace();
   if (!context) throw new Error("Select a workspace before viewing detailing pricing.");
-  const { data, error } = await db
-    .from("detailing_pricing_rules")
-    .select("id,service_catalog_id,size_tier,condition,price_multiplier,duration_multiplier,flat_fee,photo_required,quote_required,requires_water,requires_power,requires_covered_area")
-    .eq("workspace_id", context.workspaceId)
-    .order("service_catalog_id")
-    .order("size_tier")
-    .order("condition");
-  if (error) throw error;
-  return (data || []).map((row: DetailingPricingRow) => mapRule(row));
+  const response = await apiClient.get<{ data: DetailingPricingRow[] }>("/v1/detailing-pricing/rules", {
+    query: { workspace_id: context.workspaceId },
+  });
+  return (response.data || []).map((row: DetailingPricingRow) => mapRule(row));
 }

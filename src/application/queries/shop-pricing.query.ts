@@ -1,23 +1,9 @@
 /** Shop pricing defaults for the active workspace. */
-import { productionSupabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { DEFAULT_SHOP_PRICING, type ShopPricingDefaults } from "@/domain/pricing/repair-estimate";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
-export async function fetchShopPricingDefaults(_userId?: string): Promise<ShopPricingDefaults> {
-  const context = await resolveCurrentWorkspace();
-  if (!context) return { ...DEFAULT_SHOP_PRICING };
-
-  const { data, error } = await productionSupabase
-    .from("workspace_settings")
-    .select("operational_settings")
-    .eq("workspace_id", context.workspaceId)
-    .maybeSingle();
-  if (error || !data) return { ...DEFAULT_SHOP_PRICING };
-
-  const operational = data.operational_settings && typeof data.operational_settings === "object"
-    ? data.operational_settings as Record<string, unknown>
-    : {};
-
+function toDefaults(operational: Record<string, unknown>): ShopPricingDefaults {
   return {
     laborRate: Number(operational.default_labor_rate) > 0
       ? Number(operational.default_labor_rate)
@@ -28,30 +14,44 @@ export async function fetchShopPricingDefaults(_userId?: string): Promise<ShopPr
   };
 }
 
+export async function fetchShopPricingDefaults(_userId?: string): Promise<ShopPricingDefaults> {
+  const context = await resolveCurrentWorkspace();
+  if (!context) return { ...DEFAULT_SHOP_PRICING };
+  try {
+    const response = await apiClient.get<{ data: Record<string, unknown> }>(
+      "/v1/shop-pricing/operational-settings",
+      { query: { workspace_id: context.workspaceId } },
+    );
+    return toDefaults(response.data ?? {});
+  } catch {
+    return { ...DEFAULT_SHOP_PRICING };
+  }
+}
+
 export async function saveShopPricingDefaults(_userId: string, values: ShopPricingDefaults) {
   const context = await resolveCurrentWorkspace();
   if (!context) return { data: null, error: new Error("Not authenticated") };
 
-  const client = productionSupabase;
-  const { data, error } = await client.from("workspace_settings")
-    .select("operational_settings")
-    .eq("workspace_id", context.workspaceId)
-    .maybeSingle();
-  if (error) return { data: null, error };
-
-  const operational = data?.operational_settings && typeof data.operational_settings === "object"
-    ? data.operational_settings as Record<string, unknown>
-    : {};
-
-  return client.from("workspace_settings")
-    .update({
-      operational_settings: {
-        ...operational,
-        default_labor_rate: values.laborRate,
-        parts_markup_percent: values.partsMarkupPercent,
-        shop_supplies_percent: values.shopSuppliesPercent,
-        min_labor_hours: values.minLaborHours,
+  try {
+    const current = await apiClient.get<{ data: Record<string, unknown> }>(
+      "/v1/shop-pricing/operational-settings",
+      { query: { workspace_id: context.workspaceId } },
+    );
+    const response = await apiClient.put<{ data: { workspace_id: string } }>(
+      "/v1/shop-pricing/operational-settings",
+      {
+        workspace_id: context.workspaceId,
+        operational_settings: {
+          ...(current.data ?? {}),
+          default_labor_rate: values.laborRate,
+          parts_markup_percent: values.partsMarkupPercent,
+          shop_supplies_percent: values.shopSuppliesPercent,
+          min_labor_hours: values.minLaborHours,
+        },
       },
-    })
-    .eq("workspace_id", context.workspaceId);
+    );
+    return { data: response.data, error: null };
+  } catch (error) {
+    return { data: null, error: error instanceof Error ? error : new Error("Request failed") };
+  }
 }

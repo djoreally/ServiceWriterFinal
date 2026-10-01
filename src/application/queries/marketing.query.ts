@@ -2,8 +2,13 @@
  * Marketing Queries - Read operations for testimonials, reviews, analytics, and LTV.
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { format, subMonths, parseISO } from "date-fns";
+import { getCurrentAuthUser } from "@/lib/auth/current-user";
+
+// Realtime subscriptions stay on the browser client (HTTP-only apiClient cannot
+// subscribe); re-exported here so existing imports keep working.
+export { subscribeCustomerSegmentUpdates, subscribeLiveVisitorsChannel } from "@/lib/crm-realtime";
 
 // ── Helpers ──
 
@@ -28,24 +33,14 @@ export interface TestimonialRow {
 }
 
 export async function fetchTestimonials(): Promise<TestimonialRow[]> {
-  const user = await requireUser();
-  const { data, error } = await supabase
-    .from("testimonials")
-    .select("*")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false });
-
-  if (error) throw error;
+  await requireUser();
+  const { data } = await apiClient.get<{ data: TestimonialRow[] }>("/v1/crm/marketing/testimonials");
   return data ?? [];
 }
 
 export async function fetchBusinessSlug(): Promise<string | null> {
-  const user = await requireUser();
-  const { data } = await supabase
-    .from("business_profiles")
-    .select("booking_slug")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  await requireUser();
+  const { data } = await apiClient.get<{ data: { booking_slug: string | null } }>("/v1/crm/marketing/business-slug");
   return data?.booking_slug ?? null;
 }
 
@@ -76,22 +71,11 @@ export async function fetchReviewDashboardData(): Promise<{
   analytics: ReviewAnalyticsData | null;
   requests: ReviewRequestRow[];
 }> {
-  const user = await requireUser();
-
-  const [analyticsRes, requestsRes] = await Promise.all([
-    (supabase.rpc as any)("get_review_analytics", { p_days: 30 }),
-    supabase
-      .from("review_requests")
-      .select("*, services:service_id (service_type, description)")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(50),
-  ]);
-
-  return {
-    analytics: analyticsRes.data?.[0] ?? null,
-    requests: (requestsRes.data as ReviewRequestRow[]) ?? [],
-  };
+  await requireUser();
+  const { data } = await apiClient.get<{ data: { analytics: ReviewAnalyticsData | null; requests: ReviewRequestRow[] } }>(
+    "/v1/crm/marketing/review-dashboard",
+  );
+  return data;
 }
 
 // ── Marketing Analytics ──
@@ -110,66 +94,9 @@ export interface MarketingAnalyticsResult {
 }
 
 export async function fetchMarketingAnalytics(): Promise<MarketingAnalyticsResult> {
-  const user = await requireUser();
-
-  // Parallel fetch all marketing data
-  const [emailQueueRes, reviewRes, testimonialRes, campaignRes, subscriberRes] =
-    await Promise.all([
-      supabase
-        .from("email_queue")
-        .select("email_type, status")
-        .eq("user_id", user.id),
-      supabase
-        .from("review_requests")
-        .select("status, clicked_at")
-        .eq("user_id", user.id),
-      supabase
-        .from("testimonials")
-        .select("status")
-        .eq("user_id", user.id),
-      supabase
-        .from("email_marketing_campaigns")
-        .select("id")
-        .eq("user_id", user.id),
-      supabase
-        .from("customers")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", user.id)
-        .not("email", "is", null),
-    ]);
-
-  const emailQueue = emailQueueRes.data ?? [];
-  const reviewRequests = reviewRes.data ?? [];
-  const testimonials = testimonialRes.data ?? [];
-
-  const emailsSent = emailQueue.filter((e) => e.status === "sent").length;
-
-  // Calculate email type distribution
-  const emailTypeCount = emailQueue.reduce((acc, email) => {
-    acc[email.email_type] = (acc[email.email_type] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
-
-  const emailQueueStats: { email_type: string; count: number }[] = Object.entries(emailTypeCount).map(
-    ([type, count]) => ({
-      email_type: type
-        .replace(/_/g, " ")
-        .replace(/\b\w/g, (l) => l.toUpperCase()),
-      count: Number(count),
-    })
-  );
-
-  return {
-    emailsSent,
-    emailsOpened: null,
-    reviewRequestsSent: reviewRequests.filter((r) => r.status === "sent").length,
-    reviewRequestsClicked: reviewRequests.filter((r) => r.clicked_at).length,
-    testimonials: testimonials.length,
-    approvedTestimonials: testimonials.filter((t) => t.status === "approved").length,
-    campaigns: campaignRes.data?.length ?? 0,
-    subscribers: subscriberRes.count ?? 0,
-    emailQueueStats,
-  };
+  await requireUser();
+  const { data } = await apiClient.get<{ data: MarketingAnalyticsResult }>("/v1/crm/marketing/analytics");
+  return data;
 }
 
 // ── Customer Lifetime Value ──
@@ -203,75 +130,47 @@ export interface LTVDataResult {
   monthlyRevenue: MonthlyRevenuePoint[];
 }
 
+interface LTVRawPayment { created_at: string; amount: number | null; status: string; appointment_id: string | null; }
+interface LTVRawService { service_date: string; total_cost: number | null; }
+
 export async function fetchLTVData(): Promise<LTVDataResult> {
-  const user = await requireUser();
+  await requireUser();
+  const { data } = await apiClient.get<{ data: { customers: LTVCustomer[]; payments: LTVRawPayment[]; services: LTVRawService[] } }>(
+    "/v1/crm/marketing/ltv",
+  );
 
-  const twelveMonthsAgo = format(subMonths(new Date(), 12), "yyyy-MM-dd");
-
-  // Parallel: customers + payment/service data for monthly revenue
-  const [customerRes, paymentRes, serviceRes] = await Promise.all([
-    supabase
-      .from("customers")
-      .select("*")
-      .eq("user_id", user.id)
-      .not("lifetime_value", "is", null)
-      .order("lifetime_value", { ascending: false }),
-    supabase
-      .from("payments")
-      .select("created_at, amount, status, appointment_id")
-      .eq("user_id", user.id)
-      .eq("status", "succeeded")
-      .gte("created_at", `${twelveMonthsAgo}T00:00:00`)
-      .order("created_at"),
-    supabase
-      .from("services")
-      .select("service_date, total_cost")
-      .eq("user_id", user.id)
-      .eq("status", "completed")
-      .gte("service_date", twelveMonthsAgo)
-      .order("service_date"),
-  ]);
-
-  if (customerRes.error) throw customerRes.error;
-
-  const customers = (customerRes.data ?? []) as unknown as LTVCustomer[];
+  const customers = data.customers ?? [];
 
   // Build monthly revenue map
   const monthlyMap = new Map<string, { revenue: number; services: number }>();
 
-  if (paymentRes.data && paymentRes.data.length > 0) {
-    paymentRes.data.forEach((p) => {
-      const month = format(parseISO(p.created_at), "MMM yyyy");
-      const existing = monthlyMap.get(month) || { revenue: 0, services: 0 };
-      monthlyMap.set(month, {
-        revenue: existing.revenue + (p.amount || 0) / 100,
-        services: existing.services + 1,
-      });
+  (data.payments ?? []).forEach((p) => {
+    const month = format(parseISO(p.created_at), "MMM yyyy");
+    const existing = monthlyMap.get(month) || { revenue: 0, services: 0 };
+    monthlyMap.set(month, {
+      revenue: existing.revenue + (p.amount || 0) / 100,
+      services: existing.services + 1,
     });
-  }
+  });
 
-  if (serviceRes.data && serviceRes.data.length > 0) {
-    serviceRes.data.forEach((s) => {
-      const month = format(parseISO(s.service_date), "MMM yyyy");
-      const existing = monthlyMap.get(month) || { revenue: 0, services: 0 };
-      monthlyMap.set(month, {
-        revenue: existing.revenue,
-        services: existing.services + 1,
-      });
+  (data.services ?? []).forEach((s) => {
+    const month = format(parseISO(s.service_date), "MMM yyyy");
+    const existing = monthlyMap.get(month) || { revenue: 0, services: 0 };
+    monthlyMap.set(month, {
+      revenue: existing.revenue,
+      services: existing.services + 1,
     });
-  }
+  });
 
   const monthlyRevenue = Array.from(monthlyMap.entries()).map(
-    ([month, data]) => ({ month, ...data })
+    ([month, point]) => ({ month, ...point })
   );
 
   return { customers, monthlyRevenue };
 }
 
 // ── Additional marketing UI queries (segmentation, abandoned bookings, retention analytics, live visitors) ──
-import type { RealtimeChannel } from "@supabase/supabase-js";
 
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface AbandonedBookingRow {
   id: string;
   guest_email: string | null;
@@ -289,31 +188,19 @@ export interface AbandonedBookingRow {
 }
 
 export async function fetchAbandonedBookings(userId: string) {
-  return supabase
-    .from("abandoned_bookings")
-    .select("*")
-    .eq("user_id", userId)
-    .order("updated_at", { ascending: false })
-    .limit(100);
+  const { data } = await apiClient.get<{ data: AbandonedBookingRow[] }>("/v1/crm/marketing/abandoned-bookings");
+  return { data, error: null };
 }
 
 export async function fetchActiveSegmentNames(userId: string): Promise<string[]> {
-  const { data } = await supabase
-    .from("customer_segments")
-    .select("name")
-    .eq("user_id", userId)
-    .eq("is_active", true);
-  return (data ?? []).map((d) => d.name as string);
+  const { data } = await apiClient.get<{ data: string[] }>("/v1/crm/marketing/segment-names");
+  return data ?? [];
 }
 
 export async function fetchActiveSegmentsForFilter(userId: string) {
-  const { data, error } = await supabase
-    .from("customer_segments")
-    .select("id, name, color")
-    .eq("user_id", userId)
-    .eq("is_active", true)
-    .order("priority", { ascending: false });
-  if (error) throw error;
+  const { data } = await apiClient.get<{ data: Array<{ id: string; name: string; color: string | null }> }>(
+    "/v1/crm/marketing/segments",
+  );
   return data ?? [];
 }
 
@@ -328,23 +215,17 @@ export interface SegmentCustomerRow {
 }
 
 export async function fetchSegmentCustomers(userId: string, segmentName: string) {
-  return supabase
-    .from("customers")
-    .select("id, name, email, phone, lifetime_value, total_services, last_service_date")
-    .eq("user_id", userId)
-    .eq("customer_segment", segmentName)
-    .order("lifetime_value", { ascending: false, nullsFirst: false })
-    .limit(500);
+  const { data } = await apiClient.get<{ data: SegmentCustomerRow[] }>(
+    `/v1/crm/marketing/legacy-segments/${encodeURIComponent(segmentName)}/customers`,
+  );
+  return { data: data ?? [], error: null };
 }
 
 export async function fetchCustomerIdsInSegment(userId: string, segmentName: string): Promise<Set<string>> {
-  const { data, error } = await supabase
-    .from("customers")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("customer_segment", segmentName);
-  if (error) throw error;
-  return new Set((data ?? []).map((c) => c.id as string));
+  const { data } = await apiClient.get<{ data: string[] }>(
+    `/v1/crm/marketing/legacy-segments/${encodeURIComponent(segmentName)}/customer-ids`,
+  );
+  return new Set(data ?? []);
 }
 
 export interface RetentionSignalRow {
@@ -354,14 +235,9 @@ export interface RetentionSignalRow {
 }
 
 export async function fetchRetentionSignalsSince(userId: string, sinceISO: string) {
-  const { data, error } = await supabase
-    .from("retention_signals")
-    .select("detected_at, signal_type, customer_id")
-    .eq("user_id", userId)
-    .gte("detected_at", sinceISO)
-    .order("detected_at", { ascending: true })
-    .limit(5000);
-  if (error) throw error;
+  const { data } = await apiClient.get<{ data: RetentionSignalRow[] }>("/v1/crm/marketing/retention-signals-since", {
+    query: { since: sinceISO },
+  });
   return (data ?? []) as RetentionSignalRow[];
 }
 
@@ -374,43 +250,13 @@ export interface ServiceReminderRow {
 }
 
 export async function fetchServiceRemindersSince(userId: string, sinceISO: string) {
-  const { data, error } = await supabase
-    .from("service_reminders")
-    .select("created_at, reminder_date, service_type, status, customer_id")
-    .eq("user_id", userId)
-    .gte("created_at", sinceISO)
-    .order("created_at", { ascending: true })
-    .limit(5000);
-  if (error) throw error;
+  const { data } = await apiClient.get<{ data: ServiceReminderRow[] }>("/v1/crm/marketing/service-reminders-since", {
+    query: { since: sinceISO },
+  });
   return (data ?? []) as ServiceReminderRow[];
 }
 
 export async function fetchCurrentAuthUser() {
   const { data } = await getCurrentAuthUser();
   return data.user;
-}
-
-export function subscribeCustomerSegmentUpdates(
-  onUpdate: (row: { id: string; [k: string]: unknown }) => void,
-): { unsubscribe: () => void; channel: RealtimeChannel } {
-  const channel = supabase
-    .channel("segment_counts")
-    .on(
-      "postgres_changes",
-      { event: "UPDATE", schema: "public", table: "customer_segments" },
-      (payload) => onUpdate(payload.new as { id: string; [k: string]: unknown }),
-    )
-    .subscribe();
-  return { channel, unsubscribe: () => void supabase.removeChannel(channel) };
-}
-
-export function subscribeLiveVisitorsChannel(
-  onChange: () => void,
-): { unsubscribe: () => void; channel: RealtimeChannel } {
-  const channel = supabase
-    .channel("live_presence")
-    .on("postgres_changes", { event: "*", schema: "public", table: "visitor_presence" }, onChange)
-    .on("postgres_changes", { event: "*", schema: "public", table: "analytics_events" }, onChange)
-    .subscribe();
-  return { channel, unsubscribe: () => void supabase.removeChannel(channel) };
 }

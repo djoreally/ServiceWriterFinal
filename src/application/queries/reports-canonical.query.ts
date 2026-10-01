@@ -1,5 +1,5 @@
 /** Canonical reports and production data-quality audit. */
-import { productionSupabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { format, startOfYear, subDays } from "date-fns";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { fetchCanonicalCashReceipts, type CanonicalCashReceipt } from "@/application/queries/canonical-cash-receipts.query";
@@ -162,84 +162,49 @@ export async function fetchReportsCanonical(
     receiptsRes,
     receiptsPrevRes,
     receiptsYtdRes,
-    invoicesRes,
-    openInvoicesRes,
-    invoicesYtdRes,
-    serviceRecordsRes,
-    appointmentsRes,
-    customersRes,
-    vehiclesRes,
-    invoiceLinesRes,
+    canonicalRows,
   ] = await Promise.all([
     fetchCanonicalCashReceipts({ workspaceId, from: fromIso, to: toIso }),
     fetchCanonicalCashReceipts({ workspaceId, from: `${prevFrom}T00:00:00`, to: `${prevTo}T23:59:59` }),
     fetchCanonicalCashReceipts({ workspaceId, from: `${ytdFrom}T00:00:00` }),
-    productionSupabase
-      .from("invoices")
-      .select("id,customer_id,status,subtotal,tax_total,total,amount_paid,issued_at,created_at,metadata")
-      .eq("workspace_id", workspaceId)
-      .in("status", ["issued", "partially_paid", "paid", "past_due"])
-      .gte("issued_at", fromIso)
-      .lte("issued_at", toIso),
-    productionSupabase
-      .from("invoices")
-      .select("id,customer_id,status,subtotal,tax_total,total,amount_paid,issued_at,created_at,metadata")
-      .eq("workspace_id", workspaceId)
-      .in("status", ["issued", "partially_paid", "past_due"])
-      .lte("created_at", toIso),
-    productionSupabase
-      .from("invoices")
-      .select("id,customer_id,status,subtotal,tax_total,total,amount_paid,issued_at,created_at,metadata")
-      .eq("workspace_id", workspaceId)
-      .in("status", ["issued", "partially_paid", "paid", "past_due"])
-      .gte("issued_at", `${ytdFrom}T00:00:00`),
-    productionSupabase
-      .from("service_records")
-      .select("id,customer_id,vehicle_id,status,started_at,completed_at,total_amount,metadata")
-      .eq("workspace_id", workspaceId)
-      .eq("status", "completed")
-      .gte("completed_at", fromIso)
-      .lte("completed_at", toIso),
-    productionSupabase
-      .from("appointments")
-      .select("id,customer_id,vehicle_id,status,starts_at,metadata")
-      .eq("workspace_id", workspaceId)
-      .gte("starts_at", fromIso)
-      .lte("starts_at", toIso),
-    productionSupabase
-      .from("customers")
-      .select("id,first_name,last_name,company_name,email,phone,postal_code,created_at,metadata")
-      .eq("workspace_id", workspaceId),
-    productionSupabase
-      .from("vehicles")
-      .select("id,customer_id,vin,mileage,year,make,model,metadata")
-      .eq("workspace_id", workspaceId),
-    productionSupabase
-      .from("invoice_lines")
-      .select("invoice_id,description,quantity,unit_price")
-      .eq("workspace_id", workspaceId),
+    apiClient.get<{
+      invoiceRows: InvoiceRow[];
+      openInvoiceRows: InvoiceRow[];
+      invoiceYtdRows: InvoiceRow[];
+      serviceRecordRows: ServiceRecordRow[];
+      appointmentRows: AppointmentRow[];
+      customerRows: CustomerRow[];
+      vehicleRows: VehicleRow[];
+      invoiceLineRows: InvoiceLineRow[];
+    }>("/v1/platform/reports/canonical-rows", {
+      query: {
+        selected_workspace_id: workspaceId,
+        from_iso: new Date(fromIso).toISOString(),
+        to_iso: new Date(toIso).toISOString(),
+        prev_from_iso: new Date(`${prevFrom}T00:00:00`).toISOString(),
+        prev_to_iso: new Date(`${prevTo}T23:59:59`).toISOString(),
+        ytd_from_iso: new Date(`${ytdFrom}T00:00:00`).toISOString(),
+      },
+    }),
   ]);
 
   for (const result of [receiptsRes, receiptsPrevRes, receiptsYtdRes]) {
     if (result.error) throw result.error;
   }
-  for (const result of [invoicesRes, openInvoicesRes, invoicesYtdRes, serviceRecordsRes, appointmentsRes, customersRes, vehiclesRes, invoiceLinesRes]) {
-    if (result.error) throw result.error;
-  }
 
   const allReceipts = receiptsRes.data;
-  const allInvoices = (invoicesRes.data ?? []) as InvoiceRow[];
-  const allServiceRecords = (serviceRecordsRes.data ?? []) as ServiceRecordRow[];
-  const allAppointments = (appointmentsRes.data ?? []) as AppointmentRow[];
-  const allCustomers = (customersRes.data ?? []) as CustomerRow[];
-  const allVehicles = (vehiclesRes.data ?? []) as VehicleRow[];
+  const allInvoices = (canonicalRows.invoiceRows ?? []) as InvoiceRow[];
+  const allServiceRecords = (canonicalRows.serviceRecordRows ?? []) as ServiceRecordRow[];
+  const allAppointments = (canonicalRows.appointmentRows ?? []) as AppointmentRow[];
+  const allCustomers = (canonicalRows.customerRows ?? []) as CustomerRow[];
+  const allVehicles = (canonicalRows.vehicleRows ?? []) as VehicleRow[];
 
   const receipts = includeLegacy ? allReceipts : allReceipts.filter((row) => row.data_origin !== "legacy_import");
   const receiptsPrev = includeLegacy ? receiptsPrevRes.data : receiptsPrevRes.data.filter((row) => row.data_origin !== "legacy_import");
   const receiptsYtd = includeLegacy ? receiptsYtdRes.data : receiptsYtdRes.data.filter((row) => row.data_origin !== "legacy_import");
   const invoices = includeLegacy ? allInvoices : allInvoices.filter((row) => !isLegacy(row.metadata));
-  const invoicesYtd = ((invoicesYtdRes.data ?? []) as InvoiceRow[]).filter((row) => includeLegacy || !isLegacy(row.metadata));
-  const openInvoices = ((openInvoicesRes.data ?? []) as InvoiceRow[]).filter((row) => includeLegacy || !isLegacy(row.metadata));
+  const invoicesYtd = ((canonicalRows.invoiceYtdRows ?? []) as InvoiceRow[]).filter((row) => includeLegacy || !isLegacy(row.metadata));
+  const openInvoices = ((canonicalRows.openInvoiceRows ?? []) as InvoiceRow[]).filter((row) => includeLegacy || !isLegacy(row.metadata));
   const serviceRecords = includeLegacy ? allServiceRecords : allServiceRecords.filter((row) => !isLegacy(row.metadata));
   const appointments = includeLegacy ? allAppointments : allAppointments.filter((row) => !isLegacy(row.metadata));
   const customers = includeLegacy ? allCustomers : allCustomers.filter((row) => !isLegacy(row.metadata));
@@ -295,7 +260,7 @@ export async function fetchReportsCanonical(
 
   const currentInvoiceIds = new Set(invoices.map((row) => row.id));
   const typeMap = new Map<string, { revenue: number; count: number }>();
-  for (const line of (invoiceLinesRes.data ?? []) as InvoiceLineRow[]) {
+  for (const line of (canonicalRows.invoiceLineRows ?? []) as InvoiceLineRow[]) {
     if (!currentInvoiceIds.has(line.invoice_id)) continue;
     const type = line.description || "Service";
     const current = typeMap.get(type) ?? { revenue: 0, count: 0 };
@@ -414,48 +379,25 @@ export async function fetchServiceWriterAudit(): Promise<ServiceWriterAuditResul
   if (!context) throw new Error("Select a workspace before running the production audit.");
   const workspaceId = context.workspaceId;
 
-  const [customersRes, vehiclesRes, appointmentsRes, serviceRecordsRes, invoicesRes, invoiceLinesRes, paymentsRes] = await Promise.all([
-    productionSupabase
-      .from("customers")
-      .select("id,first_name,last_name,company_name,email,phone,postal_code,created_at,metadata")
-      .eq("workspace_id", workspaceId),
-    productionSupabase
-      .from("vehicles")
-      .select("id,customer_id,vin,mileage,year,make,model,metadata")
-      .eq("workspace_id", workspaceId),
-    productionSupabase
-      .from("appointments")
-      .select("id,customer_id,vehicle_id,status,starts_at,metadata")
-      .eq("workspace_id", workspaceId),
-    productionSupabase
-      .from("service_records")
-      .select("id,appointment_id,customer_id,vehicle_id,status,started_at,completed_at,work_performed,total_amount,metadata")
-      .eq("workspace_id", workspaceId),
-    productionSupabase
-      .from("invoices")
-      .select("id,customer_id,vehicle_id,work_order_id,status,total,amount_paid,due_at,created_at,metadata")
-      .eq("workspace_id", workspaceId),
-    productionSupabase
-      .from("invoice_lines")
-      .select("id,invoice_id,description,quantity,unit_price")
-      .eq("workspace_id", workspaceId),
-    productionSupabase
-      .from("payments")
-      .select("id,invoice_id,customer_id,status,amount,paid_at,metadata")
-      .eq("workspace_id", workspaceId),
-  ]);
+  const auditRows = await apiClient.get<{
+    customerRows: CustomerRow[];
+    vehicleRows: VehicleRow[];
+    appointmentRows: AppointmentRow[];
+    serviceRecordRows: Array<ServiceRecordRow & { appointment_id?: string | null; work_performed?: string | null }>;
+    invoiceRows: Array<InvoiceRow & { vehicle_id?: string | null; work_order_id?: string | null; due_at?: string | null }>;
+    invoiceLineRows: Array<{ id: string; invoice_id: string; description: string; quantity: number | string; unit_price: number | string }>;
+    paymentRows: Array<{ id: string; invoice_id: string | null; customer_id: string | null; status: string; amount: number | null; paid_at: string | null; metadata: unknown }>;
+  }>("/v1/platform/reports/audit-rows", {
+    query: { selected_workspace_id: workspaceId },
+  });
 
-  for (const result of [customersRes, vehiclesRes, appointmentsRes, serviceRecordsRes, invoicesRes, invoiceLinesRes, paymentsRes]) {
-    if (result.error) throw result.error;
-  }
-
-  const customers = (customersRes.data ?? []) as CustomerRow[];
-  const vehicles = (vehiclesRes.data ?? []) as VehicleRow[];
-  const appointments = (appointmentsRes.data ?? []) as AppointmentRow[];
-  const serviceRecords = (serviceRecordsRes.data ?? []) as Array<ServiceRecordRow & { appointment_id?: string | null; work_performed?: string | null }>;
-  const invoices = (invoicesRes.data ?? []) as Array<InvoiceRow & { vehicle_id?: string | null; work_order_id?: string | null; due_at?: string | null }>;
-  const invoiceLines = invoiceLinesRes.data ?? [];
-  const payments = paymentsRes.data ?? [];
+  const customers = (auditRows.customerRows ?? []) as CustomerRow[];
+  const vehicles = (auditRows.vehicleRows ?? []) as VehicleRow[];
+  const appointments = (auditRows.appointmentRows ?? []) as AppointmentRow[];
+  const serviceRecords = (auditRows.serviceRecordRows ?? []) as Array<ServiceRecordRow & { appointment_id?: string | null; work_performed?: string | null }>;
+  const invoices = (auditRows.invoiceRows ?? []) as Array<InvoiceRow & { vehicle_id?: string | null; work_order_id?: string | null; due_at?: string | null }>;
+  const invoiceLines = auditRows.invoiceLineRows ?? [];
+  const payments = auditRows.paymentRows ?? [];
 
   const customerIds = new Set(customers.map((row) => row.id));
   const vehicleIds = new Set(vehicles.map((row) => row.id));

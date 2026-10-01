@@ -1,5 +1,12 @@
-/** Dispatch Guardrails — canonical appointment schema. */
-import { supabase } from "@/integrations/supabase/client";
+/**
+ * Dispatch Guardrails — canonical appointment schema.
+ *
+ * Phase 2: the technician + same-day job reads run server-side in the
+ * appointments Hono router (`POST /v1/dispatch/validate-assignment`); the
+ * pure conflict/capacity checks in `./dispatch-state` stay client-side.
+ * Exported signature is unchanged.
+ */
+import { apiClient } from "@/lib/api-client";
 import { findScheduleConflict, wouldExceedCapacity, type ScheduleSlot } from "./dispatch-state";
 
 export interface AssignmentValidation {
@@ -17,30 +24,34 @@ export async function validateAssignment(
 ): Promise<AssignmentValidation> {
   const errors: string[] = [];
   const warnings: string[] = [];
-  const db = supabase as any;
 
-  const { data: tech, error: techError } = await db.from("technicians")
-    .select("name,status,max_daily_capacity_hours,is_active,auth_user_id")
-    .eq("id", technicianId)
-    .maybeSingle();
-  if (techError) throw techError;
+  const response = await apiClient.post<{
+    data: {
+      technician: {
+        id: string;
+        name: string;
+        status: string | null;
+        max_daily_capacity_hours: number | null;
+        is_active: boolean | null;
+        auth_user_id: string | null;
+      };
+      existingJobs: Array<{ id: string; starts_at: string | null; ends_at: string | null; status: string | null }>;
+    };
+  }>("/v1/dispatch/validate-assignment", {
+    technician_id: technicianId,
+    job_date: jobDate,
+    job_time: jobTime,
+    job_duration_minutes: jobDurationMinutes,
+    exclude_appointment_id: excludeAppointmentId,
+  });
+
+  const tech = response.data.technician;
+  const existingJobs = response.data.existingJobs ?? [];
   if (!tech) return { valid: false, errors: ["Technician not found"], warnings: [] };
   if (!tech.is_active) errors.push(`${tech.name} is not active`);
   if (!tech.auth_user_id) errors.push(`${tech.name} is not linked to an authenticated workspace user`);
 
-  const dayStart = new Date(`${jobDate}T00:00:00.000Z`);
-  const dayEnd = new Date(dayStart.getTime() + 86400000);
-  let query = db.from("appointments")
-    .select("id,starts_at,ends_at,status")
-    .eq("assigned_user_id", tech.auth_user_id)
-    .gte("starts_at", dayStart.toISOString())
-    .lt("starts_at", dayEnd.toISOString())
-    .not("status", "in", '("cancelled","completed","no_show")');
-  if (excludeAppointmentId) query = query.neq("id", excludeAppointmentId);
-  const { data: existingJobs, error: jobsError } = await query;
-  if (jobsError) throw jobsError;
-
-  const slots: ScheduleSlot[] = (existingJobs ?? []).map((row: any) => ({
+  const slots: ScheduleSlot[] = existingJobs.map((row) => ({
     scheduledTime: row.starts_at?.slice(11, 16) ?? "09:00",
     durationMinutes: row.starts_at && row.ends_at
       ? Math.max(5, Math.round((Date.parse(row.ends_at) - Date.parse(row.starts_at)) / 60000))

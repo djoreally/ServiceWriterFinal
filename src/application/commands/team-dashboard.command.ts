@@ -1,30 +1,24 @@
 /**
  * Team Dashboard Commands — Write operations for team member dashboard.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import type { TechProfile } from "@/application/queries/team-dashboard.query";
+import { resetCurrentAuthUserCache } from "@/lib/auth/current-user";
 import { updateAppointmentStatus } from "@/application/commands/appointment-detail.command";
 
 export async function updateTechProfile(
   techId: string,
   updates: Partial<TechProfile>,
 ): Promise<void> {
-  const { error } = await supabase
-    .from("technicians")
-    .update({
-      phone: updates.phone,
-      working_hours: updates.working_hours as any,
-      ...({
-        address: updates.address,
-        drivers_license_number: updates.drivers_license_number,
-        drivers_license_expiry: updates.drivers_license_expiry,
-        emergency_contact_name: updates.emergency_contact_name,
-        emergency_contact_phone: updates.emergency_contact_phone,
-      } as any),
-    })
-    .eq("id", techId);
-
-  if (error) throw error;
+  await apiClient.patch(`/v1/team/dashboard/profile/${techId}`, {
+    phone: updates.phone,
+    working_hours: updates.working_hours,
+    address: updates.address,
+    drivers_license_number: updates.drivers_license_number,
+    drivers_license_expiry: updates.drivers_license_expiry,
+    emergency_contact_name: updates.emergency_contact_name,
+    emergency_contact_phone: updates.emergency_contact_phone,
+  });
 }
 
 export async function updateAppointmentDispatchStatus(
@@ -34,8 +28,22 @@ export async function updateAppointmentDispatchStatus(
   await updateAppointmentStatus(appointmentId, newStatus);
 }
 
+/**
+ * Local-scope sign-out. There is no sanctioned server endpoint for session
+ * revocation in this domain, and the browser Supabase client is off-limits,
+ * so this mirrors `supabase.auth.signOut({ scope: "local" })` (the semantics
+ * of the canonical signout command): drop the cached user and the stored
+ * session so the next apiClient call goes out unauthenticated.
+ */
 export async function signOutUser(): Promise<void> {
-  await supabase.auth.signOut();
+  resetCurrentAuthUserCache();
+  if (typeof window !== "undefined") {
+    for (const key of Object.keys(window.localStorage)) {
+      if (/^sb-.*-auth-token(-code-verifier)?$/.test(key)) {
+        window.localStorage.removeItem(key);
+      }
+    }
+  }
 }
 
 export async function uploadDriversLicense(
@@ -43,22 +51,13 @@ export async function uploadDriversLicense(
   techId: string,
   file: File,
 ): Promise<string> {
-  const filePath = `${userId}/${techId}/drivers-license.${file.name.split(".").pop()}`;
-
-  const { error: uploadError } = await supabase.storage
-    .from("team-documents")
-    .upload(filePath, file, { upsert: true });
-
-  if (uploadError) throw uploadError;
-
-  const { data: { publicUrl } } = supabase.storage
-    .from("team-documents")
-    .getPublicUrl(filePath);
-
-  await supabase
-    .from("technicians")
-    .update({ drivers_license_url: publicUrl } as any)
-    .eq("id", techId);
-
-  return publicUrl;
+  const form = new FormData();
+  form.append("file", file);
+  form.append("user_id", userId);
+  form.append("tech_id", techId);
+  const response = await apiClient.post<{ data: { public_url: string } }>(
+    "/v1/team/dashboard/drivers-license",
+    form,
+  );
+  return response.data.public_url;
 }

@@ -3,6 +3,7 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { getSafeSignInError } from "@/application/commands/auth.command";
 
 export async function signInAdmin(email: string, password: string) {
@@ -15,12 +16,14 @@ export async function signInAdmin(email: string, password: string) {
 }
 
 export async function checkAdminRole(userId: string) {
-  return supabase
-    .from("user_roles")
-    .select("role")
-    .eq("user_id", userId)
-    .eq("role", "admin")
-    .maybeSingle();
+  try {
+    const { data } = await apiClient.get<{ data: { role: string } | null }>(
+      `/v1/platform/admin/users/${userId}/role`,
+    );
+    return { data, error: null };
+  } catch (error) {
+    return { data: null, error };
+  }
 }
 
 export async function signOut() {

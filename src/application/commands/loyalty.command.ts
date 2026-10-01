@@ -1,5 +1,5 @@
 /** Loyalty Program Commands - canonical workspace-scoped CRM loyalty writes. */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 export interface LoyaltyProgramPayload {
@@ -17,14 +17,13 @@ export async function saveLoyaltyProgram(
 ): Promise<void> {
   const workspace = await resolveCurrentWorkspace();
   if (!workspace) throw new Error("No active workspace is available.");
-  const { error } = await (supabase as any).rpc("save_loyalty_program_v1", {
-    p_workspace_id: workspace.workspaceId,
-    p_name: payload.name,
-    p_scope: payload.scope,
-    p_status: payload.status === "paused" ? "inactive" : payload.status,
-    p_points_per_dollar: Math.max(0, payload.pointsPerDollar),
-    p_points_per_visit: Math.max(0, payload.pointsPerVisit),
-    p_program_id: existingId ?? null,
+  await apiClient.post("/v1/crm/loyalty/programs", {
+    workspace_id: workspace.workspaceId,
+    name: payload.name,
+    scope: payload.scope,
+    status: payload.status,
+    points_per_dollar: payload.pointsPerDollar,
+    points_per_visit: payload.pointsPerVisit,
+    program_id: existingId ?? null,
   });
-  if (error) throw error;
 }

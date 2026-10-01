@@ -1,14 +1,13 @@
 /**
- * Expenses Query — canonical workspace-scoped read access.
+ * Expenses Query — canonical workspace-scoped read access via the Hono billing API.
  *
  * UI signatures retain the historical userId argument for compatibility, but
- * tenant authority is resolved from the active workspace. No expense read is
- * scoped by a user-owned tenant key or the retired technicians table.
+ * tenant authority is resolved from the active workspace server-side. No
+ * expense read is scoped by a user-owned tenant key or the retired
+ * technicians table.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
-
-const db = supabase as any;
 
 export interface ExpenseRow {
   id: string;
@@ -69,103 +68,98 @@ export interface ExpenseActivityRow {
   created_at: string;
 }
 
-async function workspaceId(): Promise<string | null> {
+async function hasWorkspace(): Promise<boolean> {
   const context = await resolveCurrentWorkspace();
-  return context?.workspaceId ?? null;
+  return Boolean(context?.workspaceId);
 }
 
 export async function fetchExpenseCategories(_userId: string) {
-  const id = await workspaceId();
-  if (!id) return { data: [], error: null };
-  return db
-    .from("expense_categories")
-    .select("id, name, is_active, is_system, sort_order")
-    .eq("workspace_id", id)
-    .eq("is_active", true)
-    .order("sort_order");
+  if (!(await hasWorkspace())) return { data: [], error: null };
+  try {
+    const { data } = await apiClient.get<{ data: ExpenseCategoryRow[] }>("/v1/billing/expense-categories");
+    return { data: data ?? [], error: null };
+  } catch (error) {
+    return { data: [], error };
+  }
 }
 
 export async function fetchExpenses(userId: string, sinceIso?: string, untilIso?: string) {
-  const id = await workspaceId();
-  if (!id) return { data: [], error: null };
-  let q = db
-    .from("expenses")
-    .select("*")
-    .eq("workspace_id", id)
-    .is("deleted_at", null)
-    .order("transaction_date", { ascending: false });
-  if (sinceIso) q = q.gte("transaction_date", sinceIso);
-  if (untilIso) q = q.lt("transaction_date", untilIso);
-  const result = await q;
-  if (result.error) return result;
-  return {
-    data: (result.data ?? []).map((row: Record<string, unknown>) => ({
-      ...row,
-      // Compatibility-only aliases for legacy components; not tenant authority.
-      user_id: userId,
-      submitted_by: null,
-    })),
-    error: null,
-  };
+  if (!(await hasWorkspace())) return { data: [], error: null };
+  try {
+    const { data } = await apiClient.get<{ data: Record<string, unknown>[] }>("/v1/billing/expenses", {
+      query: {
+        ...(sinceIso ? { since: sinceIso } : {}),
+        ...(untilIso ? { until: untilIso } : {}),
+      },
+    });
+    return {
+      data: (data ?? []).map((row) => ({
+        ...row,
+        // Compatibility-only aliases for legacy components; not tenant authority.
+        user_id: userId,
+        submitted_by: null,
+      })) as ExpenseRow[],
+      error: null,
+    };
+  } catch (error) {
+    return { data: [], error };
+  }
 }
 
 export async function fetchExpensesByAppointment(appointmentId: string) {
-  const id = await workspaceId();
-  if (!id) return { data: [], error: null };
-  return db
-    .from("expenses")
-    .select("*")
-    .eq("workspace_id", id)
-    .eq("appointment_id", appointmentId)
-    .is("deleted_at", null)
-    .order("transaction_date", { ascending: false });
+  if (!(await hasWorkspace())) return { data: [], error: null };
+  try {
+    const { data } = await apiClient.get<{ data: ExpenseRow[] }>("/v1/billing/expenses", {
+      query: { appointment_id: appointmentId },
+    });
+    return { data: data ?? [], error: null };
+  } catch (error) {
+    return { data: [], error };
+  }
 }
 
 export async function fetchExpenseLineItems(expenseId: string) {
-  const id = await workspaceId();
-  if (!id) return { data: [], error: null };
-  return db
-    .from("expense_line_items")
-    .select("*")
-    .eq("workspace_id", id)
-    .eq("expense_id", expenseId)
-    .order("sort_order");
+  if (!(await hasWorkspace())) return { data: [], error: null };
+  try {
+    const { data } = await apiClient.get<{ data: Record<string, unknown>[] }>("/v1/billing/expense-line-items", {
+      query: { expense_id: expenseId },
+    });
+    return { data: data ?? [], error: null };
+  } catch (error) {
+    return { data: [], error };
+  }
 }
 
 export async function fetchVendors(_userId: string) {
-  const id = await workspaceId();
-  if (!id) return { data: [], error: null };
-  return db
-    .from("vendors")
-    .select("id, name, normalized_name, default_category_id, vendor_type, is_active, times_seen")
-    .eq("workspace_id", id)
-    .eq("is_active", true)
-    .order("name");
+  if (!(await hasWorkspace())) return { data: [], error: null };
+  try {
+    const { data } = await apiClient.get<{ data: VendorRow[] }>("/v1/billing/vendors");
+    return { data: data ?? [], error: null };
+  } catch (error) {
+    return { data: [], error };
+  }
 }
 
 export async function fetchExpenseActivity(expenseId: string) {
-  const id = await workspaceId();
-  if (!id) return { data: [], error: null };
-  return db
-    .from("expense_activity")
-    .select("id, workspace_id, expense_id, actor_user_id, actor_name, event_type, details, created_at")
-    .eq("workspace_id", id)
-    .eq("expense_id", expenseId)
-    .order("created_at", { ascending: false });
+  if (!(await hasWorkspace())) return { data: [], error: null };
+  try {
+    const { data } = await apiClient.get<{ data: ExpenseActivityRow[] }>("/v1/billing/expense-activity", {
+      query: { expense_id: expenseId },
+    });
+    return { data: data ?? [], error: null };
+  } catch (error) {
+    return { data: [], error };
+  }
 }
 
 export async function ensureDefaultCategoriesSeeded(_userId: string) {
-  const id = await workspaceId();
-  if (!id) return { seeded: false };
-  const { count, error } = await db
-    .from("expense_categories")
-    .select("id", { count: "exact", head: true })
-    .eq("workspace_id", id);
-  if (error) throw error;
-  if ((count ?? 0) > 0) return { seeded: false };
-  const { data, error: rpcError } = await db.rpc("seed_default_expense_categories", { p_workspace_id: id });
-  if (rpcError) throw rpcError;
-  return { seeded: Number(data ?? 0) > 0 };
+  if (!(await hasWorkspace())) return { seeded: false };
+  try {
+    const { data } = await apiClient.post<{ data: { seeded: boolean } }>("/v1/billing/expense-categories/seed");
+    return { seeded: data.seeded === true };
+  } catch (error) {
+    throw error instanceof ApiClientError ? new Error(error.message) : error;
+  }
 }
 
 /** Vendors are real workspace data; do not silently manufacture vendor history. */

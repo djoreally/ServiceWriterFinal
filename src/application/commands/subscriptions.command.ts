@@ -1,15 +1,14 @@
 /**
  * Subscription Commands
- * 
+ *
  * Write operations for subscription plans and customer subscriptions.
  * Uses `subscription_plans` table — customer-facing plans that shop owners sell.
- * All Stripe operations go through edge functions — never client-side.
+ * All Stripe operations go through the Hono billing API — never client-side.
  */
 
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient, ApiClientError } from '@/lib/api-client';
 import type { SubscriptionPlan, BillingCycle } from '@/shared/types';
 
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
 // ── Types ──
 
 export interface CreatePlanPayload {
@@ -86,120 +85,70 @@ export interface ManageSubscriptionResult {
   message: string;
 }
 
+function apiError(error: unknown, fallback: string): Error {
+  if (error instanceof ApiClientError && error.status === 401) return new Error('Not authenticated');
+  return new Error(error instanceof ApiClientError ? error.message : fallback);
+}
+
 // ── Plan CRUD ──
 
 export async function createSubscriptionPlan(
   payload: CreatePlanPayload
 ): Promise<SubscriptionPlan> {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) throw new Error('Not authenticated');
-
-  const { data, error } = await supabase
-    .from('subscription_plans')
-    .insert({
-      user_id: user.id,
-      name: payload.name,
-      description: payload.description || null,
-      price: payload.price,
-      billing_cycle: payload.billing_cycle,
-      features: payload.features || [],
-      included_services: payload.included_services || [],
-      max_services_per_cycle: payload.max_services_per_cycle ?? null,
-      is_active: payload.is_active,
-      display_order: payload.display_order,
-      tier: payload.tier || null,
-      price_min: payload.price_min ?? null,
-      price_max: payload.price_max ?? null,
-      badge_label: payload.badge_label ?? null,
-      badge_color: payload.badge_color ?? null,
-      highlight: payload.highlight ?? false,
-      cta_label: payload.cta_label ?? 'Subscribe Now',
-    })
-    .select()
-    .single();
-
-  if (error) throw new Error(`Failed to create plan: ${error.message}`);
-  return data as unknown as SubscriptionPlan;
+  try {
+    const { data } = await apiClient.post<{ data: SubscriptionPlan }>('/v1/billing/subscription-plans', payload);
+    return data;
+  } catch (error) {
+    throw error instanceof ApiClientError ? new Error(error.message) : apiError(error, 'Failed to create plan');
+  }
 }
 
 export async function updateSubscriptionPlan(
   payload: UpdatePlanPayload
 ): Promise<void> {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) throw new Error('Not authenticated');
-
   const { id, ...updates } = payload;
-
-  const { error } = await supabase
-    .from('subscription_plans')
-    .update(updates)
-    .eq('id', id)
-    .eq('user_id', user.id);
-
-  if (error) throw new Error(`Failed to update plan: ${error.message}`);
+  try {
+    await apiClient.put(`/v1/billing/subscription-plans/${id}`, updates);
+  } catch (error) {
+    throw error instanceof ApiClientError ? new Error(error.message) : apiError(error, 'Failed to update plan');
+  }
 }
 
 export async function deleteSubscriptionPlan(planId: string): Promise<void> {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) throw new Error('Not authenticated');
-
-  const { error } = await supabase
-    .from('subscription_plans')
-    .delete()
-    .eq('id', planId)
-    .eq('user_id', user.id);
-
-  if (error) throw new Error(`Failed to delete plan: ${error.message}`);
+  try {
+    await apiClient.delete(`/v1/billing/subscription-plans/${planId}`);
+  } catch (error) {
+    throw error instanceof ApiClientError ? new Error(error.message) : apiError(error, 'Failed to delete plan');
+  }
 }
 
 export async function togglePlanActive(
   planId: string,
   isActive: boolean
 ): Promise<void> {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) throw new Error('Not authenticated');
-
-  const { error } = await supabase
-    .from('subscription_plans')
-    .update({ is_active: isActive })
-    .eq('id', planId)
-    .eq('user_id', user.id);
-
-  if (error) throw new Error(`Failed to toggle plan: ${error.message}`);
+  try {
+    await apiClient.patch(`/v1/billing/subscription-plans/${planId}`, { is_active: isActive });
+  } catch (error) {
+    throw error instanceof ApiClientError ? new Error(error.message) : apiError(error, 'Failed to toggle plan');
+  }
 }
 
 // ── Stripe Sync ──
 
 export async function syncPlanToStripe(planId: string): Promise<SyncPlanResult> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error('Not authenticated');
-
-  const { data, error } = await supabase.functions.invoke(
-    'sync-subscription-plan',
-    {
-      body: { plan_id: planId },
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    }
-  );
-
-  if (error) throw new Error(`Failed to sync plan: ${error.message}`);
-  return data as SyncPlanResult;
+  try {
+    return await apiClient.post<SyncPlanResult>('/v1/billing/subscription-plans/sync', { plan_id: planId });
+  } catch (error) {
+    throw new Error(error instanceof ApiClientError ? `Failed to sync plan: ${error.message}` : 'Failed to sync plan');
+  }
 }
 
 export async function syncAllPlansToStripe(): Promise<SyncAllResult> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error('Not authenticated');
-
-  const { data, error } = await supabase.functions.invoke(
-    'sync-subscription-plan',
-    {
-      body: { sync_all: true },
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    }
-  );
-
-  if (error) throw new Error(`Failed to sync plans: ${error.message}`);
-  return data as SyncAllResult;
+  try {
+    return await apiClient.post<SyncAllResult>('/v1/billing/subscription-plans/sync', { sync_all: true });
+  } catch (error) {
+    throw new Error(error instanceof ApiClientError ? `Failed to sync plans: ${error.message}` : 'Failed to sync plans');
+  }
 }
 
 // ── Customer Subscription Checkout (public) ──
@@ -207,13 +156,11 @@ export async function syncAllPlansToStripe(): Promise<SyncAllResult> {
 export async function createSubscriptionCheckout(
   request: SubscriptionCheckoutRequest
 ): Promise<SubscriptionCheckoutResult> {
-  const { data, error } = await supabase.functions.invoke(
-    'create-subscription-checkout',
-    { body: request }
-  );
-
-  if (error) throw new Error(`Failed to create checkout: ${error.message}`);
-  return data as SubscriptionCheckoutResult;
+  try {
+    return await apiClient.post<SubscriptionCheckoutResult>('/v1/billing/subscription-checkout', request);
+  } catch (error) {
+    throw new Error(error instanceof ApiClientError ? `Failed to create checkout: ${error.message}` : 'Failed to create checkout');
+  }
 }
 
 // ── Manage Subscription (authenticated) ──
@@ -221,17 +168,10 @@ export async function createSubscriptionCheckout(
 export async function manageSubscription(
   request: ManageSubscriptionRequest
 ): Promise<ManageSubscriptionResult> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error('Not authenticated');
-
-  const { data, error } = await supabase.functions.invoke(
-    'manage-subscription',
-    {
-      body: request,
-      headers: { Authorization: `Bearer ${session.access_token}` },
-    }
-  );
-
-  if (error) throw new Error(`Failed to ${request.action} subscription: ${error.message}`);
-  return data as ManageSubscriptionResult;
+  try {
+    return await apiClient.post<ManageSubscriptionResult>('/v1/billing/subscriptions/manage', request);
+  } catch (error) {
+    if (error instanceof ApiClientError && error.status === 401) throw new Error('Not authenticated');
+    throw new Error(error instanceof ApiClientError ? `Failed to ${request.action} subscription: ${error.message}` : `Failed to ${request.action} subscription`);
+  }
 }

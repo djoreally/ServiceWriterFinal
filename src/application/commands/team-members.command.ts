@@ -1,7 +1,7 @@
 /**
  * Team Members Commands — Write operations for technician and invitation management.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 import { nextApi } from "@/lib/nextApiClient";
 import type { Database } from "@/integrations/supabase/types";
 
@@ -12,20 +12,24 @@ export async function addTechnician(
   userId: string,
   data: Omit<TechnicianInsert, "user_id">,
 ) {
-  const result = await supabase.from("technicians").insert({ user_id: userId, ...data });
-
-  if (result.error?.message === "seat_limit_reached") {
-    return {
-      ...result,
-      error: {
-        ...result.error,
-        code: "seat_limit_reached",
-        message: "Technician seat limit reached for current plan.",
-      },
-    };
+  try {
+    const response = await apiClient.post<{ data: unknown }>("/v1/tech-os/technicians", {
+      user_id: userId,
+      profile: data as Record<string, unknown>,
+    });
+    return { data: response.data, error: null };
+  } catch (error) {
+    if (error instanceof ApiClientError && error.code === "seat_limit_reached") {
+      return {
+        data: null,
+        error: {
+          code: "seat_limit_reached",
+          message: "Technician seat limit reached for current plan.",
+        },
+      };
+    }
+    throw error;
   }
-
-  return result;
 }
 
 export async function createTeamInvitation(workspaceId: string, email: string, _name: string, role: string): Promise<{ data: Awaited<ReturnType<typeof nextApi.invitations.create>> | null; error: unknown }> {
@@ -51,13 +55,19 @@ export async function cancelTeamInvitation(invitationId: string): Promise<{ data
 }
 
 export async function updateTechnician(techId: string, data: TechnicianUpdate) {
-  return supabase.from("technicians").update(data).eq("id", techId);
+  const response = await apiClient.patch<{ data: unknown[] }>(`/v1/tech-os/technicians/${techId}`, data);
+  return { data: response.data, error: null };
 }
 
 export async function uploadTeamDocument(filePath: string, file: File) {
-  return supabase.storage.from("team-documents").upload(filePath, file, { upsert: true });
+  const form = new FormData();
+  form.append("file", file);
+  form.append("path", filePath);
+  const response = await apiClient.post<{ data: { path: string } }>("/v1/team/documents/upload", form);
+  return { data: response.data, error: null };
 }
 
 export async function deleteTechnician(techId: string) {
-  return supabase.from("technicians").delete().eq("id", techId);
+  const response = await apiClient.delete<{ data: { ok: boolean } }>(`/v1/tech-os/technicians/${techId}`);
+  return { data: response.data, error: null };
 }

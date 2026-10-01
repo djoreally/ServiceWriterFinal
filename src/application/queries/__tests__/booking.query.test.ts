@@ -1,16 +1,15 @@
-jest.mock("@/lib/nextApiClient", () => ({
-  nextApi: {
-    publicBooking: {
-      get: jest.fn(),
-    },
+jest.mock("@/lib/api-client", () => ({
+  apiClient: {
+    get: jest.fn(),
+    post: jest.fn(),
   },
 }));
 
-import { nextApi } from "@/lib/nextApiClient";
+import { apiClient } from "@/lib/api-client";
 import { fetchBookingProfile } from "@/application/queries/booking.query";
 
 describe("fetchBookingProfile public booking constraints", () => {
-  const mockGet = nextApi.publicBooking.get as jest.Mock;
+  const mockGet = apiClient.get as jest.Mock;
 
   beforeEach(() => {
     mockGet.mockReset();
@@ -22,7 +21,9 @@ describe("fetchBookingProfile public booking constraints", () => {
     const result = await fetchBookingProfile("missing-shop");
 
     expect(result).toBeNull();
-    expect(mockGet).toHaveBeenCalledWith("missing-shop", "profile");
+    expect(mockGet).toHaveBeenCalledWith("/v1/public-booking/missing-shop", {
+      query: { section: "profile" },
+    });
   });
 
   it("returns null when no public profile exists", async () => {

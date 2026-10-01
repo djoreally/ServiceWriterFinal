@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { toast } from "@/components/ui/sonner";
 import { Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -180,8 +180,9 @@ const FleetHelpPage = () => {
 
   useEffect(() => {
     (async () => {
-      const { data, error } = await supabase.functions.invoke("training-progress", { body: { surface: "fleet_os" } });
-      if (error) return;
+      const { data } = await apiClient.post<{
+        data: { modules?: unknown[]; completions?: unknown[] } | null;
+      }>("/v1/platform/edge/training-progress", { body: { surface: "fleet_os" } });
       const mods = (data?.modules ?? []) as (RemoteModule & { slug: string })[];
       const comps = (data?.completions ?? []) as Completion[];
       setRemoteModules(mods);
@@ -212,10 +213,11 @@ const FleetHelpPage = () => {
     if (existing && (existing.credit_status === "applied" || existing.credit_status === "disabled" || existing.credit_status === "capped")) return;
     setPendingBySlug((p) => ({ ...p, [slug]: true }));
     try {
-      const { data, error } = await supabase.functions.invoke("complete-training-module", {
+      const { data } = await apiClient.post<{
+        data: { credit_status?: string; error?: string } | null;
+      }>("/v1/platform/edge/complete-training-module", {
         body: { slug, surface: "fleet_os" },
       });
-      if (error) throw error;
       const status = (data?.credit_status ?? "pending") as CreditStatus;
       setCompletionBySlug((prev) => ({ ...prev, [slug]: { module_id: "", credit_status: status, credit_error: data?.error ?? null } }));
       if (status === "applied") toast.success("Training complete — $1 subscription credit applied");

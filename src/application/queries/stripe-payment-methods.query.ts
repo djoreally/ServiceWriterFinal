@@ -1,9 +1,9 @@
 /**
  * Stripe Payment Methods Mirror — read-only view of capabilities on a
  * connected Stripe Standard account. The platform cannot toggle these;
- * shops manage them in the Stripe Dashboard.
+ * shops manage them in the Stripe Dashboard. Served via the Hono billing API.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 
 export type MethodStatus = "active" | "pending" | "inactive" | "unrequested";
 
@@ -32,30 +32,30 @@ export interface ShopPaymentMethodSummary {
   error?: string;
 }
 
-async function authedHeaders() {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error("Not authenticated");
-  return { Authorization: `Bearer ${session.access_token}` };
+function toError(error: unknown): Error {
+  if (error instanceof ApiClientError && error.status === 401) return new Error("Not authenticated");
+  return new Error(error instanceof ApiClientError ? error.message : "Payment methods request failed");
 }
 
 export async function fetchOwnPaymentMethodMirror(): Promise<PaymentMethodMirrorResponse> {
-  const headers = await authedHeaders();
-  const { data, error } = await supabase.functions.invoke("stripe-connect-payment-methods", {
-    headers,
-    body: { mode: "self" },
-  });
-  if (error) throw error;
-  return data as PaymentMethodMirrorResponse;
+  try {
+    return await apiClient.post<PaymentMethodMirrorResponse>("/v1/billing/stripe-payment-methods", {
+      mode: "self",
+    });
+  } catch (error) {
+    throw toError(error);
+  }
 }
 
 export async function fetchAllShopPaymentMethods(): Promise<ShopPaymentMethodSummary[]> {
-  const headers = await authedHeaders();
-  const { data, error } = await supabase.functions.invoke("stripe-connect-payment-methods", {
-    headers,
-    body: { mode: "list" },
-  });
-  if (error) throw error;
-  return (data?.shops || []) as ShopPaymentMethodSummary[];
+  try {
+    const data = await apiClient.post<{ shops?: ShopPaymentMethodSummary[] }>("/v1/billing/stripe-payment-methods", {
+      mode: "list",
+    });
+    return data?.shops || [];
+  } catch (error) {
+    throw toError(error);
+  }
 }
 
 /** Deep-link a shop owner to the payment methods settings in the Stripe Dashboard. */

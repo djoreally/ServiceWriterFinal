@@ -1,7 +1,7 @@
 /**
  * Fleet Contract Services Query — fetch services attached to a fleet contract.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface FleetContractServiceRow {
   id: string;
@@ -28,15 +28,9 @@ export interface FleetContractServiceRow {
 export async function fetchFleetContractServices(
   contractId: string,
 ): Promise<FleetContractServiceRow[]> {
-  const { data, error } = await supabase
-    .from("fleet_contract_services")
-    .select(
-      "*, service_catalog(id, name, description, category, default_price, estimated_duration)",
-    )
-    .eq("fleet_contract_id", contractId)
-    .order("sort_order", { ascending: true });
-
-  if (error) throw error;
+  const { data } = await apiClient.get<{ data: FleetContractServiceRow[] }>(
+    `/v1/fleet/contract-services?contract_id=${encodeURIComponent(contractId)}`,
+  );
   return (data ?? []) as FleetContractServiceRow[];
 }
 
@@ -45,27 +39,8 @@ export async function fetchContractServicesForClient(
   clientId: string,
   userId: string,
 ): Promise<FleetContractServiceRow[]> {
-  // Find the active contract for this client
-  const { data: contracts } = await supabase
-    .from("fleet_contracts")
-    .select("id")
-    .eq("fleet_client_id", clientId)
-    .eq("user_id", userId)
-    .eq("is_active", true)
-    .order("created_at", { ascending: false })
-    .limit(1);
-
-  if (!contracts?.length) return [];
-
-  const { data, error } = await supabase
-    .from("fleet_contract_services")
-    .select(
-      "*, service_catalog(id, name, description, category, default_price, estimated_duration)",
-    )
-    .eq("fleet_contract_id", contracts[0].id)
-    .eq("is_active", true)
-    .order("sort_order", { ascending: true });
-
-  if (error) throw error;
+  const { data } = await apiClient.get<{ data: FleetContractServiceRow[] }>(
+    `/v1/fleet/contract-services/for-client?client_id=${encodeURIComponent(clientId)}`,
+  );
   return (data ?? []) as FleetContractServiceRow[];
 }

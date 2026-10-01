@@ -1,71 +1,78 @@
 /**
  * Email Testing Query — Read operations for email queue, logs, and settings.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
-export async function fetchEmailTestingData() {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) return null;
+import type { Database } from "@/integrations/supabase/types";
 
-  const [profileResp, emailSettingsResp, queueResp, logsResp] = await Promise.all([
-    (supabase as any)
-      .from("business_profiles")
-      .select("business_name, email")
-      .eq("user_id", user.id)
-      .maybeSingle(),
-    (supabase as any)
-      .from("email_settings")
-      .select("id, use_custom_smtp, smtp_host, verified")
-      .eq("user_id", user.id)
-      .maybeSingle(),
-    (supabase as any)
-      .from("email_queue")
-      .select("id, email_type, recipient_email, recipient_name, status, scheduled_for, sent_at, error_message, created_at, source, retry_count, review_request_id, campaign_id, provider_message_id, last_event, last_event_at")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(20),
-    (supabase as any)
-      .from("email_logs")
-      .select("id, recipient_email, recipient_name, email_type, subject, status, provider, error_message, created_at, source, queue_id, review_request_id, campaign_id, provider_message_id, last_event, last_event_at")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(50),
-  ]);
+type EmailQueueRow = Database["public"]["Tables"]["email_queue"]["Row"];
+type EmailLogRow = Database["public"]["Tables"]["email_logs"]["Row"];
 
-  return {
-    userEmail: user.email,
-    profile: profileResp.data,
-    emailSettings: emailSettingsResp.data,
-    emailQueue: queueResp.data || [],
-    emailLogs: logsResp.data || [],
-  };
+interface EmailTestingSettings {
+  id: string;
+  use_custom_smtp: boolean | null;
+  smtp_host: string | null;
+  verified: boolean | null;
 }
 
-export async function fetchEmailQueue() {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) return [];
-
-  const { data } = await supabase
-    .from("email_queue")
-    .select("id, email_type, recipient_email, recipient_name, status, scheduled_for, sent_at, error_message, created_at, source, retry_count, review_request_id, campaign_id, provider_message_id, last_event, last_event_at")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false })
-    .limit(20);
-
-  return data || [];
+interface EmailTestingData {
+  userEmail: string | null;
+  profile: { business_name: string; email: string } | null;
+  emailSettings: EmailTestingSettings | null;
+  emailQueue: EmailQueueRow[];
+  emailLogs: EmailLogRow[];
 }
 
-export async function fetchEmailLogs() {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) return [];
+interface EmailTestingPayload {
+  userEmail: string | null;
+  profile: { business_name: string | null; email: string | null } | null;
+  emailSettings: EmailTestingSettings | null;
+  emailQueue: EmailQueueRow[];
+  emailLogs: EmailLogRow[];
+}
 
-  const { data } = await supabase
-    .from("email_logs")
-    .select("id, recipient_email, recipient_name, email_type, subject, status, provider, error_message, created_at, source, queue_id, review_request_id, campaign_id, provider_message_id, last_event, last_event_at")
-    .eq("user_id", user.id)
-    .order("created_at", { ascending: false })
-    .limit(50);
+function isUnauthenticated(error: unknown): boolean {
+  return error instanceof ApiClientError && error.status === 401;
+}
 
-  return data || [];
+export async function fetchEmailTestingData(): Promise<EmailTestingData | null> {
+  try {
+    const payload = await apiClient.get<EmailTestingPayload>("/v1/email-testing/data");
+    if (!payload) return null;
+    return {
+      userEmail: payload.userEmail,
+      profile: payload.profile
+        ? {
+            business_name: payload.profile.business_name ?? "",
+            email: payload.profile.email ?? "",
+          }
+        : null,
+      emailSettings: payload.emailSettings,
+      emailQueue: payload.emailQueue ?? [],
+      emailLogs: payload.emailLogs ?? [],
+    };
+  } catch (error) {
+    if (isUnauthenticated(error)) return null;
+    throw error;
+  }
+}
+
+export async function fetchEmailQueue(): Promise<EmailQueueRow[]> {
+  try {
+    const { data } = await apiClient.get<{ data: EmailQueueRow[] }>("/v1/email-testing/queue");
+    return data ?? [];
+  } catch (error) {
+    if (isUnauthenticated(error)) return [];
+    throw error;
+  }
+}
+
+export async function fetchEmailLogs(): Promise<EmailLogRow[]> {
+  try {
+    const { data } = await apiClient.get<{ data: EmailLogRow[] }>("/v1/email-testing/logs");
+    return data ?? [];
+  } catch (error) {
+    if (isUnauthenticated(error)) return [];
+    throw error;
+  }
 }

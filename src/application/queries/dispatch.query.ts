@@ -1,11 +1,16 @@
-/** Dispatch Query - canonical workspace technicians + operational jobs. */
+/** Dispatch Query - canonical workspace technicians + operational jobs.
+ *
+ * Phase 2: staff/presence reads go through the typed API client
+ * (`@/lib/api-client`) to the appointments Hono router; operational jobs are
+ * read via `operational-jobs.query`. The realtime subscription stays on the
+ * browser client. Exported signatures are unchanged.
+ */
+import { apiClient } from "@/lib/api-client";
 import { supabase } from "@/integrations/supabase/client";
 import { addDays, format } from "date-fns";
 import { fetchOperationalJobsByDate, fetchOperationalJobsByDateRange, fetchAllUpcomingOperationalJobs, type OperationalJobRow } from "./operational-jobs.query";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
-
-const db = supabase as any;
 
 export interface DispatchTechnician {
   id: string;
@@ -71,29 +76,25 @@ export async function fetchDispatchBoardData(selectedDate: Date, viewMode: "day"
 
   const dateStr = format(selectedDate, "yyyy-MM-dd");
   const endDateStr = format(addDays(selectedDate, 6), "yyyy-MM-dd");
-  const [membersRes, presenceRes, jobRes] = await Promise.all([
-    db
-      .from("workspace_members")
-      .select("user_id,role,is_active,profiles!workspace_members_user_id_fkey(display_name,phone,avatar_url)")
-      .eq("workspace_id", context.workspaceId)
-      .eq("is_active", true)
-      .in("role", ["technician", "owner", "manager"]),
-    db
-      .from("technician_presence")
-      .select("user_id,status,current_location,last_seen_at")
-      .eq("workspace_id", context.workspaceId),
+  const [staffRes, jobRes] = await Promise.all([
+    apiClient.get<{ data: { members: any[]; presence: any[] } | null }>(
+      "/v1/dispatch/board-members",
+      { query: { selected_workspace_id: context.workspaceId } },
+    ),
     viewMode === "all"
       ? fetchAllUpcomingOperationalJobs(user.id)
       : viewMode === "week"
         ? fetchOperationalJobsByDateRange(user.id, dateStr, endDateStr)
         : fetchOperationalJobsByDate(user.id, dateStr),
   ]);
-  if (membersRes.error) throw membersRes.error;
-  if (presenceRes.error) throw presenceRes.error;
+
+  const members = staffRes.data?.members ?? [];
+  const presenceRows = staffRes.data?.presence ?? [];
+
   if (jobRes.error) throw jobRes.error;
 
-  const presenceByUser = new Map((presenceRes.data ?? []).map((row: any) => [row.user_id, row]));
-  const technicians: DispatchTechnician[] = (membersRes.data ?? []).map((member: any) => {
+  const presenceByUser = new Map((presenceRows ?? []).map((row: any) => [row.user_id, row]));
+  const technicians: DispatchTechnician[] = (members ?? []).map((member: any) => {
     const profile = Array.isArray(member.profiles) ? member.profiles[0] : member.profiles;
     const presence = presenceByUser.get(member.user_id) as any;
     const status = presence?.status === "on_job" || presence?.status === "en_route"

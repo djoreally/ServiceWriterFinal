@@ -1,5 +1,5 @@
 /** Provider Snapshot Query — canonical workspace-scoped dashboard KPIs. */
-import { productionSupabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import {
   format,
   startOfWeek,
@@ -65,61 +65,31 @@ export async function fetchProviderSnapshot(): Promise<SnapshotData | null> {
   const prevMonthStart = format(startOfMonth(new Date(now.getFullYear(), now.getMonth() - 1)), "yyyy-MM-dd");
   const prevMonthEnd = format(new Date(now.getFullYear(), now.getMonth(), 0), "yyyy-MM-dd");
 
-  const [
-    weekPayRes,
-    monthPayRes,
-    ytdPayRes,
-    prevMonthPayRes,
-    completedRes,
-    scheduledRes,
-    upcomingRes,
-    servicesRes,
-    settingsRes,
-  ] = await Promise.all([
+  const [weekPayRes, monthPayRes, ytdPayRes, prevMonthPayRes, snapshotRows] = await Promise.all([
     fetchCanonicalCashReceipts({ workspaceId, from: `${weekStart}T00:00:00` }),
     fetchCanonicalCashReceipts({ workspaceId, from: `${monthStart}T00:00:00` }),
     fetchCanonicalCashReceipts({ workspaceId, from: `${yearStart}T00:00:00` }),
     fetchCanonicalCashReceipts({ workspaceId, from: `${prevMonthStart}T00:00:00`, to: `${prevMonthEnd}T23:59:59` }),
-    productionSupabase
-      .from("service_records")
-      .select("id", { count: "exact", head: true })
-      .eq("workspace_id", workspaceId)
-      .eq("status", "completed")
-      .gte("completed_at", `${monthStart}T00:00:00`),
-    productionSupabase
-      .from("appointments")
-      .select("id", { count: "exact", head: true })
-      .eq("workspace_id", workspaceId)
-      .gte("starts_at", `${monthStart}T00:00:00`)
-      .in("status", ["confirmed", "requested"]),
-    productionSupabase
-      .from("appointments")
-      .select("id,starts_at,status,metadata")
-      .eq("workspace_id", workspaceId)
-      .gte("starts_at", `${today}T00:00:00`)
-      .lte("starts_at", `${next7}T23:59:59`)
-      .in("status", ["confirmed", "requested"])
-      .order("starts_at", { ascending: true })
-      .limit(25),
-    productionSupabase
-      .from("service_records")
-      .select("id,total_amount,completed_at,metadata")
-      .eq("workspace_id", workspaceId)
-      .eq("status", "completed")
-      .gte("completed_at", `${monthStart}T00:00:00`),
-    productionSupabase
-      .from("workspace_settings")
-      .select("operational_settings")
-      .eq("workspace_id", workspaceId)
-      .maybeSingle(),
+    apiClient.get<{
+      completedCount: number;
+      scheduledCount: number;
+      upcomingRows: Array<{ id: string; starts_at: string; status: string; metadata: unknown }>;
+      serviceRows: Array<{ id: string; total_amount: number | null; completed_at: string; metadata: unknown }>;
+      settingsRow: { operational_settings: unknown } | null;
+    }>("/v1/platform/provider-snapshot/rows", {
+      query: { selected_workspace_id: workspaceId, month_start: monthStart, today, next7 },
+    }),
   ]);
 
   for (const result of [weekPayRes, monthPayRes, ytdPayRes, prevMonthPayRes]) {
     if (result.error) throw result.error;
   }
-  for (const result of [completedRes, scheduledRes, upcomingRes, servicesRes, settingsRes]) {
-    if (result.error) throw result.error;
-  }
+
+  const completedRes = { count: snapshotRows.completedCount, data: null as null, error: null as null };
+  const scheduledRes = { count: snapshotRows.scheduledCount, data: null as null, error: null as null };
+  const upcomingRes = { data: snapshotRows.upcomingRows, error: null as null };
+  const servicesRes = { data: snapshotRows.serviceRows, error: null as null };
+  const settingsRes = { data: snapshotRows.settingsRow, error: null as null };
 
   const typeMap = new Map<string, { revenue: number; count: number }>();
   for (const row of servicesRes.data ?? []) {

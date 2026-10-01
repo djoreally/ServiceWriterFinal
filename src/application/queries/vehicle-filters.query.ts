@@ -4,7 +4,7 @@
  * and resolve_oil_reset_procedure_v1 for the oil-life-monitor reset steps.
  */
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export type FilterSource = "shop_confirmed" | "fram_catalogue" | "spec_reference";
 
@@ -76,16 +76,14 @@ export async function resolveVehicleFilters(
 ): Promise<ResolvedVehicleFilter[]> {
   if (!input.year || !input.make || !input.model) return [];
 
-  const { data, error } = await (supabase as any).rpc("resolve_vehicle_filters_v1", {
-    p_year: input.year,
-    p_make: input.make,
-    p_model: input.model,
-    p_engine: input.engine || null,
-    p_vehicle_kind: input.vehicleKind || null,
-    p_vehicle_id: input.vehicleId || null,
+  const { data } = await apiClient.post<{ data: ResolvedVehicleFilter[] }>("/v1/vehicles/filter-resolution", {
+    year: input.year,
+    make: input.make,
+    model: input.model,
+    engine: input.engine || null,
+    vehicleKind: input.vehicleKind || null,
+    vehicleId: input.vehicleId || null,
   });
-
-  if (error) throw new Error(error.message);
 
   return ((data ?? []) as ResolvedVehicleFilter[]).map((row) => ({
     ...row,
@@ -100,13 +98,11 @@ export async function resolveOilResetProcedure(
 ): Promise<OilResetProcedure | null> {
   if (!input.year || !input.make || !input.model) return null;
 
-  const { data, error } = await (supabase as any).rpc("resolve_oil_reset_procedure_v1", {
-    p_year: input.year,
-    p_make: input.make,
-    p_model: input.model,
+  const { data } = await apiClient.post<{ data: OilResetProcedure[] }>("/v1/vehicles/oil-reset-procedure", {
+    year: input.year,
+    make: input.make,
+    model: input.model,
   });
-
-  if (error) throw new Error(error.message);
   const row = (data ?? [])[0] as OilResetProcedure | undefined;
   if (!row) return null;
   return { ...row, steps: Array.isArray(row.steps) ? row.steps : [] };

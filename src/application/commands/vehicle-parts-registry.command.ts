@@ -2,8 +2,7 @@
  * Vehicle Parts Registry Command — write operations for per-vehicle part numbers
  * and for applying/consuming parts on fleet work orders.
  */
-import { supabase } from "@/integrations/supabase/client";
-import type { Database, Json } from "@/integrations/supabase/types";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 import type { VehicleKind } from "@/application/queries/vehicle-parts-registry.query";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
@@ -25,77 +24,41 @@ async function requireUser(): Promise<string> {
   return user.id;
 }
 
-/** Resolve the workspace owner that owns the vehicle row, so team members write valid rows. */
-async function resolveVehicleOwner(kind: VehicleKind, vehicleId: string): Promise<string> {
-  const result = kind === "fleet"
-    ? await supabase.from("fleet_vehicles").select("user_id").eq("id", vehicleId).maybeSingle()
-    : await supabase.from("vehicles").select("user_id").eq("id", vehicleId).maybeSingle();
-  const { data, error } = result;
-  if (error) throw new Error(error.message);
-  if (!data?.user_id) throw new Error("Vehicle not found");
-  return data.user_id as string;
-}
-
 export async function addVehiclePart(
   kind: VehicleKind,
   vehicleId: string,
   input: VehiclePartInput,
 ): Promise<void> {
-  const actorId = await requireUser();
-  const ownerId = await resolveVehicleOwner(kind, vehicleId);
-
-  const row = {
-    user_id: ownerId,
-    vehicle_kind: kind,
-    fleet_vehicle_id: kind === "fleet" ? vehicleId : null,
-    vehicle_id: kind === "retail" ? vehicleId : null,
-    part_category: input.part_category,
-    part_number: input.part_number.trim(),
-    brand: input.brand?.trim() || null,
-    oem_number: input.oem_number?.trim() || null,
-    quantity: input.quantity ?? 1,
-    unit: input.unit || null,
-    inventory_item_id: input.inventory_item_id || null,
-    is_required: input.is_required ?? true,
-    notes: input.notes?.trim() || null,
-    verified_by: actorId,
-    verified_at: new Date().toISOString(),
-  };
-
-  const { error } = await supabase.from("vehicle_part_assignments").insert(row);
-  if (error) {
-    if (error.code === "23505") throw new Error("That part number is already assigned to this vehicle");
-    throw new Error(error.message);
+  await requireUser();
+  try {
+    await apiClient.post("/v1/vehicle-part-assignments", {
+      kind,
+      vehicle_id: vehicleId,
+      input,
+    });
+  } catch (error) {
+    if (error instanceof ApiClientError && error.code === "duplicate_part") {
+      throw new Error("That part number is already assigned to this vehicle");
+    }
+    throw new Error(error instanceof Error ? error.message : "Failed to add part");
   }
 }
 
 export async function updateVehiclePart(id: string, input: VehiclePartInput): Promise<void> {
-  const actorId = await requireUser();
-  const { error } = await supabase
-    .from("vehicle_part_assignments")
-    .update({
-      part_category: input.part_category,
-      part_number: input.part_number.trim(),
-      brand: input.brand?.trim() || null,
-      oem_number: input.oem_number?.trim() || null,
-      quantity: input.quantity ?? 1,
-      unit: input.unit || null,
-      inventory_item_id: input.inventory_item_id || null,
-      is_required: input.is_required ?? true,
-      notes: input.notes?.trim() || null,
-      verified_by: actorId,
-      verified_at: new Date().toISOString(),
-    })
-    .eq("id", id);
-  if (error) throw new Error(error.message);
+  await requireUser();
+  try {
+    await apiClient.patch(`/v1/vehicle-part-assignments/${id}`, { input });
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : "Failed to update part");
+  }
 }
 
 export async function deleteVehiclePart(id: string): Promise<void> {
-  const { error } = await supabase
-    .from("vehicle_part_assignments")
-    .delete()
-    .eq("id", id);
-  if (error) throw new Error(error.message);
+  try {
+    await apiClient.delete(`/v1/vehicle-part-assignments/${id}`);
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : "Failed to delete part");
+  }
 }
 
 /**
@@ -109,43 +72,9 @@ export async function promotePartsToSpecReference(params: {
   engine: string | null;
   parts: Array<{ part_category: string; part_number: string }>;
 }): Promise<void> {
-  const { year, make, model, engine, parts } = params;
+  const { year, make, model } = params;
   if (!year || !make || !model) return;
-
-  type VehicleSpecUpdate = Database["public"]["Tables"]["vehicle_specifications"]["Update"];
-  type PartColumn = "oil_filter" | "air_filter" | "cabin_filter" | "fuel_filter" | "wiper_blade_driver" | "wiper_blade_passenger" | "wiper_blade_rear";
-  const map: Record<string, PartColumn> = {
-    oil_filter: "oil_filter",
-    air_filter: "air_filter",
-    cabin_filter: "cabin_filter",
-    fuel_filter: "fuel_filter",
-    wiper_blade_driver: "wiper_blade_driver",
-    wiper_blade_passenger: "wiper_blade_passenger",
-    wiper_blade_rear: "wiper_blade_rear",
-  };
-
-  const payload: VehicleSpecUpdate = {};
-  for (const p of parts) {
-    const col = map[p.part_category];
-    if (col && p.part_number) payload[col] = p.part_number;
-  }
-  if (Object.keys(payload).length === 0) return;
-
-  const { data: existing } = await supabase
-    .from("vehicle_specifications")
-    .select("id")
-    .eq("year", year)
-    .ilike("make", make)
-    .ilike("model", model)
-    .maybeSingle();
-
-  if (existing?.id) {
-    await supabase.from("vehicle_specifications").update(payload).eq("id", existing.id);
-  } else {
-    await supabase
-      .from("vehicle_specifications")
-      .insert({ year, make, model, engine: engine || null, source: "shop_confirmed", ...payload });
-  }
+  await apiClient.post("/v1/vehicle-specs/promote-parts", params);
 }
 
 // ---------- Fleet work order parts ----------
@@ -166,24 +95,28 @@ export async function applyWorkOrderParts(
   workOrderId: string,
   lines: WorkOrderPartLineInput[],
 ): Promise<{ lines: number; reservations: number }> {
-  const { data, error } = await supabase.rpc("apply_work_order_parts_v1", {
-    p_work_order_id: workOrderId,
-    p_lines: lines as unknown as Json,
-  });
-  if (error) throw new Error(error.message);
-  const result = data && typeof data === "object" && !Array.isArray(data) ? data : {};
-  return {
-    lines: typeof result.lines === "number" ? result.lines : 0,
-    reservations: typeof result.reservations === "number" ? result.reservations : 0,
-  };
+  try {
+    const { data } = await apiClient.post<{ data: { lines: number; reservations: number } }>(
+      `/v1/work-orders/${workOrderId}/parts/apply`,
+      { lines },
+    );
+    return {
+      lines: typeof data?.lines === "number" ? data.lines : 0,
+      reservations: typeof data?.reservations === "number" ? data.reservations : 0,
+    };
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : "Failed to apply parts");
+  }
 }
 
 /** Consume reserved parts: decrements van stock (or warehouse when no van assigned). */
 export async function consumeWorkOrderParts(workOrderId: string): Promise<{ consumed: number }> {
-  const { data, error } = await supabase.rpc("consume_work_order_parts_v1", {
-    p_work_order_id: workOrderId,
-  });
-  if (error) throw new Error(error.message);
-  const result = data && typeof data === "object" && !Array.isArray(data) ? data : {};
-  return { consumed: typeof result.consumed === "number" ? result.consumed : 0 };
+  try {
+    const { data } = await apiClient.post<{ data: { consumed: number } }>(
+      `/v1/work-orders/${workOrderId}/parts/consume`,
+    );
+    return { consumed: typeof data?.consumed === "number" ? data.consumed : 0 };
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : "Failed to consume parts");
+  }
 }

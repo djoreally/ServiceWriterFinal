@@ -2,7 +2,7 @@
  * Fleet Client Command — Abstracts fleet client and contact creation
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface FleetClientPayload {
   company_name: string;
@@ -53,27 +53,9 @@ export async function createFleetClient(
   form: FleetClientPayload,
   contacts: FleetClientContactPayload[]
 ) {
-  // Create client
-  const { data: client, error: clientErr } = await supabase
-    .from("fleet_clients")
-    .insert({ ...form, user_id: userId })
-    .select("id")
-    .single();
-
-  if (clientErr) throw clientErr;
-
-  // Create contacts
-  const validContacts = contacts.filter((c) => c.name.trim());
-  if (validContacts.length > 0) {
-    const { error: contactErr } = await supabase.from("fleet_contacts").insert(
-      validContacts.map((c) => ({
-        ...c,
-        fleet_client_id: client.id,
-        user_id: userId,
-      }))
-    );
-    if (contactErr) throw contactErr;
-  }
-
-  return client;
+  const { data } = await apiClient.post<{ data: { id: string } }>("/v1/fleet/clients", {
+    form,
+    contacts,
+  });
+  return data;
 }

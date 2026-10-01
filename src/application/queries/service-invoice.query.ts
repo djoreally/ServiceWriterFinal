@@ -1,7 +1,12 @@
-/** Service Invoice Query — canonical service-record invoice/print adapter. */
-import { productionSupabase } from "@/integrations/supabase/client";
+/** Service Invoice Query — canonical service-record invoice/print adapter.
+ *
+ * Phase 2: the print bundle is fetched through the typed API client
+ * (`@/lib/api-client`) from the documents Hono router; presentation
+ * shaping stays client-side. Exported signatures are unchanged.
+ */
+import { apiClient } from "@/lib/api-client";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
-import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
 export interface InvoiceServiceData {
   id: string;
@@ -62,29 +67,35 @@ function nullableNumber(value: unknown): number | null {
 export async function fetchInvoiceData(serviceId: string, customerId: string | null, vehicleId: string | null): Promise<InvoiceData> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("Not authenticated");
-  const context = await resolveCurrentWorkspace();
-  if (!context) throw new Error("Select a workspace before viewing a service invoice.");
-  const client = productionSupabase;
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) throw new Error("Select a workspace before viewing a service invoice.");
 
-  const [serviceRes, customerRes, vehicleRes, workspaceRes, settingsRes, linesRes, specsRes] = await Promise.all([
-    client.from("service_records").select("*").eq("workspace_id", context.workspaceId).eq("id", serviceId).maybeSingle(),
-    customerId ? client.from("customers").select("*").eq("workspace_id", context.workspaceId).eq("id", customerId).maybeSingle() : Promise.resolve({ data: null }),
-    vehicleId ? client.from("vehicles").select("*").eq("workspace_id", context.workspaceId).eq("id", vehicleId).maybeSingle() : Promise.resolve({ data: null }),
-    client.from("workspaces").select("name").eq("id", context.workspaceId).maybeSingle(),
-    client.from("workspace_settings").select("owner_name,phone,email,address_line1,address_line2,city,region,postal_code,logo_url").eq("workspace_id", context.workspaceId).maybeSingle(),
-    client.from("service_record_line_items").select("*").eq("workspace_id", context.workspaceId).eq("service_record_id", serviceId).order("sort_order"),
-    vehicleId ? client.from("vehicle_service_specs").select("engine,oil_type,oil_capacity").eq("workspace_id", context.workspaceId).eq("vehicle_id", vehicleId).order("updated_at", { ascending: false }).limit(1).maybeSingle() : Promise.resolve({ data: null }),
-  ]);
+  const response = await apiClient.get<{
+    data: {
+      service: Record<string, any> | null;
+      customer: Record<string, any> | null;
+      vehicle: Record<string, any> | null;
+      workspace: { name: string } | null;
+      settings: Record<string, any> | null;
+      lines: Array<Record<string, any>>;
+      specs: Record<string, any> | null;
+    };
+  }>(`/v1/service-invoices/${encodeURIComponent(serviceId)}`, {
+    query: {
+      workspace_id: workspaceId,
+      customer_id: customerId ?? undefined,
+      vehicle_id: vehicleId ?? undefined,
+    },
+  });
 
-  if (serviceRes.error) throw serviceRes.error;
-  const row = serviceRes.data;
+  const row = response.data.service;
   if (!row) return { service: null, customer: null, vehicle: null, business: null, laborItems: [], serviceItems: [] };
 
   const meta = object(row.metadata);
   const vehicleSnapshot = object(meta.vehicle_snapshot);
-  const rawVehicle = vehicleRes.data;
-  const specs = specsRes.data;
-  const lines = linesRes.data ?? [];
+  const rawVehicle = response.data.vehicle;
+  const specs = response.data.specs;
+  const lines = response.data.lines ?? [];
 
   const service: InvoiceServiceData = {
     id: row.id,
@@ -117,7 +128,7 @@ export async function fetchInvoiceData(serviceId: string, customerId: string | n
     odometer_measure: String(meta.odometer_measure ?? rawVehicle?.mileage_unit ?? "mi"),
   };
 
-  const customerRow = customerRes.data;
+  const customerRow = response.data.customer;
   const customer: InvoiceCustomerData | null = customerRow ? {
     name: [customerRow.first_name, customerRow.last_name].filter(Boolean).join(" ").trim() || customerRow.company_name || "Customer",
     email: customerRow.email ?? null,
@@ -139,9 +150,9 @@ export async function fetchInvoiceData(serviceId: string, customerId: string | n
     engine: nullableString(specs?.engine ?? object(rawVehicle.metadata).engine),
   } : null;
 
-  const settings = settingsRes.data;
-  const business: InvoiceBusinessProfile | null = workspaceRes.data ? {
-    business_name: workspaceRes.data.name || "",
+  const settings = response.data.settings;
+  const business: InvoiceBusinessProfile | null = response.data.workspace ? {
+    business_name: response.data.workspace.name || "",
     owner_name: settings?.owner_name || "",
     phone: settings?.phone || "",
     email: settings?.email || "",

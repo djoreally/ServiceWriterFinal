@@ -2,9 +2,13 @@
  * Dispatch Runs Queries — Phase 3
  *
  * Read operations for route sequencing and dispatch run data.
+ *
+ * Phase 2: data access goes through the typed API client
+ * (`@/lib/api-client`) to the appointments Hono router. Exported signatures
+ * are unchanged.
  */
 
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/api-client';
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -41,47 +45,50 @@ export interface RouteStopDetail {
 
 // ─── Queries ──────────────────────────────────────────────────────────────
 
+type RunRow = {
+  id: string;
+  technician_id: string;
+  van_id: string | null;
+  run_date: string;
+  status: string;
+  total_distance_meters: number | null;
+  total_travel_time_seconds: number | null;
+  stop_count: number;
+  technicians: { name: string } | null;
+  vans: { name: string } | null;
+};
+
+type StopRow = {
+  id: string;
+  sequence_order: number;
+  status: string;
+  work_order_id: string;
+  estimated_arrival: string | null;
+  estimated_duration_minutes: number | null;
+  actual_arrival: string | null;
+  actual_departure: string | null;
+  distance_to_next_meters: number | null;
+  travel_time_to_next_seconds: number | null;
+  work_orders: {
+    order_number: string;
+    location_address: string | null;
+    location_lat: number | string | null;
+    location_lng: number | string | null;
+    customers: { name: string } | null;
+  } | null;
+};
+
 /** Fetch all dispatch runs for a user on a given date. */
 export const fetchDispatchRuns = async (
   userId: string,
   date: string
 ): Promise<DispatchRunSummary[]> => {
-  const { data, error } = await supabase
-    .from('dispatch_runs')
-    .select(`
-      id,
-      technician_id,
-      van_id,
-      run_date,
-      status,
-      total_distance_meters,
-      total_travel_time_seconds,
-      technicians!inner(name),
-      vans(name)
-    `)
-    .eq('user_id', userId)
-    .eq('run_date', date)
-    .order('created_at', { ascending: true });
+  const response = await apiClient.get<{ data: RunRow[] }>("/v1/dispatch-runs", {
+    query: { user_id: userId, date },
+  });
+  const data = response.data ?? [];
 
-  if (error) throw new Error(`Failed to fetch dispatch runs: ${error.message}`);
-
-  // Fetch stop counts in a single query
-  const runIds = (data ?? []).map(r => r.id);
-  const stopCounts = new Map<string, number>();
-  if (runIds.length > 0) {
-    const { data: stops } = await supabase
-      .from('route_stops')
-      .select('dispatch_run_id')
-      .in('dispatch_run_id', runIds);
-
-    if (stops) {
-      for (const s of stops) {
-        stopCounts.set(s.dispatch_run_id, (stopCounts.get(s.dispatch_run_id) ?? 0) + 1);
-      }
-    }
-  }
-
-  return (data ?? []).map((r: any) => ({
+  return data.map((r: any) => ({
     id: r.id,
     technicianId: r.technician_id,
     technicianName: r.technicians?.name ?? 'Unknown',
@@ -89,7 +96,7 @@ export const fetchDispatchRuns = async (
     vanName: r.vans?.name ?? null,
     runDate: r.run_date,
     status: r.status,
-    stopCount: stopCounts.get(r.id) ?? 0,
+    stopCount: r.stop_count ?? 0,
     totalDistanceMeters: r.total_distance_meters,
     totalTravelTimeSeconds: r.total_travel_time_seconds,
   }));
@@ -99,33 +106,12 @@ export const fetchDispatchRuns = async (
 export const fetchRouteStops = async (
   dispatchRunId: string
 ): Promise<RouteStopDetail[]> => {
-  const { data, error } = await supabase
-    .from('route_stops')
-    .select(`
-      id,
-      sequence_order,
-      status,
-      work_order_id,
-      estimated_arrival,
-      estimated_duration_minutes,
-      actual_arrival,
-      actual_departure,
-      distance_to_next_meters,
-      travel_time_to_next_seconds,
-      work_orders!inner(
-        order_number,
-        location_address,
-        location_lat,
-        location_lng,
-        customers(name)
-      )
-    `)
-    .eq('dispatch_run_id', dispatchRunId)
-    .order('sequence_order', { ascending: true });
+  const response = await apiClient.get<{ data: StopRow[] }>(
+    `/v1/dispatch-runs/${encodeURIComponent(dispatchRunId)}/stops`
+  );
+  const data = response.data ?? [];
 
-  if (error) throw new Error(`Failed to fetch route stops: ${error.message}`);
-
-  return (data ?? []).map((s: any) => ({
+  return data.map((s: any) => ({
     id: s.id,
     sequenceOrder: s.sequence_order,
     status: s.status,

@@ -1,10 +1,16 @@
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
-async function invoke(body: Record<string, unknown>) {
-  const { data, error } = await supabase.functions.invoke("fleet-email-mailbox", { body });
-  if (error) throw new Error(error.message);
-  if (!data?.success) throw new Error(data?.error || "Email operation failed");
-  return data;
+async function invoke(body: Record<string, unknown>): Promise<any> {
+  try {
+    const { data } = await apiClient.post<{ data: any }>(
+      "/v1/fleet/email/mailbox",
+      body,
+    );
+    if (!data?.success) throw new Error(data?.error || "Email operation failed");
+    return data;
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : String(error));
+  }
 }
 
 export const syncFleetMailbox = () => invoke({ action: "sync" });
@@ -13,9 +19,5 @@ export const replyToFleetEmail = (messageId: string, body: string) =>
   invoke({ action: "reply", message_id: messageId, body });
 
 export async function markFleetEmailRead(messageId: string) {
-  const { error } = await (supabase as any)
-    .from("fleet_email_messages")
-    .update({ is_read: true })
-    .eq("id", messageId);
-  if (error) throw error;
+  await apiClient.patch(`/v1/fleet/email/messages/${messageId}`, { is_read: true });
 }

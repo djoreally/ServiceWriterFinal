@@ -2,7 +2,7 @@
  * Vehicle Parts Query — Lookup matching filter/part data for a vehicle.
  * Uses the filter_applications table via the lookup_vehicle_parts RPC.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface VehiclePart {
   filter_type: string;
@@ -20,18 +20,17 @@ export async function lookupVehicleParts(
   make: string,
   model: string,
 ): Promise<VehiclePart[]> {
-  const { data, error } = await supabase.rpc("lookup_vehicle_parts", {
-    p_year: year,
-    p_make: make,
-    p_model: model,
-  });
-
-  if (error) {
+  try {
+    const { data } = await apiClient.post<{ data: VehiclePart[] }>("/v1/vehicle-parts/lookup", {
+      year,
+      make,
+      model,
+    });
+    return data || [];
+  } catch (error) {
     console.error("Error looking up vehicle parts:", error);
     return [];
   }
-
-  return (data as VehiclePart[]) || [];
 }
 
 /** Filter type labels for display. */

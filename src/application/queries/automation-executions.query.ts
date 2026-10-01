@@ -1,7 +1,7 @@
 /**
  * Queries for the automation Execution Log tab.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface AutomationExecutionRow {
   id: string;
@@ -22,28 +22,9 @@ export async function fetchAutomationExecutions(
   userId: string,
   limit = 50,
 ): Promise<AutomationExecutionRow[]> {
-  const { data, error } = await supabase
-    .from("retention_action_executions")
-    .select("id, rule_id, customer_id, action_type, status, executed_at, result_jsonb, automation_rules(name), customers(name)")
-    .eq("user_id", userId)
-    .order("executed_at", { ascending: false, nullsFirst: false })
-    .limit(limit);
-
-  if (error) throw error;
-
-  return (data || []).map((row) => {
-    const ruleRel = row.automation_rules as { name?: string } | null;
-    const custRel = row.customers as { name?: string } | null;
-    return {
-      id: row.id,
-      rule_id: row.rule_id,
-      rule_name: ruleRel?.name ?? null,
-      customer_id: row.customer_id,
-      customer_name: custRel?.name ?? null,
-      action_type: row.action_type,
-      status: row.status,
-      executed_at: row.executed_at,
-      result_jsonb: row.result_jsonb as Record<string, unknown> | null,
-    };
-  });
+  const { data } = await apiClient.get<{ data: AutomationExecutionRow[] }>(
+    "/v1/crm/retention/automation-executions",
+    { query: { user_id: userId, limit } },
+  );
+  return data ?? [];
 }

@@ -1,5 +1,5 @@
 /** Retention Commands — canonical loyalty writes plus automation rules. */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 async function loyaltyWorkspaceId(): Promise<string> {
@@ -10,22 +10,24 @@ async function loyaltyWorkspaceId(): Promise<string> {
 
 export async function deleteLoyaltyProgram(id: string) {
   const workspaceId = await loyaltyWorkspaceId();
-  const { error } = await (supabase as any).from("crm_loyalty_programs").delete().eq("workspace_id", workspaceId).eq("id", id);
-  if (error) throw error;
+  await apiClient.delete(`/v1/crm/loyalty/programs/${id}`, {
+    query: { workspace_id: workspaceId },
+  });
 }
 
 export async function deleteLoyaltyReward(id: string) {
   const workspaceId = await loyaltyWorkspaceId();
-  const { error } = await (supabase as any).from("crm_loyalty_rewards").delete().eq("workspace_id", workspaceId).eq("id", id);
-  if (error) throw error;
+  await apiClient.delete(`/v1/crm/loyalty/rewards/${id}`, {
+    query: { workspace_id: workspaceId },
+  });
 }
 
 export async function toggleAutomationRule(ruleId: string, currentActive: boolean) {
-  const { error } = await supabase.from("automation_rules").update({ is_active: !currentActive }).eq("id", ruleId);
-  if (error) throw error;
+  await apiClient.patch(`/v1/crm/retention/automation-rules/${ruleId}`, {
+    is_active: !currentActive,
+  });
 }
 
 export async function deleteAutomationRule(ruleId: string) {
-  const { error } = await supabase.from("automation_rules").delete().eq("id", ruleId);
-  if (error) throw error;
+  await apiClient.delete(`/v1/crm/retention/automation-rules/${ruleId}`);
 }

@@ -1,25 +1,27 @@
 /**
  * Time Clock Commands — Write operations for clock in/out and breaks.
+ *
+ * Phase 2: all data access goes through the typed API client
+ * (`@/lib/api-client`) to the work-orders Hono router. Exported signatures
+ * are unchanged.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export async function clockIn(location: unknown): Promise<string> {
-  const { data, error } = await supabase.rpc("clock_in", { p_location: location as any });
-  if (error) throw error;
-  return data as string;
+  const response = await apiClient.post<{ data: string | null }>("/v1/time-clock/clock-in", {
+    location: location ?? null,
+  });
+  return response.data as string;
 }
 
 export async function clockOut(location: unknown): Promise<void> {
-  const { error } = await supabase.rpc("clock_out", { p_location: location as any });
-  if (error) throw error;
+  await apiClient.post("/v1/time-clock/clock-out", { location: location ?? null });
 }
 
 export async function startBreak(): Promise<void> {
-  const { error } = await supabase.rpc("start_break");
-  if (error) throw error;
+  await apiClient.post("/v1/time-clock/break/start");
 }
 
 export async function endBreak(): Promise<void> {
-  const { error } = await supabase.rpc("end_break");
-  if (error) throw error;
+  await apiClient.post("/v1/time-clock/break/end");
 }

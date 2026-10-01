@@ -45,7 +45,7 @@ export default function GoogleCalendarCallback() {
           if (session?.provider_token) {
             await exchangeGoogleTokens(session.provider_token, session.provider_refresh_token ?? null);
             const { data: backfill } = await runGoogleCalendarBackfill();
-            const pushed = backfill?.pushed ?? 0;
+            const pushed = backfill?.backfill?.pushed ?? 0;
             toast.success(pushed ? `Google Calendar connected — ${pushed} appointment${pushed === 1 ? "" : "s"} synced` : "Google Calendar connected");
           } else {
             // Support any older direct-Google consent URL that was already open

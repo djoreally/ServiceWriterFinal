@@ -5,7 +5,7 @@
  * payments -> collected cash, invoices -> A/R, service_records -> completed/in-progress work,
  * appointments -> schedule. All reads are explicitly workspace scoped.
  */
-import { productionSupabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/api-client';
 import { fetchBusinessSettings, resolveCurrentWorkspace } from '@/application/queries/settings.query';
 import { zonedDateTimeParts, zonedLocalDateTimeToUtc } from '@/server/scheduling/timezone';
 import { fetchCanonicalCashReceipts } from '@/application/queries/canonical-cash-receipts.query';
@@ -124,12 +124,7 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
     payMonth,
     payYtd,
     payPrevMonth,
-    todayAppts,
-    upcoming7,
-    inProgress,
-    completedToday,
-    completedMonth,
-    invoices,
+    cockpitRows,
   ] = await Promise.all([
     fetchCanonicalCashReceipts({ workspaceId, from: todayStart, to: todayEnd }),
     fetchCanonicalCashReceipts({ workspaceId, from: yesterdayStart, to: yesterdayEnd }),
@@ -137,68 +132,43 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
     fetchCanonicalCashReceipts({ workspaceId, from: monthStart }),
     fetchCanonicalCashReceipts({ workspaceId, from: yearStart }),
     fetchCanonicalCashReceipts({ workspaceId, from: prevMonthStart, to: prevMonthMtdEnd }),
-    productionSupabase
-      .from('appointments')
-      .select('id,starts_at,status,metadata')
-      .eq('workspace_id', workspaceId)
-      .gte('starts_at', todayStart)
-      .lt('starts_at', todayEnd)
-      .in('status', ['confirmed', 'in_progress'])
-      .order('starts_at', { ascending: true }),
-    productionSupabase
-      .from('appointments')
-      .select('id,starts_at,status,metadata')
-      .eq('workspace_id', workspaceId)
-      .gt('starts_at', todayEnd)
-      .lt('starts_at', next7End)
-      .eq('status', 'confirmed')
-      .order('starts_at', { ascending: true })
-      .limit(10),
-    productionSupabase
-      .from('appointments')
-      .select('id,starts_at,customer_id,vehicle_id,metadata,customers(first_name,last_name),vehicles(year,make,model)')
-      .eq('workspace_id', workspaceId)
-      .eq('status', 'in_progress')
-      .order('starts_at', { ascending: false })
-      .limit(20),
-    productionSupabase
-      .from('service_records')
-      .select('appointment_id')
-      .eq('workspace_id', workspaceId)
-      .eq('status', 'completed')
-      .gte('completed_at', todayStart)
-      .lt('completed_at', todayEnd),
-    productionSupabase
-      .from('service_records')
-      .select('id,total_amount,completed_at,metadata')
-      .eq('workspace_id', workspaceId)
-      .eq('status', 'completed')
-      .gte('completed_at', monthStart)
-      .order('completed_at', { ascending: true }),
-    productionSupabase
-      .from('invoices')
-      .select('id,total,amount_paid,status')
-      .eq('workspace_id', workspaceId)
-      .in('status', ['issued', 'partially_paid', 'past_due']),
+    apiClient.get<{
+      todayApptRows: any[];
+      upcoming7Rows: any[];
+      inProgressRows: any[];
+      completedTodayRows: any[];
+      completedMonthRows: any[];
+      invoiceRows: any[];
+    }>('/v1/platform/dashboard/cockpit-rows', {
+      query: {
+        selected_workspace_id: workspaceId,
+        today_start: todayStart,
+        today_end: todayEnd,
+        yesterday_start: yesterdayStart,
+        yesterday_end: yesterdayEnd,
+        week_start: weekStart,
+        month_start: monthStart,
+        year_start: yearStart,
+        next7_end: next7End,
+        prev_month_start: prevMonthStart,
+        prev_month_mtd_end: prevMonthMtdEnd,
+      },
+    }),
   ]);
 
   for (const result of [payToday, payYesterday, payWeek, payMonth, payYtd, payPrevMonth]) {
     if (result.error) throw result.error;
   }
-  if (todayAppts.error) throw todayAppts.error;
-  if (upcoming7.error) throw upcoming7.error;
-  if (inProgress.error) throw inProgress.error;
-  if (completedToday.error) throw completedToday.error;
-  if (completedMonth.error) throw completedMonth.error;
-  if (invoices.error) throw invoices.error;
 
-  const outstandingRows = invoices.data ?? [];
+  const { todayApptRows, upcoming7Rows, inProgressRows, completedTodayRows, completedMonthRows, invoiceRows } = cockpitRows;
+
+  const outstandingRows = invoiceRows ?? [];
   const outstandingAR = outstandingRows.reduce(
     (sum, invoice) => sum + Math.max(Number(invoice.total ?? 0) - Number(invoice.amount_paid ?? 0), 0),
     0,
   );
 
-  const jobsInProgressList: CockpitJobInProgress[] = (inProgress.data ?? []).map((row) => {
+  const jobsInProgressList: CockpitJobInProgress[] = (inProgressRows ?? []).map((row) => {
     const metadata = object(row.metadata);
     const customer = Array.isArray(row.customers) ? row.customers[0] : row.customers;
     const vehicleRow = Array.isArray(row.vehicles) ? row.vehicles[0] : row.vehicles;
@@ -216,7 +186,7 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
   });
 
   const serviceTypeMap = new Map<string, { revenue: number; count: number }>();
-  for (const row of completedMonth.data ?? []) {
+  for (const row of completedMonthRows ?? []) {
     const metadata = object(row.metadata);
     const type = String(metadata.service_type ?? metadata.service_name ?? 'Service');
     const current = serviceTypeMap.get(type) ?? { revenue: 0, count: 0 };
@@ -229,8 +199,8 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 6);
 
-  const todaysAppointments = (todayAppts.data ?? []).map((row) => mapAppointment(row, timeZone));
-  const upcomingNext7 = (upcoming7.data ?? []).map((row) => mapAppointment(row, timeZone));
+  const todaysAppointments = (todayApptRows ?? []).map((row) => mapAppointment(row, timeZone));
+  const upcomingNext7 = (upcoming7Rows ?? []).map((row) => mapAppointment(row, timeZone));
 
   return {
     revenueToday: sumNetCollectedDollars(payToday.data),
@@ -241,7 +211,7 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
     revenueMonthPrev: sumNetCollectedDollars(payPrevMonth.data),
     outstandingAR,
     jobsInProgress: jobsInProgressList.length,
-    jobsCompletedToday: new Set((completedToday.data ?? []).map((row) => row.appointment_id).filter(Boolean)).size,
+    jobsCompletedToday: new Set((completedTodayRows ?? []).map((row) => row.appointment_id).filter(Boolean)).size,
     appointmentsToday: todaysAppointments.length,
     unpaidInvoices: outstandingRows.length,
     todaysAppointments,

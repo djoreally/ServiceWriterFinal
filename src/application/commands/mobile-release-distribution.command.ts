@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export type MobileReleasePlatform = "android" | "ios";
 export type MobileReleaseStatus = "draft" | "published" | "revoked" | "expired";
@@ -18,11 +18,12 @@ export interface MobileRelease {
 }
 
 async function invokeDistribution<T>(body: Record<string, unknown>): Promise<T> {
-  const { data, error } = await supabase.functions.invoke("mobile-release-distribution", { body });
-  if (error) throw new Error(error.message || "Mobile release service unavailable");
+  const { data } = await apiClient.post<{ data: T }>("/v1/mobile-release-distribution", body);
   if (!data) throw new Error("Mobile release service returned no result");
-  if (typeof data === "object" && "error" in data && typeof data.error === "string") throw new Error(data.error);
-  return data as T;
+  if (typeof data === "object" && "error" in data && typeof (data as { error?: unknown }).error === "string") {
+    throw new Error((data as { error: string }).error);
+  }
+  return data;
 }
 
 export async function listMobileReleases(view: "available" | "all" = "available") {

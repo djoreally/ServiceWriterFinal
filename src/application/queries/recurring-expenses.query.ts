@@ -1,7 +1,7 @@
 /**
- * Recurring Expenses — Read access.
+ * Recurring Expenses — Read access via the Hono billing API.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 
 export type RecurringFrequency = "weekly" | "biweekly" | "monthly" | "quarterly" | "yearly";
 
@@ -31,11 +31,12 @@ export interface RecurringExpenseRow {
 }
 
 export async function fetchRecurringExpenses(userId: string) {
-  return supabase
-    .from("recurring_expenses" as any)
-    .select("*")
-    .eq("user_id", userId)
-    .order("next_due_date", { ascending: true });
+  try {
+    const { data } = await apiClient.get<{ data: RecurringExpenseRow[] }>("/v1/billing/recurring-expenses");
+    return { data: data ?? [], error: null };
+  } catch (error) {
+    return { data: [], error };
+  }
 }
 
 /**
@@ -43,9 +44,10 @@ export async function fetchRecurringExpenses(userId: string) {
  * whose next_due_date has arrived. Returns the count generated.
  */
 export async function processDueRecurringExpenses(userId: string): Promise<number> {
-  const { data, error } = await supabase.rpc("process_due_recurring_expenses" as any, {
-    p_user_id: userId,
-  });
-  if (error) throw error;
-  return (data as number) ?? 0;
+  try {
+    const { data } = await apiClient.post<{ data: { generated: number } }>("/v1/billing/recurring-expenses/process");
+    return data.generated ?? 0;
+  } catch (error) {
+    throw error instanceof ApiClientError ? new Error(error.message) : error;
+  }
 }

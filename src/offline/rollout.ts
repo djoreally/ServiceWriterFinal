@@ -1,4 +1,3 @@
-import { supabase } from '@/integrations/supabase/client';
 import { features } from '@/config/features';
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";

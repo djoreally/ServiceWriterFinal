@@ -26,6 +26,7 @@ export async function fetchStripeConnectStatus(): Promise<StripeConnectStatus> {
 /** Start the canonical Stripe connection flow. */
 export async function startStripeConnectOnboarding(_mode: "create" | "oauth" = "create"): Promise<string> {
   const response = await initiateStripeOnboarding();
-  if (!response.data?.url) throw new Error("Stripe did not return an onboarding URL");
-  return response.data.url;
+  const url = (response.data as { url?: unknown } | undefined)?.url;
+  if (typeof url !== "string" || !url) throw new Error("Stripe did not return an onboarding URL");
+  return url;
 }

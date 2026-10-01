@@ -1,26 +1,14 @@
-import { SUPABASE_URL_RESOLVED } from "@/integrations/supabase/client";
 /**
  * Provider Sync Manager Commands — Retry actions on the sync pipeline.
+ * Proxied through the platform API; edge-function auth stays server-side.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 async function postManager(body: Record<string, unknown>) {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new Error("Not authenticated");
-  const res = await fetch(
-    `${SUPABASE_URL_RESOLVED}/functions/v1/provider-sync-manager`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${session.access_token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    },
+  return apiClient.post<{ retried?: number; [key: string]: unknown }>(
+    "/v1/platform/provider-sync/manage",
+    body,
   );
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error || `Request failed (${res.status})`);
-  return json;
 }
 
 export async function retryProviderSyncRecord(recordId: string) {

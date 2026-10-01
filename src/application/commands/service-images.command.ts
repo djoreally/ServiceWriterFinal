@@ -2,7 +2,7 @@
  * Service Images Command - Upload and delete service images.
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface ServiceImage {
@@ -18,13 +18,11 @@ export async function fetchServiceImages(serviceId: string): Promise<{ images: S
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) return { images: [], userId: null };
 
-  const { data, error } = await supabase
-    .from("service_images")
-    .select("*")
-    .eq("service_id", serviceId)
-    .order("sort_order");
-
-  return { images: (!error && data ? data : []) as ServiceImage[], userId: user.id };
+  const res = await apiClient.get<{ images: ServiceImage[]; userId: string | null }>(
+    "/v1/platform/service-images",
+    { query: { service_id: serviceId } },
+  );
+  return { images: res.images ?? [], userId: res.userId ?? user.id };
 }
 
 export async function uploadServiceImage(params: {
@@ -35,36 +33,17 @@ export async function uploadServiceImage(params: {
   imageType: string;
   sortOrder: number;
 }): Promise<void> {
-  const fileExt = params.file.name.split(".").pop();
-  const fileName = `${params.userId}/${params.serviceId}/${Date.now()}.${fileExt}`;
-
-  const { error: uploadError } = await supabase.storage
-    .from("service-images")
-    .upload(fileName, params.file);
-  if (uploadError) throw uploadError;
-
-  const { data: { publicUrl } } = supabase.storage
-    .from("service-images")
-    .getPublicUrl(fileName);
-
-  const { error: dbError } = await supabase.from("service_images").insert({
-    user_id: params.userId,
-    service_id: params.serviceId,
-    image_url: publicUrl,
-    caption: params.caption,
-    image_type: params.imageType,
-    sort_order: params.sortOrder,
-  });
-  if (dbError) throw dbError;
+  const form = new FormData();
+  form.append("file", params.file);
+  form.append("service_id", params.serviceId);
+  form.append("caption", params.caption ?? "");
+  form.append("image_type", params.imageType);
+  form.append("sort_order", String(params.sortOrder));
+  await apiClient.post("/v1/platform/service-images", form);
 }
 
 export async function deleteServiceImage(imageId: string, imageUrl: string): Promise<void> {
-  // Remove from storage
-  const urlParts = imageUrl.split("/service-images/");
-  if (urlParts[1]) {
-    await supabase.storage.from("service-images").remove([urlParts[1]]);
-  }
-
-  const { error } = await supabase.from("service_images").delete().eq("id", imageId);
-  if (error) throw error;
+  await apiClient.delete(`/v1/platform/service-images/${encodeURIComponent(imageId)}`, {
+    query: { image_url: imageUrl },
+  });
 }

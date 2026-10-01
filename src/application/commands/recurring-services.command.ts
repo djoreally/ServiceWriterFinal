@@ -1,7 +1,11 @@
 /**
  * Recurring Services Commands — Write operations for recurring service records.
+ *
+ * Phase 2: all data access goes through the typed API client
+ * (`@/lib/api-client`) to the work-orders Hono router. Exported signatures
+ * are unchanged.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import type { CreateRecurringServiceInput, RecurringServiceRecord } from "@/application/queries/recurring-services.query";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
@@ -21,22 +25,15 @@ export async function createRecurringService(input: CreateRecurringServiceInput)
   const startDate = new Date(input.start_date);
   const nextDueDate = addInterval(startDate, input.frequency, input.interval).toISOString().split("T")[0];
 
-  const { data, error } = await supabase
-    .from("recurring_services")
-    .insert({
-      user_id: user.id,
-      service_catalog_id: input.service_catalog_id,
-      customer_id: input.customer_id || null,
-      vehicle_id: input.vehicle_id || null,
-      frequency: input.frequency,
-      interval: input.interval,
-      start_date: input.start_date,
-      next_due_date: nextDueDate,
-      is_active: true,
-    })
-    .select("id, service_catalog_id, customer_id, vehicle_id, frequency, interval, start_date, next_due_date, is_active, created_at")
-    .single();
-
-  if (error) throw error;
-  return data as RecurringServiceRecord;
+  const response = await apiClient.post<{ data: RecurringServiceRecord }>("/v1/recurring-services", {
+    user_id: user.id,
+    service_catalog_id: input.service_catalog_id,
+    customer_id: input.customer_id || null,
+    vehicle_id: input.vehicle_id || null,
+    frequency: input.frequency,
+    interval: input.interval,
+    start_date: input.start_date,
+    next_due_date: nextDueDate,
+  });
+  return response.data;
 }

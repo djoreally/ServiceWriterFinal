@@ -1,7 +1,7 @@
 /**
  * Fleet Location Commands — Write operations for fleet locations.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export interface FleetLocationRegistrationPayload {
@@ -56,40 +56,12 @@ export async function insertFleetLocation(payload: FleetLocationRegistrationPayl
     throw new Error("Service window end must be after start.");
   }
 
-  const { data: contract } = await supabase
-    .from("fleet_contracts")
-    .select("id, fleet_client_id")
-    .eq("id", payload.default_contract_id)
-    .eq("user_id", payload.user_id)
-    .maybeSingle();
-
-  if (!contract || contract.fleet_client_id !== payload.fleet_client_id) {
-    throw new Error("Selected contract must belong to the selected fleet client.");
+  try {
+    const { data } = await apiClient.post<{ data: unknown }>("/v1/fleet/locations", { payload });
+    return { data, error: null };
+  } catch (error) {
+    return { data: null, error };
   }
-
-  return supabase.from("fleet_locations").insert({
-    user_id: payload.user_id,
-    fleet_client_id: payload.fleet_client_id,
-    name: payload.name,
-    address: payload.address,
-    city: payload.city,
-    state: payload.state,
-    postal_code: payload.postal_code,
-    site_contact_name: payload.site_contact_name,
-    site_contact_phone: payload.site_contact_phone,
-    service_window_start: payload.service_window_start,
-    service_window_end: payload.service_window_end,
-    access_instructions: payload.access_instructions,
-    is_primary: payload.is_primary,
-    notes: JSON.stringify({
-      registration_version: "service_site_v1",
-      site_contact_role: payload.site_contact_role,
-      default_contract_id: payload.default_contract_id,
-      access_profile: payload.access_profile,
-      scheduling_policy: payload.scheduling_policy,
-      billing_context: payload.billing_context,
-    }),
-  });
 }
 
 /** Update a fleet location */
@@ -114,11 +86,12 @@ export async function updateFleetLocation(
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("Unauthorized");
 
-  return supabase
-    .from("fleet_locations")
-    .update(payload)
-    .eq("id", locationId)
-    .eq("user_id", user.id);
+  try {
+    const { data } = await apiClient.patch<{ data: unknown }>(`/v1/fleet/locations/${locationId}`, { payload });
+    return { data, error: null };
+  } catch (error) {
+    return { data: null, error };
+  }
 }
 
 /** Delete a fleet location */
@@ -126,9 +99,10 @@ export async function deleteFleetLocation(locationId: string) {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("Unauthorized");
 
-  return supabase
-    .from("fleet_locations")
-    .delete()
-    .eq("id", locationId)
-    .eq("user_id", user.id);
+  try {
+    const { data } = await apiClient.delete<{ data: unknown }>(`/v1/fleet/locations/${locationId}`);
+    return { data, error: null };
+  } catch (error) {
+    return { data: null, error };
+  }
 }

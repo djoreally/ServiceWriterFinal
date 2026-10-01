@@ -8,7 +8,7 @@
  * - Supports multiple payment providers (Stripe + Square)
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 import type { AppointmentBookingConfiguration } from "@/lib/booking-configuration";
 
 export type PaymentProviderType = "stripe" | "square";
@@ -131,57 +131,44 @@ export async function startCheckout(request: CheckoutRequest): Promise<CheckoutR
   // Generate idempotency key to prevent duplicate checkouts
   const idempotencyKey = `booking_${request.tenantId}_${request.customerEmail}_${Date.now()}`;
 
-  // Route to the correct edge function based on provider
-  const edgeFunctionName = request.paymentProvider === "square"
-    ? "create-square-payment"
-    : "create-booking-payment";
-
   try {
-    const { data, error } = await supabase.functions.invoke(edgeFunctionName, {
-      body: {
-        business_user_id: request.tenantId,
-        service_catalog_ids: request.serviceCatalogIds,
-        customer_email: request.customerEmail,
-        customer_name: request.customerName,
-        idempotency_key: idempotencyKey,
-        // Oil quart adjustment for vehicles needing more than base 5 quarts (in dollars)
-        oil_price_adjustment: request.oilPriceAdjustment || 0,
-        oil_extra_quarts: request.oilExtraQuarts || 0,
-        oil_price_per_quart: request.oilPricePerQuart || 0,
-        appointment_data: {
-          scheduledDate: request.appointmentData.scheduledDate,
-          scheduledTime: request.appointmentData.scheduledTime,
-          dropOffOption: request.appointmentData.dropOffOption,
-          customerAddress: request.appointmentData.customerAddress,
-          customerPhone: request.customerPhone || undefined,
-          vehicles: request.appointmentData.vehicles,
-          bookingConfiguration: request.appointmentData.bookingConfiguration,
-          vehicleServiceAssignments: request.appointmentData.vehicleServiceAssignments,
-          tireItems: request.appointmentData.tireItems,
-          notes: request.appointmentData.notes,
-          consent: request.appointmentData.consent,
-          hasPickupService: request.appointmentData.dropOffOption === "pickup",
+    // Route to the correct edge function server-side; the Hono endpoint
+    // proxies to the legacy edge function and forwards its error message
+    // verbatim so parseCheckoutError can match on it.
+    const data = await apiClient.post<{ url?: string; session_id?: string }>(
+      "/v1/billing/public-checkout",
+      {
+        payment_provider: request.paymentProvider,
+        checkout: {
+          business_user_id: request.tenantId,
+          service_catalog_ids: request.serviceCatalogIds,
+          customer_email: request.customerEmail,
+          customer_name: request.customerName,
+          idempotency_key: idempotencyKey,
+          // Oil quart adjustment for vehicles needing more than base 5 quarts (in dollars)
+          oil_price_adjustment: request.oilPriceAdjustment || 0,
+          oil_extra_quarts: request.oilExtraQuarts || 0,
+          oil_price_per_quart: request.oilPricePerQuart || 0,
+          appointment_data: {
+            scheduledDate: request.appointmentData.scheduledDate,
+            scheduledTime: request.appointmentData.scheduledTime,
+            dropOffOption: request.appointmentData.dropOffOption,
+            customerAddress: request.appointmentData.customerAddress,
+            customerPhone: request.customerPhone || undefined,
+            vehicles: request.appointmentData.vehicles,
+            bookingConfiguration: request.appointmentData.bookingConfiguration,
+            vehicleServiceAssignments: request.appointmentData.vehicleServiceAssignments,
+            tireItems: request.appointmentData.tireItems,
+            notes: request.appointmentData.notes,
+            consent: request.appointmentData.consent,
+            hasPickupService: request.appointmentData.dropOffOption === "pickup",
+          },
+          booking_source: request.bookingSource || undefined,
+          success_url: request.successUrl,
+          cancel_url: request.cancelUrl,
         },
-        booking_source: request.bookingSource || undefined,
-        success_url: request.successUrl,
-        cancel_url: request.cancelUrl,
       },
-    });
-
-    if (error) {
-      // supabase.functions.invoke wraps non-2xx responses in FunctionsHttpError
-      // The actual error body from the edge function is in error.context (JSON)
-      const ctx = (error as any)?.context;
-      let edgeMessage: string | undefined;
-      if (ctx && typeof ctx === "object") {
-        // ctx is the parsed JSON body from the edge function response
-        edgeMessage = ctx.error ?? ctx.message ?? undefined;
-      }
-      if (!edgeMessage && typeof error === "object" && error !== null) {
-        edgeMessage = (error as any).message;
-      }
-      return parseCheckoutError(new Error(edgeMessage || "Payment service error. Please try again."));
-    }
+    );
 
     if (data?.url) {
       return {
@@ -199,6 +186,9 @@ export async function startCheckout(request: CheckoutRequest): Promise<CheckoutR
       },
     };
   } catch (err) {
+    if (err instanceof ApiClientError) {
+      return parseCheckoutError(new Error(err.message));
+    }
     return parseCheckoutError(err);
   }
 }

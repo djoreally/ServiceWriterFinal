@@ -1,9 +1,9 @@
 /**
  * Inline Service Writer Queries — canonical workspace-scoped reads for the Command Center.
  */
+import { apiClient } from "@/lib/api-client";
 import { nextApi } from "@/lib/nextApiClient";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
-import { supabase } from "@/integrations/supabase/client";
 
 type QueryResult<T> = { data: T | null; error: Error | null };
 
@@ -40,15 +40,10 @@ export async function fetchServiceWriterData(_userId: string): Promise<[
 
     const [customerResponse, catalogResponse] = await Promise.all([
       nextApi.customers.list(context.workspaceId),
-      (supabase as any)
-        .from("service_catalog")
-        .select("id,name,description,default_price,labor_rate,estimated_duration,category")
-        .eq("workspace_id", context.workspaceId)
-        .eq("is_active", true)
-        .order("name"),
+      apiClient.get<{ data: Array<Record<string, unknown>> }>("/v1/service-catalog", {
+        query: { workspace_id: context.workspaceId },
+      }),
     ]);
-
-    if (catalogResponse.error) throw catalogResponse.error;
 
     const customers = ((customerResponse.data ?? []) as Array<Record<string, unknown>>).map((row) => ({
       id: String(row.id),

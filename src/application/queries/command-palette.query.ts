@@ -1,4 +1,4 @@
-import { productionSupabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 export async function searchCommandPalette(_userId: string, query: string) {
@@ -10,35 +10,15 @@ export async function searchCommandPalette(_userId: string, query: string) {
   const context = await resolveCurrentWorkspace();
   if (!context) return { customers: [], appointments: [] };
 
-  const db = productionSupabase as any;
-  const [customersRes, appointmentsRes] = await Promise.all([
-    db
-      .from("customers")
-      .select("id,first_name,last_name,email,phone")
-      .eq("workspace_id", context.workspaceId)
-      .neq("status", "archived")
-      .or(`first_name.ilike.%${q}%,last_name.ilike.%${q}%,email.ilike.%${q}%,phone.ilike.%${q}%`)
-      .limit(8),
-    db
-      .from("appointments")
-      .select("id,status,starts_at,confirmation_code,metadata")
-      .eq("workspace_id", context.workspaceId)
-      .order("starts_at", { ascending: false })
-      .limit(30),
-  ]);
-
-  if (customersRes.error) throw customersRes.error;
-  if (appointmentsRes.error) throw appointmentsRes.error;
-
-  const customers = (customersRes.data ?? []).map((customer: any) => ({
-    id: customer.id,
-    name: [customer.first_name, customer.last_name].filter(Boolean).join(" ") || "Customer",
-    email: customer.email,
-    phone: customer.phone,
-  }));
+  const { customers, appointmentRows } = await apiClient.get<{
+    customers: Array<{ id: string; name: string; email: string | null; phone: string | null }>;
+    appointmentRows: any[];
+  }>("/v1/platform/command-palette/search", {
+    query: { q, selected_workspace_id: context.workspaceId },
+  });
 
   const lower = q.toLowerCase();
-  const appointments = (appointmentsRes.data ?? [])
+  const appointments = (appointmentRows ?? [])
     .filter((appointment: any) => {
       const metadata = appointment.metadata && typeof appointment.metadata === "object" ? appointment.metadata : {};
       const searchable = [
@@ -66,5 +46,5 @@ export async function searchCommandPalette(_userId: string, query: string) {
       };
     });
 
-  return { customers, appointments };
+  return { customers: customers ?? [], appointments };
 }

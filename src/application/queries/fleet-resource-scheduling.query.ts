@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 export interface FleetResourceCapacity {
   technician_id: string;
   technician_name: string;
@@ -12,10 +12,10 @@ export interface FleetResourceCapacity {
   is_blacked_out: boolean;
 }
 
-const db = supabase as any;
 export async function fetchFleetResourceCapacity(date: string): Promise<FleetResourceCapacity[]> {
-  const { data, error } = await db.rpc("get_fleet_resource_capacity_v1", { p_date: date });
-  if (error) throw error;
+  const { data } = await apiClient.get<{ data: FleetResourceCapacity[] }>(
+    `/v1/fleet/resource-capacity?date=${encodeURIComponent(date)}`,
+  );
   return data ?? [];
 }
 

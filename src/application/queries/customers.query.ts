@@ -3,6 +3,7 @@
  */
 
 import type { Customer } from "@/shared/types";
+import { apiClient } from "@/lib/api-client";
 import { getOfflineDatabase } from "@/offline/database";
 import { isOfflineEligibleForCurrentUser } from "@/offline/rollout";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
@@ -58,15 +59,37 @@ const CUSTOMER_OVERVIEW_TTL_MS = 5 * 60 * 1000;
 const customerOverviewCache = new Map<string, { value: CustomerOverviewResult; expiresAt: number }>();
 const customerOverviewInFlight = new Map<string, Promise<CustomerOverviewResult>>();
 
+/**
+ * Fetch every page of the paginated customer list so the overview never
+ * silently presents only the first page of records.
+ */
+export async function listAllCustomers(workspaceId: string): Promise<unknown[]> {
+  const pageSize = 100;
+  const data: unknown[] = [];
+  let offset = 0;
+  for (;;) {
+    const response = await apiClient.get<{ data: unknown[] }>("/v1/customers", {
+      query: { workspace_id: workspaceId, limit: pageSize, offset },
+    });
+    data.push(...response.data);
+    if (response.data.length < pageSize) break;
+    offset += pageSize;
+  }
+  return data;
+}
+
 async function loadCustomerOverviewFromNextApi(workspaceId: string): Promise<CustomerOverviewResult> {
-  const { nextApi } = await import("@/lib/nextApiClient");
-  const [customerResponse, vehicleResponse, serviceResponse] = await Promise.all([
-    nextApi.customers.list(workspaceId),
-    nextApi.vehicles.list(workspaceId),
-    nextApi.serviceRecords.list(workspaceId),
+  const [customersData, vehiclesData, serviceRecordsData] = await Promise.all([
+    listAllCustomers(workspaceId),
+    apiClient
+      .get<{ data: unknown[] }>("/v1/vehicles", { query: { workspace_id: workspaceId } })
+      .then((response) => response.data),
+    apiClient
+      .get<{ data: unknown[] }>("/v1/service-records", { query: { workspace_id: workspaceId } })
+      .then((response) => response.data),
   ]);
 
-  const customers = z.array(apiCustomerSchema).parse(customerResponse.data).map((customer) => ({
+  const customers = z.array(apiCustomerSchema).parse(customersData).map((customer) => ({
     id: customer.id,
     name: [customer.first_name, customer.last_name].filter(Boolean).join(" "),
     email: customer.email ?? null,
@@ -77,8 +100,8 @@ async function loadCustomerOverviewFromNextApi(workspaceId: string): Promise<Cus
     user_id: "",
   })) as Customer[];
 
-  const vehicles = z.array(apiVehicleSchema).parse(vehicleResponse.data);
-  const serviceRecords = z.array(apiServiceRecordSchema).parse(serviceResponse.data);
+  const vehicles = z.array(apiVehicleSchema).parse(vehiclesData);
+  const serviceRecords = z.array(apiServiceRecordSchema).parse(serviceRecordsData);
 
   const vehicleCounts: Record<string, number> = {};
   for (const vehicle of vehicles) {

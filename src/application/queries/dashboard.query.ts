@@ -1,7 +1,8 @@
 /** Dashboard query adapters for Final's canonical workspace schema. */
-import { productionSupabase, supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { format, subDays, startOfDay } from "date-fns";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+import { getCurrentAuthUser } from "@/lib/auth/current-user";
 
 export interface DashboardStats {
   vehicles: number;
@@ -173,8 +174,8 @@ function serviceLegacy(row: DashboardServiceSource): ServiceRecord {
 }
 
 export async function fetchDashboardOnboardingInfo(): Promise<DashboardOnboardingInfo> {
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.user) {
+  const { data: { user } } = await getCurrentAuthUser();
+  if (!user) {
     return { hasUser: false, onboardingCompleted: false, ownerName: null, resolved: true };
   }
 
@@ -183,17 +184,11 @@ export async function fetchDashboardOnboardingInfo(): Promise<DashboardOnboardin
     if (!context) {
       return { hasUser: true, onboardingCompleted: false, ownerName: null, resolved: true };
     }
-    const { data, error } = await productionSupabase.from("workspace_settings")
-      .select("owner_name")
-      .eq("workspace_id", context.workspaceId)
-      .maybeSingle();
-    if (error) throw error;
-    return {
-      hasUser: true,
-      onboardingCompleted: true,
-      ownerName: data?.owner_name ?? null,
-      resolved: true,
-    };
+    const info = await apiClient.get<DashboardOnboardingInfo>(
+      "/v1/platform/dashboard/onboarding-info",
+      { query: { selected_workspace_id: context.workspaceId } },
+    );
+    return { ...info, hasUser: true };
   } catch {
     return { hasUser: true, onboardingCompleted: false, ownerName: null, resolved: false };
   }
@@ -206,37 +201,23 @@ export async function fetchDashboardOverview(): Promise<DashboardOverviewResult>
   }
 
   const todayStartIso = format(startOfDay(new Date()), "yyyy-MM-dd'T'HH:mm:ss");
-  const [vehiclesRes, pendingRes, activeRes, upcomingRes] = await Promise.all([
-    productionSupabase.from("vehicles").select("id", { count: "exact", head: true }).eq("workspace_id", context.workspaceId).eq("status", "active"),
-    productionSupabase.from("service_records").select("id", { count: "exact", head: true }).eq("workspace_id", context.workspaceId).eq("status", "in_progress"),
-    productionSupabase.from("service_records")
-      .select("id,work_performed,metadata,customers(first_name,last_name),vehicles(year,make,model)")
-      .eq("workspace_id", context.workspaceId)
-      .eq("status", "in_progress")
-      .limit(5),
-    productionSupabase.from("appointments")
-      .select("id,status,starts_at,metadata,vehicles(year,make,model)")
-      .eq("workspace_id", context.workspaceId)
-      .neq("source", "fleet_work_order")
-      .gte("starts_at", todayStartIso)
-      .neq("status", "cancelled")
-      .order("starts_at", { ascending: true })
-      .limit(20),
-  ]);
+  const rows = await apiClient.get<{
+    vehiclesCount: number;
+    pendingCount: number;
+    activeRows: any[];
+    upcomingRows: any[];
+  }>("/v1/platform/dashboard/overview", {
+    query: { selected_workspace_id: context.workspaceId, today_start: todayStartIso },
+  });
 
-  if (vehiclesRes.error) throw vehiclesRes.error;
-  if (pendingRes.error) throw pendingRes.error;
-  if (activeRes.error) throw activeRes.error;
-  if (upcomingRes.error) throw upcomingRes.error;
-
-  const activeServices: ActiveService[] = (activeRes.data ?? []).map((row) => ({
+  const activeServices: ActiveService[] = (rows.activeRows ?? []).map((row) => ({
     id: row.id,
     vehicle: row.vehicles ? `${row.vehicles.year ?? ""} ${row.vehicles.make ?? ""} ${row.vehicles.model ?? ""}`.trim() : "Unknown",
     customer: customerName(row.customers),
     serviceType: String(obj(row.metadata).service_type ?? obj(row.metadata).title ?? row.work_performed ?? "Service"),
   }));
 
-  const upcomingAppointments: UpcomingAppointment[] = (upcomingRes.data ?? []).map((row) => {
+  const upcomingAppointments: UpcomingAppointment[] = (rows.upcomingRows ?? []).map((row) => {
     const startsAt = new Date(row.starts_at);
     return {
       id: row.id,
@@ -250,8 +231,8 @@ export async function fetchDashboardOverview(): Promise<DashboardOverviewResult>
 
   return {
     stats: {
-      vehicles: vehiclesRes.count ?? 0,
-      pendingServices: pendingRes.count ?? 0,
+      vehicles: rows.vehiclesCount ?? 0,
+      pendingServices: rows.pendingCount ?? 0,
       // Final does not yet have an inventory_items table. Do not fabricate stock counts.
       lowStockItems: 0,
     },
@@ -270,39 +251,22 @@ export async function fetchDashboardReporting(range: DashboardDateRange): Promis
   const prevFrom = subDays(range.from, periodDays); prevFrom.setHours(0, 0, 0, 0);
   const prevTo = subDays(range.from, 1); prevTo.setHours(23, 59, 59, 999);
 
-  const [paymentsRes, servicesRes, appointmentsRes, prevPaymentsRes] = await Promise.all([
-    productionSupabase.from("payments")
-      .select("id,amount,created_at,status,metadata,customers(first_name,last_name,email)")
-      .eq("workspace_id", context.workspaceId)
-      .gte("created_at", fromIso.toISOString())
-      .lte("created_at", toIso.toISOString())
-      .order("created_at", { ascending: true }),
-    productionSupabase.from("service_records")
-      .select("id,status,work_performed,metadata,started_at,completed_at,created_at,total_amount,tax_amount,discount_amount,customers(first_name,last_name),vehicles(make,model,year)")
-      .eq("workspace_id", context.workspaceId)
-      .gte("created_at", fromIso.toISOString())
-      .lte("created_at", toIso.toISOString())
-      .order("created_at", { ascending: true }),
-    productionSupabase.from("appointments")
-      .select("id,status,starts_at,metadata")
-      .eq("workspace_id", context.workspaceId)
-      .neq("source", "fleet_work_order")
-      .gte("starts_at", fromIso.toISOString())
-      .lte("starts_at", toIso.toISOString())
-      .order("starts_at", { ascending: true }),
-    productionSupabase.from("payments")
-      .select("id,amount,status,metadata")
-      .eq("workspace_id", context.workspaceId)
-      .gte("created_at", prevFrom.toISOString())
-      .lte("created_at", prevTo.toISOString()),
-  ]);
+  const rows = await apiClient.get<{
+    paymentRows: any[];
+    serviceRows: any[];
+    appointmentRows: any[];
+    prevPaymentRows: any[];
+  }>("/v1/platform/dashboard/reporting", {
+    query: {
+      selected_workspace_id: context.workspaceId,
+      from: fromIso.toISOString(),
+      to: toIso.toISOString(),
+      prev_from: prevFrom.toISOString(),
+      prev_to: prevTo.toISOString(),
+    },
+  });
 
-  if (paymentsRes.error) throw paymentsRes.error;
-  if (servicesRes.error) throw servicesRes.error;
-  if (appointmentsRes.error) throw appointmentsRes.error;
-  if (prevPaymentsRes.error) throw prevPaymentsRes.error;
-
-  const payments: PaymentRecord[] = (paymentsRes.data ?? [])
+  const payments: PaymentRecord[] = (rows.paymentRows ?? [])
     .filter((row) => {
       const metadata = obj(row.metadata);
       const appointmentStatus = metadata.appointment_status;
@@ -331,7 +295,7 @@ export async function fetchDashboardReporting(range: DashboardDateRange): Promis
       };
     });
 
-  const previousPeriodPayments: PreviousPeriodPayment[] = (prevPaymentsRes.data ?? []).map((row) => ({
+  const previousPeriodPayments: PreviousPeriodPayment[] = (rows.prevPaymentRows ?? []).map((row) => ({
     id: row.id,
     amount: Number(row.amount ?? 0),
     status: row.status,
@@ -340,8 +304,8 @@ export async function fetchDashboardReporting(range: DashboardDateRange): Promis
 
   return {
     payments,
-    services: (servicesRes.data ?? []).map(serviceLegacy),
-    appointments: (appointmentsRes.data ?? []).map(appointmentLegacy),
+    services: (rows.serviceRows ?? []).map(serviceLegacy),
+    appointments: (rows.appointmentRows ?? []).map(appointmentLegacy),
     previousPeriodPayments,
   };
 }

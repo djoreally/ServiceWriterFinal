@@ -2,14 +2,27 @@
  * Onboarding Wizard Commands — All write operations for the onboarding flow.
  * Extracted from onboarding-wizard.query.ts to enforce command/query separation.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 /** Upsert onboarding profile data. */
 export async function saveOnboardingProgress(profileData: Record<string, unknown>): Promise<void> {
-  const { error } = await supabase
-    .from("business_profiles")
-    .upsert(profileData as any, { onConflict: "user_id" });
-  if (error) throw error;
+  await apiClient.post("/v1/platform/onboarding/profile", profileData);
+}
+
+interface OnboardingServiceInput {
+  name: string;
+  description: string;
+  price: number | null;
+  duration_minutes: number;
+}
+
+async function saveOnboardingServices(services: OnboardingServiceInput[]): Promise<number> {
+  if (services.length === 0) return 0;
+  const { count } = await apiClient.post<{ count: number }>(
+    "/v1/platform/onboarding/services",
+    { services },
+  );
+  return count;
 }
 
 /** Add first service during onboarding. */
@@ -19,15 +32,12 @@ export async function addOnboardingService(userId: string, service: {
   price: number;
   duration: number;
 }): Promise<void> {
-  const { error } = await supabase.from("service_catalog").insert({
-    user_id: userId,
+  await saveOnboardingServices([{
     name: service.name,
     description: service.description,
-    default_price: service.price,
-    estimated_duration: service.duration,
-    is_active: true,
-  });
-  if (error) throw error;
+    price: service.price,
+    duration_minutes: service.duration,
+  }]);
 }
 
 /**
@@ -39,19 +49,5 @@ export async function addOnboardingServices(
   userId: string,
   services: Array<{ name: string; description: string; price: number | null; duration_minutes: number }>,
 ): Promise<number> {
-  if (services.length === 0) return 0;
-
-  const rows = services.map((service) => ({
-    user_id: userId,
-    name: service.name,
-    description: service.description,
-    default_price: service.price,
-    estimated_duration: service.duration_minutes,
-    is_active: true,
-  }));
-
-  const { error } = await supabase.from("service_catalog").insert(rows as any);
-  if (error) throw error;
-  return rows.length;
+  return saveOnboardingServices(services);
 }
-

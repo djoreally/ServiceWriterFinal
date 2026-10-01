@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 import { useToast } from "@/hooks/use-toast";
 
 function updateAppBadge(count: number) {
@@ -42,6 +42,8 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
   const [loading, setLoading] = useState(true);
   const locallyDeletedIds = useRef(new Set<string>());
   const toastedIds = useRef(new Set<string>());
+  const knownIds = useRef(new Set<string>());
+  const broadcastRef = useRef<BroadcastChannel | null>(null);
   const { toast } = useToast();
   const showToastOnNewRef = useRef(showToastOnNew);
   const filterNotificationRef = useRef(filterNotification);
@@ -54,6 +56,7 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
   }, [showToastOnNew, filterNotification, toast]);
 
   const applyRows = useCallback((rows: InAppNotification[]) => {
+    knownIds.current = new Set(rows.map((notification) => notification.id));
     const visibleRows = rows
       .filter((notification) => !locallyDeletedIds.current.has(notification.id))
       .filter((notification) => filterNotificationRef.current?.(notification) ?? true)
@@ -66,45 +69,30 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
   }, []);
 
   const fetchNotifications = useCallback(async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) {
-      setNotifications([]);
-      setUnreadCount(0);
-      updateAppBadge(0);
+    try {
+      const { data } = await apiClient.get<{ data: InAppNotification[] }>("/v1/notifications");
+      applyRows(data ?? []);
+    } catch (error) {
+      if (error instanceof ApiClientError && error.status === 401) {
+        knownIds.current = new Set();
+        setNotifications([]);
+        setUnreadCount(0);
+        updateAppBadge(0);
+      } else {
+        console.error("[Notifications] Error fetching:", error instanceof Error ? error.message : error);
+      }
+    } finally {
       setLoading(false);
-      return;
     }
-
-    const { data, error } = await supabase
-      .from("in_app_notifications")
-      .select("*")
-      .eq("user_id", session.user.id)
-      .is("dismissed_at", null)
-      .order("created_at", { ascending: false })
-      .limit(50);
-
-    if (error) {
-      console.error("[Notifications] Error fetching:", error.message);
-      setLoading(false);
-      return;
-    }
-
-    applyRows((data ?? []) as InAppNotification[]);
-    setLoading(false);
   }, [applyRows]);
 
   const markAsRead = useCallback(async (notificationId: string) => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) return;
     const readAt = new Date().toISOString();
-    const { error } = await supabase
-      .from("in_app_notifications")
-      .update({ read: true, read_at: readAt })
-      .eq("id", notificationId)
-      .eq("user_id", session.user.id);
-
-    if (error) {
-      console.error("[Notifications] Error marking read:", error.message);
+    try {
+      await apiClient.patch(`/v1/notifications/${notificationId}/read`, {});
+    } catch (error) {
+      if (error instanceof ApiClientError && error.status === 401) return;
+      console.error("[Notifications] Error marking read:", error instanceof Error ? error.message : error);
       return;
     }
     setNotifications((previous) => previous.map((notification) => (
@@ -118,17 +106,12 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
   }, []);
 
   const markAllAsRead = useCallback(async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) return;
     const readAt = new Date().toISOString();
-    const { error } = await supabase
-      .from("in_app_notifications")
-      .update({ read: true, read_at: readAt })
-      .eq("user_id", session.user.id)
-      .eq("read", false);
-
-    if (error) {
-      console.error("[Notifications] Error marking all read:", error.message);
+    try {
+      await apiClient.patch("/v1/notifications/read-all", {});
+    } catch (error) {
+      if (error instanceof ApiClientError && error.status === 401) return;
+      console.error("[Notifications] Error marking all read:", error instanceof Error ? error.message : error);
       return;
     }
     setNotifications((previous) => previous.map((notification) => ({ ...notification, read: true, read_at: readAt })));
@@ -137,8 +120,6 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
   }, []);
 
   const deleteNotification = useCallback(async (notificationId: string) => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) return;
     locallyDeletedIds.current.add(notificationId);
     setNotifications((previous) => {
       const removed = previous.find((notification) => notification.id === notificationId);
@@ -152,23 +133,37 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
       return previous.filter((notification) => notification.id !== notificationId);
     });
 
-    const { error } = await supabase
-      .from("in_app_notifications")
-      .update({ dismissed_at: new Date().toISOString() })
-      .eq("id", notificationId)
-      .eq("user_id", session.user.id);
-
-    if (error) {
+    try {
+      await apiClient.delete(`/v1/notifications/${notificationId}`);
+    } catch (error) {
+      if (error instanceof ApiClientError && error.status === 401) return;
       locallyDeletedIds.current.delete(notificationId);
-      console.error("[Notifications] Error dismissing:", error.message);
+      console.error("[Notifications] Error dismissing:", error instanceof Error ? error.message : error);
       await fetchNotifications();
     }
   }, [fetchNotifications]);
 
+  /**
+   * Merge a polled snapshot into state, toasting for rows we have not seen
+   * before. This replaces the browser Supabase realtime subscription
+   * (websocket), which has no server-side equivalent.
+   */
+  const mergePolledRows = useCallback((rows: InAppNotification[]) => {
+    const freshRows = rows.filter((notification) => !knownIds.current.has(notification.id));
+    applyRows(rows);
+    for (const notification of freshRows) {
+      if (locallyDeletedIds.current.has(notification.id)) continue;
+      if (!(filterNotificationRef.current?.(notification) ?? true)) continue;
+      if (showToastOnNewRef.current && !toastedIds.current.has(notification.id)) {
+        toastedIds.current.add(notification.id);
+        broadcastRef.current?.postMessage({ notificationId: notification.id });
+        toastRef.current({ title: notification.title, description: notification.message });
+      }
+    }
+  }, [applyRows]);
+
   useEffect(() => {
     let active = true;
-    let channel: ReturnType<typeof supabase.channel> | null = null;
-    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let broadcast: BroadcastChannel | null = null;
 
     if (typeof window !== "undefined" && "BroadcastChannel" in window) {
@@ -178,96 +173,31 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
         if (typeof id === "string") toastedIds.current.add(id);
       };
     }
+    broadcastRef.current = broadcast;
 
-    const scheduleRetry = () => {
-      if (!active || retryTimer) return;
-      retryTimer = setTimeout(() => {
-        retryTimer = undefined;
-        void subscribe();
-      }, 3000);
-    };
-
-    const subscribe = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!active || !session?.user) return;
-      const userId = session.user.id;
-      const nextChannel = supabase
-        .channel(`notifications:${userId}`)
-        .on("postgres_changes", {
-          event: "INSERT",
-          schema: "public",
-          table: "in_app_notifications",
-          filter: `user_id=eq.${userId}`,
-        }, (payload) => {
-          const newNotification = payload.new as InAppNotification;
-          if (locallyDeletedIds.current.has(newNotification.id)) return;
-          if (!(filterNotificationRef.current?.(newNotification) ?? true)) return;
-
-          setNotifications((previous) => {
-            if (previous.some((notification) => notification.id === newNotification.id)) return previous;
-            return [newNotification, ...previous].slice(0, 50);
-          });
-          if (!newNotification.read && !newNotification.dismissed_at) {
-            setUnreadCount((previous) => {
-              const next = previous + 1;
-              updateAppBadge(next);
-              return next;
-            });
-          }
-
-          if (showToastOnNewRef.current && !toastedIds.current.has(newNotification.id)) {
-            toastedIds.current.add(newNotification.id);
-            broadcast?.postMessage({ notificationId: newNotification.id });
-            toastRef.current({ title: newNotification.title, description: newNotification.message });
-          }
-        })
-        .on("postgres_changes", {
-          event: "UPDATE",
-          schema: "public",
-          table: "in_app_notifications",
-          filter: `user_id=eq.${userId}`,
-        }, (payload) => {
-          const updated = payload.new as InAppNotification;
-          if (updated.dismissed_at) {
-            setNotifications((previous) => previous.filter((notification) => notification.id !== updated.id));
-          } else {
-            setNotifications((previous) => previous.map((notification) => (
-              notification.id === updated.id ? updated : notification
-            )));
-          }
-          void fetchNotifications();
-        })
-        .on("postgres_changes", {
-          event: "DELETE",
-          schema: "public",
-          table: "in_app_notifications",
-          filter: `user_id=eq.${userId}`,
-        }, (payload) => {
-          const deleted = payload.old as InAppNotification;
-          setNotifications((previous) => previous.filter((notification) => notification.id !== deleted.id));
-          void fetchNotifications();
-        })
-        .subscribe((status) => {
-          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") scheduleRetry();
-        });
-
-      if (!active) {
-        void supabase.removeChannel(nextChannel);
-        return;
+    const poll = async () => {
+      if (!active) return;
+      try {
+        const { data } = await apiClient.get<{ data: InAppNotification[] }>("/v1/notifications");
+        if (!active) return;
+        mergePolledRows(data ?? []);
+      } catch {
+        // Polling is best-effort — the next interval retries.
       }
-      channel = nextChannel;
     };
 
     void Promise.resolve().then(() => fetchNotifications());
-    void Promise.resolve().then(() => subscribe());
+    const pollTimer: ReturnType<typeof setInterval> | undefined = setInterval(() => {
+      void poll();
+    }, 5000);
 
     return () => {
       active = false;
-      if (retryTimer) clearTimeout(retryTimer);
-      if (channel) void supabase.removeChannel(channel);
+      if (pollTimer) clearInterval(pollTimer);
+      broadcastRef.current = null;
       broadcast?.close();
     };
-  }, [fetchNotifications]);
+  }, [fetchNotifications, mergePolledRows]);
 
   return { notifications, unreadCount, loading, markAsRead, markAllAsRead, deleteNotification, refetch: fetchNotifications };
 }

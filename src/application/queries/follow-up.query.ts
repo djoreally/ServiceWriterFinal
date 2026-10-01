@@ -1,7 +1,6 @@
 /** Follow-Up Automation Query — canonical workspace reads. */
-import { productionSupabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
-const db = productionSupabase as any;
 
 export interface FollowUpRule {
   id: string; name: string; description: string | null; trigger_type: string; trigger_days: number;
@@ -17,33 +16,11 @@ export interface ScheduledFollowUp {
 }
 export interface FollowUpAutomationData { rules: FollowUpRule[]; scheduledFollowUps: ScheduledFollowUp[]; segments: string[]; }
 
-function one<T>(value: T | T[] | null | undefined): T | null { return Array.isArray(value) ? value[0] ?? null : value ?? null; }
-
 export async function fetchFollowUpAutomationData(): Promise<FollowUpAutomationData> {
   const context = await resolveCurrentWorkspace();
   if (!context) throw new Error("No active workspace is available.");
-  const [rulesRes, scheduledRes, segmentRes] = await Promise.all([
-    db.from("follow_up_rules").select("*").eq("workspace_id", context.workspaceId).order("created_at", { ascending: false }),
-    db.from("scheduled_follow_ups")
-      .select("*,customers(first_name,last_name,company_name),follow_up_rules(name)")
-      .eq("workspace_id", context.workspaceId).order("scheduled_for", { ascending: true }).limit(100),
-    db.from("customer_segments").select("name").eq("workspace_id", context.workspaceId).eq("is_active", true),
-  ]);
-  if (rulesRes.error) throw rulesRes.error;
-  if (scheduledRes.error) throw scheduledRes.error;
-  if (segmentRes.error) throw segmentRes.error;
-  const scheduledFollowUps = (scheduledRes.data ?? []).map((row: any) => {
-    const customer = one<any>(row.customers);
-    const rule = one<any>(row.follow_up_rules);
-    return {
-      ...row,
-      customer_name: customer ? ([customer.first_name, customer.last_name].filter(Boolean).join(" ") || customer.company_name || "Unknown") : "Unknown",
-      rule_name: rule?.name || "Manual",
-    } as ScheduledFollowUp;
+  const { data } = await apiClient.get<{ data: FollowUpAutomationData }>("/v1/crm/follow-up", {
+    query: { workspace_id: context.workspaceId },
   });
-  return {
-    rules: (rulesRes.data ?? []) as FollowUpRule[],
-    scheduledFollowUps,
-    segments: (segmentRes.data ?? []).flatMap((row: any) => row.name ? [String(row.name)] : []),
-  };
+  return data;
 }

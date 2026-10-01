@@ -2,9 +2,12 @@
  * Inventory Reservation Commands — Reserve, consume, and release parts.
  *
  * Lifecycle: reserved → consumed | released | expired
+ *
+ * All reads/writes go through the typed API client to the work-orders Hono
+ * router. Exported signatures are unchanged.
  */
 
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 // ============= Types =============
 
@@ -34,147 +37,66 @@ export async function reserveInventory(
   userId: string,
   payload: ReserveInventoryPayload
 ): Promise<ReservationResult> {
-  // 1. Check available stock (total quantity minus active reservations)
-  const [itemResult, reservedResult] = await Promise.all([
-    supabase
-      .from("inventory_items")
-      .select("quantity")
-      .eq("id", payload.inventoryItemId)
-      .single(),
-    supabase
-      .from("inventory_reservations")
-      .select("quantity")
-      .eq("inventory_item_id", payload.inventoryItemId)
-      .eq("status", "reserved"),
-  ]);
-
-  if (itemResult.error) throw new Error(`Item not found: ${itemResult.error.message}`);
-
-  const totalStock = itemResult.data.quantity ?? 0;
-  const totalReserved = (reservedResult.data ?? []).reduce(
-    (sum, r) => sum + (r.quantity ?? 0),
-    0
-  );
-  const available = totalStock - totalReserved;
-
-  if (available < payload.quantity) {
-    throw new Error(
-      `Insufficient stock: ${available} available, ${payload.quantity} requested`
-    );
-  }
-
-  // 2. Create reservation
-  const expiresAt = new Date();
-  expiresAt.setHours(expiresAt.getHours() + (payload.expiresInHours ?? 48));
-
-  const { data, error } = await supabase
-    .from("inventory_reservations")
-    .insert({
+  const response = await apiClient.post<{ data: { reservation_id: string; available_after: number } }>(
+    "/v1/inventory/reservations/reserve",
+    {
       user_id: userId,
       inventory_item_id: payload.inventoryItemId,
       work_order_id: payload.workOrderId ?? null,
       appointment_id: payload.appointmentId ?? null,
       van_id: payload.vanId ?? null,
       quantity: payload.quantity,
-      expires_at: expiresAt.toISOString(),
+      expires_in_hours: payload.expiresInHours ?? 48,
       notes: payload.notes ?? null,
-    })
-    .select("id")
-    .single();
-
-  if (error) throw new Error(`Failed to reserve: ${error.message}`);
-
+    },
+  );
   return {
-    reservationId: data.id,
-    availableAfter: available - payload.quantity,
+    reservationId: response.data.reservation_id,
+    availableAfter: response.data.available_after,
   };
 }
 
 /** Consume a reservation (parts used during work order execution). Decrements actual inventory. */
 export async function consumeReservation(reservationId: string) {
-  // Get reservation details
-  const { data: reservation, error: fetchErr } = await supabase
-    .from("inventory_reservations")
-    .select("inventory_item_id, quantity, status")
-    .eq("id", reservationId)
-    .single();
-
-  if (fetchErr || !reservation) throw new Error("Reservation not found");
-  if (reservation.status !== "reserved") throw new Error("Reservation is not active");
-
-  const now = new Date().toISOString();
-
-  // Decrement stock first and surface the error: the old parallel call with a
-  // manual fallback could mark the reservation consumed while stock stayed put.
-  const decrementRes = await supabase.rpc("decrement_inventory_quantity", {
-    p_item_id: reservation.inventory_item_id,
-    p_quantity: reservation.quantity,
-  });
-  if (decrementRes.error) {
-    throw new Error(`Failed to decrement stock: ${decrementRes.error.message}`);
-  }
-
-  const updateRes = await supabase
-    .from("inventory_reservations")
-    .update({ status: "consumed", consumed_at: now, updated_at: now })
-    .eq("id", reservationId);
-
-  if (updateRes.error) throw new Error(`Failed to consume: ${updateRes.error.message}`);
+  await apiClient.post(`/v1/inventory/reservations/${encodeURIComponent(reservationId)}/consume`, {});
 }
-
 
 /** Release a reservation (cancellation, no longer needed). */
 export async function releaseReservation(reservationId: string) {
-  const { error } = await supabase
-    .from("inventory_reservations")
-    .update({
-      status: "released",
-      released_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", reservationId)
-    .eq("status", "reserved");
-
-  if (error) throw new Error(`Failed to release: ${error.message}`);
+  await apiClient.post(`/v1/inventory/reservations/${encodeURIComponent(reservationId)}/release`, {});
 }
 
 /** Release all reservations for a work order (e.g., on cancellation). */
 export async function releaseWorkOrderReservations(workOrderId: string) {
-  const now = new Date().toISOString();
-  const { error } = await supabase
-    .from("inventory_reservations")
-    .update({ status: "released", released_at: now, updated_at: now })
-    .eq("work_order_id", workOrderId)
-    .eq("status", "reserved");
-
-  if (error) throw new Error(`Failed to release WO reservations: ${error.message}`);
+  await apiClient.post("/v1/inventory/reservations/release-by-work-order", {
+    work_order_id: workOrderId,
+  });
 }
 
 /** Fetch active reservations for a work order. */
 export async function fetchWorkOrderReservations(workOrderId: string) {
-  return supabase
-    .from("inventory_reservations")
-    .select("*, inventory_items(name, sku, unit_cost)")
-    .eq("work_order_id", workOrderId)
-    .eq("status", "reserved")
-    .order("created_at", { ascending: true });
+  try {
+    const response = await apiClient.get<{ data: unknown[] }>("/v1/inventory/reservations", {
+      query: { work_order_id: workOrderId },
+    });
+    return { data: response.data ?? [], error: null };
+  } catch (error) {
+    return { data: null, error: error instanceof Error ? error : new Error("Failed to load reservations") };
+  }
 }
 
 /** Fetch shortage alerts: items with more reserved than available. */
 export async function fetchInventoryShortages(userId: string) {
-  // Get all items with active reservations
-  const { data: items } = await supabase
-    .from("inventory_items")
-    .select("id, name, sku, quantity, low_stock_threshold")
-    .eq("user_id", userId);
+  const response = await apiClient.get<{
+    data: {
+      items: Array<{ id: string; name: string; sku: string | null; quantity: number | null; low_stock_threshold: number | null } & Record<string, unknown>>;
+      reservations: Array<{ inventory_item_id: string; quantity: number | null }>;
+    };
+  }>("/v1/inventory/shortages", { query: { user_id: userId } });
+
+  const { items, reservations } = response.data;
 
   if (!items?.length) return [];
-
-  const { data: reservations } = await supabase
-    .from("inventory_reservations")
-    .select("inventory_item_id, quantity")
-    .eq("user_id", userId)
-    .eq("status", "reserved");
 
   // Aggregate reserved quantities per item
   const reservedMap = new Map<string, number>();

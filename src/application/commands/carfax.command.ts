@@ -1,5 +1,5 @@
 /** CARFAX Command — canonical settings and feed generation. */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
@@ -18,27 +18,10 @@ export async function saveCarfaxSettings(settings: {
   if (!user) throw new Error("Not authenticated");
   const context = await resolveCurrentWorkspace();
   if (!context) throw new Error("Select a workspace before saving CARFAX settings.");
-  const client = supabase as any;
-  const { data: current, error: readError } = await client.from("workspace_settings")
-    .select("operational_settings").eq("workspace_id", context.workspaceId).maybeSingle();
-  if (readError) throw readError;
-  const operational = object(current?.operational_settings);
-  const existingCarfax = object(operational.carfax);
-  const nextCarfax = {
-    ...existingCarfax,
-    location_id: settings.carfax_location_id || null,
-    activation_date: settings.carfax_location_id
-      ? existingCarfax.activation_date || new Date().toISOString()
-      : null,
-  };
-  const { error } = await client.from("workspace_settings").update({
-    city: settings.city || null,
-    region: settings.state || null,
-    postal_code: settings.postal_code || null,
-    website_url: settings.website_url || null,
-    operational_settings: { ...operational, carfax: nextCarfax },
-  }).eq("workspace_id", context.workspaceId);
-  if (error) throw new Error("Failed to save CARFAX settings");
+  await apiClient.put("/v1/carfax/settings", {
+    ...settings,
+    selected_workspace_id: context.workspaceId,
+  });
 }
 
 interface ActivateCarfaxShopData {
@@ -61,10 +44,6 @@ interface CarfaxExportVehicle {
   vin: string | null; make: string | null; model: string | null; year: number | null;
   license_plate: string | null; plate_state: string | null; mileage: number | null; odometer_measure: string | null;
 }
-interface CarfaxSourceVehicle {
-  vin: string | null; make: string | null; model: string | null; year: number | null;
-  license_plate: string | null; plate_region: string | null; mileage: number | null; mileage_unit: string | null;
-}
 interface CarfaxExportLaborItem { description: string | null; }
 interface CarfaxExportServiceItem { description: string | null; quantity: number | null; }
 interface CarfaxSourceLine {
@@ -82,6 +61,10 @@ interface CarfaxSourceRow {
   vehicles: CarfaxSourceVehicle | null;
   service_record_line_items: CarfaxSourceLine[] | null;
 }
+interface CarfaxSourceVehicle {
+  vin: string | null; make: string | null; model: string | null; year: number | null;
+  license_plate: string | null; plate_region: string | null; mileage: number | null; mileage_unit: string | null;
+}
 export interface CarfaxExportServiceRecord {
   id: string; service_number: string | null; service_date: string | null; service_type: string | null;
   description: string | null; created_at: string; vehicles: CarfaxExportVehicle;
@@ -95,14 +78,9 @@ interface CarfaxFeedBusiness {
 export async function fetchCarfaxExportServices(exportType: "PROD" | "HIST"): Promise<CarfaxExportServiceRecord[]> {
   const context = await resolveCurrentWorkspace();
   if (!context) throw new Error("Select a workspace before exporting CARFAX service history.");
-  const client = supabase as any;
-  const { data, error } = await client.from("service_records")
-    .select("id,vehicle_id,work_performed,metadata,completed_at,created_at,vehicles(vin,make,model,year,license_plate,plate_region,mileage,mileage_unit),service_record_line_items(id,item_type,description,quantity,labor_hours)")
-    .eq("workspace_id", context.workspaceId)
-    .eq("status", "completed")
-    .not("vehicle_id", "is", null)
-    .order("completed_at", { ascending: false, nullsFirst: false });
-  if (error) throw error;
+  const { data } = await apiClient.get<{ data: CarfaxSourceRow[] }>("/v1/carfax/export-services", {
+    query: { selected_workspace_id: context.workspaceId },
+  });
 
   const today = new Date().toISOString().slice(0, 10);
   return ((data ?? []) as unknown as CarfaxSourceRow[])

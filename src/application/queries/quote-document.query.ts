@@ -1,6 +1,11 @@
-/** Quote Document Query — canonical workspace-scoped document adapter. */
-import { productionSupabase } from "@/integrations/supabase/client";
-import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+/** Quote Document Query — canonical workspace-scoped document adapter.
+ *
+ * Phase 2: the document bundle is fetched through the typed API client
+ * (`@/lib/api-client`) from the documents Hono router; presentation
+ * shaping stays client-side. Exported signatures are unchanged.
+ */
+import { apiClient } from "@/lib/api-client";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
 function object(value: unknown): Record<string, any> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
@@ -23,51 +28,34 @@ function address(row: { address_line1?: string | null; address_line2?: string | 
 }
 
 export async function fetchQuoteDocumentData(quoteId: string, customerId: string, vehicleId: string) {
-  const context = await resolveCurrentWorkspace();
-  if (!context) return null;
-  const client = productionSupabase;
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) return null;
 
-  const [quoteRes, itemsRes, customerRes, vehicleRes, workspaceRes, settingsRes] = await Promise.all([
-    client.from("quotes")
-      .select("id,customer_id,vehicle_id,status,subtotal,tax_total,total,expires_at,created_at,updated_at,metadata")
-      .eq("workspace_id", context.workspaceId)
-      .eq("id", quoteId)
-      .single(),
-    client.from("quote_items")
-      .select("id,description,quantity,unit_price,total_price")
-      .eq("workspace_id", context.workspaceId)
-      .eq("quote_id", quoteId)
-      .order("created_at"),
-    client.from("customers")
-      .select("id,first_name,last_name,company_name,email,phone,address_line1,address_line2,city,region,postal_code,created_at")
-      .eq("workspace_id", context.workspaceId)
-      .eq("id", customerId)
-      .maybeSingle(),
-    client.from("vehicles")
-      .select("id,make,model,year,trim,license_plate,vin,mileage,color,metadata")
-      .eq("workspace_id", context.workspaceId)
-      .eq("id", vehicleId)
-      .maybeSingle(),
-    client.from("workspaces").select("name").eq("id", context.workspaceId).maybeSingle(),
-    client.from("workspace_settings")
-      .select("owner_name,phone,email,address_line1,address_line2,city,region,postal_code,logo_url")
-      .eq("workspace_id", context.workspaceId)
-      .maybeSingle(),
-  ]);
+  const response = await apiClient.get<{
+    data: {
+      quote: Record<string, any>;
+      items: Array<Record<string, any>>;
+      customer: Record<string, any> | null;
+      vehicle: Record<string, any> | null;
+      workspace: { name: string } | null;
+      settings: Record<string, any> | null;
+    };
+  }>(`/v1/quotes/${encodeURIComponent(quoteId)}/document`, {
+    query: {
+      workspace_id: workspaceId,
+      customer_id: customerId,
+      vehicle_id: vehicleId,
+    },
+  });
 
-  if (quoteRes.error) throw quoteRes.error;
-  if (itemsRes.error) throw itemsRes.error;
-  if (customerRes.error) throw customerRes.error;
-  if (vehicleRes.error) throw vehicleRes.error;
-  if (workspaceRes.error) throw workspaceRes.error;
-  if (settingsRes.error) throw settingsRes.error;
-
-  const row = quoteRes.data;
+  const row = response.data.quote;
+  const items = response.data.items ?? [];
+  const customer = response.data.customer;
+  const vehicle = response.data.vehicle;
+  const workspace = response.data.workspace;
+  const settings = response.data.settings;
   const metadata = object(row.metadata);
-  const customer = customerRes.data;
-  const vehicle = vehicleRes.data;
   const vehicleMeta = object(vehicle?.metadata);
-  const settings = settingsRes.data;
 
   return {
     quote: {
@@ -84,7 +72,7 @@ export async function fetchQuoteDocumentData(quoteId: string, customerId: string
       notes: metadata.notes == null ? null : String(metadata.notes),
       fleet_metadata: metadata.fleet_metadata ?? null,
     },
-    quoteItems: (itemsRes.data ?? []).map((item) => ({
+    quoteItems: items.map((item) => ({
       id: item.id,
       description: item.description,
       quantity: Number(item.quantity ?? 0),
@@ -108,8 +96,8 @@ export async function fetchQuoteDocumentData(quoteId: string, customerId: string
       color: vehicle.color ?? null,
       engine: typeof vehicleMeta.engine === "string" ? vehicleMeta.engine : null,
     } : null,
-    business: workspaceRes.data ? {
-      business_name: workspaceRes.data.name,
+    business: workspace ? {
+      business_name: workspace.name,
       owner_name: settings?.owner_name ?? "",
       phone: settings?.phone ?? "",
       email: settings?.email ?? "",

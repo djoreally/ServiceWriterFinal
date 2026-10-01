@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import type {
   GuidanceMode,
   GuidanceRoute,
@@ -21,10 +21,10 @@ class LocationServiceCommandError extends Error {
 }
 
 async function invokeLocationService<T>(body: Record<string, unknown>): Promise<T> {
-  const { data, error } = await supabase.functions.invoke("location-service", { body });
-  if (error) {
-    throw new LocationServiceCommandError(error.message || "Location service request failed", "location_service_unavailable");
-  }
+  const { data } = await apiClient.post<{ data: { error?: string } | T | null }>(
+    "/v1/platform/location-service",
+    body,
+  );
 
   const payload = data as { error?: string } | T | null;
   if (!payload) {

@@ -1,15 +1,21 @@
 import { jest } from "@jest/globals";
 
-jest.mock("@/integrations/supabase/client", () => ({
-  supabase: {
-    rpc: jest.fn(),
-    from: jest.fn(() => ({
-      select: jest.fn(() => ({
-        eq: jest.fn(() => ({
-          gte: jest.fn(() => Promise.resolve({ data: [], error: null })),
-        })),
-      })),
-    })),
+jest.mock("@/lib/api-client", () => ({
+  apiClient: {
+    get: jest.fn(),
+    post: jest.fn(),
+    put: jest.fn(),
+    patch: jest.fn(),
+    delete: jest.fn(),
+  },
+  ApiClientError: class ApiClientError extends Error {
+    status: number;
+    code: string;
+    constructor(status: number, code: string, message: string) {
+      super(message);
+      this.status = status;
+      this.code = code;
+    }
   },
 }));
 
@@ -22,12 +28,18 @@ jest.mock("../operational-jobs.query", () => ({
     fetchOperationalJobsByDateRangeMock(userId, fromDate, toDate),
 }));
 
+import { apiClient } from "@/lib/api-client";
 import { fetchTechTodayData, fetchTechnicianAppContext, fetchTechnicianJobWorkspace } from "../tech-app.query";
-import { supabase } from "@/integrations/supabase/client";
+
+const post = apiClient.post as jest.Mock;
+const get = apiClient.get as jest.Mock;
 
 describe("tech-app.query identity scope", () => {
   beforeEach(() => {
     fetchOperationalJobsByDateRangeMock.mockClear();
+    post.mockReset();
+    get.mockReset();
+    get.mockResolvedValue({ data: [] });
   });
 
   it("uses businessUserId scope when available so assigned jobs resolve for technician users", async () => {
@@ -43,12 +55,12 @@ describe("tech-app.query identity scope", () => {
     expect(firstCall[0]).toBe("owner-user-id");
   });
 
-  it("loads identity and job access through canonical RPC contracts", async () => {
-    (supabase.rpc as jest.Mock)
-      .mockResolvedValueOnce({ data: { technician_id: "tech-1", workspace_user_id: "owner-1", access_state: "linked" }, error: null })
-      .mockResolvedValueOnce({ data: { job_id: "job-1", source: "fleet_work_order" }, error: null });
+  it("loads identity and job access through canonical API contracts", async () => {
+    post
+      .mockResolvedValueOnce({ data: { technician_id: "tech-1", workspace_user_id: "owner-1", access_state: "linked" } })
+      .mockResolvedValueOnce({ data: { job_id: "job-1", source: "fleet_work_order" } });
     await expect(fetchTechnicianAppContext()).resolves.toMatchObject({ technician_id: "tech-1", access_state: "linked" });
     await expect(fetchTechnicianJobWorkspace("job-1")).resolves.toMatchObject({ source: "fleet_work_order" });
-    expect(supabase.rpc).toHaveBeenLastCalledWith("get_technician_job_workspace_v1", { p_job_id: "job-1" });
+    expect(post).toHaveBeenLastCalledWith("/v1/tech-app/job-workspace", { job_id: "job-1" });
   });
 });

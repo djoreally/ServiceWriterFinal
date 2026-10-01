@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 export interface PostHogOrganizationProfile {
   business_name: string | null;
@@ -15,12 +15,9 @@ export interface PostHogOrganizationProfile {
 export async function fetchPostHogOrganizationProfile(
   organizationId: string,
 ): Promise<PostHogOrganizationProfile | null> {
-  const { data, error } = await supabase
-    .from("business_profiles")
-    .select("business_name, created_at, onboarding_completed, marketplace_opt_in, stripe_onboarding_complete, stripe_charges_enabled, sms_transactional_enabled, sms_marketing_enabled, marketing_email_enabled")
-    .eq("user_id", organizationId)
-    .maybeSingle();
-
-  if (error) throw new Error(error.message);
-  return data;
+  const data = await apiClient.get<PostHogOrganizationProfile | null>(
+    "/v1/platform/posthog-organization",
+    { query: { organization_id: organizationId } },
+  );
+  return data ?? null;
 }

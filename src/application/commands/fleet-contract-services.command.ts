@@ -9,7 +9,7 @@
  * enforce_active_contract_has_services() trigger enforce the same rules
  * server-side as a defence in depth.
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 
 export interface AttachServicePayload {
   fleet_contract_id: string;
@@ -95,21 +95,14 @@ export function validateContractServiceInput(input: ContractServiceValidationInp
   }
 }
 
-function translateSupabaseError(error: { code?: string; message: string }): Error {
-  if (error.code === "23505") {
-    return new Error("This service is already attached to the contract.");
-  }
-  if (error.code === "23514") {
-    // CHECK constraint violation (custom_price / custom_label).
-    if (/custom_price/i.test(error.message)) {
-      return new Error("Contract price cannot be negative.");
-    }
-    if (/custom_label/i.test(error.message)) {
-      return new Error("Custom label cannot be blank whitespace.");
+function translateApiClientError(error: unknown): Error {
+  if (error instanceof ApiClientError) {
+    if (error.code === "duplicate_contract_service" || error.code === "23505") {
+      return new Error("This service is already attached to the contract.");
     }
     return new Error(error.message);
   }
-  return new Error(error.message);
+  return new Error(error instanceof Error ? error.message : String(error));
 }
 
 /** Attach a platform service to a fleet contract. */
@@ -124,18 +117,11 @@ export async function attachServiceToContract(
     estimated_duration: payload.estimated_duration,
   });
 
-  const { error } = await supabase.from("fleet_contract_services").insert({
-    user_id: userId,
-    fleet_contract_id: payload.fleet_contract_id,
-    service_catalog_id: payload.service_catalog_id,
-    custom_price: payload.custom_price ?? null,
-    custom_label: payload.custom_label ?? null,
-    pricing_model: payload.pricing_model || "fixed",
-    notes: payload.notes ?? null,
-    billing_frequency: payload.billing_frequency ?? null,
-  });
-
-  if (error) throw translateSupabaseError(error);
+  try {
+    await apiClient.post("/v1/fleet/contract-services", { payload });
+  } catch (error) {
+    throw translateApiClientError(error);
+  }
 }
 
 /** Update a fleet contract service override. */
@@ -158,20 +144,16 @@ export async function updateContractService(
     });
   }
 
-  const { error } = await supabase
-    .from("fleet_contract_services")
-    .update(updates)
-    .eq("id", id);
-  if (error) throw translateSupabaseError(error);
+  try {
+    await apiClient.patch(`/v1/fleet/contract-services/${id}`, { updates });
+  } catch (error) {
+    throw translateApiClientError(error);
+  }
 }
 
 /** Remove a service from a fleet contract. */
 export async function removeServiceFromContract(id: string): Promise<void> {
-  const { error } = await supabase
-    .from("fleet_contract_services")
-    .delete()
-    .eq("id", id);
-  if (error) throw error;
+  await apiClient.delete(`/v1/fleet/contract-services/${id}`);
 }
 
 /** Bulk attach multiple services to a contract at once. */
@@ -198,19 +180,12 @@ export async function bulkAttachServicesToContract(
     }
   });
 
-  const rows = services.map((s, idx) => ({
-    user_id: userId,
-    fleet_contract_id: contractId,
-    service_catalog_id: s.service_catalog_id,
-    custom_price: s.custom_price ?? null,
-    custom_label: s.custom_label ?? null,
-    pricing_model: "fixed",
-    sort_order: idx,
-  }));
-
-  const { error } = await supabase
-    .from("fleet_contract_services")
-    .upsert(rows, { onConflict: "fleet_contract_id,service_catalog_id" });
-
-  if (error) throw translateSupabaseError(error);
+  try {
+    await apiClient.post("/v1/fleet/contract-services/bulk", {
+      contract_id: contractId,
+      services,
+    });
+  } catch (error) {
+    throw translateApiClientError(error);
+  }
 }

@@ -1,5 +1,5 @@
 /** Inline Service Writer Commands — canonical workspace-scoped writes for the Command Center. */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { nextApi } from "@/lib/nextApiClient";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { requestAppointmentProviderSync } from "./provider-sync.command";
@@ -93,14 +93,13 @@ export async function createInlineAppointment(data: {
     const context = await currentWorkspace();
     if (!data.customer_id) throw new Error("Select or create a customer before creating the job.");
 
-    const { data: workspace, error: workspaceError } = await (supabase as any)
-      .from("workspaces")
-      .select("timezone")
-      .eq("id", context.workspaceId)
-      .maybeSingle();
-    if (workspaceError) throw workspaceError;
+    const tzResponse = await apiClient.get<{ data: { timezone: string } }>(
+      "/v1/workspaces/timezone",
+      { query: { workspace_id: context.workspaceId } },
+    );
+    const timezone = tzResponse.data?.timezone || "UTC";
 
-    const startsAt = workspaceLocalToIso(data.scheduled_date, data.scheduled_time, workspace?.timezone || "UTC");
+    const startsAt = workspaceLocalToIso(data.scheduled_date, data.scheduled_time, timezone);
     const endsAt = new Date(Date.parse(startsAt) + Math.max(5, Number(data.duration_minutes || 60)) * 60_000).toISOString();
 
     const response = await nextApi.appointments.create({
@@ -152,33 +151,17 @@ export async function insertAppointmentServiceItems(
     const appointmentId = items[0].appointment_id;
     if (items.some((item) => item.appointment_id !== appointmentId)) throw new Error("Line items must belong to one appointment.");
 
-    const { data: appointment, error: appointmentError } = await (supabase as any)
-      .from("appointments")
-      .select("id")
-      .eq("workspace_id", context.workspaceId)
-      .eq("id", appointmentId)
-      .maybeSingle();
-    if (appointmentError) throw appointmentError;
-    if (!appointment) throw new Error("Appointment was not found in the active workspace.");
-
-    const rows = items.map((item, index) => ({
+    const response = await apiClient.post<{ data: unknown[] }>("/v1/inline-writer/appointment-items", {
       workspace_id: context.workspaceId,
-      appointment_id: item.appointment_id,
-      service_catalog_id: item.service_catalog_id,
-      item_type: "service",
-      description: item.name,
-      quantity: Math.max(1, Number(item.quantity || 1)),
-      unit_price: Number(item.price || 0),
-      sort_order: index,
-      metadata: { source: "inline_service_writer" },
-    }));
-
-    const { data, error } = await (supabase as any)
-      .from("appointment_items")
-      .insert(rows)
-      .select();
-    if (error) throw error;
-    return { data: data ?? [], error: null };
+      appointment_id: appointmentId,
+      items: items.map((item) => ({
+        service_catalog_id: item.service_catalog_id,
+        name: item.name,
+        price: item.price,
+        quantity: item.quantity,
+      })),
+    });
+    return { data: response.data ?? [], error: null };
   } catch (error) {
     return { data: null, error: asError(error) };
   }

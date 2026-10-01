@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import type { ReportsRange } from "@/application/queries/reports-canonical.query";
 
 export interface BookingFunnelData {
@@ -11,13 +11,20 @@ export interface BookingFunnelData {
 
 const STEP_LABELS = ["Booking opened", "Service selected", "Vehicle details", "Date and time", "Contact and payment"];
 
+interface AbandonedBookingRow {
+  id: string;
+  session_id: string;
+  last_step: number | null;
+  recovered: boolean | null;
+  status: string | null;
+  created_at: string;
+}
+
 export async function fetchBookingFunnel(range: ReportsRange): Promise<BookingFunnelData> {
-  const { data, error } = await supabase
-    .from("abandoned_bookings")
-    .select("id, session_id, last_step, recovered, status, created_at")
-    .gte("created_at", range.from.toISOString())
-    .lte("created_at", range.to.toISOString());
-  if (error) throw error;
+  const data = await apiClient.get<AbandonedBookingRow[]>(
+    "/v1/platform/reports/booking-funnel",
+    { query: { from: range.from.toISOString(), to: range.to.toISOString() } },
+  );
 
   // One active/recovered row represents one persisted booking session. The tracker
   // upserts progress, so counting rows does not multiply a session at every step.

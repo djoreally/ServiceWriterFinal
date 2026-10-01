@@ -4,9 +4,8 @@
  * Notification creation is idempotent when callers provide a stable dedupeKey
  * (normally the originating domain event ID plus notification type).
  */
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 import type { Json } from "@/integrations/supabase/types";
-import { getCurrentAuthUser } from "@/lib/auth/current-user";
 
 export type NotificationType =
   | "new_booking"
@@ -29,13 +28,6 @@ export interface CreateNotificationParams {
   sourceEventId?: string | null;
 }
 
-async function getCurrentUserId(): Promise<string | null> {
-  const {
-    data: { user },
-  } = await getCurrentAuthUser();
-  return user?.id ?? null;
-}
-
 function createFallbackDedupeKey(params: CreateNotificationParams): string {
   // Direct/manual notifications remain unique by default. Domain producers
   // should always supply an event-derived key to receive idempotency.
@@ -46,34 +38,24 @@ function createFallbackDedupeKey(params: CreateNotificationParams): string {
 export async function createNotification(
   params: CreateNotificationParams,
 ): Promise<boolean> {
-  const userId = await getCurrentUserId();
-  if (!userId) {
-    console.warn("[Notifications] Cannot create notification: user not authenticated");
+  try {
+    await apiClient.post("/v1/notifications", {
+      type: params.type,
+      title: params.title,
+      message: params.message,
+      metadata: params.metadata ?? {},
+      workspace_id: params.workspaceId ?? null,
+      dedupe_key: params.dedupeKey ?? createFallbackDedupeKey(params),
+      source_event_id: params.sourceEventId ?? null,
+    });
+    return true;
+  } catch (error) {
+    // Notification creation is best-effort for the caller — never throw.
+    if (error instanceof ApiClientError && error.status === 401) {
+      console.warn("[Notifications] Cannot create notification: user not authenticated");
+    } else {
+      console.error("[Notifications] Error creating notification:", error instanceof Error ? error.message : error);
+    }
     return false;
   }
-
-  const { error } = await supabase
-    .from("in_app_notifications")
-    .upsert(
-      {
-        user_id: userId,
-        workspace_id: params.workspaceId ?? null,
-        type: params.type,
-        title: params.title,
-        message: params.message,
-        metadata: (params.metadata ?? {}) as Json,
-        dedupe_key: params.dedupeKey ?? createFallbackDedupeKey(params),
-        source_event_id: params.sourceEventId ?? null,
-      },
-      {
-        onConflict: "user_id,dedupe_key",
-        ignoreDuplicates: true,
-      },
-    );
-
-  if (error) {
-    console.error("[Notifications] Error creating notification:", error.message);
-    return false;
-  }
-  return true;
 }

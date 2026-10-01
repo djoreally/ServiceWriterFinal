@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 export type FleetRequestStatus = "new" | "triage" | "waiting_customer" | "waiting_approval" | "waiting_po" | "ready_to_schedule" | "scheduled" | "converted" | "declined" | "duplicate" | "closed";
@@ -20,56 +20,56 @@ export interface FleetDispatchSearchResult {
   entity_id: string; title: string; subtitle: string | null; fleet_client_id: string | null; fleet_location_id: string | null; search_rank: number;
 }
 
-const db = supabase as any;
-
 export async function listFleetServiceRequests(): Promise<FleetServiceRequest[]> {
-  const { data, error } = await db.from("fleet_service_requests")
-    .select("*, fleet_clients(company_name), fleet_vehicles(unit_number,year,make,model)")
-    .order("received_at", { ascending: false });
-  if (error) throw error;
+  const { data } = await apiClient.get<{ data: FleetServiceRequest[] }>("/v1/fleet/service-requests");
   return data ?? [];
 }
 
 export async function createFleetServiceRequest(input: { subject: string; request_summary?: string; requester_name?: string; requester_email?: string; priority?: FleetRequestPriority; source_type?: "manual" | "internal" }): Promise<FleetServiceRequest> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("You must be signed in.");
-  const { data, error } = await db.from("fleet_service_requests").insert({ user_id: user.id, source_type: input.source_type ?? "internal", status: "new", ...input }).select().single();
-  if (error) throw error;
-  return data;
+  const { data } = await apiClient.post<{ data: FleetServiceRequest }>("/v1/fleet/service-requests", { input });
+  return data as FleetServiceRequest;
 }
 
 export async function searchFleetDispatch(query: string): Promise<FleetDispatchSearchResult[]> {
   if (query.trim().length < 2) return [];
-  const { data, error } = await db.rpc("search_fleet_dispatch_v1", { p_query: query.trim(), p_limit: 30 });
-  if (error) throw error;
+  const { data } = await apiClient.get<{ data: FleetDispatchSearchResult[] }>(
+    `/v1/fleet/dispatch-search?query=${encodeURIComponent(query.trim())}`,
+  );
   return data ?? [];
 }
 
 export async function claimFleetServiceRequest(request: FleetServiceRequest): Promise<FleetServiceRequest> {
-  const { data, error } = await db.rpc("claim_fleet_service_request_v1", { p_request_id: request.id, p_version: request.version });
-  if (error) throw error;
-  return data;
+  const { data } = await apiClient.post<{ data: FleetServiceRequest }>(
+    `/v1/fleet/service-requests/${request.id}/claim`,
+    { version: request.version },
+  );
+  return data as FleetServiceRequest;
 }
 
 export async function updateFleetServiceRequest(request: FleetServiceRequest, patch: Partial<Pick<FleetServiceRequest, "status" | "priority" | "fleet_client_id" | "fleet_location_id" | "fleet_vehicle_id" | "match_status">>): Promise<void> {
-  const { data, error } = await db.from("fleet_service_requests").update(patch).eq("id", request.id).eq("version", request.version).select("id");
-  if (error) throw error;
-  if (!data?.length) throw new Error("This request changed. Refresh and try again.");
+  await apiClient.patch(`/v1/fleet/service-requests/${request.id}`, { patch, version: request.version });
 }
 
 export async function convertFleetServiceRequestToDraft(request: FleetServiceRequest): Promise<string> {
-  const { data, error } = await db.rpc("convert_fleet_service_request_to_draft_v1", { p_request_id: request.id, p_version: request.version });
-  if (error) throw error;
-  return String(data);
+  const { data } = await apiClient.post<{ data: { id: string } }>(
+    `/v1/fleet/service-requests/${request.id}/convert-to-draft`,
+    { version: request.version },
+  );
+  return String(data.id);
 }
 
 export function subscribeFleetServiceRequests(onChange: () => void) {
-  const channel = db.channel("fleet-service-request-queue").on("postgres_changes", { event: "*", schema: "public", table: "fleet_service_requests" }, onChange).subscribe();
-  return () => { void db.removeChannel(channel); };
+  // Realtime subscriptions are no longer wired to direct Supabase access.
+  // Poll the query instead; the returned function unsubscribes (no-op).
+  return () => {};
 }
 
 export async function createFleetRequestFromEmail(messageId: string, disposition: "service_request" | "non_service" = "service_request"): Promise<string> {
-  const { data, error } = await db.rpc("create_fleet_request_from_email_v1", { p_message_id: messageId, p_disposition: disposition });
-  if (error) throw error;
-  return String(data);
+  const { data } = await apiClient.post<{ data: { id: string } }>("/v1/fleet/service-requests/from-email", {
+    message_id: messageId,
+    disposition,
+  });
+  return String(data.id);
 }
