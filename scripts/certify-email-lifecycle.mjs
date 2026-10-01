@@ -131,6 +131,18 @@ for (const required of ['templateKey: "newsletter.welcome"', 'templateKey: "news
   assert(newsletter.includes(required), `Newsletter email path missing required control: ${required}`);
 }
 
+const newsletterContent = read("src/server/newsletter/moms-content.ts");
+const newsletterWeeks = [...newsletterContent.matchAll(/\bweek:\s*(\d+)/g)].map((match) => Number(match[1]));
+assert(newsletterWeeks.length === 52, `Expected 52 newsletter issues, found ${newsletterWeeks.length}.`);
+assert(new Set(newsletterWeeks).size === 52, "Newsletter issue weeks must be unique.");
+assert(Math.min(...newsletterWeeks) === 1 && Math.max(...newsletterWeeks) === 52, "Newsletter issues must cover weeks 1 through 52.");
+for (const field of ["subject", "preheader", "headline", "body"]) {
+  const count = [...newsletterContent.matchAll(new RegExp(`\\b${field}:\\s*"`, "g"))].length;
+  assert(count === 52, `Newsletter field ${field} must be present on all 52 issues; found ${count}.`);
+}
+assert(newsletterContent.includes("renderNewsletter"), "Newsletter renderer is missing.");
+assert(newsletterContent.includes("unsubscribe"), "Newsletter renderer must include unsubscribe behavior.");
+
 const invoiceSend = read("app/api/v1/invoices/[id]/send/route.ts");
 for (const required of ["sendLifecycleEmail", "renderedOverride", 'purpose: "transactional"', "invoice-send:"]) {
   assert(invoiceSend.includes(required), `Direct invoice-send path missing required control: ${required}`);
@@ -156,6 +168,7 @@ console.log(JSON.stringify({
   baseTemplates: baseKeys.length,
   overrides: overrideKeys.length,
   marketingTemplates: marketingKeys.length,
+  newsletterIssues: newsletterWeeks.length,
   criticalAuthoritativeProducers: criticalProducers.length,
   transactionalProvider: "Resend",
   marketingProvider: "Enginemailer",
