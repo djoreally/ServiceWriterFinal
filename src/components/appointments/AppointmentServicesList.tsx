@@ -177,7 +177,6 @@ export function AppointmentServicesList({
               ) : (
                 <p className="text-sm text-destructive">Canonical financial record unavailable.</p>
               )}
-              </div>
             </div>
           ) : (
             <div className="text-center py-6 text-muted-foreground">
