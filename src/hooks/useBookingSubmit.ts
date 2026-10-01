@@ -796,13 +796,16 @@ export function useBookingSubmit(deps: SubmitDeps) {
           if (adjustment > 0) serviceItems.push({ vehicle_id: persistedVehicleIdsByClientId[vehicle.id] || null, service_catalog_id:null, name:"Vehicle size & condition adjustment", price:adjustment, quantity:1, is_prepaid:paymentChoice==="pay_now" });
         }
 
-        if (serviceItems.length > 0) {
-          try {
-            await insertBookingAppointmentServices(appointmentId, slug || "", validationResult.data.email, validationResult.data.phone || "", serviceItems as BookingServiceItem[]);
-          } catch (err) {
-            console.warn("[Booking] Failed to create appointment_services:", err);
-          }
+        if (serviceItems.length === 0) {
+          throw new Error("BOOKING_FINANCIAL_LINES_REQUIRED");
         }
+        await insertBookingAppointmentServices(
+          appointmentId,
+          slug || "",
+          validationResult.data.email,
+          validationResult.data.phone || "",
+          serviceItems as BookingServiceItem[],
+        );
       }
 
       // Create payment record for pay-later
