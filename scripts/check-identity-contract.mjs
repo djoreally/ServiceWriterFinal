@@ -25,12 +25,16 @@ assert(/\.eq\(["']user_id["'],\s*user\.id\)/.test(api), "Workspace authorization
 assert(/\.eq\(["']is_active["'],\s*true\)/.test(api), "Workspace authorization must require active membership.");
 
 const routeRoleGuard = read("src/components/security/RouteRoleGuard.tsx");
+const navItems = read("src/components/layout/navItems.ts");
 const legacyGuards = read("src/components/routing/legacy-guards.tsx");
 assert(!routeRoleGuard.includes("if (!role) return <>{children}</>"), "Role-less authenticated sessions must never render protected RouteRoleGuard children.");
 assert(routeRoleGuard.includes("if (!role) return <>{fallback ?? <AccessDenied />}</>"), "RouteRoleGuard must deny unresolved workforce identity.");
 assert(legacyGuards.includes("if (!role)"), "RequireAuth must explicitly handle unresolved workforce identity.");
 assert(!legacyGuards.includes("Unresolved identity is not a denial"), "RequireAuth must not fail open when workforce identity is unresolved.");
 assert(legacyGuards.includes("if (!canAccessRoute(role, location.pathname))"), "RequireAuth must authorize every protected route against the canonical route policy.");
+assert(navItems.includes("if (!role) return [];"), "Role-less sessions must receive no protected navigation.");
+assert(!navItems.includes("if (!role || role === \"admin\") return all"), "Unresolved role must never inherit admin navigation.");
+assert(navItems.includes("role: RoleScope = null"), "Navigation defaults must be deny-by-default, not admin.");
 
 const browserClient = read("src/integrations/supabase/client.ts");
 assert(browserClient.includes("CANONICAL_SUPABASE_PROJECT_ID = 'rjfbrfognxqkyhdrpibx'"), "Browser auth must retain the certified production Supabase project fallback.");
