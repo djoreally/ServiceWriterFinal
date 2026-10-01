@@ -5,6 +5,7 @@ const platform = read("src/server/hono/routes/platform.ts");
 const wizard = read("src/components/onboarding/OnboardingWizard.tsx");
 const gate = read("src/hooks/useAppAccessGate.ts");
 const commands = read("src/application/commands/onboarding-wizard.command.ts");
+const billing = read("src/server/hono/routes/billing.ts");
 
 const start = platform.indexOf("// Onboarding (canonical workspace-backed contract)");
 const end = platform.indexOf("// Dashboard (migrated from dashboard.query.ts", start);
@@ -33,6 +34,8 @@ const checks = [
   ["security events use audit_events", platform.includes('.from("audit_events").insert')],
   ["security events no longer call missing RPC", !platform.includes('rpc("record_auth_security_event_v1"')],
   ["dashboard onboarding info uses canonical profile", platform.includes('platformRouter.get("/v1/platform/dashboard/onboarding-info"') && platform.includes("const canonical = await loadCanonicalOnboardingProfile(supabase, user.id);")],
+  ["pre-workspace subscription read is non-error provisional basic", billing.includes('error.code === "billing_workspace_missing"') && billing.includes("provisional: true") && billing.includes('plan_tier: "basic"')],
+  ["explicit unauthorized billing workspace still fails closed", billing.includes("if (!workspaceId && error instanceof ApiError") && billing.includes("throw error;")],
 ];
 
 const failed = checks.filter(([, ok]) => !ok);

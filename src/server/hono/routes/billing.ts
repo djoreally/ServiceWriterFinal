@@ -271,7 +271,35 @@ billingRouter.get("/v1/billing/subscription", async (c) => {
   const request = c.req.raw;
   const url = new URL(request.url);
   const workspaceId = url.searchParams.get("workspace_id");
-  const { admin, workspace } = await resolveAuthorizedBillingWorkspace(request, workspaceId);
+
+  let resolved;
+  try {
+    resolved = await resolveAuthorizedBillingWorkspace(request, workspaceId);
+  } catch (error) {
+    if (!workspaceId && error instanceof ApiError && error.code === "billing_workspace_missing") {
+      return json({
+        workspace: null,
+        billing: {
+          workspace_id: null,
+          plan_tier: "basic",
+          billing_interval: "monthly",
+          payments_addon_active: false,
+          additional_technician_quantity: 0,
+          stripe_customer_id: null,
+          stripe_subscription_id: null,
+          subscription_status: "active",
+          current_period_end: null,
+          cancel_at_period_end: false,
+        },
+        entitlements: null,
+        usage: { technician_count: 0, technicians_remaining: 0 },
+        provisional: true,
+      });
+    }
+    throw error;
+  }
+
+  const { admin, workspace } = resolved;
   const billing = await ensureWorkspaceBilling(admin, workspace.id);
 
   const [{ data: entitlement, error: entitlementError }, technicianCount] = await Promise.all([
@@ -298,6 +326,7 @@ billingRouter.get("/v1/billing/subscription", async (c) => {
       technician_count,
       technicians_remaining: Math.max(0, technician_limit - technician_count),
     },
+    provisional: false,
   });
 });
 
