@@ -46,21 +46,25 @@ export async function fetchSucceededPayments(_userId: string, sinceIso: string) 
       query: { since: sinceIso },
     });
     return {
-      data: (data ?? []).map((row) => {
-        const metadata = object(row.metadata);
-        const refundDollars = row.status === "refunded"
-          ? Number(metadata.refunded_amount ?? row.amount ?? 0)
-          : Number(metadata.refunded_amount ?? 0);
-        return {
-          id: row.id,
-          amount: cents(row.amount),
-          refund_amount: cents(refundDollars),
-          status: row.status,
-          created_at: row.paid_at ?? row.created_at,
-          payment_type: metadata.payment_type ?? metadata.payment_method ?? row.provider ?? "card",
-          appointment_id: metadata.appointment_id ?? null,
-        };
-      }),
+      data: (data ?? [])
+        .map((row) => {
+          const metadata = object(row.metadata);
+          const refundDollars = row.status === "refunded"
+            ? Number(metadata.refunded_amount ?? row.amount ?? 0)
+            : Number(metadata.refunded_amount ?? 0);
+          return {
+            id: row.id,
+            amount: cents(row.amount),
+            refund_amount: cents(refundDollars),
+            status: row.status,
+            created_at: row.paid_at ?? row.created_at,
+            payment_type: metadata.payment_type ?? metadata.payment_method ?? row.provider ?? "card",
+            appointment_id: metadata.appointment_id ?? null,
+          };
+        })
+        // A payment without any usable date cannot be placed on a time chart;
+        // drop it here instead of crashing format(parseISO(...)) downstream.
+        .filter((payment) => !!payment.created_at),
       error: null,
     };
   } catch (error) {

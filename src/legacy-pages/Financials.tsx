@@ -27,7 +27,7 @@ import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { CustomerLifetimeValue } from "@/components/marketing/CustomerLifetimeValue";
 import { AccountingWorkspace } from "@/components/accounting/AccountingWorkspace";
 import { getCurrentUserId, fetchSucceededPayments, fetchPendingPayments, fetchAppointmentStatuses, fetchCompletedServices } from "@/application/queries/financials.query";
-import { format, subMonths, subWeeks, parseISO, startOfMonth, endOfMonth, startOfWeek, addDays } from "date-fns";
+import { format, subMonths, subWeeks, parseISO, isValid, startOfMonth, endOfMonth, startOfWeek, addDays } from "date-fns";
 import { toDollars, aggregatePayments } from "@/lib/currencyUtils";
 import { computeLedgerMetrics, groupMonthlyCollectedRevenue, mapServicesToCanonicalLedger } from "@/lib/financial-ledger";
 
@@ -179,7 +179,10 @@ function useFinancialOverview() {
       // Monthly revenue for chart (last 12 months)
       const monthlyRevenue = groupMonthlyCollectedRevenue(
         succeeded,
-        (isoDate) => format(parseISO(isoDate), "MMM yy"),
+        (isoDate) => {
+          const parsed = isoDate ? parseISO(isoDate) : new Date(NaN);
+          return isValid(parsed) ? format(parsed, "MMM yy") : "Unknown";
+        },
       );
 
       // Daily revenue heatmap for last 12 weeks (7-day columns, Sun-Sat)
@@ -187,8 +190,11 @@ function useFinancialOverview() {
       const dailyRevenueMap = new Map<string, number>();
 
       succeeded.forEach((p) => {
+        if (!p.created_at) return;
         if (p.created_at < heatmapStart.toISOString()) return;
-        const day = format(parseISO(p.created_at), "yyyy-MM-dd");
+        const parsed = parseISO(p.created_at);
+        if (!isValid(parsed)) return;
+        const day = format(parsed, "yyyy-MM-dd");
         const netAmount = (p.amount || 0) - (p.refund_amount || 0);
         dailyRevenueMap.set(day, (dailyRevenueMap.get(day) || 0) + toDollars(netAmount));
       });

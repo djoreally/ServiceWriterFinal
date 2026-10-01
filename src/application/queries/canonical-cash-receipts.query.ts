@@ -83,29 +83,33 @@ export async function fetchCanonicalCashReceipts(params: {
       },
     });
     return {
-      data: (data ?? []).map((row) => {
-        const metadata = object(row.metadata);
-        const amountDollars = Math.max(Number(row.amount ?? 0), 0);
-        const refundedDollars = refundDollars(row.status, amountDollars, metadata);
-        const collectedCents = dollarsToCents(amountDollars);
-        const refundedCents = dollarsToCents(refundedDollars);
-        const paymentType = metadata.payment_type ?? metadata.payment_method ?? row.provider ?? null;
-        const dataOrigin = metadata.data_origin ?? metadata.origin ?? null;
+      data: (data ?? [])
+        .map((row) => {
+          const metadata = object(row.metadata);
+          const amountDollars = Math.max(Number(row.amount ?? 0), 0);
+          const refundedDollars = refundDollars(row.status, amountDollars, metadata);
+          const collectedCents = dollarsToCents(amountDollars);
+          const refundedCents = dollarsToCents(refundedDollars);
+          const paymentType = metadata.payment_type ?? metadata.payment_method ?? row.provider ?? null;
+          const dataOrigin = metadata.data_origin ?? metadata.origin ?? null;
 
-        return {
-          payment_record_id: row.id,
-          payment_status: row.status,
-          payment_provider: row.provider,
-          collected_at: row.paid_at ?? row.created_at,
-          collected_cents: collectedCents,
-          refunded_cents: refundedCents,
-          net_collected_cents: Math.max(collectedCents - refundedCents, 0),
-          payment_type: paymentType == null ? null : String(paymentType),
-          tax_amount: dollarsToCents(taxDollars(metadata)),
-          data_origin: dataOrigin == null ? null : String(dataOrigin),
-          metadata,
-        };
-      }),
+          return {
+            payment_record_id: row.id,
+            payment_status: row.status,
+            payment_provider: row.provider,
+            collected_at: row.paid_at ?? row.created_at,
+            collected_cents: collectedCents,
+            refunded_cents: refundedCents,
+            net_collected_cents: Math.max(collectedCents - refundedCents, 0),
+            payment_type: paymentType == null ? null : String(paymentType),
+            tax_amount: dollarsToCents(taxDollars(metadata)),
+            data_origin: dataOrigin == null ? null : String(dataOrigin),
+            metadata,
+          };
+        })
+        // Drop receipts with no usable collection date — they cannot be
+        // bucketed by day and would crash date formatting downstream.
+        .filter((receipt) => !!receipt.collected_at),
       error: null,
     };
   } catch (error) {

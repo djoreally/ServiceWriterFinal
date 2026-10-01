@@ -138,7 +138,11 @@ function settledNet(receipt: CanonicalCashReceipt): number {
 }
 
 function dateKey(value: string | null | undefined): string {
-  return value ? value.slice(0, 10) : "";
+  if (!value) return "";
+  // Guard against malformed date strings (e.g. from a messy data migration):
+  // a truthy-but-invalid slice would crash format(new Date(...)) downstream.
+  const key = value.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(key) ? key : "";
 }
 
 export async function fetchReportsCanonical(
