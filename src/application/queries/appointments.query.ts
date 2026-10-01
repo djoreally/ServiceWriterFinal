@@ -2,7 +2,7 @@ import { z } from "zod";
 import { apiClient } from "@/lib/api-client";
 import type { Appointment, BusinessHours, Customer, ServiceCatalogItem, Vehicle } from "@/shared/types";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
-import { fetchBusinessSettings, resolveCurrentWorkspace } from "@/application/queries/settings.query";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { nextApi } from "@/lib/nextApiClient";
 
 const customerApiSchema = z.object({
@@ -105,11 +105,10 @@ export async function fetchAppointmentsPageData(): Promise<AppointmentsPageData>
   if (!context) throw new Error("No active workspace is available.");
 
   const errors: AppointmentsPageErrors = {};
-  const [appointmentsResult, customersResult, vehiclesResult, settingsResult, catalogResult, scheduleResult, workspaceResult, serviceLinesResult] = await Promise.allSettled([
+  const [appointmentsResult, customersResult, vehiclesResult, catalogResult, scheduleResult, workspaceResult, serviceLinesResult] = await Promise.allSettled([
     nextApi.appointments.list(context.workspaceId),
     nextApi.customers.list(context.workspaceId),
     nextApi.vehicles.list(context.workspaceId),
-    fetchBusinessSettings(),
     apiClient.get<{ data: Array<{ id: string; name: string; description: string | null; labor_price: number | string | null; estimated_minutes: number | null; category: string | null; is_active: boolean }> | null }>(
       "/v1/appointments/service-catalog",
       { query: { active: "true", selected_workspace_id: context.workspaceId } },
@@ -167,16 +166,15 @@ export async function fetchAppointmentsPageData(): Promise<AppointmentsPageData>
     });
   const serviceCatalog = catalogRows.map(mapCatalog);
 
-  const legacySettings = settingsResult.status === "fulfilled" ? settingsResult.value : null;
   const scheduling = scheduleResult.status === "fulfilled" ? scheduleResult.value.settings : null;
   const rawDayHours = scheduling?.day_hours && typeof scheduling.day_hours === "object" && !Array.isArray(scheduling.day_hours) ? scheduling.day_hours as Record<string, any> : {};
   const configuredWorkingDays = Object.entries(rawDayHours)
     .filter(([, value]) => value && typeof value === "object" && (value as { is_open?: boolean }).is_open === true)
     .map(([day]) => day.charAt(0).toUpperCase() + day.slice(1));
   const businessHours: BusinessHours = {
-    opening_time: hhmm(scheduling?.opening_time ?? legacySettings?.opening_time, DEFAULT_BUSINESS_HOURS.opening_time),
-    closing_time: hhmm(scheduling?.closing_time ?? legacySettings?.closing_time, DEFAULT_BUSINESS_HOURS.closing_time),
-    working_days: configuredWorkingDays.length ? configuredWorkingDays : (scheduling?.working_days ?? legacySettings?.working_days ?? DEFAULT_BUSINESS_HOURS.working_days),
+    opening_time: hhmm(scheduling?.opening_time, DEFAULT_BUSINESS_HOURS.opening_time),
+    closing_time: hhmm(scheduling?.closing_time, DEFAULT_BUSINESS_HOURS.closing_time),
+    working_days: configuredWorkingDays.length ? configuredWorkingDays : (scheduling?.working_days ?? DEFAULT_BUSINESS_HOURS.working_days),
     slot_duration_minutes: Number(scheduling?.slot_duration_minutes ?? DEFAULT_BUSINESS_HOURS.slot_duration_minutes),
     min_lead_time_hours: Number(scheduling?.min_lead_time_hours ?? DEFAULT_BUSINESS_HOURS.min_lead_time_hours),
     buffer_time_before: Number(scheduling?.buffer_time_before ?? DEFAULT_BUSINESS_HOURS.buffer_time_before),
@@ -184,7 +182,7 @@ export async function fetchAppointmentsPageData(): Promise<AppointmentsPageData>
   };
 
   return { userId: user.id, appointments, customers, vehicles, serviceCatalog, scheduleVans: [], businessHours, errors,
-    providerName: legacySettings?.business_name || "Service Writer", providerEmail: legacySettings?.email || null };
+    providerName: "Service Writer", providerEmail: null };
 }
 
 export interface AppointmentPickerOption { id: string; title: string | null; status: string | null; scheduled_date: string | null; scheduled_time: string | null; customer_name: string | null; }
