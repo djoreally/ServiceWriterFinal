@@ -1,17 +1,17 @@
 import fs from "node:fs";
 
 const resources = [
-  ["customers", "app/api/v1/customers/route.ts", "app/api/v1/customers/[id]/route.ts", ["POST"], ["GET","PATCH","DELETE"]],
-  ["vehicles", "app/api/v1/vehicles/route.ts", "app/api/v1/vehicles/[id]/route.ts", ["POST"], ["GET","PATCH","DELETE"]],
-  ["appointments", "app/api/v1/appointments/route.ts", "app/api/v1/appointments/[id]/route.ts", ["POST"], ["GET","PATCH","DELETE"]],
-  ["service-records", "app/api/v1/service-records/route.ts", "app/api/v1/service-records/[id]/route.ts", ["POST"], ["GET","PATCH","DELETE"]],
-  ["invoices", "app/api/v1/invoices/route.ts", "app/api/v1/invoices/[id]/route.ts", ["POST"], ["GET","PATCH","DELETE"]],
-  ["payments", "app/api/v1/payments/route.ts", "app/api/v1/payments/[id]/route.ts", ["POST"], ["GET","PATCH","DELETE"]],
-  ["work-orders", "app/api/v1/work-orders/route.ts", "app/api/v1/work-orders/[id]/route.ts", ["POST"], ["GET","PATCH"]],
-  ["crm-profiles", "app/api/v1/crm/profiles/route.ts", "app/api/v1/crm/profiles/route.ts", ["POST"], ["GET","PATCH"]],
-  ["crm-campaigns", "app/api/v1/crm/campaigns/route.ts", "app/api/v1/crm/campaigns/route.ts", ["POST"], ["GET"]],
-  ["crm-activities", "app/api/v1/crm/activities/route.ts", "app/api/v1/crm/activities/route.ts", ["POST"], ["GET"]],
-  ["invitations", "app/api/v1/invitations/route.ts", "app/api/v1/invitations/[id]/route.ts", ["POST"], ["DELETE"]],
+  ["customers", "app/api/v1/customers/route.ts", "app/api/v1/customers/[id]/route.ts", ["GET","POST"], ["GET","PATCH","DELETE"]],
+  ["vehicles", "app/api/v1/vehicles/route.ts", "app/api/v1/vehicles/[id]/route.ts", ["GET","POST"], ["GET","PATCH","DELETE"]],
+  ["appointments", "app/api/v1/appointments/route.ts", "app/api/v1/appointments/[id]/route.ts", ["GET","POST"], ["GET","PATCH","DELETE"]],
+  ["service-records", "app/api/v1/service-records/route.ts", "app/api/v1/service-records/[id]/route.ts", ["GET","POST"], ["GET","PATCH","DELETE"]],
+  ["invoices", "app/api/v1/invoices/route.ts", "app/api/v1/invoices/[id]/route.ts", ["GET","POST"], ["GET","PATCH","DELETE"]],
+  ["payments", "app/api/v1/payments/route.ts", "app/api/v1/payments/[id]/route.ts", ["GET","POST"], ["GET","PATCH","DELETE"]],
+  ["work-orders", "app/api/v1/work-orders/route.ts", "app/api/v1/work-orders/[id]/route.ts", ["GET","POST"], ["GET","PATCH"]],
+  ["crm-profiles", "app/api/v1/crm/profiles/route.ts", "app/api/v1/crm/profiles/route.ts", ["GET","POST"], ["GET","PATCH"]],
+  ["crm-campaigns", "app/api/v1/crm/campaigns/route.ts", "app/api/v1/crm/campaigns/route.ts", ["GET","POST"], ["GET"]],
+  ["crm-activities", "app/api/v1/crm/activities/route.ts", "app/api/v1/crm/activities/route.ts", ["GET","POST"], ["GET"]],
+  ["invitations", "app/api/v1/invitations/route.ts", "app/api/v1/invitations/[id]/route.ts", ["GET","POST"], ["DELETE"]],
 ];
 
 const failures = [];
