@@ -357,8 +357,7 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
   const customerName = appointment.guest_name || appointment.customer?.name || 'Customer';
   const customerEmail = appointment.customer?.email || appointment.guest_email || null;
   
-  const canonicalSubtotal = financials?.subtotal ?? null;
-  const canonicalTax = financials?.tax ?? null;
+  const canonicalTax = financials?.tax ?? 0;
   const totalDue = financials?.total ?? null;
   const canonicalLines = financials?.lines ?? [];
   const isEditable = appointment.status !== 'completed' && appointment.status !== 'cancelled';
