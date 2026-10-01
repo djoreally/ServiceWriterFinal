@@ -135,7 +135,7 @@ async function reconcileInvoiceEvent(event: Stripe.Event, invoice: Stripe.Invoic
 
   const { data: reconciled } = await admin
     .from("payments")
-    .select("id,customer_id,invoice_id,status,amount,currency_code,paid_at,metadata,customers(first_name,last_name,email),invoices(invoice_number)")
+    .select("id,workspace_id,customer_id,invoice_id,status,amount,currency_code,paid_at,metadata,customers(first_name,last_name,email),invoices(invoice_number)")
     .eq("workspace_id", workspaceId)
     .eq("id", paymentId)
     .maybeSingle();
@@ -153,7 +153,7 @@ async function reconcileInvoiceEvent(event: Stripe.Event, invoice: Stripe.Invoic
       },
       workspaceName: workspace?.name ?? "Service Writer",
       workspaceTimezone: workspace?.timezone ?? "UTC",
-      actionUrl: invoice.hosted_invoice_url ?? undefined,
+      actionUrl: invoice.hosted_invoice_url ?? "",
     });
   }
   return { received: true };
