@@ -275,6 +275,21 @@ export interface ReasonInput {
   summary: string;
   profile: ShopProfile;
   instructionSet: string;
+  /**
+   * Turns elapsed in this conversation (from ConversationMemory). The
+   * provider reasoner enforces the turn cap from this; absence = 0.
+   */
+  turnCount?: number;
+}
+
+/** Token/cost evidence for the ZeroCert cost story (returned, never decided). */
+export interface ModelUsage {
+  model: string;
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  /** Wall-clock ms for the model call. */
+  latencyMs?: number;
 }
 
 export interface ReasonOutput {
@@ -286,6 +301,11 @@ export interface ReasonOutput {
   /** 0..1 — below threshold forces handoff. */
   confidence: number;
   handoffReason?: string;
+  /**
+   * Token/cost evidence from a provider call. The pipeline writes this to
+   * the ledger; the model never sees it and it never affects decisions.
+   */
+  usage?: ModelUsage;
 }
 
 /**

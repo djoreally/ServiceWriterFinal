@@ -82,7 +82,7 @@ import {
   handleAgentPhoneWebhook,
   resolveAgentPhoneSender,
 } from "@/server/shop-agent/channels/agentphone-webhook";
-import { getDefaultReasoner } from "@/server/shop-agent/channels/sms";
+import { ensureDefaultReasoner } from "@/server/shop-agent/channels/sms";
 import {
   AGENTPHONE_EVENT_HEADER,
   AGENTPHONE_SIGNATURE_HEADER,
@@ -213,7 +213,7 @@ messagingRouter.post("/v1/shop-agent/agentphone", async (c) => {
       {
         supabase,
         senderFor: (workspaceId) => resolveAgentPhoneSender(supabase, workspaceId),
-        reasoner: getDefaultReasoner(),
+        reasoner: ensureDefaultReasoner(),
       },
       JSON.parse(rawBody) as unknown,
       headerEvent,

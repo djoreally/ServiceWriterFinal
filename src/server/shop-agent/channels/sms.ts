@@ -29,6 +29,7 @@ import {
 import type { SupabaseMemoryClient } from "../zeroai/memory";
 import { getNode, transition } from "../zeroai/taskgraph";
 import { AGENT_REGISTRY } from "../zeroai/registry";
+import { createReasonerFromEnv } from "../zeroai/provider-reasoner";
 import { bookingPort as defaultBookingPort } from "../booking";
 import type { AgentBookingInput, BookingPort } from "../booking";
 import {
@@ -107,18 +108,34 @@ export interface ProcessInboundSmsOptions {
 // ---------------------------------------------------------------------------
 
 let defaultReasoner: ModelReasoner | null = null;
+let reasonerInitialized = false;
 
 /**
- * The model-calling reasoner is injected by the app bootstrap (or whichever
- * worker owns the model adapter). Until set, the inbound webhook hook logs
- * and skips pipeline processing — the conversation never runs without one.
+ * The model-calling reasoner is injected here (tests, explicit wiring) or
+ * built lazily from env by ensureDefaultReasoner() — with no
+ * SHOP_AGENT_MODEL_API_KEY that is the NoopReasoner, so the pipeline always
+ * has a safe reasoner and never runs model-free by accident.
  */
 export function setShopAgentReasoner(reasoner: ModelReasoner | null): void {
   defaultReasoner = reasoner;
+  reasonerInitialized = true;
 }
 
 export function getDefaultReasoner(): ModelReasoner | null {
   return defaultReasoner;
+}
+
+/**
+ * Lazily builds the reasoner from env on first use (serverless-safe).
+ * No SHOP_AGENT_MODEL_API_KEY → NoopReasoner: fail closed, exactly as
+ * before. setShopAgentReasoner() still overrides (tests, explicit wiring).
+ */
+export function ensureDefaultReasoner(): ModelReasoner {
+  if (!reasonerInitialized) {
+    defaultReasoner = createReasonerFromEnv();
+    reasonerInitialized = true;
+  }
+  return defaultReasoner as ModelReasoner;
 }
 
 // ---------------------------------------------------------------------------
@@ -371,7 +388,23 @@ export async function processInboundSms(
     summary: mem?.summary ?? "",
     profile,
     instructionSet: AGENT_REGISTRY.sms_agent?.instructionSet ?? "",
+    turnCount: mem?.turnCount ?? 0,
   });
+
+  // ZeroCert cost evidence: token usage goes to the ledger, never to decisions.
+  if (out.usage) {
+    await log({
+      action: "model_usage",
+      inputHash: receivedHash,
+      evidenceRefs: [
+        intent.intentId,
+        out.usage.model,
+        `prompt_tokens:${out.usage.promptTokens ?? "?"}`,
+        `completion_tokens:${out.usage.completionTokens ?? "?"}`,
+        `latency_ms:${out.usage.latencyMs ?? "?"}`,
+      ],
+    });
+  }
 
   let nextState = safeTransition(currentState, out.suggestedState);
   if (nextState === "handed_off" && out.suggestedState !== "handed_off") {
