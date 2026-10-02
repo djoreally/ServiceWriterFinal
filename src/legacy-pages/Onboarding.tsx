@@ -1,11 +1,10 @@
 import { Navigate } from "react-router-dom";
 
 /**
- * Business onboarding has been sunset.
+ * The legacy onboarding wizard is retired.
  *
- * Keep the historical route as a compatibility redirect so old bookmarks and
- * stale links cannot strand authenticated users in the retired wizard.
+ * Old onboarding links now land on the simple business-settings setup surface.
  */
-const Onboarding = () => <Navigate to="/dashboard" replace />;
+const Onboarding = () => <Navigate to="/settings?tab=business&setup=1" replace />;
 
 export default Onboarding;
