@@ -7,6 +7,7 @@ import { getCurrentUser, fetchBusinessProfileDirect, checkSlugDirect } from "@/a
 import { isReservedSubdomain } from "@/lib/reserved-subdomains";
 
 import { uploadCoverImage, uploadLogo, upsertBusinessProfile } from "@/application/commands/settings-page.command";
+import { loadStarterBusinessData } from "@/application/commands/starter-business-data.command";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -154,6 +155,7 @@ const Settings = () => {
   const [sectionSearch, setSectionSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loadingStarterData, setLoadingStarterData] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [checkingSlug, setCheckingSlug] = useState(false);
   const [slugAvailable, setSlugAvailable] = useState<boolean | null>(null);
@@ -429,7 +431,10 @@ const Settings = () => {
       setTerms(profile.terminology);
       await refetch();
       await refetchRegional();
-      toast.success("Profile saved successfully");
+      toast.success(setupMode ? "Business settings saved. Opening dashboard…" : "Profile saved successfully");
+      if (setupMode) {
+        navigate("/dashboard", { replace: true });
+      }
     }
     setSaving(false);
   };
@@ -486,7 +491,8 @@ const Settings = () => {
     setGeocodingAddress(false);
   };
 
-  const activeTab = (searchParams.get("tab") as SettingsTabId) || "business";
+  const setupMode = searchParams.get("setup") === "1";
+  const activeTab: SettingsTabId = setupMode ? "business" : ((searchParams.get("tab") as SettingsTabId) || "business");
   const setActiveTab = (id: SettingsTabId) => {
     const next = new URLSearchParams(searchParams);
     next.set("tab", id);
@@ -494,13 +500,31 @@ const Settings = () => {
   };
 
   const filteredTabs = useMemo(() => {
-    if (!sectionSearch.trim()) return SETTINGS_TABS;
+    const source = setupMode ? SETTINGS_TABS.filter((tab) => tab.id === "business") : SETTINGS_TABS;
+    if (!sectionSearch.trim()) return source;
     const q = sectionSearch.toLowerCase();
-    return SETTINGS_TABS.filter((t) =>
+    return source.filter((t) =>
       t.label.toLowerCase().includes(q) ||
       t.sections.some((s) => s.toLowerCase().includes(q)),
     );
-  }, [sectionSearch]);
+  }, [sectionSearch, setupMode]);
+
+  const handleLoadStarterData = async () => {
+    setLoadingStarterData(true);
+    try {
+      const result = await loadStarterBusinessData();
+      toast.success("Starter business data loaded", {
+        description: `${result.servicesAdded} services, ${result.packagesAdded} packages, and ${result.subscriptionPlansAdded} subscription plans added.`,
+      });
+    } catch (error) {
+      console.error("[Settings] Starter data load failed:", error);
+      toast.error("Could not load starter data", {
+        description: error instanceof Error ? error.message : "Please try again.",
+      });
+    } finally {
+      setLoadingStarterData(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -517,12 +541,14 @@ const Settings = () => {
     <AppLayout title="Settings">
       <div className="space-y-6 pb-24">
         <div>
-          <h2 className="text-3xl font-bold mb-2">Settings</h2>
-          <p className="text-muted-foreground">Find and manage every part of your business in one place.</p>
+          <h2 className="text-3xl font-bold mb-2">{setupMode ? "Business setup" : "Settings"}</h2>
+          <p className="text-muted-foreground">
+            {setupMode ? "Add your business details, load the starter catalog if you want it, save, and go straight to your dashboard." : "Find and manage every part of your business in one place."}
+          </p>
         </div>
 
-        <div className="grid min-w-0 gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
-          <aside className="min-w-0 lg:sticky lg:top-4 lg:self-start">
+        <div className={`grid min-w-0 gap-6 ${setupMode ? "" : "lg:grid-cols-[240px_minmax(0,1fr)]"}`}>
+          {!setupMode && <aside className="min-w-0 lg:sticky lg:top-4 lg:self-start">
             <div className="rounded-lg border bg-card p-2 shadow-[var(--shadow-card)]">
               <div className="relative mb-2">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -559,13 +585,31 @@ const Settings = () => {
                 )}
               </nav>
             </div>
-          </aside>
+          </aside>}
 
           <div className="min-w-0">
             <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as SettingsTabId)} className="w-full">
 
           {/* ======================== BUSINESS TAB ======================== */}
           <TabsContent value="business" className="space-y-6 mt-6 max-w-3xl">
+
+        {setupMode && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Starter business data</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                One click loads the standard oil-change add-ons, basic tire services, detailing services,
+                starter service packages, and the three editable customer subscription plans. Existing rows are left alone.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <Button type="button" variant="outline" onClick={() => void handleLoadStarterData()} disabled={loadingStarterData}>
+                {loadingStarterData ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ClipboardCheck className="mr-2 h-4 w-4" />}
+                {loadingStarterData ? "Loading starter data…" : "Load starter templates"}
+              </Button>
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>
@@ -1425,7 +1469,7 @@ const Settings = () => {
             ) : (
               <Save className="h-4 w-4" />
             )}
-            Save settings
+            {setupMode ? "Save & open dashboard" : "Save settings"}
           </Button>
         </div>
       </div>
