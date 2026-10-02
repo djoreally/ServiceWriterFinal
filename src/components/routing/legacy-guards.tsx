@@ -76,7 +76,7 @@ export const RequirePlanFeature = ({
   }
 
   if (!hasAccess) {
-    return <Navigate to="/onboarding" replace />;
+    return <Navigate to="/plans" replace />;
   }
 
   return children;

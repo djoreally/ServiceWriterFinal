@@ -71,10 +71,9 @@ export function resolveStartupRoute({
     return roleLandingPath(role);
   }
 
-  // 3) Owner gates (admin / unresolved owner identity).
-  if (requiresOnboarding) {
-    return currentPath === "/onboarding" ? currentPath : "/onboarding";
-  }
+  // 3) Owner gates. Business onboarding is sunset; authenticated users are
+  // never diverted into a setup wizard during startup.
+  void requiresOnboarding;
 
   if (requiresPlan) {
     return currentPath === "/plans" ? currentPath : "/plans";
