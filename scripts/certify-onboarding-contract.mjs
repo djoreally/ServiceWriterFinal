@@ -12,7 +12,7 @@ const checks = [
   ["app access gate no longer calls onboarding status", !gate.includes("/v1/platform/onboarding/status")],
   ["app access gate never returns onboarding_required", !gate.includes("onboarding_required")],
   ["startup routing does not redirect to onboarding", !startup.includes('return currentPath === "/onboarding" ? currentPath : "/onboarding"')],
-  ["retired onboarding route redirects to dashboard", onboardingPage.includes('<Navigate to="/dashboard" replace />')],
+  ["retired onboarding route redirects to business setup", onboardingPage.includes('<Navigate to="/settings?tab=business&setup=1" replace />')],
   ["plan feature gate routes to plans instead of onboarding", guards.includes('<Navigate to="/plans" replace />') && !guards.includes('<Navigate to="/onboarding" replace />')],
   ["compatibility onboarding status reports completed", platform.includes("onboardingCompleted: true") && platform.includes("sunset: true")],
   ["dashboard onboarding info cannot re-enable wizard", platform.includes('platformRouter.get("/v1/platform/dashboard/onboarding-info"') && platform.includes("onboardingCompleted: true")],
