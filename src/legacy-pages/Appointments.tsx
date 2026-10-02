@@ -348,7 +348,7 @@ const AppointmentsPage = () => {
           // Auto-dispatch failure is non-fatal
         }
 
-        toast.success("Appointment created — confirmation email queued");
+        toast.success(formData.guest_email?.trim() ? "Appointment created — confirmation email queued" : "Appointment created");
       }
 
       setDialogOpen(false);

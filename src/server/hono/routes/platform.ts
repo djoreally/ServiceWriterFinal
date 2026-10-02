@@ -2092,84 +2092,289 @@ platformRouter.patch("/v1/platform/tracking-settings/enabled", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// Onboarding (migrated from onboarding-check.query.ts,
-// onboarding-wizard.query.ts, onboarding-wizard.command.ts,
-// onboarding-site-import.query.ts)
+// Onboarding (canonical workspace-backed contract)
 // ---------------------------------------------------------------------------
+
+const onboardingStateSchema = z.object({
+  step: z.number().int().min(0).max(5).default(0),
+  completed: z.boolean().default(false),
+  completed_at: z.string().datetime().nullable().optional(),
+});
+
+const onboardingProfileInputSchema = z.object({
+  business_name: z.string().trim().max(200).optional(),
+  owner_name: z.string().trim().max(200).optional(),
+  email: z.string().email().max(320).optional(),
+  phone: z.string().trim().max(40).optional(),
+  logo_url: z.string().url().nullable().optional(),
+  service_address: z.string().trim().max(500).optional(),
+  service_radius_miles: z.number().min(0).max(500).optional(),
+  timezone: z.string().trim().min(1).max(120).optional(),
+  service_coordinates: z.object({ lat: z.number(), lng: z.number() }).nullable().optional(),
+  working_days: z.array(z.string().trim().min(1).max(20)).max(7).optional(),
+  opening_time: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/).optional(),
+  closing_time: z.string().regex(/^\d{2}:\d{2}(:\d{2})?$/).optional(),
+  day_hours: z.record(z.string(), z.unknown()).optional(),
+  website_url: z.string().url().nullable().optional(),
+  brand_primary_color: z.string().max(64).nullable().optional(),
+  brand_secondary_color: z.string().max(64).nullable().optional(),
+  brand_font_family: z.string().max(120).nullable().optional(),
+  onboarding_step: z.number().int().min(0).max(5).optional(),
+  onboarding_completed: z.boolean().optional(),
+}).strict();
+
+function onboardingStateFromOperational(value: unknown) {
+  const operational = readOperationalObject(value);
+  const raw = readOperationalObject(operational.onboarding);
+  const parsed = onboardingStateSchema.safeParse(raw);
+  return parsed.success ? parsed.data : { step: 0, completed: false, completed_at: null };
+}
+
+function serviceCoordinatesFromOperational(value: unknown): { lat: number; lng: number } | null {
+  const operational = readOperationalObject(value);
+  const raw = readOperationalObject(operational.service_coordinates);
+  const lat = Number(raw.lat);
+  const lng = Number(raw.lng);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+}
+
+function onboardingProfileIsComplete(workspace: any, settings: any): boolean {
+  const state = onboardingStateFromOperational(settings?.operational_settings);
+  if (!state.completed || state.step < 5) return false;
+  return Boolean(
+    workspace?.id &&
+    workspace?.name?.trim() &&
+    workspace?.timezone?.trim() &&
+    settings?.owner_name?.trim() &&
+    settings?.email &&
+    settings?.phone?.trim() &&
+    settings?.address_line1?.trim() &&
+    Array.isArray(settings?.working_days) &&
+    settings.working_days.length > 0 &&
+    settings?.opening_time &&
+    settings?.closing_time
+  );
+}
+
+async function loadCanonicalOnboardingProfile(supabase: any, userId: string) {
+  const workspaceId = await resolveWorkspaceIdForUser(supabase, userId);
+  if (!workspaceId) return { workspaceId: null, workspace: null, settings: null, profile: null };
+
+  const [{ data: workspace, error: workspaceError }, { data: settings, error: settingsError }] = await Promise.all([
+    supabase.from("workspaces").select("id,name,timezone,currency_code,is_active,created_at").eq("id", workspaceId).maybeSingle(),
+    supabase.from("workspace_settings").select("*").eq("workspace_id", workspaceId).maybeSingle(),
+  ]);
+  if (workspaceError) throw workspaceError;
+  if (settingsError) throw settingsError;
+  if (!workspace) return { workspaceId, workspace: null, settings: null, profile: null };
+
+  const state = onboardingStateFromOperational(settings?.operational_settings);
+  const operational = readOperationalObject(settings?.operational_settings);
+  const profile = {
+    business_name: workspace.name ?? "",
+    owner_name: settings?.owner_name ?? "",
+    email: settings?.email ?? "",
+    phone: settings?.phone ?? "",
+    logo_url: settings?.logo_url ?? null,
+    service_address: settings?.address_line1 ?? "",
+    service_radius_miles: Number(settings?.service_radius_miles ?? 25),
+    timezone: workspace.timezone ?? "America/New_York",
+    service_coordinates: serviceCoordinatesFromOperational(settings?.operational_settings),
+    working_days: settings?.working_days ?? [],
+    opening_time: settings?.opening_time ? String(settings.opening_time).slice(0, 5) : "09:00",
+    closing_time: settings?.closing_time ? String(settings.closing_time).slice(0, 5) : "17:00",
+    day_hours: settings?.day_hours ?? {},
+    website_url: settings?.website_url ?? null,
+    brand_primary_color: typeof operational.brand_primary_color === "string" ? operational.brand_primary_color : null,
+    brand_secondary_color: typeof operational.brand_secondary_color === "string" ? operational.brand_secondary_color : null,
+    brand_font_family: typeof operational.brand_font_family === "string" ? operational.brand_font_family : null,
+    onboarding_step: state.step,
+    onboarding_completed: onboardingProfileIsComplete(workspace, settings),
+  };
+  return { workspaceId, workspace, settings, profile };
+}
 
 platformRouter.get("/v1/platform/onboarding/status", async (c) => {
   const { supabase, user } = await requireAuth(c);
-  const { data: link } = await (supabase as any)
+
+  const { data: link, error: linkError } = await (supabase as any)
     .from("team_user_links")
     .select("id")
     .eq("member_user_id", user.id)
     .limit(1)
     .maybeSingle();
-  if (link) {
-    return json({ authenticated: true, onboardingCompleted: true });
-  }
-  const { data: profile } = await (supabase as any)
-    .from("business_profiles")
-    .select("onboarding_completed")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  if (linkError) throw linkError;
+  if (link) return json({ authenticated: true, onboardingCompleted: true, verified: true });
+
+  const canonical = await loadCanonicalOnboardingProfile(supabase, user.id);
   return json({
     authenticated: true,
-    onboardingCompleted: !!profile?.onboarding_completed,
+    onboardingCompleted: Boolean(canonical.profile?.onboarding_completed),
+    verified: Boolean(canonical.workspace && canonical.settings),
+    workspaceId: canonical.workspaceId,
   });
 });
 
 platformRouter.get("/v1/platform/onboarding/profile", async (c) => {
   const { supabase, user } = await requireAuth(c);
-  const { data, error } = await (supabase as any)
-    .from("business_profiles")
-    .select("*")
-    .eq("user_id", user.id)
-    .single();
-  if (error) throw error;
-  return json(data ?? null);
+  const canonical = await loadCanonicalOnboardingProfile(supabase, user.id);
+  return json(canonical.profile);
 });
 
 platformRouter.post("/v1/platform/onboarding/profile", async (c) => {
-  const profileData = z.record(z.string(), z.unknown()).parse(await c.req.json());
+  const profileData = onboardingProfileInputSchema.parse(await c.req.json());
   const { supabase, user } = await requireAuth(c);
-  const { error } = await (supabase as any)
-    .from("business_profiles")
-    .upsert({ ...profileData, user_id: user.id }, { onConflict: "user_id" });
-  if (error) throw error;
-  return json({ success: true });
+  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id);
+  if (!workspaceId) throw new ApiError(409, "Your workspace has not been provisioned yet.", "onboarding_workspace_missing");
+
+  const [{ data: existingWorkspace, error: workspaceReadError }, { data: existingSettings, error: settingsReadError }] = await Promise.all([
+    supabase.from("workspaces").select("id,name,timezone").eq("id", workspaceId).maybeSingle(),
+    supabase.from("workspace_settings").select("*").eq("workspace_id", workspaceId).maybeSingle(),
+  ]);
+  if (workspaceReadError) throw workspaceReadError;
+  if (settingsReadError) throw settingsReadError;
+  if (!existingWorkspace) throw new ApiError(409, "Your workspace has not been provisioned yet.", "onboarding_workspace_missing");
+
+  const currentOperational = readOperationalObject(existingSettings?.operational_settings);
+  const previousState = onboardingStateFromOperational(existingSettings?.operational_settings);
+  const nextStep = profileData.onboarding_step ?? previousState.step;
+  const wantsComplete = profileData.onboarding_completed ?? previousState.completed;
+  const nextOnboarding = {
+    step: nextStep,
+    completed: wantsComplete,
+    completed_at: wantsComplete ? (previousState.completed_at ?? new Date().toISOString()) : null,
+  };
+
+  const workspacePatch: Record<string, unknown> = {};
+  if (profileData.business_name !== undefined) workspacePatch.name = profileData.business_name;
+  if (profileData.timezone !== undefined) workspacePatch.timezone = profileData.timezone;
+  if (Object.keys(workspacePatch).length > 0) {
+    const { error } = await supabase.from("workspaces").update(workspacePatch).eq("id", workspaceId);
+    if (error) throw error;
+  }
+
+  const settingsPayload: Record<string, unknown> = {
+    workspace_id: workspaceId,
+    operational_settings: {
+      ...currentOperational,
+      onboarding: nextOnboarding,
+      ...(profileData.service_coordinates !== undefined ? { service_coordinates: profileData.service_coordinates } : {}),
+      ...(profileData.brand_primary_color !== undefined ? { brand_primary_color: profileData.brand_primary_color } : {}),
+      ...(profileData.brand_secondary_color !== undefined ? { brand_secondary_color: profileData.brand_secondary_color } : {}),
+      ...(profileData.brand_font_family !== undefined ? { brand_font_family: profileData.brand_font_family } : {}),
+    },
+  };
+  if (profileData.owner_name !== undefined) settingsPayload.owner_name = profileData.owner_name;
+  if (profileData.email !== undefined) settingsPayload.email = profileData.email;
+  if (profileData.phone !== undefined) settingsPayload.phone = profileData.phone;
+  if (profileData.logo_url !== undefined) settingsPayload.logo_url = profileData.logo_url;
+  if (profileData.service_address !== undefined) settingsPayload.address_line1 = profileData.service_address;
+  if (profileData.service_radius_miles !== undefined) settingsPayload.service_radius_miles = profileData.service_radius_miles;
+  if (profileData.working_days !== undefined) settingsPayload.working_days = profileData.working_days;
+  if (profileData.opening_time !== undefined) settingsPayload.opening_time = profileData.opening_time;
+  if (profileData.closing_time !== undefined) settingsPayload.closing_time = profileData.closing_time;
+  if (profileData.day_hours !== undefined) settingsPayload.day_hours = profileData.day_hours;
+  if (profileData.website_url !== undefined) settingsPayload.website_url = profileData.website_url;
+
+  const { error: settingsWriteError } = await (supabase as any)
+    .from("workspace_settings")
+    .upsert(settingsPayload, { onConflict: "workspace_id" });
+  if (settingsWriteError) throw settingsWriteError;
+
+  const persisted = await loadCanonicalOnboardingProfile(supabase, user.id);
+  if (!persisted.profile) throw new ApiError(500, "Onboarding settings were not readable after save.", "onboarding_verify_failed");
+  if (profileData.onboarding_step !== undefined && persisted.profile.onboarding_step !== profileData.onboarding_step) {
+    throw new ApiError(500, "Onboarding progress did not persist.", "onboarding_verify_failed");
+  }
+  if (profileData.onboarding_completed === true && !persisted.profile.onboarding_completed) {
+    throw new ApiError(409, "Complete the required business, contact, service-area, and hours fields before finishing onboarding.", "onboarding_requirements_incomplete");
+  }
+
+  await recordOperationalAudit({
+    supabase: createSupabaseAdminClient(),
+    request: c.req.raw,
+    workspaceId,
+    actorUserId: user.id,
+    action: profileData.onboarding_completed ? "onboarding.completed" : "onboarding.progress_saved",
+    entityType: "workspace",
+    entityId: workspaceId,
+    metadata: { step: persisted.profile.onboarding_step ?? 0, verified: true },
+  });
+
+  return json({ success: true, verified: true, profile: persisted.profile });
 });
 
 const onboardingServiceSchema = z.object({
-  name: z.string().min(1),
-  description: z.string().default(""),
-  price: z.number().nullable().optional(),
-  duration_minutes: z.number().int().nonnegative().optional(),
+  name: z.string().trim().min(1).max(250),
+  description: z.string().max(5000).default(""),
+  price: z.number().nonnegative().nullable().optional(),
+  duration_minutes: z.number().int().nonnegative().max(1440).optional(),
 });
 
 platformRouter.post("/v1/platform/onboarding/services", async (c) => {
-  const { services } = z.object({ services: z.array(onboardingServiceSchema) }).parse(await c.req.json());
+  const { services } = z.object({ services: z.array(onboardingServiceSchema).max(100) }).parse(await c.req.json());
   const { supabase, user } = await requireAuth(c);
-  if (services.length === 0) return json({ count: 0 });
-  const rows = services.map((service) => ({
-    user_id: user.id,
-    name: service.name,
-    description: service.description,
-    default_price: service.price ?? null,
-    estimated_duration: service.duration_minutes ?? null,
-    is_active: true,
-  }));
-  const { error } = await (supabase as any).from("service_catalog").insert(rows);
-  if (error) throw error;
-  return json({ count: rows.length });
+  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id);
+  if (!workspaceId) throw new ApiError(409, "Your workspace has not been provisioned yet.", "onboarding_workspace_missing");
+  if (services.length === 0) return json({ count: 0, verified: true });
+
+  let persistedCount = 0;
+  for (const service of services) {
+    const { data: existing, error: existingError } = await (supabase as any)
+      .from("service_catalog")
+      .select("id")
+      .eq("workspace_id", workspaceId)
+      .ilike("name", service.name)
+      .limit(1)
+      .maybeSingle();
+    if (existingError) throw existingError;
+
+    const row = {
+      workspace_id: workspaceId,
+      name: service.name,
+      description: service.description,
+      labor_price: service.price ?? 0,
+      estimated_minutes: service.duration_minutes ?? null,
+      is_active: true,
+      metadata: { source: "onboarding" },
+    };
+
+    if (existing?.id) {
+      const { error } = await (supabase as any).from("service_catalog").update(row).eq("id", existing.id).eq("workspace_id", workspaceId);
+      if (error) throw error;
+    } else {
+      const { error } = await (supabase as any).from("service_catalog").insert(row);
+      if (error) throw error;
+    }
+    persistedCount += 1;
+  }
+
+  const { count, error: verifyError } = await (supabase as any)
+    .from("service_catalog")
+    .select("id", { count: "exact", head: true })
+    .eq("workspace_id", workspaceId)
+    .in("name", services.map((service) => service.name));
+  if (verifyError) throw verifyError;
+  if ((count ?? 0) < persistedCount) throw new ApiError(500, "Onboarding services did not persist.", "onboarding_services_verify_failed");
+
+  await recordOperationalAudit({
+    supabase: createSupabaseAdminClient(),
+    request: c.req.raw,
+    workspaceId,
+    actorUserId: user.id,
+    action: "onboarding.services_saved",
+    entityType: "workspace",
+    entityId: workspaceId,
+    metadata: { requested: services.length, verified: count ?? 0 },
+  });
+
+  return json({ count: persistedCount, verified: true });
 });
 
 platformRouter.post("/v1/platform/onboarding/site-import", async (c) => {
   const { url } = z.object({ url: z.string().url() }).parse(await c.req.json());
   const result = await invokeEdgeFunction(c, "onboarding-site-import", { body: { url } });
   if (isEdgeError(result)) {
-    // Preserve the client contract: FunctionsHttpError-style bodies surface
-    // their `error` field; everything else falls back to a friendly message.
     let message = "We couldn't import that website.";
     const parsed = parseJsonLoose(result.detail);
     if (parsed && typeof parsed === "object" && typeof (parsed as { error?: unknown }).error !== "undefined") {
@@ -2178,15 +2383,13 @@ platformRouter.post("/v1/platform/onboarding/site-import", async (c) => {
     throw new ApiError(result.status >= 400 && result.status < 600 ? result.status : 502, message, "site_import_failed");
   }
   const payload = result.data as { result?: unknown; warnings?: unknown } | null;
-  if (!payload?.result) {
-    throw new ApiError(502, "We couldn't read anything useful from that website.", "site_import_empty");
-  }
+  if (!payload?.result) throw new ApiError(502, "We couldn't read anything useful from that website.", "site_import_empty");
   return json({ result: payload.result, warnings: payload.warnings ?? [] });
 });
 
 platformRouter.get("/v1/platform/onboarding/site-import/latest", async (c) => {
   const { supabase, user } = await requireAuth(c);
-  const { data } = await (supabase as any)
+  const { data, error } = await (supabase as any)
     .from("onboarding_site_imports")
     .select("payload, warnings, status")
     .eq("user_id", user.id)
@@ -2194,6 +2397,7 @@ platformRouter.get("/v1/platform/onboarding/site-import/latest", async (c) => {
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
+  if (error) throw error;
   if (!data?.payload) return json(null);
   return json({ result: data.payload, warnings: data.warnings ?? [] });
 });
@@ -2206,18 +2410,13 @@ platformRouter.get("/v1/platform/onboarding/site-import/latest", async (c) => {
 
 platformRouter.get("/v1/platform/dashboard/onboarding-info", async (c) => {
   const { supabase, user } = await requireAuth(c);
-  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id, readWorkspaceHint(c));
-  if (!workspaceId) {
-    return json({ hasUser: true, onboardingCompleted: false, ownerName: null, resolved: true });
-  }
-  const { data, error } = await (supabase as any).from("workspace_settings")
-    .select("owner_name")
-    .eq("workspace_id", workspaceId)
-    .maybeSingle();
-  if (error) {
-    return json({ hasUser: true, onboardingCompleted: false, ownerName: null, resolved: false });
-  }
-  return json({ hasUser: true, onboardingCompleted: true, ownerName: data?.owner_name ?? null, resolved: true });
+  const canonical = await loadCanonicalOnboardingProfile(supabase, user.id);
+  return json({
+    hasUser: true,
+    onboardingCompleted: Boolean(canonical.profile?.onboarding_completed),
+    ownerName: canonical.settings?.owner_name ?? null,
+    resolved: Boolean(canonical.workspace && canonical.settings),
+  });
 });
 
 platformRouter.get("/v1/platform/dashboard/overview", async (c) => {
@@ -3669,16 +3868,25 @@ platformRouter.get("/v1/platform/link-health", async (c) => {
 });
 
 platformRouter.get("/v1/platform/posthog-organization", async (c) => {
-  const { supabase } = await requireAuth(c);
+  const { supabase, user } = await requireAuth(c);
   const url = new URL(c.req.url);
-  const organizationId = z.string().min(1).parse(url.searchParams.get("organization_id") ?? "");
-  const { data, error } = await (supabase as any)
-    .from("business_profiles")
-    .select("business_name, created_at, onboarding_completed, marketplace_opt_in, stripe_onboarding_complete, stripe_charges_enabled, sms_transactional_enabled, sms_marketing_enabled, marketing_email_enabled")
-    .eq("user_id", organizationId)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  return json(data ?? null);
+  const organizationId = z.string().uuid().parse(url.searchParams.get("organization_id") ?? "");
+  if (organizationId !== user.id) throw new ApiError(403, "Organization analytics access denied", "forbidden");
+
+  const canonical = await loadCanonicalOnboardingProfile(supabase, user.id);
+  if (!canonical.workspace) return json(null);
+  const operational = readOperationalObject(canonical.settings?.operational_settings);
+  return json({
+    business_name: canonical.workspace.name,
+    created_at: canonical.workspace.created_at ?? null,
+    onboarding_completed: Boolean(canonical.profile?.onboarding_completed),
+    marketplace_opt_in: canonical.settings?.marketplace_opt_in ?? false,
+    stripe_onboarding_complete: operational.stripe_onboarding_complete === true,
+    stripe_charges_enabled: operational.stripe_charges_enabled === true,
+    sms_transactional_enabled: operational.sms_transactional_enabled === true,
+    sms_marketing_enabled: operational.sms_marketing_enabled === true,
+    marketing_email_enabled: operational.marketing_email_enabled === true,
+  });
 });
 
 // Weather guard (realtime subscriptions stay client-side; see weather-guard.query.ts).
@@ -3874,9 +4082,18 @@ platformRouter.post("/v1/platform/edge/:functionName", async (c) => {
 // Auth security events (fire-and-forget audit RPCs from auth.command.ts).
 
 platformRouter.post("/v1/platform/auth/security-event", async (c) => {
-  const { supabase } = await requireAuth(c);
+  const { user } = await requireAuth(c);
   const { event_type } = z.object({ event_type: z.string().min(1).max(80) }).parse(await c.req.json());
-  const { error } = await (supabase as any).rpc("record_auth_security_event_v1", { p_event_type: event_type });
+  const admin = createSupabaseAdminClient();
+  const workspaceId = await resolveWorkspaceIdForUser(admin as any, user.id);
+  const { error } = await (admin as any).from("audit_events").insert({
+    workspace_id: workspaceId,
+    actor_user_id: user.id,
+    action: `auth.${event_type}`,
+    entity_type: "auth_session",
+    entity_id: null,
+    metadata: { source: "platform_auth_security_event" },
+  });
   if (error) throw error;
-  return json({ data: { ok: true } });
+  return json({ data: { ok: true, verified: true } });
 });

@@ -164,8 +164,11 @@ export const OnboardingWizard = () => {
     setData((prev) => ({ ...prev, ...updates }));
   };
 
-  const saveProgress = async (step: number, complete = false) => {
-    if (!userId) return;
+  const saveProgress = async (step: number, complete = false): Promise<boolean> => {
+    if (!userId) {
+      toast.error("Your account is not ready to save onboarding yet.");
+      return false;
+    }
 
     setSaving(true);
     try {
@@ -174,7 +177,6 @@ export const OnboardingWizard = () => {
         .map(([k]) => k);
 
       await saveOnboardingProgress({
-        user_id: userId,
         business_name: data.business_name,
         owner_name: data.owner_name,
         email: data.email,
@@ -185,6 +187,8 @@ export const OnboardingWizard = () => {
         timezone: data.timezone,
         service_coordinates: data.service_coordinates,
         working_days: workingDays,
+        opening_time: data.opening_time,
+        closing_time: data.closing_time,
         day_hours: data.day_hours,
         website_url: data.website_url || null,
         brand_primary_color: data.brand_primary_color,
@@ -193,17 +197,19 @@ export const OnboardingWizard = () => {
         onboarding_step: step,
         onboarding_completed: complete,
       });
+      return true;
     } catch (error) {
       console.error("Error saving progress:", error);
-      toast.error("Failed to save progress");
+      toast.error(complete ? "Onboarding could not be verified. Your account was not marked complete." : "Failed to save progress. This step was not advanced.");
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
   const handleNext = async () => {
-    await saveProgress(currentStep + 1);
-    setCurrentStep((prev) => prev + 1);
+    const verified = await saveProgress(currentStep + 1);
+    if (verified) setCurrentStep((prev) => prev + 1);
   };
 
   const handleBack = () => {
@@ -266,8 +272,8 @@ export const OnboardingWizard = () => {
   };
 
   const handleComplete = async () => {
-    await saveProgress(STEP_DONE, true);
-    setCurrentStep(STEP_DONE);
+    const verified = await saveProgress(STEP_DONE, true);
+    if (verified) setCurrentStep(STEP_DONE);
   };
 
   const renderStep = () => {

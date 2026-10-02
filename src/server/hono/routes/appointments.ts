@@ -290,7 +290,7 @@ async function validatePatchReferences(supabase: any, workspaceId: string, body:
   return null;
 }
 
-appointmentsRouter.get("/v1/appointments/:id", async (c: Context) => {
+appointmentsRouter.get("/v1/appointments/:id{[0-9a-fA-F-]{36}}", async (c: Context) => {
   const id = z.string().uuid().parse(c.req.param("id"));
   const url = new URL(c.req.url);
   const explicitWorkspaceId = url.searchParams.get("workspace_id");
