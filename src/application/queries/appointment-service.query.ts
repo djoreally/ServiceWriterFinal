@@ -18,11 +18,16 @@ async function workspaceId() {
   return context.workspaceId;
 }
 
-async function resendUpdatedConfirmation(appointmentId: string) {
+async function resendUpdatedConfirmation(appointmentId: string, workspaceId: string) {
   try {
-    await apiClient.post(`/v1/appointments/${encodeURIComponent(appointmentId)}/confirmation`, {});
+    await apiClient.post(
+      `/v1/appointments/${encodeURIComponent(appointmentId)}/confirmation`,
+      { workspace_id: workspaceId },
+    );
   } catch (error) {
-    throw new Error(error instanceof Error ? error.message : "Updated confirmation could not be sent.");
+    // Appointment/service persistence is authoritative. Notification delivery
+    // must never make a successful write look like a failed save in the UI.
+    console.warn("[appointment-service] confirmation delivery failed after save", error);
   }
 }
 
@@ -57,7 +62,7 @@ export async function insertAppointmentService(data: AppointmentServiceInput) {
     },
     { query: { selected_workspace_id: id } },
   );
-  if (!response.error) await resendUpdatedConfirmation(data.appointment_id);
+  if (!response.error) await resendUpdatedConfirmation(data.appointment_id, id);
   return { data: response.data ?? null, error: response.error ?? null };
 }
 
@@ -74,7 +79,8 @@ export async function updateAppointmentService(id: string, data: AppointmentServ
       is_prepaid: data.is_prepaid,
       added_at_service: data.added_at_service,
     },
+    { query: { selected_workspace_id: workspace_id } },
   );
-  if (!response.error) await resendUpdatedConfirmation(data.appointment_id);
+  if (!response.error) await resendUpdatedConfirmation(data.appointment_id, workspace_id);
   return { data: response.data ?? null, error: response.error ?? null };
 }
