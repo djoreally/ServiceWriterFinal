@@ -2195,12 +2195,13 @@ async function loadCanonicalOnboardingProfile(supabase: any, userId: string) {
 
 platformRouter.get("/v1/platform/onboarding/status", async (c) => {
   const { supabase, user } = await requireAuth(c);
-  const canonical = await loadCanonicalOnboardingProfile(supabase, user.id);
+  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id);
   return json({
     authenticated: true,
-    onboardingCompleted: Boolean(canonical.profile?.onboarding_completed),
-    verified: Boolean(canonical.workspace && canonical.settings),
-    workspaceId: canonical.workspaceId,
+    onboardingCompleted: true,
+    verified: true,
+    workspaceId,
+    sunset: true,
   });
 });
 
@@ -2399,12 +2400,22 @@ platformRouter.get("/v1/platform/onboarding/site-import/latest", async (c) => {
 
 platformRouter.get("/v1/platform/dashboard/onboarding-info", async (c) => {
   const { supabase, user } = await requireAuth(c);
-  const canonical = await loadCanonicalOnboardingProfile(supabase, user.id);
+  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id, readWorkspaceHint(c));
+  let ownerName: string | null = null;
+  if (workspaceId) {
+    const { data: settings } = await supabase
+      .from("workspace_settings")
+      .select("owner_name")
+      .eq("workspace_id", workspaceId)
+      .maybeSingle();
+    ownerName = settings?.owner_name ?? null;
+  }
   return json({
     hasUser: true,
-    onboardingCompleted: Boolean(canonical.profile?.onboarding_completed),
-    ownerName: canonical.settings?.owner_name ?? null,
-    resolved: Boolean(canonical.workspace && canonical.settings),
+    onboardingCompleted: true,
+    ownerName,
+    resolved: true,
+    sunset: true,
   });
 });
 
