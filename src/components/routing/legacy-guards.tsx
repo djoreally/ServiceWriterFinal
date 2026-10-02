@@ -47,8 +47,11 @@ export const RequireAuth = ({ children }: { children: React.ReactElement }) => {
 
   if (roleLoading) return <LoadingScreen />;
 
-  // Unresolved identity is not a denial — RLS remains authoritative server-side.
-  if (role && !canAccessRoute(role, location.pathname)) {
+  if (!role) {
+    return <AccessDenied />;
+  }
+
+  if (!canAccessRoute(role, location.pathname)) {
     return <AccessDenied />;
   }
 
