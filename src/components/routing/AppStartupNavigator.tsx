@@ -48,7 +48,7 @@ export function AppStartupNavigator({ children }: { children: React.ReactNode })
   const requiresPlan = Boolean(
     subscription && !subscription.subscribed && subscription.status === "requires_plan",
   );
-  const requiresOnboarding = decision?.reason === "onboarding_required";
+  const requiresOnboarding = false;
   const searchString = searchParams.toString();
   const hasPendingNext = Boolean(safeNextPath(searchString ? `?${searchString}` : ""));
   const onStartupDecisionPath = isStartupDecisionPath(pathname) && !hasPendingNext;
