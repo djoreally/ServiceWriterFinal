@@ -29,7 +29,7 @@ export function useStartupNavigation({ enabled = true }: UseStartupNavigationOpt
   const requiresPlan = Boolean(
     subscription && !subscription.subscribed && subscription.status === "requires_plan",
   );
-  const requiresOnboarding = decision?.reason === "onboarding_required";
+  const requiresOnboarding = false;
   const hasPendingNext = Boolean(safeNextPath(location.search));
   const onStartupDecisionPath = isStartupDecisionPath(location.pathname) && !hasPendingNext;
 
