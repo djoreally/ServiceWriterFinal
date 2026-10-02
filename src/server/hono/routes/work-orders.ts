@@ -15,7 +15,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { ApiError, json, paginationSchema } from "@/server/api";
-import { createSupabaseAdminClient, createSupabaseAnonServerClient } from "@/lib/supabase";
+import { createSupabaseAdminClient } from "@/lib/supabase";
 import { requireAuth, requireWorkspaceAuth } from "@/server/hono/middleware/auth";
 
 export const workOrdersRouter = new Hono();
