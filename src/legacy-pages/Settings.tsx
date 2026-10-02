@@ -593,23 +593,21 @@ const Settings = () => {
           {/* ======================== BUSINESS TAB ======================== */}
           <TabsContent value="business" className="space-y-6 mt-6 max-w-3xl">
 
-        {setupMode && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Starter business data</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                One click loads the standard oil-change add-ons, basic tire services, detailing services,
-                starter service packages, and the three editable customer subscription plans. Existing rows are left alone.
-              </p>
-            </CardHeader>
-            <CardContent>
-              <Button type="button" variant="outline" onClick={() => void handleLoadStarterData()} disabled={loadingStarterData}>
-                {loadingStarterData ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ClipboardCheck className="mr-2 h-4 w-4" />}
-                {loadingStarterData ? "Loading starter data…" : "Load starter templates"}
-              </Button>
-            </CardContent>
-          </Card>
-        )}
+        <Card>
+          <CardHeader>
+            <CardTitle>Starter business data</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              One click loads the standard oil-change add-ons, basic tire services, detailing services,
+              starter service packages, and the three editable customer subscription plans. Existing rows are left alone.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <Button type="button" variant="outline" onClick={() => void handleLoadStarterData()} disabled={loadingStarterData}>
+              {loadingStarterData ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ClipboardCheck className="mr-2 h-4 w-4" />}
+              {loadingStarterData ? "Loading starter data…" : "Load starter templates"}
+            </Button>
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>
