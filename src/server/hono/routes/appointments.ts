@@ -178,23 +178,36 @@ appointmentsRouter.get("/v1/appointments/scheduling-settings", async (c: Context
   return json({ settings: data ?? null });
 });
 
-// GET /v1/appointments/service-lines — appointment_services rows (price/quantity/vehicle)
-// for the workspace's appointments. appointment_services has no workspace_id
-// column, so scoping goes through the appointments table.
+// GET /v1/appointments/service-lines — canonical appointment_items rows
+// projected to the legacy client shape (appointment_id, vehicle_id, price, quantity).
 appointmentsRouter.get("/v1/appointments/service-lines", async (c: Context) => {
   const { supabase, workspaceId } = await requireCallerWorkspace(c, selectedWorkspaceHint(new URL(c.req.url)));
   const db = supabase as any;
-  const { data: appointmentRows, error: idsError } = await db
-    .from("appointments")
-    .select("id")
+  const { data, error } = await db
+    .from("appointment_items")
+    .select("appointment_id,quantity,unit_price,metadata")
     .eq("workspace_id", workspaceId);
-  if (idsError) throw idsError;
-  const ids = ((appointmentRows ?? []) as Array<{ id: string }>).map((row) => row.id);
-  const { data, error } = ids.length
-    ? await db.from("appointment_services").select("appointment_id,vehicle_id,price,quantity").in("appointment_id", ids)
-    : { data: [], error: null };
   if (error) throw error;
-  return json({ data: data ?? [] });
+  const rows = ((data ?? []) as Array<{
+    appointment_id: string;
+    quantity: number | string | null;
+    unit_price: number | string | null;
+    metadata: unknown;
+  }>).map((row) => {
+    const metadata = row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+      ? row.metadata as Record<string, unknown>
+      : {};
+    const vehicleId = typeof metadata.vehicle_id === "string" && metadata.vehicle_id.trim()
+      ? metadata.vehicle_id
+      : null;
+    return {
+      appointment_id: row.appointment_id,
+      vehicle_id: vehicleId,
+      price: Number(row.unit_price ?? 0),
+      quantity: Number(row.quantity ?? 1),
+    };
+  });
+  return json({ data: rows });
 });
 
 // GET /v1/appointments/day-appointments — raw appointments for one workspace-local
@@ -1280,27 +1293,28 @@ appointmentsRouter.get("/v1/appointments/:id/booking-configuration", async (c: C
   const workspaceIds = ((memberships ?? []) as Array<{ workspace_id: string }>).map((m) => m.workspace_id);
   if (!workspaceIds.length) throw new ApiError(400, "No active workspace", "no_workspace");
   const db = supabase as any;
-  const { data: configRow, error: configError } = await db
-    .from("appointment_booking_configurations")
-    .select("configuration")
-    .eq("appointment_id", id)
-    .maybeSingle();
-  if (configError) throw configError;
-  const configuration = (configRow as { configuration?: { vehicles?: unknown[] } } | null)?.configuration;
-  if (configuration?.vehicles?.length) return json({ configuration });
-
   const { data: appointment, error: appointmentError } = await supabase
     .from("appointments")
-    .select("id,workspace_id,vehicle_id,updated_at,created_at,starts_at")
+    .select("id,workspace_id,vehicle_id,metadata,updated_at,created_at,starts_at")
     .eq("id", id)
     .in("workspace_id", workspaceIds)
     .maybeSingle();
   if (appointmentError) throw appointmentError;
   const appointmentRow = appointment as {
-    id: string; workspace_id: string; vehicle_id: string | null;
+    id: string; workspace_id: string; vehicle_id: string | null; metadata: unknown;
     updated_at: string; created_at: string; starts_at: string;
   } | null;
-  if (!appointmentRow?.vehicle_id) return json({ configuration: null });
+  if (!appointmentRow) return json({ configuration: null });
+
+  const appointmentMetadata = appointmentRow.metadata && typeof appointmentRow.metadata === "object" && !Array.isArray(appointmentRow.metadata)
+    ? appointmentRow.metadata as Record<string, unknown>
+    : {};
+  const configuration = appointmentMetadata.booking_configuration && typeof appointmentMetadata.booking_configuration === "object" && !Array.isArray(appointmentMetadata.booking_configuration)
+    ? appointmentMetadata.booking_configuration as { vehicles?: unknown[] }
+    : null;
+  if (configuration?.vehicles?.length) return json({ configuration });
+
+  if (!appointmentRow.vehicle_id) return json({ configuration: null });
 
   const { data: vehicle, error: vehicleError } = await supabase
     .from("vehicles")
