@@ -6,6 +6,8 @@
  * - app/api/v1/webhooks/resend/route.ts (POST)
  * - app/api/v1/webhooks/twilio/route.ts (POST)
  * - app/api/v1/webhooks/twilio/inbound/route.ts (POST)
+ * - /v1/shop-agent/agentphone (POST, AgentPhone webhooks; signature-verified)
+ * - /v1/shop-agent/sweep (POST, CRON_SECRET auth; deferred text-backs + nudge sweep)
  * - app/api/webhooks/stripe/route.ts (POST)
  * - app/api/webhooks/stripe/direct/[workspaceId]/route.ts (POST)
  * - app/api/v1/email-testing/send/route.ts (POST)
@@ -75,6 +77,20 @@ import { EnginemailerEmailAdapter } from "@/server/messaging/enginemailer";
 import { ResendEmailAdapter } from "@/server/messaging/resend";
 import { TwilioSmsAdapter } from "@/server/messaging/twilio";
 import { ingestDeliveryWebhook, ingestInboundWebhook } from "@/server/messaging/webhook";
+import { sweepDueActions } from "@/server/shop-agent/channels/sweep";
+import {
+  handleAgentPhoneWebhook,
+  resolveAgentPhoneSender,
+} from "@/server/shop-agent/channels/agentphone-webhook";
+import { getDefaultReasoner } from "@/server/shop-agent/channels/sms";
+import {
+  AGENTPHONE_EVENT_HEADER,
+  AGENTPHONE_SIGNATURE_HEADER,
+  AGENTPHONE_TIMESTAMP_HEADER,
+  AGENTPHONE_WEBHOOK_SECRET_ENV,
+  AgentPhoneAdapter,
+} from "@/server/shop-agent/agentphone";
+import type { ShopAgentSupabase } from "@/server/shop-agent/channels/db";
 import { reconcileServiceWriterBillingEvent } from "@/server/billing/stripe-billing-reconciliation";
 import {
   directWebhookSecret,
@@ -160,6 +176,85 @@ messagingRouter.post("/v1/webhooks/twilio/inbound", async (c) => {
   } catch (error) {
     console.error("twilio_inbound_webhook_failed", error instanceof Error ? error.message : "unknown error");
     return NextResponse.json({ error: "Webhook processing failed" }, { status: 500 });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Shop Agent Phase 1: AgentPhone webhooks + sweep
+// ---------------------------------------------------------------------------
+
+/**
+ * AgentPhone webhook endpoint (public, HMAC-signature-verified).
+ * Register this URL via the AgentPhone dashboard / setWebhook helper with
+ * the shop's agent in WEBHOOK mode:
+ *   https://<host>/api/v1/shop-agent/agentphone
+ *
+ * Voice turns in webhook mode must answer JSON with a `text` field (30s
+ * timeout); SMS webhooks only need 200 OK.
+ */
+messagingRouter.post("/v1/shop-agent/agentphone", async (c) => {
+  const request = c.req.raw;
+  const rawBody = await request.text();
+  const requestId = request.headers.get("x-vercel-id") ?? request.headers.get("x-request-id") ?? crypto.randomUUID();
+  try {
+    const secret = process.env[AGENTPHONE_WEBHOOK_SECRET_ENV]?.trim();
+    if (!secret) {
+      console.error("[ShopAgent] agentphone webhook disabled: AGENTPHONE_WEBHOOK_SECRET is not configured");
+      return NextResponse.json({ ok: false, error: "worker_not_configured" }, { status: 503 });
+    }
+    const signature = request.headers.get(AGENTPHONE_SIGNATURE_HEADER);
+    const timestamp = request.headers.get(AGENTPHONE_TIMESTAMP_HEADER);
+    if (!AgentPhoneAdapter.verifyWebhookSignature(secret, rawBody, signature, timestamp)) {
+      return NextResponse.json({ error: "Invalid webhook signature" }, { status: 401 });
+    }
+    const headerEvent = request.headers.get(AGENTPHONE_EVENT_HEADER);
+    const supabase = createSupabaseAdminClient() as unknown as ShopAgentSupabase;
+    const result = await handleAgentPhoneWebhook(
+      {
+        supabase,
+        senderFor: (workspaceId) => resolveAgentPhoneSender(supabase, workspaceId),
+        reasoner: getDefaultReasoner(),
+      },
+      JSON.parse(rawBody) as unknown,
+      headerEvent,
+    );
+    return NextResponse.json(result.body);
+  } catch (error) {
+    console.error("shop_agent_agentphone_webhook_failed", {
+      requestId,
+      error: error instanceof Error ? error.message : "unknown error",
+    });
+    return NextResponse.json({ error: "Webhook processing failed", requestId }, { status: 500 });
+  }
+});
+
+/**
+ * Shop Agent sweep worker: sends deferred text-backs whose quiet hours have
+ * passed and one follow-up nudge per silent conversation. Idempotent — safe
+ * to run every few minutes. Auth mirrors the internal worker routes below
+ * (CRON_SECRET bearer).
+ */
+messagingRouter.post("/v1/shop-agent/sweep", async (c) => {
+  const request = c.req.raw;
+  const secret = process.env.CRON_SECRET?.trim();
+  if (!secret) {
+    console.error("[ShopAgent] sweep worker disabled: CRON_SECRET is not configured");
+    return NextResponse.json({ ok: false, error: "worker_not_configured" }, { status: 503 });
+  }
+  if (!authorizedWorker(request, secret)) {
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  }
+
+  const startedAt = Date.now();
+  try {
+    const supabase = createSupabaseAdminClient() as unknown as ShopAgentSupabase;
+    const result = await sweepDueActions(supabase, {
+      senderFor: (workspaceId) => resolveAgentPhoneSender(supabase, workspaceId),
+    });
+    return NextResponse.json({ ok: true, ...result, durationMs: Date.now() - startedAt });
+  } catch (error) {
+    console.error("[ShopAgent] sweep failed", error instanceof Error ? error.message : "unknown error");
+    return NextResponse.json({ ok: false, error: "worker_failed" }, { status: 500 });
   }
 });
 
