@@ -1037,16 +1037,18 @@ workOrdersRouter.get("/v1/detailing-pricing/rules", async (c) => {
 workOrdersRouter.get("/v1/detailing-pricing/public-rules", async (c) => {
   const businessUserId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("business_user_id") ?? "");
   const admin = createSupabaseAdminClient();
-  const { data: workspaces, error: workspaceError } = await admin
+  const db = admin as any;
+  const { data: workspaces, error: workspaceError } = await db
     .from("workspaces")
     .select("id")
     .eq("created_by", businessUserId)
     .eq("is_active", true);
   if (workspaceError) throw workspaceError;
-  const workspaceIds = (workspaces ?? []).map((workspace) => workspace.id);
+  const workspaceIds = ((workspaces ?? []) as Array<{ id: string }>).map((workspace) => workspace.id);
   if (!workspaceIds.length) return json({ data: [] });
 
-  const { data, error } = await (admin.from("detailing_pricing_rules") as any)
+  const { data, error } = await db
+    .from("detailing_pricing_rules")
     .select("id,workspace_id,service_catalog_id,size_tier,condition,price_multiplier,duration_multiplier,flat_fee,photo_required,quote_required,requires_water,requires_power,requires_covered_area")
     .in("workspace_id", workspaceIds)
     .order("service_catalog_id")
