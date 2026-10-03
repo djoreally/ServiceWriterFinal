@@ -1,25 +1,15 @@
 /**
- * useBookingSlots — Encapsulates date/time slot generation, conflict
- * detection, and real-time subscription for the public booking flow.
- *
- * Extracted from PublicBooking.tsx to isolate scheduling concerns.
+ * useBookingSlots — Encapsulates date/time slot generation and server-safe availability.
  */
-
 import { useCallback, useEffect } from "react";
 import { fetchRouteSafeSlots } from "@/application/queries/booking-context.query";
-import { fetchBookedSlotsForDate } from "@/application/queries/public-booking.query";
+import { fetchCanonicalAvailability } from "@/application/queries/public-booking.query";
 import { format, isBefore, addDays, addMinutes, addHours, setHours, setMinutes, startOfDay, parse } from "date-fns";
-import { toast } from "@/components/ui/sonner";
 import type { BookingAction, BookingState } from "@/hooks/useBookingState";
 import { isOperatingDay, resolveDayWindow, type DayHoursMap } from "@/lib/business-hours";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 export interface SlotsDeps {
   businessUserId: string | undefined;
-  /** Canonical public booking slug used by the secure API boundary. */
   bookingSlug?: string;
   bookingContextId: string | null;
   openingTime: string | null;
@@ -30,217 +20,123 @@ export interface SlotsDeps {
   minLeadTimeHours: number;
   maxAdvanceDays: number;
   workingDays: string[] | null;
-  /** Per-weekday hours from business settings (authoritative when present). */
   dayHours?: DayHoursMap;
-  /** Current selected date from booking state */
   selectedDate: Date | undefined;
-  /** Current selected time from booking state */
   selectedTime: string;
-  /** Booked slots from state */
   bookedSlots: BookingState["bookedSlots"];
-  /** Route-safe slots from state */
   routeSafeSlots: BookingState["routeSafeSlots"];
-  /** Weather guard check (if enabled) */
   isWeatherBlocked?: (slotTime: string) => { blocked: boolean; reasons: string[] };
-  /** Total service duration in minutes (from pricing hook) */
   getTotalDuration: () => number;
-  /** Dispatch to update booking state */
   dispatch: React.Dispatch<BookingAction>;
 }
 
-// ---------------------------------------------------------------------------
-// Hook
-// ---------------------------------------------------------------------------
-
 export function useBookingSlots(deps: SlotsDeps) {
-  const {
-    businessUserId,
-    bookingSlug,
-    bookingContextId,
-    openingTime,
-    closingTime,
-    slotDurationMinutes,
-    bufferTimeBefore,
-    bufferTimeAfter,
-    minLeadTimeHours,
-    maxAdvanceDays,
-    workingDays,
-    dayHours,
-    selectedDate,
-    selectedTime,
-    bookedSlots,
-    routeSafeSlots,
-    isWeatherBlocked,
-    getTotalDuration,
-    dispatch,
-  } = deps;
+  const { businessUserId, bookingSlug, bookingContextId, openingTime, closingTime, slotDurationMinutes, bufferTimeBefore, bufferTimeAfter, minLeadTimeHours, maxAdvanceDays, workingDays, dayHours, selectedDate, bookedSlots, routeSafeSlots, isWeatherBlocked, getTotalDuration, dispatch } = deps;
 
-  // ── Fetch slots for a given date ────────────────────────────────────────
   const fetchBookedSlots = useCallback(async (date: Date) => {
     if (!businessUserId) return;
-
     dispatch({ type: "SET_LOADING_SLOTS", loading: true });
     const dateStr = format(date, "yyyy-MM-dd");
 
-    // Try route-safe slots first
     if (bookingContextId) {
       try {
         const { data, error } = await fetchRouteSafeSlots(bookingContextId, businessUserId, dateStr);
         if (!error && data?.slots) {
           dispatch({ type: "SET_ROUTE_SAFE_SLOTS", slots: data.slots });
-          // Fetch conflict data through the same secure public API boundary.
-          const { data: publicData } = bookingSlug
-            ? await fetchBookedSlotsForDate(bookingSlug, dateStr)
-            : { data: null };
-          dispatch({ type: "SET_BOOKED_SLOTS", slots: (publicData || []) as BookingState["bookedSlots"] });
+          dispatch({ type: "SET_BOOKED_SLOTS", slots: [] });
           dispatch({ type: "SET_LOADING_SLOTS", loading: false });
           return;
         }
       } catch (err) {
-        console.warn("Route-safe slots failed, falling back to legacy:", err);
+        console.warn("Route-safe slots failed; using canonical public availability:", err);
       }
     }
 
-    // Public conflict fallback remains behind the secure API boundary.
-    dispatch({ type: "SET_ROUTE_SAFE_SLOTS", slots: [] });
-    const { data, error } = bookingSlug
-      ? await fetchBookedSlotsForDate(bookingSlug, dateStr)
-      : { data: null, error: new Error("missing_booking_slug") };
+    if (bookingSlug) {
+      const { data, error } = await fetchCanonicalAvailability(bookingSlug, dateStr);
+      if (!error && data?.bookingEnabled) {
+        dispatch({ type: "SET_ROUTE_SAFE_SLOTS", slots: data.slots.map((slot) => ({ time: slot.time, technicianId: "canonical", routeScore: 1 })) });
+        dispatch({ type: "SET_BOOKED_SLOTS", slots: [] });
+        dispatch({ type: "SET_LOADING_SLOTS", loading: false });
+        return;
+      }
+    }
 
-    dispatch({ type: "SET_BOOKED_SLOTS", slots: error ? [] : (data as BookingState["bookedSlots"]) || [] });
+    // Fail closed: without server-approved availability the UI must not invent
+    // bookable capacity from local business-hour math.
+    dispatch({ type: "SET_ROUTE_SAFE_SLOTS", slots: [] });
+    dispatch({ type: "SET_BOOKED_SLOTS", slots: [] });
     dispatch({ type: "SET_LOADING_SLOTS", loading: false });
   }, [businessUserId, bookingSlug, bookingContextId, dispatch]);
 
-  // Re-fetch when date changes
   useEffect(() => {
     if (selectedDate && businessUserId) {
-      fetchBookedSlots(selectedDate);
+      void fetchBookedSlots(selectedDate);
       dispatch({ type: "SET_SELECTED_TIME", time: "" });
     }
   }, [selectedDate, businessUserId, fetchBookedSlots, dispatch]);
 
-  // ── Secure refresh polling ───────────────────────────────────────────────
-  // Anonymous clients do not subscribe directly to the appointments table.
-  // Refreshing through the public API keeps payloads within the audited boundary.
   useEffect(() => {
     if (!bookingSlug || !selectedDate) return;
-    const interval = window.setInterval(() => {
-      void fetchBookedSlots(selectedDate);
-    }, 30_000);
+    const interval = window.setInterval(() => { void fetchBookedSlots(selectedDate); }, 30_000);
     return () => window.clearInterval(interval);
   }, [bookingSlug, selectedDate, fetchBookedSlots]);
 
-  // ── Pure slot helpers ───────────────────────────────────────────────────
-
   const generateTimeSlots = useCallback((): string[] => {
-    // Per-day hours are authoritative; the flat opening/closing pair is only a
-    // fallback for weekdays the shop never configured.
     const day = selectedDate ?? new Date();
     const window = resolveDayWindow(dayHours, day, openingTime, closingTime);
     if (!window) return [];
-
     const slots: string[] = [];
     const [openHour, openMin] = window.open.split(":").map(Number);
     const [closeHour, closeMin] = window.close.split(":").map(Number);
     const baseSlot = slotDurationMinutes || 30;
-    // The UI renders each start time as an arrival WINDOW whose length is
-    // max(slotDuration, serviceDuration). Stepping by a smaller increment than
-    // the window produces overlapping windows that render with identical
-    // labels ("5 PM - 8 PM" twice). Step by the window length instead.
     const serviceDuration = Math.max(getTotalDuration() || 0, 0);
     const windowMinutes = Math.max(baseSlot, serviceDuration, 15);
-    const step = windowMinutes;
-
     let current = setMinutes(setHours(new Date(), openHour), openMin);
     const closing = setMinutes(setHours(new Date(), closeHour), closeMin);
-
-    // Keep every window fully inside business hours.
     while (!isBefore(closing, addMinutes(current, windowMinutes))) {
       slots.push(format(current, "HH:mm"));
-      current = addMinutes(current, step);
+      current = addMinutes(current, windowMinutes);
     }
-
-    // Fallback: if the window is longer than the whole operating day, still
-    // offer the opening time so the day isn't silently unbookable.
-    if (slots.length === 0 && isBefore(setMinutes(setHours(new Date(), openHour), openMin), closing)) {
-      slots.push(format(setMinutes(setHours(new Date(), openHour), openMin), "HH:mm"));
-    }
-
+    if (slots.length === 0 && isBefore(setMinutes(setHours(new Date(), openHour), openMin), closing)) slots.push(format(setMinutes(setHours(new Date(), openHour), openMin), "HH:mm"));
     return slots;
   }, [openingTime, closingTime, dayHours, selectedDate, slotDurationMinutes, getTotalDuration]);
 
+  const isSlotBlocked = useCallback((slotTime: string): boolean => {
+    if (bookedSlots.length === 0) return false;
+    const serviceDuration = getTotalDuration();
+    const slotStart = parse(slotTime, "HH:mm", new Date());
+    const slotEnd = addMinutes(slotStart, serviceDuration);
+    for (const booked of bookedSlots) {
+      const bookedStart = parse(booked.scheduled_time.substring(0, 5), "HH:mm", new Date());
+      const blockedStart = addMinutes(bookedStart, -bufferTimeBefore);
+      const blockedEnd = addMinutes(addMinutes(bookedStart, booked.duration_minutes), bufferTimeAfter);
+      if (slotStart < blockedEnd && slotEnd > blockedStart) return true;
+    }
+    return false;
+  }, [bookedSlots, getTotalDuration, bufferTimeBefore, bufferTimeAfter]);
 
-  const isSlotBlocked = useCallback(
-    (slotTime: string): boolean => {
-      if (bookedSlots.length === 0) return false;
+  const isSlotTooSoon = useCallback((slotTime: string): boolean => {
+    if (!selectedDate || minLeadTimeHours <= 0) return false;
+    const [hour, min] = slotTime.split(":").map(Number);
+    return isBefore(setMinutes(setHours(selectedDate, hour), min), addHours(new Date(), minLeadTimeHours));
+  }, [selectedDate, minLeadTimeHours]);
 
-      const serviceDuration = getTotalDuration();
-      const slotStart = parse(slotTime, "HH:mm", new Date());
-      const slotEnd = addMinutes(slotStart, serviceDuration);
+  const isWorkingDay = useCallback((date: Date): boolean => isOperatingDay(dayHours, workingDays, date), [dayHours, workingDays]);
+  const isDateWithinWindow = useCallback((date: Date): boolean => isBefore(date, addDays(startOfDay(new Date()), maxAdvanceDays)), [maxAdvanceDays]);
 
-      for (const booked of bookedSlots) {
-        const bookedStart = parse(booked.scheduled_time.substring(0, 5), "HH:mm", new Date());
-        const blockedStart = addMinutes(bookedStart, -bufferTimeBefore);
-        const blockedEnd = addMinutes(addMinutes(bookedStart, booked.duration_minutes), bufferTimeAfter);
-
-        if (slotStart < blockedEnd && slotEnd > blockedStart) {
-          return true;
-        }
-      }
-      return false;
-    },
-    [bookedSlots, getTotalDuration, bufferTimeBefore, bufferTimeAfter],
-  );
-
-  const isSlotTooSoon = useCallback(
-    (slotTime: string): boolean => {
-      if (!selectedDate || minLeadTimeHours <= 0) return false;
-
-      const [hour, min] = slotTime.split(":").map(Number);
-      const slotDateTime = setMinutes(setHours(selectedDate, hour), min);
-      const minBookingTime = addHours(new Date(), minLeadTimeHours);
-
-      return isBefore(slotDateTime, minBookingTime);
-    },
-    [selectedDate, minLeadTimeHours],
-  );
-
-  const isWorkingDay = useCallback(
-    (date: Date): boolean => isOperatingDay(dayHours, workingDays, date),
-    [dayHours, workingDays],
-  );
-
-  const isDateWithinWindow = useCallback(
-    (date: Date): boolean => {
-      const maxDate = addDays(startOfDay(new Date()), maxAdvanceDays);
-      return isBefore(date, maxDate);
-    },
-    [maxAdvanceDays],
-  );
-
-  /** Compute the time slots to display (route-safe or generated). */
+  // Stage 22 rule: when a public booking slug exists, only canonical backend
+  // availability may create visible slots. Local generation is retained solely
+  // for non-public internal compatibility flows.
   const timeSlots = routeSafeSlots.length > 0
     ? Array.from(new Set(routeSafeSlots.map((s) => s.time.substring(0, 5)))).sort()
-    : generateTimeSlots();
+    : bookingSlug ? [] : generateTimeSlots();
 
+  const effectiveIsSlotBlocked = useCallback((time: string) => {
+    const weatherBlocked = isWeatherBlocked?.(time).blocked ?? false;
+    if (weatherBlocked) return true;
+    return routeSafeSlots.length > 0 ? false : isSlotBlocked(time);
+  }, [routeSafeSlots, isSlotBlocked, isWeatherBlocked]);
 
-  /** When route-safe slots are active, slot blocking is handled server-side. */
-  const effectiveIsSlotBlocked = useCallback(
-    (time: string) => {
-      const weatherBlocked = isWeatherBlocked?.(time).blocked ?? false;
-      if (weatherBlocked) return true;
-      return routeSafeSlots.length > 0 ? false : isSlotBlocked(time);
-    },
-    [routeSafeSlots, isSlotBlocked, isWeatherBlocked],
-  );
-
-  return {
-    fetchBookedSlots,
-    generateTimeSlots,
-    isSlotBlocked: effectiveIsSlotBlocked,
-    isSlotTooSoon,
-    isWorkingDay,
-    isDateWithinWindow,
-    timeSlots,
-  } as const;
+  return { fetchBookedSlots, generateTimeSlots, isSlotBlocked: effectiveIsSlotBlocked, isSlotTooSoon, isWorkingDay, isDateWithinWindow, timeSlots } as const;
 }
