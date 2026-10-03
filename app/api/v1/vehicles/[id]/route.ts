@@ -1,4 +1,5 @@
-import { errorResponse, json, requireWorkspaceMember } from "@/server/api";
+import { errorResponse, json } from "@/server/api";
+import { ensureIdempotencyKey, serviceWriterApi } from "@/server/service-writer-api";
 import { z } from "zod";
 
 const vehicleUpdateSchema = z.object({
@@ -21,25 +22,47 @@ const vehicleUpdateSchema = z.object({
   oil_capacity: z.string().trim().max(40).nullable().optional(),
   oil_filter: z.string().trim().max(100).nullable().optional(),
   notes: z.string().max(5000).nullable().optional(),
-}).refine((body) => Object.keys(body).some((key) => key !== "workspace_id"), {
-  message: "At least one vehicle field is required",
-});
+}).refine((body) => Object.keys(body).some((key) => key !== "workspace_id"), { message: "At least one vehicle field is required" });
 
-const writeRoles = ["owner", "admin", "manager", "service_advisor", "receptionist", "technician"] as const;
+type ApiVehicle = Record<string, unknown> & { customerId?: string | null; metadata?: Record<string, unknown> | null };
+type ApiCustomer = Record<string, unknown> & { id?: string; firstName?: string; lastName?: string; email?: string | null; phone?: string | null };
+
+function legacyVehicle(row: ApiVehicle, customer?: ApiCustomer | null) {
+  const metadata = row.metadata && typeof row.metadata === "object" ? row.metadata : {};
+  return {
+    ...row,
+    workspace_id: row.workspaceId,
+    customer_id: row.customerId,
+    license_plate: row.licensePlate,
+    plate_region: row.plateRegion,
+    mileage_unit: row.mileageUnit === "kilometers" ? "km" : "mi",
+    created_at: row.createdAt,
+    updated_at: row.updatedAt,
+    customers: customer ? { id: customer.id, first_name: customer.firstName, last_name: customer.lastName, email: customer.email, phone: customer.phone } : null,
+    vehicle_service_specs: [{
+      engine: metadata.engine ?? null,
+      oil_type: metadata.oil_type ?? null,
+      oil_capacity: metadata.oil_capacity ?? null,
+      oil_filter: metadata.oil_filter ?? null,
+      metadata: metadata.vehicle_service_specs_metadata ?? {},
+    }],
+  };
+}
+
+async function loadLegacyVehicle(request: Request, workspaceId: string, id: string) {
+  const vehicle = await serviceWriterApi<ApiVehicle>(request, `/api/v1/workspaces/${workspaceId}/vehicles/${id}`);
+  let customer: ApiCustomer | null = null;
+  if (vehicle.customerId) {
+    try { customer = await serviceWriterApi<ApiCustomer>(request, `/api/v1/workspaces/${workspaceId}/customers/${vehicle.customerId}`); } catch { customer = null; }
+  }
+  return legacyVehicle(vehicle, customer);
+}
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
     const id = z.string().uuid().parse((await context.params).id);
-    const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
-    const { data, error } = await supabase
-      .from("vehicles")
-      .select("*,customers(id,first_name,last_name,email,phone),vehicle_service_specs(engine,oil_type,oil_capacity,oil_filter,metadata)")
-      .eq("workspace_id", workspaceId)
-      .eq("id", id)
-      .single();
-    if (error) throw error;
-    return json({ data });
+    return json({ data: await loadLegacyVehicle(request, workspaceId, id) });
   } catch (error) {
     return errorResponse(error);
   }
@@ -49,85 +72,37 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   try {
     const body = vehicleUpdateSchema.parse(await request.json());
     const id = z.string().uuid().parse((await context.params).id);
-    const { supabase } = await requireWorkspaceMember(body.workspace_id, [...writeRoles], request);
+    const current = await serviceWriterApi<ApiVehicle>(request, `/api/v1/workspaces/${body.workspace_id}/vehicles/${id}`);
+    const patch: Record<string, unknown> = {};
+    if (body.customer_id !== undefined) patch.customerId = body.customer_id;
+    if (body.vin !== undefined) patch.vin = body.vin || null;
+    if (body.year !== undefined) patch.year = body.year;
+    if (body.make !== undefined) patch.make = body.make;
+    if (body.model !== undefined) patch.model = body.model;
+    if (body.trim !== undefined) patch.trim = body.trim;
+    if (body.license_plate !== undefined) patch.licensePlate = body.license_plate;
+    if (body.plate_region !== undefined || body.plate_state !== undefined) patch.plateRegion = body.plate_region ?? body.plate_state ?? null;
+    if (body.color !== undefined) patch.color = body.color;
+    if (body.mileage !== undefined) patch.mileage = body.mileage;
+    if (body.mileage_unit !== undefined) patch.mileageUnit = body.mileage_unit === "km" ? "kilometers" : "miles";
+    if (body.notes !== undefined) patch.notes = body.notes;
 
-    if (Object.prototype.hasOwnProperty.call(body, "customer_id") && body.customer_id) {
-      const { data: customer, error: customerError } = await supabase
-        .from("customers")
-        .select("id")
-        .eq("workspace_id", body.workspace_id)
-        .eq("id", body.customer_id)
-        .neq("status", "archived")
-        .maybeSingle();
-      if (customerError) throw customerError;
-      if (!customer) throw new Error("Customer does not belong to this workspace.");
+    if ([body.odometer_measure, body.engine, body.oil_type, body.oil_capacity, body.oil_filter].some((value) => value !== undefined)) {
+      const metadata = current.metadata && typeof current.metadata === "object" ? { ...current.metadata } : {};
+      if (body.odometer_measure !== undefined) metadata.odometer_measure = body.odometer_measure;
+      if (body.engine !== undefined) metadata.engine = body.engine;
+      if (body.oil_type !== undefined) metadata.oil_type = body.oil_type;
+      if (body.oil_capacity !== undefined) metadata.oil_capacity = body.oil_capacity;
+      if (body.oil_filter !== undefined) metadata.oil_filter = body.oil_filter;
+      patch.metadata = metadata;
     }
 
-    const { workspace_id, engine, oil_type, oil_capacity, oil_filter, odometer_measure, plate_state, ...vehicleInput } = body;
-    const patch: Record<string, unknown> = { ...vehicleInput };
-
-    if (Object.prototype.hasOwnProperty.call(body, "plate_state") && !Object.prototype.hasOwnProperty.call(body, "plate_region")) {
-      patch.plate_region = plate_state ?? null;
-    }
-    if (Object.prototype.hasOwnProperty.call(body, "odometer_measure")) {
-      const { data: current, error: currentError } = await supabase
-        .from("vehicles")
-        .select("metadata")
-        .eq("workspace_id", workspace_id)
-        .eq("id", id)
-        .maybeSingle();
-      if (currentError) throw currentError;
-      if (!current) throw new Error("Vehicle does not belong to this workspace.");
-      const metadata = current.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata)
-        ? current.metadata as Record<string, unknown>
-        : {};
-      patch.metadata = { ...metadata, odometer_measure: odometer_measure ?? null };
-    }
-
-    let vehicle: unknown;
-    if (Object.keys(patch).length > 0) {
-      const { data, error } = await supabase
-        .from("vehicles")
-        .update(patch as never)
-        .eq("id", id)
-        .eq("workspace_id", workspace_id)
-        .select()
-        .single();
-      if (error) throw error;
-      vehicle = data;
-    } else {
-      const { data, error } = await supabase
-        .from("vehicles")
-        .select("*")
-        .eq("id", id)
-        .eq("workspace_id", workspace_id)
-        .single();
-      if (error) throw error;
-      vehicle = data;
-    }
-
-    if ([engine, oil_type, oil_capacity, oil_filter].some((value) => value !== undefined)) {
-      const { data: currentSpecs, error: currentSpecsError } = await supabase
-        .from("vehicle_service_specs")
-        .select("engine,oil_type,oil_capacity,oil_filter,metadata")
-        .eq("workspace_id", workspace_id)
-        .eq("vehicle_id", id)
-        .maybeSingle();
-      if (currentSpecsError) throw currentSpecsError;
-      const { error: specsError } = await supabase.from("vehicle_service_specs").upsert({
-        workspace_id,
-        vehicle_id: id,
-        engine: engine !== undefined ? engine : currentSpecs?.engine ?? null,
-        oil_type: oil_type !== undefined ? oil_type : currentSpecs?.oil_type ?? null,
-        oil_capacity: oil_capacity !== undefined ? oil_capacity : currentSpecs?.oil_capacity ?? null,
-        oil_filter: oil_filter !== undefined ? oil_filter : currentSpecs?.oil_filter ?? null,
-        source: "service_writer",
-        metadata: currentSpecs?.metadata ?? {},
-      } as never, { onConflict: "workspace_id,vehicle_id" });
-      if (specsError) throw specsError;
-    }
-
-    return json({ data: vehicle });
+    await serviceWriterApi<ApiVehicle>(request, `/api/v1/workspaces/${body.workspace_id}/vehicles/${id}`, {
+      method: "PATCH",
+      headers: { "idempotency-key": ensureIdempotencyKey(request) },
+      body: JSON.stringify(patch),
+    });
+    return json({ data: await loadLegacyVehicle(request, body.workspace_id, id) });
   } catch (error) {
     return errorResponse(error);
   }
@@ -137,28 +112,11 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   try {
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
     const id = z.string().uuid().parse((await context.params).id);
-    const { supabase, user } = await requireWorkspaceMember(workspaceId, [...writeRoles], request);
-    const { data: current, error: currentError } = await supabase
-      .from("vehicles")
-      .select("id,metadata")
-      .eq("id", id)
-      .eq("workspace_id", workspaceId)
-      .maybeSingle();
-    if (currentError) throw currentError;
-    if (!current) throw new Error("Vehicle does not belong to this workspace.");
-    const metadata = current.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata)
-      ? current.metadata as Record<string, unknown>
-      : {};
-    const archivedAt = new Date().toISOString();
-    const { data, error } = await supabase
-      .from("vehicles")
-      .update({ metadata: { ...metadata, archived_at: archivedAt, archived_by: user.id } } as never)
-      .eq("id", id)
-      .eq("workspace_id", workspaceId)
-      .select("id,metadata")
-      .single();
-    if (error) throw error;
-    return json({ data });
+    const data = await serviceWriterApi<ApiVehicle>(request, `/api/v1/workspaces/${workspaceId}/vehicles/${id}`, {
+      method: "DELETE",
+      headers: { "idempotency-key": ensureIdempotencyKey(request) },
+    });
+    return json({ data: legacyVehicle(data) });
   } catch (error) {
     return errorResponse(error);
   }
