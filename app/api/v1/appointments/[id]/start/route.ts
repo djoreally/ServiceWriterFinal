@@ -1,4 +1,6 @@
-import { ApiError, errorResponse, json, requireWorkspaceMember } from "@/server/api";
+import { errorResponse, json } from "@/server/api";
+import { ApiAppointment } from "@/server/cutover/appointments";
+import { ensureIdempotencyKey, serviceWriterApi } from "@/server/service-writer-api";
 import { z } from "zod";
 
 const schema = z.object({ workspace_id: z.string().uuid() });
@@ -7,63 +9,15 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   try {
     const id = z.string().uuid().parse((await context.params).id);
     const { workspace_id } = schema.parse(await request.json());
-    const { supabase, user, membership } = await requireWorkspaceMember(
-      workspace_id,
-      ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher", "technician"],
-      request,
-    );
-    const db = supabase as any;
-
-    const { data: current, error: readError } = await db
-      .from("appointments")
-      .select("id,status,assigned_user_id,metadata,customer_id,vehicle_id")
-      .eq("workspace_id", workspace_id)
-      .eq("id", id)
-      .maybeSingle();
-    if (readError) throw readError;
-    if (!current) return json({ error: { code: "not_found", message: "Appointment not found in this workspace." } }, { status: 404 });
-    if (membership.role === "technician" && current.assigned_user_id !== user.id) {
-      throw new ApiError(403, "This appointment is not assigned to you.", "forbidden");
-    }
+    let current = await serviceWriterApi<ApiAppointment>(request, `/api/v1/workspaces/${workspace_id}/appointments/${id}`);
     if (current.status === "in_progress") return json({ data: { id, status: current.status, already_started: true } });
-    if (["completed", "cancelled", "no_show"].includes(current.status)) {
-      return json({ error: { code: "invalid_status", message: "This appointment can no longer be started." } }, { status: 409 });
+    if (["completed", "cancelled", "no_show"].includes(current.status)) return json({ error: { code: "invalid_status", message: "This appointment can no longer be started." } }, { status: 409 });
+    const key = ensureIdempotencyKey(request);
+    if (current.status === "scheduled") {
+      current = await serviceWriterApi<ApiAppointment>(request, `/api/v1/workspaces/${workspace_id}/appointments/${id}/transition`, { method: "POST", headers: { "idempotency-key": `${key}:confirm` }, body: JSON.stringify({ status: "confirmed" }) });
     }
-
-    if (!current.customer_id || !current.vehicle_id) return json({ error: { code: "missing_job_context", message: "Start Job requires customer and vehicle context." } }, { status: 409 });
-
-    const metadata = current.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata)
-      ? current.metadata as Record<string, unknown>
-      : {};
-    const now = new Date().toISOString();
-    const { data, error } = await db
-      .from("appointments")
-      .update({
-        status: "in_progress",
-        metadata: { ...metadata, dispatch_status: "started", actual_start_time: metadata.actual_start_time ?? now },
-        updated_at: now,
-      })
-      .eq("workspace_id", workspace_id)
-      .eq("id", id)
-      .select("id,status,assigned_user_id,metadata,updated_at")
-      .single();
-    if (error) throw error;
-
-    if (membership.role === "technician") {
-      const { error: presenceError } = await db.rpc("set_technician_presence_v1", {
-        p_workspace_id: workspace_id,
-        p_status: "on_job",
-        p_appointment_id: id,
-        p_location: null,
-      });
-      if (presenceError) throw presenceError;
-    }
-
-    // Start Job is intentionally internal-only. It establishes the authoritative
-    // start timestamp, in-progress state, and technician presence. Customer
-    // communication begins only when there is something actionable to send,
-    // such as an inspection recommendation/approval request.
-    return json({ data: { ...data, already_started: false } });
+    const data = await serviceWriterApi<ApiAppointment>(request, `/api/v1/workspaces/${workspace_id}/appointments/${id}/transition`, { method: "POST", headers: { "idempotency-key": `${key}:start` }, body: JSON.stringify({ status: "in_progress" }) });
+    return json({ data: { id: data.id, status: data.status, metadata: data.metadata, updated_at: data.updatedAt, already_started: false } });
   } catch (error) {
     return errorResponse(error);
   }
