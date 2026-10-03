@@ -1,4 +1,5 @@
-import { corsHeaders, errorResponse, json, requireUser } from "@/server/api";
+import { corsHeaders, errorResponse, json } from "@/server/api";
+import { serviceWriterApi } from "@/server/service-writer-api";
 
 export const dynamic = "force-dynamic";
 
@@ -8,15 +9,31 @@ export function OPTIONS() {
 
 export async function GET(request: Request) {
   try {
-    const { supabase, user } = await requireUser(request);
-    const { data, error } = await supabase
-      .from("workspace_members")
-      .select("workspace_id,role,is_active,workspaces(id,name,slug,kind,timezone,currency_code,is_active)")
-      .eq("user_id", user.id)
-      .eq("is_active", true)
-      .order("workspace_id", { ascending: true });
-    if (error) throw error;
-    return json({ data: data ?? [] }, { headers: { "Cache-Control": "private, no-store" } });
+    const rows = await serviceWriterApi<Array<{
+      id: string;
+      name: string;
+      slug: string;
+      timezone: string;
+      currencyCode: string;
+      isActive: boolean;
+      role: string;
+    }>>(request, "/api/v1/workspaces");
+
+    const data = rows.map((row) => ({
+      workspace_id: row.id,
+      role: row.role,
+      is_active: row.isActive,
+      workspaces: {
+        id: row.id,
+        name: row.name,
+        slug: row.slug,
+        timezone: row.timezone,
+        currency_code: row.currencyCode,
+        is_active: row.isActive,
+      },
+    }));
+
+    return json({ data }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return errorResponse(error);
   }
