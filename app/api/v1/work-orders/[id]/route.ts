@@ -1,110 +1,64 @@
-import { ApiError, json, errorResponse, requireWorkspaceMember } from "@/server/api";
+import { errorResponse, json } from "@/server/api";
+import { ApiWorkOrder, canonicalWorkOrderStatus, legacyWorkOrder } from "@/server/cutover/work-orders";
+import { ensureIdempotencyKey, serviceWriterApi } from "@/server/service-writer-api";
 import { z } from "zod";
 
 const patchSchema = z.object({
   workspace_id: z.string().uuid(),
-  status: z.enum(["draft", "scheduled", "assigned", "in_progress", "waiting_for_parts", "awaiting_approval", "completed", "cancelled"]).optional(),
+  status: z.enum(["draft", "scheduled", "assigned", "open", "in_progress", "waiting_for_parts", "awaiting_approval", "ready", "completed", "cancelled"]).optional(),
   priority: z.enum(["low", "normal", "high", "urgent"]).optional(),
-  complaint: z.string().max(10000).nullable().optional(),
-  technician_notes: z.string().max(10000).nullable().optional(),
-  tech_notes: z.string().max(10000).nullable().optional(),
-  diagnosis: z.string().max(10000).nullable().optional(),
-  technician_id: z.string().uuid().nullable().optional(),
-  signature_url: z.string().max(200000).nullable().optional(),
-  vin_captured: z.string().trim().max(32).nullable().optional(),
-  mileage_captured: z.number().int().min(0).nullable().optional(),
-  started_at: z.string().datetime().nullable().optional(),
-  completed_at: z.string().datetime().nullable().optional(),
-  updated_at: z.string().datetime().optional(),
-});
+  complaint: z.string().max(10000).nullable().optional(), technician_notes: z.string().max(10000).nullable().optional(), tech_notes: z.string().max(10000).nullable().optional(), diagnosis: z.string().max(10000).nullable().optional(), technician_id: z.string().uuid().nullable().optional(), signature_url: z.string().max(200000).nullable().optional(), vin_captured: z.string().trim().max(32).nullable().optional(), mileage_captured: z.number().int().min(0).nullable().optional(), started_at: z.string().datetime().nullable().optional(), completed_at: z.string().datetime().nullable().optional(), updated_at: z.string().datetime().optional(),
+}).refine((value) => Object.keys(value).some((key) => key !== "workspace_id" && key !== "updated_at"), { message: "At least one work-order field is required" });
 
-const TECHNICIAN_FIELDS = new Set([
-  "workspace_id",
-  "status",
-  "technician_notes",
-  "tech_notes",
-  "diagnosis",
-  "signature_url",
-  "vin_captured",
-  "mileage_captured",
-  "started_at",
-  "completed_at",
-  "updated_at",
-]);
-
-const TECHNICIAN_STATUSES = new Set(["in_progress", "waiting_for_parts", "awaiting_approval", "completed"]);
+async function transition(request: Request, workspaceId: string, id: string, current: string, target: string, key: string) {
+  if (current === target) return;
+  const order = ["draft", "open", "in_progress", "ready", "completed"];
+  if (target === "cancelled") {
+    await serviceWriterApi(request, `/api/v1/workspaces/${workspaceId}/work-orders/${id}/transition`, { method: "POST", headers: { "idempotency-key": `${key}:cancel` }, body: JSON.stringify({ status: "cancelled" }) });
+    return;
+  }
+  const from = order.indexOf(current), to = order.indexOf(target);
+  if (from < 0 || to < 0 || to < from) throw new Error(`Canonical work-order state cannot move from ${current} to ${target}`);
+  for (let index = from + 1; index <= to; index += 1) {
+    await serviceWriterApi(request, `/api/v1/workspaces/${workspaceId}/work-orders/${id}/transition`, { method: "POST", headers: { "idempotency-key": `${key}:transition:${order[index]}` }, body: JSON.stringify({ status: order[index] }) });
+  }
+}
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params;
-    const workspaceId = new URL(request.url).searchParams.get("workspace_id");
-    if (!workspaceId) throw new Error("workspace_id is required");
-    const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
-    const { data, error } = await supabase
-      .from("work_orders")
-      .select("*,customers(*),vehicles(*),locations(*),work_order_items(*),work_order_assignments(*),work_order_events(*)")
-      .eq("workspace_id", workspaceId)
-      .eq("id", id)
-      .single();
-    if (error) throw error;
-    return json({ data });
-  } catch (error) {
-    return errorResponse(error);
-  }
+    const id = z.string().uuid().parse((await params).id);
+    const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
+    const row = await serviceWriterApi<ApiWorkOrder>(request, `/api/v1/workspaces/${workspaceId}/work-orders/${id}`);
+    return json({ data: await legacyWorkOrder(request, workspaceId, row) });
+  } catch (error) { return errorResponse(error); }
 }
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params;
-    const body = patchSchema.parse(await request.json());
-    const { supabase, user, membership } = await requireWorkspaceMember(
-      body.workspace_id,
-      ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician"],
-      request,
-    );
-
-    if (membership.role === "technician") {
-      const requestedFields = Object.keys(body);
-      const forbiddenField = requestedFields.find((field) => !TECHNICIAN_FIELDS.has(field));
-      if (forbiddenField) {
-        throw new ApiError(403, `Technicians cannot change ${forbiddenField}`, "technician_field_forbidden");
-      }
-      if (body.status && !TECHNICIAN_STATUSES.has(body.status)) {
-        throw new ApiError(403, "Technicians cannot set this work order status", "technician_status_forbidden");
-      }
-
-      const { data: assignment, error: assignmentError } = await supabase
-        .from("work_order_assignments")
-        .select("work_order_id")
-        .eq("workspace_id", body.workspace_id)
-        .eq("work_order_id", id)
-        .eq("user_id", user.id)
-        .is("unassigned_at", null)
-        .maybeSingle();
-      if (assignmentError) throw assignmentError;
-      if (!assignment) {
-        throw new ApiError(403, "Technicians may only update work orders actively assigned to them", "technician_assignment_required");
-      }
+    const id = z.string().uuid().parse((await params).id); const body = patchSchema.parse(await request.json());
+    const current = await serviceWriterApi<ApiWorkOrder>(request, `/api/v1/workspaces/${body.workspace_id}/work-orders/${id}`);
+    const metadata = current.metadata && typeof current.metadata === "object" ? { ...current.metadata } : {};
+    if (body.priority !== undefined) metadata.priority = body.priority;
+    if (body.diagnosis !== undefined) metadata.diagnosis = body.diagnosis;
+    if (body.signature_url !== undefined) metadata.signature_url = body.signature_url;
+    if (body.vin_captured !== undefined) metadata.vin_captured = body.vin_captured;
+    if (body.mileage_captured !== undefined) metadata.mileage_captured = body.mileage_captured;
+    if (body.started_at !== undefined) metadata.started_at = body.started_at;
+    if (body.completed_at !== undefined) metadata.completed_at = body.completed_at;
+    if (body.status !== undefined) metadata.legacy_status = body.status;
+    const patch: Record<string, unknown> = { metadata };
+    if (body.technician_id !== undefined) patch.assignedTechnicianUserId = body.technician_id;
+    if (body.complaint !== undefined) patch.customerConcern = body.complaint;
+    if (body.technician_notes !== undefined || body.tech_notes !== undefined) patch.internalNotes = body.technician_notes ?? body.tech_notes ?? null;
+    if (body.mileage_captured !== undefined) patch.odometerIn = body.mileage_captured;
+    const key = ensureIdempotencyKey(request);
+    await serviceWriterApi(request, `/api/v1/workspaces/${body.workspace_id}/work-orders/${id}`, { method: "PATCH", headers: { "idempotency-key": `${key}:details` }, body: JSON.stringify(patch) });
+    if (body.status) {
+      const latest = await serviceWriterApi<ApiWorkOrder>(request, `/api/v1/workspaces/${body.workspace_id}/work-orders/${id}`);
+      const target = canonicalWorkOrderStatus(body.status);
+      if (target) await transition(request, body.workspace_id, id, latest.status, target, key);
     }
-
-    const { workspace_id, updated_at: _ignoredOptimisticHint, ...patch } = body;
-
-    const { error } = await (supabase as any).rpc("patch_work_order_v1", {
-      p_workspace_id: workspace_id,
-      p_work_order_id: id,
-      p_patch: patch,
-    });
-    if (error) throw error;
-
-    const { data, error: readError } = await supabase
-      .from("work_orders")
-      .select("*")
-      .eq("workspace_id", workspace_id)
-      .eq("id", id)
-      .single();
-    if (readError) throw readError;
-    return json({ data });
-  } catch (error) {
-    return errorResponse(error);
-  }
+    const updated = await serviceWriterApi<ApiWorkOrder>(request, `/api/v1/workspaces/${body.workspace_id}/work-orders/${id}`);
+    return json({ data: await legacyWorkOrder(request, body.workspace_id, updated) });
+  } catch (error) { return errorResponse(error); }
 }
