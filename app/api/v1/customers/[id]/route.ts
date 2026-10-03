@@ -1,4 +1,5 @@
-import { errorResponse, json, requireWorkspaceMember } from "@/server/api";
+import { errorResponse, json } from "@/server/api";
+import { ensureIdempotencyKey, serviceWriterApi } from "@/server/service-writer-api";
 import { z } from "zod";
 
 const customerUpdateSchema = z.object({
@@ -16,11 +17,23 @@ const customerUpdateSchema = z.object({
   postal_code: z.string().trim().max(24).nullable().optional(),
   notes: z.string().max(5000).nullable().optional(),
   status: z.enum(["active", "inactive", "archived"]).optional(),
-}).refine((body) => Object.keys(body).some((key) => key !== "workspace_id"), {
-  message: "At least one customer field is required",
-});
+}).refine((body) => Object.keys(body).some((key) => key !== "workspace_id"), { message: "At least one customer field is required" });
 
-const writeRoles = ["owner", "admin", "manager", "service_advisor", "receptionist"] as const;
+function legacyCustomer(row: Record<string, unknown>) {
+  return {
+    ...row,
+    workspace_id: row.workspaceId,
+    first_name: row.firstName,
+    last_name: row.lastName,
+    company_name: row.companyName,
+    address_line1: row.addressLine1,
+    address_line2: row.addressLine2,
+    postal_code: row.postalCode,
+    country_code: row.countryCode,
+    created_at: row.createdAt,
+    updated_at: row.updatedAt,
+  };
+}
 
 function customerIdFromParams(params: { id: string }): string {
   return z.string().uuid().parse(params.id);
@@ -30,15 +43,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   try {
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
     const id = customerIdFromParams(await context.params);
-    const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
-    const { data, error } = await supabase
-      .from("customers")
-      .select("*")
-      .eq("workspace_id", workspaceId)
-      .eq("id", id)
-      .single();
-    if (error) throw error;
-    return json({ data });
+    const data = await serviceWriterApi<Record<string, unknown>>(request, `/api/v1/workspaces/${workspaceId}/customers/${id}`);
+    return json({ data: legacyCustomer(data) });
   } catch (error) {
     return errorResponse(error);
   }
@@ -48,21 +54,25 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   try {
     const body = customerUpdateSchema.parse(await request.json());
     const id = customerIdFromParams(await context.params);
-    const { supabase } = await requireWorkspaceMember(body.workspace_id, [...writeRoles], request);
-    const { workspace_id, address, ...customer } = body;
-    const patch: Record<string, unknown> = { ...customer };
-    if (Object.prototype.hasOwnProperty.call(body, "address")) {
-      patch.address_line1 = address || null;
-    }
-    const { data, error } = await supabase
-      .from("customers")
-      .update(patch as never)
-      .eq("id", id)
-      .eq("workspace_id", workspace_id)
-      .select()
-      .single();
-    if (error) throw error;
-    return json({ data });
+    const patch: Record<string, unknown> = {};
+    if (body.first_name !== undefined) patch.firstName = body.first_name;
+    if (body.last_name !== undefined) patch.lastName = body.last_name;
+    if (body.company_name !== undefined) patch.companyName = body.company_name;
+    if (body.email !== undefined) patch.email = body.email;
+    if (body.phone !== undefined) patch.phone = body.phone;
+    if (body.address_line1 !== undefined || body.address !== undefined) patch.addressLine1 = body.address_line1 ?? body.address ?? null;
+    if (body.address_line2 !== undefined) patch.addressLine2 = body.address_line2;
+    if (body.city !== undefined) patch.city = body.city;
+    if (body.region !== undefined) patch.region = body.region;
+    if (body.postal_code !== undefined) patch.postalCode = body.postal_code;
+    if (body.notes !== undefined) patch.notes = body.notes;
+    if (body.status !== undefined) patch.status = body.status;
+    const data = await serviceWriterApi<Record<string, unknown>>(request, `/api/v1/workspaces/${body.workspace_id}/customers/${id}`, {
+      method: "PATCH",
+      headers: { "idempotency-key": ensureIdempotencyKey(request) },
+      body: JSON.stringify(patch),
+    });
+    return json({ data: legacyCustomer(data) });
   } catch (error) {
     return errorResponse(error);
   }
@@ -70,19 +80,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
-    const url = new URL(request.url);
-    const workspaceId = z.string().uuid().parse(url.searchParams.get("workspace_id"));
+    const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
     const id = customerIdFromParams(await context.params);
-    const { supabase } = await requireWorkspaceMember(workspaceId, [...writeRoles], request);
-    const { data, error } = await supabase
-      .from("customers")
-      .update({ status: "archived" } as never)
-      .eq("id", id)
-      .eq("workspace_id", workspaceId)
-      .select("id,status")
-      .single();
-    if (error) throw error;
-    return json({ data });
+    const data = await serviceWriterApi<Record<string, unknown>>(request, `/api/v1/workspaces/${workspaceId}/customers/${id}`, {
+      method: "DELETE",
+      headers: { "idempotency-key": ensureIdempotencyKey(request) },
+    });
+    return json({ data: legacyCustomer(data) });
   } catch (error) {
     return errorResponse(error);
   }
