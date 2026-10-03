@@ -122,6 +122,42 @@ export async function fetchSucceededPayments(appointmentId: string) {
   return { data: response.data ?? [], error: null };
 }
 
+export interface CanonicalAppointmentFinancials {
+  invoice_id: string;
+  invoice_number: number | string | null;
+  status: string;
+  subtotal: number;
+  tax: number;
+  total: number;
+  amount_paid: number;
+  balance_due: number;
+  lines: Array<{
+    id: string;
+    description: string;
+    quantity: number;
+    unit_price: number;
+    tax_rate?: number | null;
+    sort_order?: number | null;
+    metadata?: unknown;
+  }>;
+  payments: Array<Record<string, unknown>>;
+  integrity: {
+    line_subtotal: number;
+    subtotal_matches_lines: boolean;
+    total_matches_header: boolean;
+  };
+}
+
+export async function fetchCanonicalAppointmentFinancials(appointmentId: string): Promise<CanonicalAppointmentFinancials | null> {
+  const context = await resolveCurrentWorkspace();
+  if (!context) return null;
+  const response = await apiClient.get<{ data: CanonicalAppointmentFinancials | null }>(
+    `/v1/appointments/${encodeURIComponent(appointmentId)}/financials`,
+    { query: { selected_workspace_id: context.workspaceId } },
+  );
+  return response.data ?? null;
+}
+
 export async function fetchAppointmentFeeSettings(_userId: string) {
   const context = await resolveCurrentWorkspace();
   if (!context) return { data: null, error: new Error("No active workspace is available.") };

@@ -1,15 +1,14 @@
 import { errorMessage } from "@/lib/error-message";
 import { useEffect, useState, useCallback } from 'react';
 import { sendReviewRequest } from '@/application/commands/review-request.command';
-import { computeFinancialSummary } from '@/lib/financialMath';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   getCurrentAuthUser,
   fetchAppointmentWithRelations,
   fetchVehicleSpecs,
   fetchCustomerAddressByGuestEmail,
-  fetchSucceededPayments,
-  fetchAppointmentFeeSettings,
+  fetchCanonicalAppointmentFinancials,
+  type CanonicalAppointmentFinancials,
 } from '@/application/queries/appointment-detail.query';
 import {
   updateAppointmentStatus as updateAppointmentStatusQuery,
@@ -117,7 +116,7 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [completeDialogOpen, setCompleteDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("services");
-  const [servicesTotal, setServicesTotal] = useState(0);
+  const [financials, setFinancials] = useState<CanonicalAppointmentFinancials | null>(null);
   const [vehicleSpecs, setVehicleSpecs] = useState<{ oil_type?: string; oil_capacity?: string; engine?: string } | null>(null);
   const [resolvedAddress, setResolvedAddress] = useState<string | null>(null);
 
@@ -132,13 +131,6 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
   ]);
   const showsFluids = categoryPolicy.showsFluidSpecs;
   const isTireJob = categoryPolicy.vehicleSelector === 'wheel_tire';
-  const [feeSettings, setFeeSettings] = useState<{
-    waste_oil_fee_enabled: boolean; waste_oil_fee: number;
-    shop_fee_enabled: boolean; shop_fee_type: string; shop_fee_value: number; shop_fee_description: string;
-    surcharge_enabled: boolean; surcharge_type: string; surcharge_value: number; surcharge_description: string;
-    tax_rate: number | null;
-  } | null>(null);
-  
   // Track if this is a prepaid appointment (deposit was collected upfront)
   const [isPrepaid, setIsPrepaid] = useState(false);
   const [reviewRequestLoading, setReviewRequestLoading] = useState(false);
@@ -263,40 +255,16 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
     }
     setResolvedAddress(address);
 
-    // Check if there's a paid deposit for this appointment
-    const { data: payments } = await fetchSucceededPayments(id);
-    setIsPrepaid(payments && payments.length > 0);
+    // Canonical invoice snapshot is the sole financial authority for the detail page.
+    const canonicalFinancials = await fetchCanonicalAppointmentFinancials(id);
+    setFinancials(canonicalFinancials);
+    setIsPrepaid(Number(canonicalFinancials?.amount_paid ?? 0) > 0);
     setLoading(false);
   }, [id, overrideUserId]);
 
   useEffect(() => {
     fetchAppointment();
   }, [fetchAppointment]);
-
-  // Fetch fee settings from business profile
-  useEffect(() => {
-    const fetchFees = async () => {
-      const user = await getCurrentAuthUser();
-      if (!user) return;
-      const { data } = await fetchAppointmentFeeSettings(overrideUserId || user.id);
-      if (data) {
-        setFeeSettings({
-          waste_oil_fee_enabled: data.waste_oil_fee_enabled ?? false,
-          waste_oil_fee: data.waste_oil_fee ?? 0,
-          shop_fee_enabled: data.shop_fee_enabled ?? false,
-          shop_fee_type: data.shop_fee_type ?? "fixed",
-          shop_fee_value: data.shop_fee_value ?? 0,
-          shop_fee_description: data.shop_fee_description ?? "",
-          surcharge_enabled: data.surcharge_enabled ?? false,
-          surcharge_type: data.surcharge_type ?? "fixed",
-          surcharge_value: data.surcharge_value ?? 0,
-          surcharge_description: data.surcharge_description ?? "",
-          tax_rate: data.tax_rate,
-        });
-      }
-    };
-    fetchFees();
-  }, [overrideUserId]);
 
   const handleEditSuccess = () => {
     fetchAppointment();
@@ -348,10 +316,6 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
     }
   };
 
-  const handleServicesChange = (subtotal: number, _count: number) => {
-    setServicesTotal(subtotal);
-  };
-
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'completed': return <CheckCircle2 className="h-4 w-4" />;
@@ -393,21 +357,9 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
   const customerName = appointment.guest_name || appointment.customer?.name || 'Customer';
   const customerEmail = appointment.customer?.email || appointment.guest_email || null;
   
-  // ⚡ Calculate financials using centralized banker's rounding
-  const estimatedCost = servicesTotal || appointment.estimated_cost || 0;
-  const taxAmount = appointment.tax_amount || 0;
-
-  // Compute fees via standard financial math (banker's-rounded)
-  const financials = computeFinancialSummary({
-    subtotal: estimatedCost,
-    // Waste-oil disposal never applies to tire or detailing work.
-    feeSettings: feeSettings
-      ? { ...feeSettings, waste_oil_fee_enabled: feeSettings.waste_oil_fee_enabled && showsFluids }
-      : undefined,
-    taxAmount,
-  });
-  const { wasteOilFee, shopFee, surcharge } = financials;
-  const totalDue = financials.total;
+  const canonicalTax = financials?.tax ?? 0;
+  const totalDue = financials?.total ?? null;
+  const canonicalLines = financials?.lines ?? [];
   const isEditable = appointment.status !== 'completed' && appointment.status !== 'cancelled';
   const canReactivate = appointment.status === 'cancelled' || appointment.status === 'no_show';
 
@@ -619,11 +571,10 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
                 <AppointmentServicesList
                   appointmentId={appointment.id}
                   appointmentStatus={appointment.status}
-                  estimatedCost={appointment.estimated_cost}
-                  taxAmount={appointment.tax_amount}
                   serviceCatalogId={appointment.service_catalog_id}
                   isPrepaid={isPrepaid}
-                  onTotalChange={handleServicesChange}
+                  canonicalFinancials={financials}
+                  onChanged={fetchAppointment}
                 />
               </TabsContent>
 
@@ -633,10 +584,9 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
                   customerEmail={customerEmail}
                   customerName={customerName}
                   isPrepaid={isPrepaid}
-                  estimatedTotal={totalDue}
-                  taxAmount={taxAmount}
-                  subtotal={estimatedCost + wasteOilFee + shopFee + surcharge}
-                  taxRate={feeSettings?.tax_rate || undefined}
+                  estimatedTotal={financials?.total ?? 0}
+                  taxAmount={financials?.tax ?? 0}
+                  subtotal={financials?.subtotal ?? 0}
                 />
               </TabsContent>
 
@@ -690,7 +640,7 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
                   </div>
                   <div>
                     <p className="text-xs uppercase tracking-wide text-muted-foreground">Estimate</p>
-                    <p className="text-lg font-bold text-primary">{formatCurrency(totalDue)}</p>
+                    <p className="text-lg font-bold text-primary">{totalDue == null ? "—" : formatCurrency(totalDue)}</p>
                     <p className="text-xs text-muted-foreground">{isPrepaid ? "Prepaid" : "Due at service"}</p>
                   </div>
                   <div>
@@ -779,40 +729,33 @@ export const AppointmentDetail = ({ embedded = false, overrideUserId, technician
                 <CardTitle>Estimate Summary</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Services</span>
-                  <span>{formatCurrency(estimatedCost)}</span>
-                </div>
-                {wasteOilFee > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Waste Oil Disposal Fee</span>
-                    <span>{formatCurrency(wasteOilFee)}</span>
-                  </div>
+                {financials ? (
+                  <>
+                    {canonicalLines.map((line) => (
+                      <div key={line.id} className="flex justify-between gap-3 text-sm">
+                        <span className="min-w-0 truncate text-muted-foreground" title={line.description}>{line.description}</span>
+                        <span className="shrink-0">{formatCurrency(Number(line.quantity || 0) * Number(line.unit_price || 0))}</span>
+                      </div>
+                    ))}
+                    {canonicalTax > 0 && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Tax</span>
+                        <span>{formatCurrency(canonicalTax)}</span>
+                      </div>
+                    )}
+                    <Separator />
+                    <div className="flex justify-between items-center">
+                      <span className="font-medium">Canonical Total</span>
+                      <span className="text-2xl font-bold text-primary">{formatCurrency(financials.total)}</span>
+                    </div>
+                    {!financials.integrity.subtotal_matches_lines || !financials.integrity.total_matches_header ? (
+                      <p className="text-xs font-medium text-destructive">Financial integrity check failed for this invoice.</p>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No canonical financial record is available for this appointment.</p>
                 )}
-                {shopFee > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">{feeSettings?.shop_fee_description || "Shop Supplies Fee"}</span>
-                    <span>{formatCurrency(shopFee)}</span>
-                  </div>
-                )}
-                {surcharge > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">{feeSettings?.surcharge_description || "Card Processing Fee"}</span>
-                    <span>{formatCurrency(surcharge)}</span>
-                  </div>
-                )}
-                {taxAmount > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Tax</span>
-                    <span>{formatCurrency(taxAmount)}</span>
-                  </div>
-                )}
-                <Separator />
-                <div className="flex justify-between items-center">
-                  <span className="font-medium">Estimated Total</span>
-                  <span className="text-2xl font-bold text-primary">{formatCurrency(totalDue)}</span>
-                </div>
-                
+
                 {/* Action Buttons */}
                 <div className="space-y-2 pt-4">
                   {isEditable && (
