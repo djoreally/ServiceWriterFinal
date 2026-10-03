@@ -32,6 +32,8 @@ export type BookingStage = {
     address?: string | null;
   };
   vehicles: StagedVehicle[];
+  appointmentId?: string;
+  canonicalVehicleByTempId?: Record<string, string>;
   createdAt: number;
 };
 
