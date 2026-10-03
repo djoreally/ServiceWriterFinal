@@ -1,96 +1,41 @@
 import { z } from "zod";
 import { errorResponse, json } from "@/server/api";
-import { createSupabaseAdminClient } from "@/lib/supabase";
+import { serviceWriterApi } from "@/server/service-writer-api";
 
 const slugSchema = z.string().trim().min(1).max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/i);
-const querySchema = z.object({
-  section: z.enum(["profile", "catalog", "packages", "slots", "blocked_dates", "settings"]).default("profile"),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-});
-
-const bookingSlugAliases: Readonly<Record<string, string>> = {
-  moms: "momsoilchange",
-  "moms-mobile-oil-change": "momsoilchange",
-};
-
-type RpcRow = Record<string, unknown>;
+const querySchema = z.object({ section: z.enum(["profile", "catalog", "packages", "slots", "blocked_dates", "settings"]).default("profile"), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() });
+const bookingSlugAliases: Readonly<Record<string, string>> = { moms: "momsoilchange", "moms-mobile-oil-change": "momsoilchange" };
 type Requirement = "basic_vehicle" | "oil_fitment" | "tire_fitment" | "tire_quantity" | "detailing_assessment";
+type Profile = { workspaceId: string; workspaceSlug: string; displayName: string; timezone: string; currencyCode: string; phone?: string | null; email?: string | null; logoUrl?: string | null; minNoticeMinutes?: number; maxAdvanceDays?: number; defaultSlotMinutes?: number; availabilityWindows?: Array<{dayOfWeek:number;startMinute:number;endMinute:number}>; paymentChoices?: {payNow:boolean;payLater:boolean} };
+type Service = { id:string; categoryId?:string|null; name:string; description?:string|null; priceCents:number; laborMinutes:number; taxable:boolean };
+type Availability = { localDate:string; bookingEnabled:boolean; defaultSlotMinutes:number; segments:Array<{startMinute:number;endMinute:number}> };
+function slugAlias(slug:string){return bookingSlugAliases[slug.toLowerCase()]??slug;}
+function hhmm(minute:number){return `${String(Math.floor(minute/60)).padStart(2,"0")}:${String(minute%60).padStart(2,"0")}`;}
+function requirements(name:string):Requirement[]{const value=name.toLowerCase();const out=new Set<Requirement>(["basic_vehicle"]);if(/oil|lube|fluid/.test(value))out.add("oil_fitment");if(/tire|tyre|wheel|tpms|rotation/.test(value))out.add("tire_fitment");if(/detail|wash|ceramic|coating|wax|polish|interior|exterior/.test(value))out.add("detailing_assessment");return [...out];}
 
-function unavailable() { return new Error("public_booking_unavailable"); }
-
-function canonicalBookingSlug(slug: string): string {
-  return bookingSlugAliases[slug.toLowerCase()] ?? slug;
-}
-
-function normalizedRequirements(row: RpcRow): Requirement[] {
-  const requirements = new Set<Requirement>(["basic_vehicle"]);
-  const stored = Array.isArray(row.booking_requirements) ? row.booking_requirements : [];
-  for (const requirement of stored) {
-    if (["basic_vehicle", "oil_fitment", "tire_fitment", "tire_quantity", "detailing_assessment"].includes(String(requirement))) requirements.add(requirement as Requirement);
-  }
-  const identity = [row.category_id, row.category, row.name].filter((value): value is string => typeof value === "string").join(" ").toLowerCase().replaceAll("_", " ");
-  if (/\b(oil|lube|lubrication|oil fluids?|fluid service)\b/.test(identity)) requirements.add("oil_fitment");
-  if (/\b(tire|tires|tyre|wheel|wheels|tpms|rotation)\b/.test(identity)) requirements.add("tire_fitment");
-  if (/\b(detail|detailing|wash|ceramic|coating|wax|polish|interior|exterior)\b/.test(identity)) requirements.add("detailing_assessment");
-  return Array.from(requirements);
-}
-
-function normalizeCatalog(rows: RpcRow[]): RpcRow[] {
-  return rows.map((row) => ({ ...row, booking_requirements: normalizedRequirements(row) }));
-}
-
-async function profileForSlug(supabase: ReturnType<typeof createSupabaseAdminClient>, slug: string) {
-  const { data, error } = await supabase.rpc("get_public_booking_profile_v3", { booking_slug_param: slug });
-  if (error || !Array.isArray(data) || data.length === 0) throw unavailable();
-  return data[0] as RpcRow;
-}
-
-export async function GET(request: Request, context: { params: Promise<{ slug: string }> }) {
-  try {
-    const { slug: rawSlug } = await context.params;
-    const slug = canonicalBookingSlug(slugSchema.parse(rawSlug));
-    const url = new URL(request.url);
-    const query = querySchema.parse({ section: url.searchParams.get("section") ?? undefined, date: url.searchParams.get("date") ?? undefined });
-    const supabase = createSupabaseAdminClient();
-    const profile = await profileForSlug(supabase, slug);
-    const businessUserId = z.string().uuid().parse(profile.user_id);
-
-    if (query.section === "profile") return json({ data: profile }, { headers: { "Cache-Control": "no-store" } });
-
-    if (query.section === "catalog") {
-      const v2 = await supabase.rpc("get_public_service_catalog_v2", { p_business_user_id: businessUserId, p_booking_context_id: null });
-      if (!v2.error && Array.isArray(v2.data)) return json({ data: normalizeCatalog(v2.data as RpcRow[]) }, { headers: { "Cache-Control": "no-store" } });
-      const v1 = await supabase.rpc("get_public_service_catalog", { business_user_id: businessUserId });
-      if (v1.error || !Array.isArray(v1.data)) throw unavailable();
-      return json({ data: normalizeCatalog(v1.data as RpcRow[]) }, { headers: { "Cache-Control": "no-store" } });
+export async function GET(request:Request,context:{params:Promise<{slug:string}>}){
+  try{
+    const slug=slugAlias(slugSchema.parse((await context.params).slug));
+    const url=new URL(request.url);const query=querySchema.parse({section:url.searchParams.get("section")??undefined,date:url.searchParams.get("date")??undefined});
+    const profile=await serviceWriterApi<Profile>(request,`/api/v1/public/booking/${slug}/profile`);
+    if(query.section==="profile"){
+      const windows=profile.availabilityWindows??[];const starts=windows.map(w=>w.startMinute);const ends=windows.map(w=>w.endMinute);const dayNames=["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+      return json({data:{user_id:profile.workspaceId,business_name:profile.displayName,booking_slug:profile.workspaceSlug,phone:profile.phone??null,email:profile.email??null,logo_url:profile.logoUrl??null,opening_time:starts.length?hhmm(Math.min(...starts)):null,closing_time:ends.length?hhmm(Math.max(...ends)):null,working_days:[...new Set(windows.map(w=>dayNames[w.dayOfWeek]))],currency:profile.currencyCode,buffer_time_before:0,buffer_time_after:0,min_lead_time_hours:Math.ceil((profile.minNoticeMinutes??0)/60),max_advance_days:profile.maxAdvanceDays??90,slot_duration_minutes:profile.defaultSlotMinutes??30,stripe_charges_enabled:profile.paymentChoices?.payNow??true,require_approval:false}}, {headers:{"Cache-Control":"no-store"}});
     }
-
-    if (query.section === "packages") {
-      const { data, error } = await supabase.rpc("get_public_service_packages", { business_user_id: businessUserId });
-      if (error || !Array.isArray(data)) throw unavailable();
-      return json({ data }, { headers: { "Cache-Control": "no-store" } });
+    if(query.section==="catalog"){
+      const services=await serviceWriterApi<Service[]>(request,`/api/v1/public/booking/${slug}/services`);
+      return json({data:services.map(s=>({id:s.id,name:s.name,description:s.description,category_id:s.categoryId,category:null,labor_price:s.priceCents/100,price:s.priceCents/100,estimated_minutes:s.laborMinutes,taxable:s.taxable,is_active:true,booking_requirements:requirements(s.name)}))},{headers:{"Cache-Control":"no-store"}});
     }
-
-    if (query.section === "slots") {
-      if (!query.date) return json({ error: { code: "invalid_date", message: "date is required for slots" } }, { status: 400 });
-      const { data, error } = await supabase.rpc("get_booked_slots", { business_user_id: businessUserId, booking_date: query.date });
-      if (error || !Array.isArray(data)) throw unavailable();
-      return json({ data }, { headers: { "Cache-Control": "no-store" } });
+    if(query.section==="slots"){
+      if(!query.date)return json({error:{code:"invalid_date",message:"date is required for slots"}},{status:400});
+      const availability=await serviceWriterApi<Availability>(request,`/api/v1/public/booking/${slug}/availability?date=${query.date}`);
+      return json({data:{canonical_availability:true,...availability,slots:availability.segments.map(segment=>({time:hhmm(segment.startMinute),start_minute:segment.startMinute,end_minute:segment.endMinute}))}},{headers:{"Cache-Control":"no-store"}});
     }
-
-    if (query.section === "blocked_dates") {
-      const db = supabase as any;
-      const { data, error } = await db.rpc("get_public_blocked_dates_v2", { p_booking_slug: slug });
-      if (error || !Array.isArray(data)) throw unavailable();
-      return json({ data }, { headers: { "Cache-Control": "no-store" } });
-    }
-
-    const { data, error } = await supabase.rpc("get_public_booking_settings", { p_business_user_id: businessUserId });
-    if (error) throw unavailable();
-    return json({ data: Array.isArray(data) ? data[0] ?? null : data ?? null }, { headers: { "Cache-Control": "no-store" } });
-  } catch (error) {
-    if (error instanceof z.ZodError) return json({ error: { code: "invalid_public_booking_request", message: "Invalid public booking request" } }, { status: 400 });
-    if (error instanceof Error && error.message === "public_booking_unavailable") return json({ error: { code: "public_booking_unavailable", message: "This booking page is not currently available." } }, { status: 503 });
+    if(query.section==="settings")return json({data:{payment_provider:profile.paymentChoices?.payNow?"stripe":null,square_charges_enabled:false,service_verticals:[]}},{headers:{"Cache-Control":"no-store"}});
+    if(query.section==="packages"||query.section==="blocked_dates")return json({data:[]},{headers:{"Cache-Control":"no-store"}});
+    return json({data:null},{headers:{"Cache-Control":"no-store"}});
+  }catch(error){
+    if(error instanceof z.ZodError)return json({error:{code:"invalid_public_booking_request",message:"Invalid public booking request"}},{status:400});
     return errorResponse(error);
   }
 }
