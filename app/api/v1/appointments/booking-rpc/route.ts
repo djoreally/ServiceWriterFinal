@@ -90,7 +90,7 @@ export async function POST(request: Request) {
       const duration = Math.max(5, z.number().int().min(1).max(1440).parse(params.p_duration_minutes));
       const serviceId = z.string().uuid().parse(params.p_service_catalog_id);
       const payload = {
-        customer: { firstName, lastName, email: stage.customer.email, phone: stage.customer.phone || "0000000", addressLine1: fullAddress || null, addressLine2: null, city: addressParts.length >= 3 ? addressParts[addressParts.length - 3] : null, region: addressParts.length >= 2 ? addressParts[addressParts.length - 2] : null, postalCode: addressParts.length >= 1 ? addressParts[addressParts.length - 1] : null },
+        customer: { firstName, lastName, email: stage.customer.email, phone: stage.customer.phone ?? null, addressLine1: fullAddress || null, addressLine2: null, city: addressParts.length >= 3 ? addressParts[addressParts.length - 3] : null, region: addressParts.length >= 2 ? addressParts[addressParts.length - 2] : null, postalCode: addressParts.length >= 1 ? addressParts[addressParts.length - 1] : null },
         vehicle: { year: orderedVehicles[0].year, make: orderedVehicles[0].make, model: orderedVehicles[0].model, vin: orderedVehicles[0].vin || null, licensePlate: orderedVehicles[0].licensePlate || null, mileage: orderedVehicles[0].mileage, engine: orderedVehicles[0].engine, oilType: orderedVehicles[0].oilType, oilCapacity: orderedVehicles[0].oilCapacity, tireSize: orderedVehicles[0].tireSize },
         additionalVehicles: orderedVehicles.slice(1).map((vehicle) => ({ year: vehicle.year, make: vehicle.make, model: vehicle.model, vin: vehicle.vin || null, licensePlate: vehicle.licensePlate || null, mileage: vehicle.mileage, engine: vehicle.engine, oilType: vehicle.oilType, oilCapacity: vehicle.oilCapacity, tireSize: vehicle.tireSize })),
         serviceIds: [serviceId], vehicleServiceAssignments: [{ vehicleIndex: 0, serviceIds: [serviceId] }],
@@ -100,9 +100,11 @@ export async function POST(request: Request) {
         compatibility: { title: text(params.p_title), description: text(params.p_description), estimatedCostCents: Math.round((numberOrNull(params.p_estimated_cost) ?? 0) * 100), taxCents: Math.round((numberOrNull(params.p_tax_amount) ?? 0) * 100), locationAddress: stage.customer.address ?? null, source: "ServiceWriterFinal-cutover" },
       };
       const result = await serviceWriterApi<{ appointmentId: string; vehicleIds: string[] }>(request, `/api/v1/public/booking/${slug}/book`, { method: "POST", headers: { "idempotency-key": ensureIdempotencyKey(request) }, body: JSON.stringify(payload) });
+      const canonicalVehicleByTempId: Record<string, string> = {};
+      orderedVehicles.forEach((vehicle, index) => { const canonicalId = result.vehicleIds[index]; if (canonicalId) canonicalVehicleByTempId[vehicle.tempId] = canonicalId; });
       const refreshed = await readBookingStage(slug);
-      (refreshed as typeof refreshed & { appointmentId?: string; canonicalVehicleIds?: string[] }).appointmentId = result.appointmentId;
-      (refreshed as typeof refreshed & { appointmentId?: string; canonicalVehicleIds?: string[] }).canonicalVehicleIds = result.vehicleIds;
+      refreshed.appointmentId = result.appointmentId;
+      refreshed.canonicalVehicleByTempId = canonicalVehicleByTempId;
       await writeBookingStage(refreshed);
       return rpcResult(result.appointmentId);
     }
@@ -110,27 +112,19 @@ export async function POST(request: Request) {
     if (fn === "public_booking_insert_services_v7") {
       const slug = canonicalSlug(params.p_booking_slug);
       const appointmentId = z.string().uuid().parse(params.p_appointment_id);
-      const stage = await readBookingStage(slug) as Awaited<ReturnType<typeof readBookingStage>> & { appointmentId?: string; canonicalVehicleIds?: string[] };
+      const stage = await readBookingStage(slug);
       if (!stage.customer || stage.appointmentId !== appointmentId) throw new ApiError(404, "Fresh booking stage not found", "booking_stage_not_found");
       const items = z.array(z.object({ vehicle_id: z.string().uuid().nullable().optional(), service_catalog_id: z.string().uuid().nullable(), name: z.string().min(1).max(500), price: z.number().nonnegative(), quantity: z.number().positive(), is_prepaid: z.boolean() })).parse(params.p_services);
-      const mapped = items.map((item) => {
-        const stagedIndex = item.vehicle_id ? stage.vehicles.findIndex((vehicle) => vehicle.tempId === item.vehicle_id) : -1;
-        return { serviceId: item.service_catalog_id, vehicleId: stagedIndex >= 0 ? stage.canonicalVehicleIds?.[stagedIndex] ?? null : null, name: item.name, priceCents: Math.round(item.price * 100), quantityMilli: Math.round(item.quantity * 1000), prepaid: item.is_prepaid };
-      });
+      const mapped = items.map((item) => ({ serviceId: item.service_catalog_id, vehicleId: item.vehicle_id ? stage.canonicalVehicleByTempId?.[item.vehicle_id] ?? null : null, name: item.name, priceCents: Math.round(item.price * 100), quantityMilli: Math.round(item.quantity * 1000), prepaid: item.is_prepaid }));
       await serviceWriterApi(request, `/api/v1/public/booking/${slug}/appointments/${appointmentId}/services`, { method: "POST", headers: { "idempotency-key": ensureIdempotencyKey(request) }, body: JSON.stringify({ email: stage.customer.email, phone: stage.customer.phone ?? "", items: mapped }) });
       return rpcResult(appointmentId);
     }
 
     if (["public_booking_save_configuration_v2", "public_booking_update_appointment_context_v2", "public_booking_record_payment_intent_v3", "reserve_tire_inventory_for_appointment", "assign_van_by_zip"].includes(fn)) {
-      // Stage 22 compatibility no-op. Canonical Stage 18 already persists the
-      // booking, paymentChoice and vehicle/service assignment evidence. Dispatch,
-      // inventory reservation and pending-payment materialization are separate
-      // post-cutover domains and must not write the retired frontend database.
       return rpcResult(null);
     }
 
     if (fn === "link_customer_portal_account_v1") return rpcResult(null);
-
     throw new ApiError(410, `Legacy booking RPC '${fn}' is disabled during canonical cutover`, "legacy_booking_rpc_disabled");
   } catch (error) {
     return errorResponse(error);
