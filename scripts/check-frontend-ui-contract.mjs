@@ -12,6 +12,7 @@ const bottomNav = read("src/components/layout/BottomNavBar.tsx");
 const table = read("src/components/ui/table.tsx");
 const dashboard = read("src/components/dashboard/DashboardCockpit.tsx");
 const navItems = read("src/components/layout/navItems.ts");
+const tenantBooking = read("src/legacy-pages/TenantBooking.tsx");
 
 if (!shell.includes('defaultTheme="system"')) fail("new users must default to system theme");
 if (!theme.includes("${storageKey}:${userId}")) fail("theme storage must be scoped to the authenticated user");
@@ -20,6 +21,14 @@ if ((bottomNav.match(/path: "\/settings"/g) || []).length > 0) fail("mobile bott
 if (!table.includes("tabular-nums")) fail("canonical tables must use tabular numerals");
 if (dashboard.includes("lucide-react")) fail("dashboard must not use decorative iconography");
 if (/icon:\s*[A-Z]/.test(navItems)) fail("application navigation must not carry decorative icon metadata");
+
+// Embedded booking is consumed by external host pages, so it must publish its
+// current document height without leaking booking/customer payloads.
+if (!tenantBooking.includes('location.pathname !== "/embed/booking"')) fail("booking auto-resize must stay isolated to /embed/booking");
+if (!tenantBooking.includes('servicewriter:booking-resize')) fail("embedded booking must expose the stable resize message type");
+if (!tenantBooking.includes("new ResizeObserver(reportHeight)")) fail("embedded booking must react to layout-size changes");
+if (!tenantBooking.includes("new MutationObserver(reportHeight)")) fail("embedded booking must react to step/content changes");
+if (!tenantBooking.includes("window.parent.postMessage({ type: BOOKING_RESIZE_MESSAGE, height }")) fail("embedded booking resize message must contain only type + height");
 
 const operationalGradientFiles = [
   "src/components/retention/RetentionHeroStrip.tsx",
