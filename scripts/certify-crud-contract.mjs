@@ -65,6 +65,31 @@ for (const [name, source] of [["create", appointmentCollection], ["reschedule", 
 if (!appointmentCollection.includes("validateAppointmentReferences")) failures.push("appointments: create must validate workspace customer/vehicle/service references");
 if (!appointmentMember.includes("validatePatchReferences")) failures.push("appointments: update must validate workspace customer/vehicle/service references");
 
+const financialArtifacts = [
+  "supabase/migrations/20261001214000_canonical_financial_authority_v1.sql",
+  "supabase/migrations/20261001221500_financial_authority_invoice_write_v2.sql",
+  "supabase/migrations/20261001223000_canonical_quote_financial_authority_v1.sql",
+  "app/api/v1/appointments/[id]/financials/route.ts",
+];
+for (const file of financialArtifacts) if (!fs.existsSync(file)) failures.push(`financials: missing canonical authority artifact ${file}`);
+if (fs.existsSync(financialArtifacts[0])) {
+  const financialV1 = read(financialArtifacts[0]);
+  for (const invariant of ["money_round_v1", "sync_appointment_invoice_v1", "financial_integrity_issues_v1"]) {
+    if (!financialV1.includes(invariant)) failures.push(`financials: canonical authority missing ${invariant}`);
+  }
+}
+if (fs.existsSync(financialArtifacts[1])) {
+  const invoiceAuthority = read(financialArtifacts[1]);
+  for (const invariant of ["create_invoice_v1", "patch_draft_invoice_v1", "v_line_subtotal", "v_subtotal", "v_total"]) {
+    if (!invoiceAuthority.includes(invariant)) failures.push(`financials: invoice authority missing ${invariant}`);
+  }
+  if (!invoiceAuthority.includes("Client-provided subtotal/tax/total are ignored")) failures.push("financials: client headers must not own invoice totals");
+}
+if (fs.existsSync(financialArtifacts[3])) {
+  const snapshot = read(financialArtifacts[3]);
+  if (!snapshot.includes("subtotal_matches_lines") || !snapshot.includes("total_matches_header")) failures.push("financials: appointment financial snapshot must expose integrity evidence");
+}
+
 const terminalActions = [
   ["appointment complete", "app/api/v1/appointments/[id]/complete/route.ts", "POST"],
   ["quote status", "app/api/v1/quotes/[id]/status/route.ts", "POST"],
@@ -80,4 +105,4 @@ if (failures.length) {
   failures.forEach((f) => console.error("- " + f));
   process.exit(1);
 }
-console.log("CRUD contract certification PASS: canonical mutable resources expose their required lifecycle operations and customer/vehicle/appointment invariants.");
+console.log("CRUD contract certification PASS: canonical mutable resources expose required lifecycle operations, tenant invariants, scheduling policy, and financial authority.");
