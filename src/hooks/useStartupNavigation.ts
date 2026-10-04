@@ -6,7 +6,6 @@ import { safeNextPath } from "@/lib/auth/next-path";
 import { isStartupDecisionPath, resolveStartupRoute } from "@/lib/resolveStartupRoute";
 import { useStartupRoutingStore } from "@/stores/startupRoutingStore";
 import { useTeamRole } from "@/hooks/useTeamRole";
-import { useAppAccessGate } from "@/hooks/useAppAccessGate";
 
 /** Single source of truth for post-login startup routing. */
 interface UseStartupNavigationOptions {
@@ -18,7 +17,6 @@ export function useStartupNavigation({ enabled = true }: UseStartupNavigationOpt
   const location = useLocation();
   const { session, loading: authLoading } = useAuth();
   const { role, loading: roleLoading } = useTeamRole();
-  const { decision, loading: gateLoading } = useAppAccessGate();
   const { subscription, loading: subscriptionLoading } = useSubscription();
   const { hasHydrated, intendedPath, clearIntendedPath } = useStartupRoutingStore();
 
@@ -29,7 +27,6 @@ export function useStartupNavigation({ enabled = true }: UseStartupNavigationOpt
   const requiresPlan = Boolean(
     subscription && !subscription.subscribed && subscription.status === "requires_plan",
   );
-  const requiresOnboarding = decision?.reason === "onboarding_required";
   const hasPendingNext = Boolean(safeNextPath(location.search));
   const onStartupDecisionPath = isStartupDecisionPath(location.pathname) && !hasPendingNext;
 
@@ -42,7 +39,7 @@ export function useStartupNavigation({ enabled = true }: UseStartupNavigationOpt
       if (roleLoading) return false;
       if (role === "technician" || isCustomerPortalUser) return true;
 
-      return !gateLoading && !subscriptionLoading && Boolean(decision) && Boolean(subscription);
+      return !subscriptionLoading && Boolean(subscription);
     },
     [
       enabled,
@@ -53,9 +50,7 @@ export function useStartupNavigation({ enabled = true }: UseStartupNavigationOpt
       roleLoading,
       role,
       isCustomerPortalUser,
-      gateLoading,
       subscriptionLoading,
-      decision,
       subscription,
     ],
   );
@@ -70,7 +65,6 @@ export function useStartupNavigation({ enabled = true }: UseStartupNavigationOpt
       : resolveStartupRoute({
           currentPath: location.pathname,
           isAuthenticated,
-          requiresOnboarding,
           requiresPlan,
           persistedIntendedPath: intendedPath,
           role,
@@ -90,7 +84,6 @@ export function useStartupNavigation({ enabled = true }: UseStartupNavigationOpt
     isAuthenticated,
     onStartupDecisionPath,
     isCustomerPortalUser,
-    requiresOnboarding,
     requiresPlan,
     intendedPath,
     role,
