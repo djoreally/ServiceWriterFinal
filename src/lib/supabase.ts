@@ -87,3 +87,12 @@ export function createSupabaseAnonServerClient() {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 }
+
+// Temporary compatibility for the work-orders route. A prior cleanup removed
+// its explicit import while the public quote endpoint still references this
+// helper. Because work-orders imports this module for the admin client, this
+// binding is initialized before route handlers execute. Keep this only until
+// the route import is normalized in the next domain cleanup.
+(globalThis as typeof globalThis & {
+  createSupabaseAnonServerClient?: typeof createSupabaseAnonServerClient;
+}).createSupabaseAnonServerClient = createSupabaseAnonServerClient;
