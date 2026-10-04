@@ -46,6 +46,25 @@ if (!vehicleCollection.includes("assertCustomerInWorkspace")) failures.push("veh
 if (!vehicleMember.includes('.eq("workspace_id", body.workspace_id)')) failures.push("vehicles: update references must stay workspace scoped");
 if (!vehicleMember.includes("archived_at")) failures.push("vehicles: delete must remain non-destructive soft archive");
 
+const schedulingPolicy = "src/server/scheduling/appointment-availability.ts";
+if (!fs.existsSync(schedulingPolicy)) {
+  failures.push("appointments: canonical scheduling policy is missing");
+} else {
+  const policy = read(schedulingPolicy);
+  for (const invariant of ["day_hours", "min_lead_time_hours", "blackout_date", "bufferTimeBefore", "bufferTimeAfter"]) {
+    if (!policy.includes(invariant)) failures.push(`appointments: scheduling policy missing ${invariant}`);
+  }
+}
+const appointmentCollection = read("app/api/v1/appointments/route.ts");
+const appointmentMember = read("app/api/v1/appointments/[id]/route.ts");
+for (const [name, source] of [["create", appointmentCollection], ["reschedule", appointmentMember]]) {
+  if (!source.includes("validateLocalAvailability")) failures.push(`appointments: ${name} must use canonical availability policy`);
+  if (!source.includes("conflictWindow")) failures.push(`appointments: ${name} must enforce configured scheduling buffers`);
+  if (!source.includes("workspace_blackout_dates")) failures.push(`appointments: ${name} must enforce blackout dates`);
+}
+if (!appointmentCollection.includes("validateAppointmentReferences")) failures.push("appointments: create must validate workspace customer/vehicle/service references");
+if (!appointmentMember.includes("validatePatchReferences")) failures.push("appointments: update must validate workspace customer/vehicle/service references");
+
 const terminalActions = [
   ["appointment complete", "app/api/v1/appointments/[id]/complete/route.ts", "POST"],
   ["quote status", "app/api/v1/quotes/[id]/status/route.ts", "POST"],
@@ -61,4 +80,4 @@ if (failures.length) {
   failures.forEach((f) => console.error("- " + f));
   process.exit(1);
 }
-console.log("CRUD contract certification PASS: canonical mutable resources expose their required lifecycle operations and customer/vehicle domain invariants.");
+console.log("CRUD contract certification PASS: canonical mutable resources expose their required lifecycle operations and customer/vehicle/appointment invariants.");
