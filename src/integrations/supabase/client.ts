@@ -60,6 +60,32 @@ const CLIENT_SUPABASE_KEY = SUPABASE_PUBLISHABLE_KEY;
 const isBrowser = typeof window !== "undefined" && typeof window.localStorage !== "undefined";
 const INTERACTIVE_AUTH_REQUEST_TIMEOUT_MS = 45_000;
 
+function isOperationalSupabaseRequest(url: string): boolean {
+  if (!isBrowser) return false;
+  try {
+    const requestUrl = new URL(url);
+    const canonicalUrl = new URL(SUPABASE_URL);
+    if (requestUrl.origin !== canonicalUrl.origin) return false;
+    return (
+      requestUrl.pathname.startsWith("/rest/v1/") ||
+      requestUrl.pathname.startsWith("/functions/v1/") ||
+      requestUrl.pathname.startsWith("/storage/v1/")
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function operationalSupabaseProxyUrl(path: string): string {
+  if (!path.startsWith("/")) throw new Error("Supabase proxy path must start with /");
+  return `/api/v1/supabase-proxy?path=${encodeURIComponent(path)}`;
+}
+
+function sameOriginSupabaseProxyUrl(url: string): string {
+  const requestUrl = new URL(url);
+  return operationalSupabaseProxyUrl(requestUrl.pathname + requestUrl.search);
+}
+
 function isInteractiveAuthRequest(url: string): boolean {
   if (!url.includes('/auth/v1/')) return false;
   if (/grant_type=refresh_token/.test(url)) return false;
@@ -120,7 +146,10 @@ const tracedFetch: typeof fetch = async (input: RequestInfo | URL, init: Request
       requestInit.signal = authAbortController.signal;
     }
 
-    const response = await fetch(input, requestInit);
+    const transportTarget = isOperationalSupabaseRequest(requestUrl)
+      ? sameOriginSupabaseProxyUrl(requestUrl)
+      : input;
+    const response = await fetch(transportTarget, requestInit);
     const isTelemetryRequest = requestUrl.includes('/rest/v1/client_error_events');
     if ((isEdgeFunctionRequest || isRestRequest) && !isTelemetryRequest && !response.ok) {
       const endpoint = (() => {

@@ -149,9 +149,9 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
       if (isSignup) {
         const result = await signUpWithEmail(email, password);
         if (result.error) throw new Error(result.error);
-        setIntendedPath("/plans");
-        toast.success("Business account created. Choose a plan to continue.");
-        navigate("/plans", { replace: true });
+        setIntendedPath("/settings?tab=business&setup=1");
+        toast.success("Business account created. Add your business settings to continue.");
+        navigate("/settings?tab=business&setup=1", { replace: true });
       } else {
         const result = await signInWithPassword(email, password);
         if (result.error) throw new Error(result.error);

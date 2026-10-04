@@ -1,4 +1,4 @@
-import { json, errorResponse, paginationSchema, requireWorkspaceMember } from "@/server/api";
+import { ApiError, json, errorResponse, paginationSchema, requireWorkspaceMember } from "@/server/api";
 import { z } from "zod";
 
 const vehicleSchema = z.object({
@@ -37,7 +37,25 @@ async function assertCustomerInWorkspace(
     .neq("status", "archived")
     .maybeSingle();
   if (error) throw error;
-  if (!data) throw new Error("Customer does not belong to this workspace.");
+  if (!data) throw new ApiError(409, "Customer does not belong to this workspace.", "invalid_customer");
+}
+
+async function assertUniqueVin(
+  supabase: Awaited<ReturnType<typeof requireWorkspaceMember>>["supabase"],
+  workspaceId: string,
+  vin: string | null | undefined,
+) {
+  const normalizedVin = vin?.trim().toUpperCase();
+  if (!normalizedVin) return;
+  const { data, error } = await supabase
+    .from("vehicles")
+    .select("id")
+    .eq("workspace_id", workspaceId)
+    .ilike("vin", normalizedVin)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (data) throw new ApiError(409, "A vehicle with this VIN already exists in this workspace.", "duplicate_vin");
 }
 
 function isArchivedVehicle(row: { metadata?: unknown }): boolean {
@@ -53,14 +71,19 @@ export async function GET(request: Request) {
   try {
     const url = new URL(request.url);
     const workspaceId = url.searchParams.get("workspace_id");
-    if (!workspaceId) throw new Error("workspace_id is required");
+    if (!workspaceId) throw new ApiError(400, "workspace_id is required", "missing_workspace");
     const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
+    const search = url.searchParams.get("search")?.trim();
 
     let query = supabase
       .from("vehicles")
       .select("*,customers(id,first_name,last_name),vehicle_service_specs(engine,oil_type,oil_capacity,oil_filter,metadata)")
       .eq("workspace_id", workspaceId)
       .order("created_at", { ascending: false });
+
+    if (search) {
+      query = query.or(`vin.ilike.%${search}%,make.ilike.%${search}%,model.ilike.%${search}%,license_plate.ilike.%${search}%`);
+    }
 
     let pagination: { limit: number; offset: number } | undefined;
     if (url.searchParams.has("limit") || url.searchParams.has("offset")) {
@@ -86,10 +109,13 @@ export async function POST(request: Request) {
     const body = vehicleSchema.parse(await request.json());
     const { supabase } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist", "technician"], request);
     await assertCustomerInWorkspace(supabase, body.workspace_id, body.customer_id);
+    await assertUniqueVin(supabase, body.workspace_id, body.vin);
 
+    const normalizedVin = body.vin?.trim().toUpperCase() || null;
     const { engine, oil_type, oil_capacity, oil_filter, odometer_measure, plate_state, ...vehicleInput } = body;
     const { data: vehicle, error } = await supabase.from("vehicles").insert({
       ...vehicleInput,
+      vin: normalizedVin,
       plate_region: body.plate_region ?? plate_state ?? null,
       metadata: odometer_measure ? { odometer_measure } : {},
     } as never).select().single();

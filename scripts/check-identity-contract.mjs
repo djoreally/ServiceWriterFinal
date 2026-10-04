@@ -24,6 +24,23 @@ assert(/\.from\(["']workspace_members["']\)/.test(api), "Workspace authorization
 assert(/\.eq\(["']user_id["'],\s*user\.id\)/.test(api), "Workspace authorization must bind membership to the authenticated user.");
 assert(/\.eq\(["']is_active["'],\s*true\)/.test(api), "Workspace authorization must require active membership.");
 
+const routeRoleGuard = read("src/components/security/RouteRoleGuard.tsx");
+const navItems = read("src/components/layout/navItems.ts");
+const legacyGuards = read("src/components/routing/legacy-guards.tsx");
+assert(!routeRoleGuard.includes("if (!role) return <>{children}</>"), "Role-less authenticated sessions must never render protected RouteRoleGuard children.");
+assert(routeRoleGuard.includes("if (!role) return <>{fallback ?? <AccessDenied />}</>"), "RouteRoleGuard must deny unresolved workforce identity.");
+assert(legacyGuards.includes("if (!role)"), "RequireAuth must explicitly handle unresolved workforce identity.");
+assert(!legacyGuards.includes("Unresolved identity is not a denial"), "RequireAuth must not fail open when workforce identity is unresolved.");
+assert(legacyGuards.includes("if (!canAccessRoute(role, location.pathname))"), "RequireAuth must authorize every workforce-protected route against the canonical route policy.");
+assert(legacyGuards.includes('location.pathname === "/fleet-manager"'), "Fleet-manager customer identities must have a narrow session-auth exception from workforce RBAC.");
+assert(!legacyGuards.includes('location.pathname.startsWith("/customer/")'), "Customer routes must not receive a broad workforce-RBAC bypass from RequireAuth.");
+assert(legacyGuards.includes("if (roleError) return <IdentityUnavailable"), "Workforce identity backend failures must remain fail-closed while exposing recovery UI.");
+assert(legacyGuards.includes("Try again"), "Identity recovery UI must expose a retry action.");
+assert(legacyGuards.includes("Sign out"), "Identity recovery UI must expose a sign-out escape hatch.");
+assert(navItems.includes("if (!role) return [];"), "Role-less sessions must receive no protected navigation.");
+assert(!navItems.includes("if (!role || role === \"admin\") return all"), "Unresolved role must never inherit admin navigation.");
+assert(navItems.includes("role: RoleScope = null"), "Navigation defaults must be deny-by-default, not admin.");
+
 const browserClient = read("src/integrations/supabase/client.ts");
 assert(browserClient.includes("CANONICAL_SUPABASE_PROJECT_ID = 'rjfbrfognxqkyhdrpibx'"), "Browser auth must retain the certified production Supabase project fallback.");
 assert(browserClient.includes("CANONICAL_SUPABASE_URL"), "Browser auth must retain a canonical production Supabase URL fallback.");
@@ -64,4 +81,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-console.log("Identity/RBAC contract passed: Supabase Auth, canonical browser backend, active workspace membership, separated customer identity, owner-only owner assignment, and documented RLS authority are consistent.");
+console.log("Identity/RBAC contract passed: workforce routes fail closed, fleet customers keep their scoped portal, identity faults expose recovery, and owner/workspace authority remains server-enforced.");

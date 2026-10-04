@@ -85,10 +85,28 @@ const environmentManifest = read("docs/environment-and-secrets-manifest.md");
 assert(environmentManifest.includes("Resend is the primary transactional email provider"), "Environment manifest must preserve transactional provider ownership.");
 assert(environmentManifest.includes("Runtime `VITE_*` configuration is retired"), "Environment manifest must explicitly retire Vite runtime configuration.");
 
+// Browser operational data must cross the application server boundary. Supabase
+// Auth/session remains the intentional direct-browser exception.
+const supabaseClientPath = "src/integrations/supabase/client.ts";
+const supabaseProxyPath = "app/api/v1/supabase-proxy/route.ts";
+assert(exists(supabaseProxyPath), `Missing canonical server-owned Supabase proxy: ${supabaseProxyPath}`);
+const supabaseClient = read(supabaseClientPath);
+assert(supabaseClient.includes("isOperationalSupabaseRequest"), "Supabase client must classify operational browser traffic.");
+assert(supabaseClient.includes('/api/v1/supabase-proxy?path='), "Browser REST/functions/storage traffic must use the same-origin application proxy.");
+assert(supabaseClient.includes("/auth/v1/"), "Supabase Auth must remain an explicit direct-browser transport exception.");
+if (exists(supabaseProxyPath)) {
+  const proxy = read(supabaseProxyPath);
+  for (const prefix of ["/rest/v1/", "/functions/v1/", "/storage/v1/"]) {
+    assert(proxy.includes(prefix), `Supabase proxy must allow canonical operational prefix ${prefix}.`);
+  }
+  assert(proxy.includes("sameOriginRequest"), "Supabase operational proxy must reject cross-origin browser use.");
+  assert(proxy.includes('headers.set("apikey", SUPABASE_PUBLISHABLE_KEY_RESOLVED)'), "Supabase operational proxy must own the publishable-key boundary server-side.");
+}
+
 if (failures.length) {
   console.error("Architecture contract verification failed:");
   failures.forEach((failure) => console.error(`- ${failure}`));
   process.exit(1);
 }
 
-console.log("Architecture contract passed: single Next.js/Vercel runtime, workspace tenancy, and provider ownership are consistent.");
+console.log("Architecture contract passed: single Next.js/Vercel runtime, workspace tenancy, provider ownership, and server-owned operational data boundary are consistent.");
