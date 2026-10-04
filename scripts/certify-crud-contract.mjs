@@ -15,9 +15,10 @@ const resources = [
 ];
 
 const failures = [];
+const read = (file) => fs.readFileSync(file, "utf8");
 function methods(file) {
   if (!fs.existsSync(file)) { failures.push(`missing route: ${file}`); return new Set(); }
-  const source = fs.readFileSync(file, "utf8");
+  const source = read(file);
   if (file.startsWith("app/api/v1/") && !source.includes("requireWorkspaceMember(") && !source.includes("requireWorkspacePaymentsAddon(") && !source.includes("requireCrmCapability(") && !file.includes("invitations")) failures.push(`${file}: mutable workspace route must enforce canonical workspace authorization`);
   if (file.startsWith("app/api/v1/") && !source.includes("workspace_id") && !source.includes("workspaceId") && !file.includes("invitations")) failures.push(`${file}: mutable workspace route must bind workspace identity`);
   return new Set([...source.matchAll(/export\s+async\s+function\s+(GET|POST|PUT|PATCH|DELETE)\b/g)].map((m) => m[1]));
@@ -28,6 +29,22 @@ for (const [name, collection, member, collectionRequired, memberRequired] of res
   for (const verb of memberRequired) if (!m.has(verb)) failures.push(`${name}: ${member} missing ${verb}`);
   console.log(`${name}\tcollection=[${[...c].join(",")}]\tmember=[${[...m].join(",")}]`);
 }
+
+const customerCollection = read("app/api/v1/customers/route.ts");
+const customerMember = read("app/api/v1/customers/[id]/route.ts");
+if (!customerCollection.includes('const search = url.searchParams.get("search")')) failures.push("customers: collection must support search");
+if (!customerCollection.includes("paginationSchema.parse")) failures.push("customers: collection must enforce bounded pagination");
+if (!customerMember.includes('.eq("workspace_id", workspaceId)') && !customerMember.includes('.eq("workspace_id", workspace_id)')) failures.push("customers: member operations must remain workspace scoped");
+if (!customerMember.includes('status: "archived"')) failures.push("customers: delete must remain non-destructive soft archive");
+
+const vehicleCollection = read("app/api/v1/vehicles/route.ts");
+const vehicleMember = read("app/api/v1/vehicles/[id]/route.ts");
+if (!vehicleCollection.includes('const search = url.searchParams.get("search")')) failures.push("vehicles: collection must support search");
+if (!vehicleCollection.includes('"duplicate_vin"')) failures.push("vehicles: create must reject duplicate VINs in the workspace");
+if (!vehicleMember.includes('"duplicate_vin"')) failures.push("vehicles: update must reject duplicate VINs in the workspace");
+if (!vehicleCollection.includes("assertCustomerInWorkspace")) failures.push("vehicles: create must validate customer ownership");
+if (!vehicleMember.includes('.eq("workspace_id", body.workspace_id)')) failures.push("vehicles: update references must stay workspace scoped");
+if (!vehicleMember.includes("archived_at")) failures.push("vehicles: delete must remain non-destructive soft archive");
 
 const terminalActions = [
   ["appointment complete", "app/api/v1/appointments/[id]/complete/route.ts", "POST"],
@@ -44,4 +61,4 @@ if (failures.length) {
   failures.forEach((f) => console.error("- " + f));
   process.exit(1);
 }
-console.log("CRUD contract certification PASS: canonical mutable resources expose their required lifecycle operations.");
+console.log("CRUD contract certification PASS: canonical mutable resources expose their required lifecycle operations and customer/vehicle domain invariants.");
