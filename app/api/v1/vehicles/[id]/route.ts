@@ -1,4 +1,4 @@
-import { errorResponse, json, requireWorkspaceMember } from "@/server/api";
+import { ApiError, errorResponse, json, requireWorkspaceMember } from "@/server/api";
 import { z } from "zod";
 
 const vehicleUpdateSchema = z.object({
@@ -26,6 +26,26 @@ const vehicleUpdateSchema = z.object({
 });
 
 const writeRoles = ["owner", "admin", "manager", "service_advisor", "receptionist", "technician"] as const;
+
+async function assertUniqueVin(
+  supabase: Awaited<ReturnType<typeof requireWorkspaceMember>>["supabase"],
+  workspaceId: string,
+  vin: string | null | undefined,
+  excludeVehicleId: string,
+) {
+  const normalizedVin = vin?.trim().toUpperCase();
+  if (!normalizedVin) return;
+  const { data, error } = await supabase
+    .from("vehicles")
+    .select("id")
+    .eq("workspace_id", workspaceId)
+    .ilike("vin", normalizedVin)
+    .neq("id", excludeVehicleId)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (data) throw new ApiError(409, "A vehicle with this VIN already exists in this workspace.", "duplicate_vin");
+}
 
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
@@ -60,12 +80,19 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         .neq("status", "archived")
         .maybeSingle();
       if (customerError) throw customerError;
-      if (!customer) throw new Error("Customer does not belong to this workspace.");
+      if (!customer) throw new ApiError(409, "Customer does not belong to this workspace.", "invalid_customer");
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, "vin")) {
+      await assertUniqueVin(supabase, body.workspace_id, body.vin, id);
     }
 
     const { workspace_id, engine, oil_type, oil_capacity, oil_filter, odometer_measure, plate_state, ...vehicleInput } = body;
     const patch: Record<string, unknown> = { ...vehicleInput };
 
+    if (Object.prototype.hasOwnProperty.call(body, "vin")) {
+      patch.vin = body.vin?.trim().toUpperCase() || null;
+    }
     if (Object.prototype.hasOwnProperty.call(body, "plate_state") && !Object.prototype.hasOwnProperty.call(body, "plate_region")) {
       patch.plate_region = plate_state ?? null;
     }
@@ -77,7 +104,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         .eq("id", id)
         .maybeSingle();
       if (currentError) throw currentError;
-      if (!current) throw new Error("Vehicle does not belong to this workspace.");
+      if (!current) throw new ApiError(404, "Vehicle does not belong to this workspace.", "vehicle_not_found");
       const metadata = current.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata)
         ? current.metadata as Record<string, unknown>
         : {};
@@ -145,7 +172,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
       .eq("workspace_id", workspaceId)
       .maybeSingle();
     if (currentError) throw currentError;
-    if (!current) throw new Error("Vehicle does not belong to this workspace.");
+    if (!current) throw new ApiError(404, "Vehicle does not belong to this workspace.", "vehicle_not_found");
     const metadata = current.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata)
       ? current.metadata as Record<string, unknown>
       : {};
