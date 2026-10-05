@@ -8,7 +8,7 @@ describe("public booking route precedence", () => {
       "utf8",
     );
 
-  it.each(["booking-progress", "booking-recovered"])(
+  it.each(["booking-progress", "booking-recovered", "booking-rpc"])(
     "keeps an explicit POST route for %s so appointments/[id] cannot shadow it",
     (name) => {
       const source = readRoute(name);
