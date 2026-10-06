@@ -1,12 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { Plus, Wrench, Loader2 } from "lucide-react";
 import {
   fetchAppointmentServices,
-  fetchFeeSettings,
-  type FeeSettings,
   type CatalogServiceInfo,
 } from "@/application/queries/appointment-services.query";
 import { removeAppointmentService } from "@/application/commands/appointment-services.command";
@@ -15,8 +12,6 @@ import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { useTerminology } from "@/contexts/TerminologyContext";
 import { ServiceLineItem, type AppointmentService } from "./ServiceLineItem";
 import { AddServiceDialog } from "./AddServiceDialog";
-
-// FeeSettings imported from application layer
 
 interface AppointmentServicesListProps {
   appointmentId: string;
@@ -28,20 +23,14 @@ interface AppointmentServicesListProps {
   onTotalChange?: (subtotal: number, serviceCount: number) => void;
 }
 
-// CatalogServiceInfo imported from application layer
-
-// ⚡ Use centralized financial math with banker's rounding
-import { computeFees as computeFeesStandard } from "@/lib/financialMath";
-function computeFees(feeSettings: FeeSettings | null, subtotal: number) {
-  const result = computeFeesStandard(feeSettings, subtotal);
-  return { wasteOilFee: result.wasteOilFee, shopFee: result.shopFee, surcharge: result.surcharge };
-}
-
+/**
+ * Service editor only. Pricing totals and fees intentionally live in the
+ * appointment financial summary so the page has one authoritative math block.
+ */
 export function AppointmentServicesList({
   appointmentId,
   appointmentStatus,
   estimatedCost,
-  taxAmount,
   serviceCatalogId,
   isPrepaid = false,
   onTotalChange,
@@ -53,23 +42,21 @@ export function AppointmentServicesList({
   const [loading, setLoading] = useState(true);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [editingService, setEditingService] = useState<AppointmentService | null>(null);
-  const [feeSettings, setFeeSettings] = useState<FeeSettings | null>(null);
 
   const isReadOnly = appointmentStatus === "completed" || appointmentStatus === "cancelled";
 
   const calculateTotals = useCallback((serviceList: AppointmentService[]) => {
-    const subtotal = serviceList.reduce((sum, s) => sum + s.price * s.quantity, 0);
+    const subtotal = serviceList.reduce((sum, service) => sum + service.price * service.quantity, 0);
     onTotalChange?.(subtotal, serviceList.length);
   }, [onTotalChange]);
 
   const fetchServices = useCallback(async () => {
     setLoading(true);
-    
     const result = await fetchAppointmentServices(appointmentId, serviceCatalogId);
-    setServices(result.services as unknown as AppointmentService[]);
-    calculateTotals(result.services as unknown as AppointmentService[]);
-    if (result.catalogService) setCatalogService(result.catalogService);
-    
+    const nextServices = result.services as unknown as AppointmentService[];
+    setServices(nextServices);
+    calculateTotals(nextServices);
+    setCatalogService(result.catalogService ?? null);
     setLoading(false);
   }, [appointmentId, serviceCatalogId, calculateTotals]);
 
@@ -77,19 +64,10 @@ export function AppointmentServicesList({
     void Promise.resolve().then(() => fetchServices());
   }, [fetchServices]);
 
-  // Fetch business profile fee settings
-  useEffect(() => {
-    const loadFees = async () => {
-      const fees = await fetchFeeSettings();
-      if (fees) setFeeSettings(fees);
-    };
-    loadFees();
-  }, []);
-  
   const handleServiceAdded = (service: AppointmentService) => {
-    const existingIndex = services.findIndex(s => s.id === service.id);
+    const existingIndex = services.findIndex((item) => item.id === service.id);
     let updatedServices: AppointmentService[];
-    
+
     if (existingIndex >= 0) {
       updatedServices = [...services];
       updatedServices[existingIndex] = service;
@@ -98,7 +76,7 @@ export function AppointmentServicesList({
       updatedServices = [...services, service];
       toast.success("Service added");
     }
-    
+
     setServices(updatedServices);
     calculateTotals(updatedServices);
     setEditingService(null);
@@ -110,7 +88,7 @@ export function AppointmentServicesList({
 
     try {
       await removeAppointmentService(serviceId);
-      const updatedServices = services.filter(s => s.id !== serviceId);
+      const updatedServices = services.filter((service) => service.id !== serviceId);
       setServices(updatedServices);
       calculateTotals(updatedServices);
       toast.success("Service removed");
@@ -126,12 +104,6 @@ export function AppointmentServicesList({
 
   const hasServices = services.length > 0;
   const showCatalogService = !hasServices && !loading && catalogService;
-  const displayTax = taxAmount || 0;
-
-  // --- Itemized services totals ---
-  const subtotal = services.reduce((sum, s) => sum + s.price * s.quantity, 0);
-  const { wasteOilFee, shopFee, surcharge } = computeFees(feeSettings, subtotal);
-  const total = subtotal + wasteOilFee + shopFee + surcharge + displayTax;
 
   if (loading) {
     return (
@@ -160,65 +132,20 @@ export function AppointmentServicesList({
         </CardHeader>
         <CardContent>
           {showCatalogService ? (
-            // Catalog service fallback — now includes all fees
-            (() => {
-              const catSubtotal = estimatedCost || catalogService.default_price;
-              const { wasteOilFee: catWaste, shopFee: catShop, surcharge: catSurcharge } = computeFees(feeSettings, catSubtotal);
-              const catTotal = catSubtotal + catWaste + catShop + catSurcharge + displayTax;
-              return (
-                <div className="space-y-4">
-                  <div className="flex items-start justify-between p-3 bg-muted/30 rounded-lg">
-                    <div className="space-y-1">
-                      <p className="font-medium">{catalogService.name}</p>
-                      {catalogService.description && (
-                        <p className="text-sm text-muted-foreground">{catalogService.description}</p>
-                      )}
-                    </div>
-                    <span className="font-semibold">{formatCurrency(catSubtotal)}</span>
-                  </div>
-
-                  <Separator />
-
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Subtotal</span>
-                      <span>{formatCurrency(catSubtotal)}</span>
-                    </div>
-                    {catWaste > 0 && (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">Waste Oil Disposal Fee</span>
-                        <span>{formatCurrency(catWaste)}</span>
-                      </div>
-                    )}
-                    {catShop > 0 && (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">{feeSettings?.shop_fee_description || "Shop Supplies Fee"}</span>
-                        <span>{formatCurrency(catShop)}</span>
-                      </div>
-                    )}
-                    {catSurcharge > 0 && (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">{feeSettings?.surcharge_description || "Card Processing Fee"}</span>
-                        <span>{formatCurrency(catSurcharge)}</span>
-                      </div>
-                    )}
-                    {displayTax > 0 && (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">Tax</span>
-                        <span>{formatCurrency(displayTax)}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between font-semibold text-lg pt-2 border-t">
-                      <span>Total</span>
-                      <span>{formatCurrency(catTotal)}</span>
-                    </div>
-                  </div>
-                </div>
-              );
-            })()
+            <div className="flex items-start justify-between gap-4 rounded-lg bg-muted/30 p-3">
+              <div className="space-y-1">
+                <p className="font-medium">{catalogService.name}</p>
+                {catalogService.description && (
+                  <p className="text-sm text-muted-foreground">{catalogService.description}</p>
+                )}
+              </div>
+              <span className="shrink-0 font-semibold">
+                {formatCurrency(estimatedCost || catalogService.default_price)}
+              </span>
+            </div>
           ) : hasServices ? (
             <div className="space-y-2">
-              {services.map(service => (
+              {services.map((service) => (
                 <ServiceLineItem
                   key={service.id}
                   service={service}
@@ -227,60 +154,9 @@ export function AppointmentServicesList({
                   readOnly={isReadOnly}
                 />
               ))}
-              
-              <Separator className="my-4" />
-              
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Subtotal</span>
-                  <span>{formatCurrency(subtotal)}</span>
-                </div>
-                {wasteOilFee > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Waste Oil Disposal Fee</span>
-                    <span>{formatCurrency(wasteOilFee)}</span>
-                  </div>
-                )}
-                {shopFee > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">{feeSettings?.shop_fee_description || "Shop Supplies Fee"}</span>
-                    <span>{formatCurrency(shopFee)}</span>
-                  </div>
-                )}
-                {surcharge > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">{feeSettings?.surcharge_description || "Card Processing Fee"}</span>
-                    <span>{formatCurrency(surcharge)}</span>
-                  </div>
-                )}
-                {displayTax > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Tax</span>
-                    <span>{formatCurrency(displayTax)}</span>
-                  </div>
-                )}
-                <div className="flex justify-between font-semibold text-lg pt-2 border-t">
-                  <span>Total</span>
-                  <span>{formatCurrency(total)}</span>
-                </div>
-                
-                {services.some(s => s.is_prepaid) && services.some(s => !s.is_prepaid) && (
-                  <div className="mt-4 pt-4 border-t space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600">Prepaid</span>
-                      <span className="text-gray-600">
-                        {formatCurrency(services.filter(s => s.is_prepaid).reduce((sum, s) => sum + s.price * s.quantity, 0))}
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-amber-600">Due at Service</span>
-                      <span className="text-amber-600">
-                        {formatCurrency(services.filter(s => !s.is_prepaid).reduce((sum, s) => sum + s.price * s.quantity, 0))}
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
+              <p className="pt-2 text-xs text-muted-foreground">
+                Fees, tax, discounts, and the final amount due are shown once in Financial Summary.
+              </p>
             </div>
           ) : (
             <div className="text-center py-6 text-muted-foreground">
