@@ -40,6 +40,15 @@ export function JobActionButton({ appointment, onUpdated, className }: JobAction
   else if (gate.pendingCount > 0) step = "inspection";
   else step = "complete";
 
+  // On mobile, the active workflow action stays visible above the bottom nav.
+  // The appointment page is long; burying Start/Complete below the financials
+  // makes the primary shop action effectively disappear in real use.
+  const actionClass = [
+    className,
+    "max-md:fixed max-md:left-4 max-md:right-4 max-md:bottom-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom)+0.75rem)]",
+    "max-md:z-40 max-md:w-auto max-md:shadow-2xl",
+  ].filter(Boolean).join(" ");
+
   const handleStart = async () => {
     setStarting(true);
     const res = await startAppointmentJob(appointment.id);
@@ -51,24 +60,35 @@ export function JobActionButton({ appointment, onUpdated, className }: JobAction
     const nextGate = await fetchAppointmentInspectionGate(appointment.id).catch(() => ({ required: [], pendingCount: 0 }));
     setGate(nextGate);
     setStarting(false);
-    toast.success(res.alreadyStarted ? "Job already started" : "Job started — verify vehicle and complete inspection");
+    toast.success(res.alreadyStarted ? "Job already started" : "Job started");
     onUpdated();
     if (nextGate.pendingCount > 0) setShowInspection(true);
   };
 
   const handleCompleteSuccess = (serviceId: string) => {
-    setShowComplete(false); onUpdated(); toast.success("Service record created"); navigate(`/services/${serviceId}`);
+    setShowComplete(false);
+    onUpdated();
+    toast.success("Service record created");
+    navigate(`/services/${serviceId}`);
   };
 
-  if (step === "loading") return <Button className={className} variant="default" disabled><Loader2 className="h-4 w-4 mr-2 animate-spin" />Loading…</Button>;
-  if (step === "done") return <Button className={className} variant="outline" onClick={() => { const svc = appointment.service_record_id; if (svc) navigate(`/services/${svc}`); }}><FileText className="h-4 w-4 mr-2" />View Service Record</Button>;
-  if (step === "start") return <Button className={className} variant="default" onClick={handleStart} disabled={starting}>{starting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}Start Job</Button>;
+  if (step === "loading") {
+    // Do not hide the workflow behind an indefinite inspection-gate load.
+    // Confirmed jobs can still present a clear start affordance immediately.
+    if (!started && !isCompleted) {
+      return <Button className={actionClass} variant="default" onClick={handleStart} disabled={starting}>{starting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}Start Job</Button>;
+    }
+    return <Button className={actionClass} variant="default" disabled><Loader2 className="h-4 w-4 mr-2 animate-spin" />Loading job…</Button>;
+  }
+
+  if (step === "done") return <Button className={actionClass} variant="outline" onClick={() => { const svc = appointment.service_record_id; if (svc) navigate(`/services/${svc}`); }}><FileText className="h-4 w-4 mr-2" />View Service Record</Button>;
+  if (step === "start") return <Button className={actionClass} variant="default" onClick={handleStart} disabled={starting}>{starting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}Start Job</Button>;
 
   if (step === "inspection") {
     const pending = gate?.required.filter((r) => !r.completed) ?? [];
     const current = pending[0];
     return <>
-      <Button className={className} variant="default" onClick={() => setShowInspection(true)}><ClipboardCheck className="h-4 w-4 mr-2" />Service Inspection ({pending.length} pending)</Button>
+      <Button className={actionClass} variant="default" onClick={() => setShowInspection(true)}><ClipboardCheck className="h-4 w-4 mr-2" />Service Inspection ({pending.length} pending)</Button>
       <Dialog open={showInspection} onOpenChange={setShowInspection}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -82,7 +102,7 @@ export function JobActionButton({ appointment, onUpdated, className }: JobAction
   }
 
   return <>
-    <Button className={className} variant="default" onClick={() => setShowComplete(true)}><CheckCircle2 className="h-4 w-4 mr-2" />Complete Job</Button>
+    <Button className={actionClass} variant="default" onClick={() => setShowComplete(true)}><CheckCircle2 className="h-4 w-4 mr-2" />Complete Job</Button>
     <CompleteAppointmentDialog open={showComplete} onOpenChange={setShowComplete} appointment={appointment} onSuccess={handleCompleteSuccess} />
   </>;
 }
