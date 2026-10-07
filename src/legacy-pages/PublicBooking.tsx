@@ -1395,24 +1395,35 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
           />
         )}
 
-        {/* Step 6: Confirmation */}
+        {/* Step 6: Confirmation — pay-later bookings land here (pay-now goes
+            to /booking-success). Fire the Meta Purchase conversion with the
+            appointment total so offline-payment bookings are tracked too. */}
         {bs.step === 6 && (
-          <ConfirmationStep
-            businessName={business?.business_name || "Auto Shop"}
-            guestEmail={bs.guestEmail}
-            vehicles={bs.vehicles}
-            vehicleServiceSelections={bs.vehicleServiceSelections}
-            selectedDate={bs.selectedDate}
-            selectedTime={bs.selectedTime}
-            customerAddress={bs.customerAddress}
-            city={bs.city}
-            state={bs.state}
-            zipCode={bs.zipCode}
-            paymentChoice={bs.paymentChoice}
-            formatCurrency={pricing.formatCurrency}
-            getGrandTotal={pricing.getGrandTotal}
-            confirmationEmailStatus={bs.confirmationEmailStatus}
-          />
+          <>
+            {business?.user_id && (
+              <TenantTrackingScripts
+                userId={business.user_id}
+                event="purchase"
+                value={pricing.getGrandTotal()}
+              />
+            )}
+            <ConfirmationStep
+              businessName={business?.business_name || "Auto Shop"}
+              guestEmail={bs.guestEmail}
+              vehicles={bs.vehicles}
+              vehicleServiceSelections={bs.vehicleServiceSelections}
+              selectedDate={bs.selectedDate}
+              selectedTime={bs.selectedTime}
+              customerAddress={bs.customerAddress}
+              city={bs.city}
+              state={bs.state}
+              zipCode={bs.zipCode}
+              paymentChoice={bs.paymentChoice}
+              formatCurrency={pricing.formatCurrency}
+              getGrandTotal={pricing.getGrandTotal}
+              confirmationEmailStatus={bs.confirmationEmailStatus}
+            />
+          </>
         )}
 
         {bs.step < 6 && (
