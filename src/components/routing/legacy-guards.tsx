@@ -24,19 +24,44 @@ export const LoadingScreen = ({ message = "Loading..." }: { message?: string }) 
   </div>
 );
 
+const IdentityUnavailable = ({ retry, signOut }: { retry: () => void; signOut: () => Promise<void> }) => (
+  <div className="min-h-screen flex items-center justify-center bg-background px-4">
+    <div className="w-full max-w-md rounded-lg border bg-card p-6 text-center shadow-sm">
+      <h1 className="text-lg font-semibold">We could not verify your workspace access</h1>
+      <p className="mt-2 text-sm text-muted-foreground">
+        Your session is still signed in, but the workforce identity service did not respond correctly. Protected workspace data remains locked until identity can be verified.
+      </p>
+      <div className="mt-5 flex justify-center gap-3">
+        <button
+          type="button"
+          onClick={retry}
+          className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+        >
+          Try again
+        </button>
+        <button
+          type="button"
+          onClick={() => { void signOut(); }}
+          className="rounded-md border px-4 py-2 text-sm font-medium"
+        >
+          Sign out
+        </button>
+      </div>
+    </div>
+  </div>
+);
+
 /**
  * RequireAuth — auth/session render gate plus the single role-authorization
- * choke point for every protected route.
+ * choke point for every workforce-protected route.
  *
- * Startup destination decisions live in the startup navigator (the
- * `useStartupNavigation` hook in the SPA shell, `AppStartupNavigator` under
- * App Router), which is mounted once at the app shell. This component never
- * redirects on role: an unauthorized deep link renders `AccessDenied` so there
- * is no bounce/flash.
+ * External fleet contacts are authenticated customer identities, not workforce
+ * members. Their `/fleet-manager` surface performs its own account-scoped API
+ * authorization and therefore needs session auth without a workforce role.
  */
 export const RequireAuth = ({ children }: { children: React.ReactElement }) => {
-  const { session, loading } = useAuth();
-  const { role, loading: roleLoading } = useTeamRole();
+  const { session, loading, signOut } = useAuth();
+  const { role, loading: roleLoading, error: roleError, retry } = useTeamRole();
   const location = useLocation();
 
   if (loading) return <LoadingScreen />;
@@ -47,8 +72,19 @@ export const RequireAuth = ({ children }: { children: React.ReactElement }) => {
 
   if (roleLoading) return <LoadingScreen />;
 
-  // Unresolved identity is not a denial — RLS remains authoritative server-side.
-  if (role && !canAccessRoute(role, location.pathname)) {
+  // Fleet-manager contacts authenticate as customer/fleet identities rather
+  // than workspace_members. Authorization remains enforced by the fleet portal
+  // API against the signed-in account, so workforce RBAC does not apply here.
+  if (location.pathname === "/fleet-manager" || location.pathname.startsWith("/fleet-manager/")) {
+    return children;
+  }
+
+  if (!role) {
+    if (roleError) return <IdentityUnavailable retry={retry} signOut={signOut} />;
+    return <AccessDenied />;
+  }
+
+  if (!canAccessRoute(role, location.pathname)) {
     return <AccessDenied />;
   }
 
@@ -76,7 +112,7 @@ export const RequirePlanFeature = ({
   }
 
   if (!hasAccess) {
-    return <Navigate to="/onboarding" replace />;
+    return <Navigate to="/plans" replace />;
   }
 
   return children;

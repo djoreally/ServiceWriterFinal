@@ -5,7 +5,6 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@packages/auth";
 import { useSubscription } from "@/contexts/SubscriptionContext";
 import { useTeamRole } from "@/hooks/useTeamRole";
-import { useAppAccessGate } from "@/hooks/useAppAccessGate";
 import { useTenant } from "@/contexts/TenantContext";
 import { safeNextPath } from "@/lib/auth/next-path";
 import { isStartupDecisionPath, resolveStartupRoute } from "@/lib/resolveStartupRoute";
@@ -21,12 +20,8 @@ import { LoadingScreen } from "./legacy-guards";
  * instead of react-router hooks. Enabled only on non-tenant hosts, exactly
  * like the SPA (`useStartupNavigation({ enabled: !isTenant })`).
  *
- * Wraps the layout's children and renders the same `LoadingScreen` while
- * startup routing is still deciding — the equivalent of AppRoutes'
- * `{startupBlocking ? <LoadingScreen/> : <Routes/>}`.
- *
- * Note: uses `useSearchParams()`, so it must be rendered inside a
- * `<Suspense>` boundary (the `(app)` layout provides one).
+ * Business onboarding is retired. Startup routing now waits only for auth,
+ * role, and subscription state and can never route back into onboarding.
  */
 export function AppStartupNavigator({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "/";
@@ -37,7 +32,6 @@ export function AppStartupNavigator({ children }: { children: React.ReactNode })
 
   const { session, loading: authLoading } = useAuth();
   const { role, loading: roleLoading } = useTeamRole();
-  const { decision, loading: gateLoading } = useAppAccessGate();
   const { subscription, loading: subscriptionLoading } = useSubscription();
   const { hasHydrated, intendedPath, clearIntendedPath } = useStartupRoutingStore();
 
@@ -48,7 +42,6 @@ export function AppStartupNavigator({ children }: { children: React.ReactNode })
   const requiresPlan = Boolean(
     subscription && !subscription.subscribed && subscription.status === "requires_plan",
   );
-  const requiresOnboarding = decision?.reason === "onboarding_required";
   const searchString = searchParams.toString();
   const hasPendingNext = Boolean(safeNextPath(searchString ? `?${searchString}` : ""));
   const onStartupDecisionPath = isStartupDecisionPath(pathname) && !hasPendingNext;
@@ -62,7 +55,7 @@ export function AppStartupNavigator({ children }: { children: React.ReactNode })
       if (roleLoading) return false;
       if (role === "technician" || isCustomerPortalUser) return true;
 
-      return !gateLoading && !subscriptionLoading && Boolean(decision) && Boolean(subscription);
+      return !subscriptionLoading && Boolean(subscription);
     },
     [
       enabled,
@@ -73,9 +66,7 @@ export function AppStartupNavigator({ children }: { children: React.ReactNode })
       roleLoading,
       role,
       isCustomerPortalUser,
-      gateLoading,
       subscriptionLoading,
-      decision,
       subscription,
     ],
   );
@@ -90,7 +81,6 @@ export function AppStartupNavigator({ children }: { children: React.ReactNode })
       : resolveStartupRoute({
           currentPath: pathname,
           isAuthenticated,
-          requiresOnboarding,
           requiresPlan,
           persistedIntendedPath: intendedPath,
           role,
@@ -110,7 +100,6 @@ export function AppStartupNavigator({ children }: { children: React.ReactNode })
     isAuthenticated,
     onStartupDecisionPath,
     isCustomerPortalUser,
-    requiresOnboarding,
     requiresPlan,
     intendedPath,
     role,

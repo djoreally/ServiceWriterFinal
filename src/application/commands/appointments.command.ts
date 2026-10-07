@@ -38,8 +38,17 @@ async function workspaceTimezone(_workspaceId: string): Promise<string> {
   return context.timezone || "UTC";
 }
 
-async function sendStaffAppointmentConfirmation(appointmentId: string, _workspaceId: string): Promise<void> {
-  await apiClient.post(`/v1/appointments/${encodeURIComponent(appointmentId)}/confirmation`, {});
+async function sendStaffAppointmentConfirmation(appointmentId: string, workspaceId: string): Promise<void> {
+  try {
+    await apiClient.post(
+      `/v1/appointments/${encodeURIComponent(appointmentId)}/confirmation`,
+      { workspace_id: workspaceId },
+    );
+  } catch (error) {
+    // Saving the appointment is the primary transaction. Email delivery is a
+    // side effect and must not turn a successful database write into a failed UI save.
+    console.warn("[saveAppointment] confirmation delivery failed after save", error);
+  }
 }
 
 export async function saveAppointment(formData:AppointmentFormState,options:SaveAppointmentOptions={}):Promise<SaveAppointmentResult>{

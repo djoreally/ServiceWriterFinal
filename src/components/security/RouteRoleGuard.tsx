@@ -24,7 +24,9 @@ export const RouteRoleGuard: React.FC<RouteRoleGuardProps> = ({ children, fallba
   if (loading) return null;
   if (role && canAccessRoute(role, location.pathname)) return <>{children}</>;
 
-  // Unresolved identity is not a denial — the server (RLS) stays authoritative.
-  if (!role) return <>{children}</>;
+  // A signed-in session without a verified workforce role has no protected
+  // route authority. RLS remains the server-side backstop, but the UI must
+  // never render privileged surfaces optimistically.
+  if (!role) return <>{fallback ?? <AccessDenied />}</>;
   return <>{fallback ?? <AccessDenied />}</>;
 };

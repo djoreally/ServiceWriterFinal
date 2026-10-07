@@ -6,9 +6,10 @@ export type NavGroup = { label: string; items: NavItem[] };
 type Terms = { customer: string; vehicle: string; service: string; quote: string };
 export type RoleScope = WorkforceRole | null;
 
-export const getNavGroups = (terms: Terms, role: RoleScope = "admin"): NavGroup[] => {
+export const getNavGroups = (terms: Terms, role: RoleScope = null): NavGroup[] => {
   const all = buildAllGroups(terms);
-  if (!role || role === "admin") return all;
+  if (!role) return [];
+  if (role === "admin") return all;
   return all
     .map((group) => ({
       ...group,
@@ -93,10 +94,10 @@ const buildAllGroups = (terms: Terms): NavGroup[] => [
   ]},
 ];
 
-export const getPrimaryNavItems = (terms: Terms, role: RoleScope = "admin"): NavItem[] =>
+export const getPrimaryNavItems = (terms: Terms, role: RoleScope = null): NavItem[] =>
   getNavGroups(terms, role).flatMap((group) =>
     group.items.flatMap((item) => (item.children && item.children.length > 0 ? [item, ...item.children] : [item]))
   );
 
 export const footerNavItems: NavItem[] = [];
-export const getFooterNavItems = (_role: RoleScope = "admin"): NavItem[] => [];
+export const getFooterNavItems = (_role: RoleScope = null): NavItem[] => [];

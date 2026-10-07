@@ -15,9 +15,10 @@ const resources = [
 ];
 
 const failures = [];
+const read = (file) => fs.readFileSync(file, "utf8");
 function methods(file) {
   if (!fs.existsSync(file)) { failures.push(`missing route: ${file}`); return new Set(); }
-  const source = fs.readFileSync(file, "utf8");
+  const source = read(file);
   if (file.startsWith("app/api/v1/") && !source.includes("requireWorkspaceMember(") && !source.includes("requireWorkspacePaymentsAddon(") && !source.includes("requireCrmCapability(") && !file.includes("invitations")) failures.push(`${file}: mutable workspace route must enforce canonical workspace authorization`);
   if (file.startsWith("app/api/v1/") && !source.includes("workspace_id") && !source.includes("workspaceId") && !file.includes("invitations")) failures.push(`${file}: mutable workspace route must bind workspace identity`);
   return new Set([...source.matchAll(/export\s+async\s+function\s+(GET|POST|PUT|PATCH|DELETE)\b/g)].map((m) => m[1]));
@@ -27,6 +28,66 @@ for (const [name, collection, member, collectionRequired, memberRequired] of res
   for (const verb of collectionRequired) if (!c.has(verb)) failures.push(`${name}: ${collection} missing ${verb}`);
   for (const verb of memberRequired) if (!m.has(verb)) failures.push(`${name}: ${member} missing ${verb}`);
   console.log(`${name}\tcollection=[${[...c].join(",")}]\tmember=[${[...m].join(",")}]`);
+}
+
+const customerCollection = read("app/api/v1/customers/route.ts");
+const customerMember = read("app/api/v1/customers/[id]/route.ts");
+if (!customerCollection.includes('const search = url.searchParams.get("search")')) failures.push("customers: collection must support search");
+if (!customerCollection.includes("paginationSchema.parse")) failures.push("customers: collection must enforce bounded pagination");
+if (!customerMember.includes('.eq("workspace_id", workspaceId)') && !customerMember.includes('.eq("workspace_id", workspace_id)')) failures.push("customers: member operations must remain workspace scoped");
+if (!customerMember.includes('status: "archived"')) failures.push("customers: delete must remain non-destructive soft archive");
+
+const vehicleCollection = read("app/api/v1/vehicles/route.ts");
+const vehicleMember = read("app/api/v1/vehicles/[id]/route.ts");
+if (!vehicleCollection.includes('const search = url.searchParams.get("search")')) failures.push("vehicles: collection must support search");
+if (!vehicleCollection.includes('"duplicate_vin"')) failures.push("vehicles: create must reject duplicate VINs in the workspace");
+if (!vehicleMember.includes('"duplicate_vin"')) failures.push("vehicles: update must reject duplicate VINs in the workspace");
+if (!vehicleCollection.includes("assertCustomerInWorkspace")) failures.push("vehicles: create must validate customer ownership");
+if (!vehicleMember.includes('.eq("workspace_id", body.workspace_id)')) failures.push("vehicles: update references must stay workspace scoped");
+if (!vehicleMember.includes("archived_at")) failures.push("vehicles: delete must remain non-destructive soft archive");
+
+const schedulingPolicy = "src/server/scheduling/appointment-availability.ts";
+if (!fs.existsSync(schedulingPolicy)) {
+  failures.push("appointments: canonical scheduling policy is missing");
+} else {
+  const policy = read(schedulingPolicy);
+  for (const invariant of ["day_hours", "min_lead_time_hours", "blackout_date", "bufferTimeBefore", "bufferTimeAfter"]) {
+    if (!policy.includes(invariant)) failures.push(`appointments: scheduling policy missing ${invariant}`);
+  }
+}
+const appointmentCollection = read("app/api/v1/appointments/route.ts");
+const appointmentMember = read("app/api/v1/appointments/[id]/route.ts");
+for (const [name, source] of [["create", appointmentCollection], ["reschedule", appointmentMember]]) {
+  if (!source.includes("validateLocalAvailability")) failures.push(`appointments: ${name} must use canonical availability policy`);
+  if (!source.includes("conflictWindow")) failures.push(`appointments: ${name} must enforce configured scheduling buffers`);
+  if (!source.includes("workspace_blackout_dates")) failures.push(`appointments: ${name} must enforce blackout dates`);
+}
+if (!appointmentCollection.includes("validateAppointmentReferences")) failures.push("appointments: create must validate workspace customer/vehicle/service references");
+if (!appointmentMember.includes("validatePatchReferences")) failures.push("appointments: update must validate workspace customer/vehicle/service references");
+
+const financialArtifacts = [
+  "supabase/migrations/20261001214000_canonical_financial_authority_v1.sql",
+  "supabase/migrations/20261001221500_financial_authority_invoice_write_v2.sql",
+  "supabase/migrations/20261001223000_canonical_quote_financial_authority_v1.sql",
+  "app/api/v1/appointments/[id]/financials/route.ts",
+];
+for (const file of financialArtifacts) if (!fs.existsSync(file)) failures.push(`financials: missing canonical authority artifact ${file}`);
+if (fs.existsSync(financialArtifacts[0])) {
+  const financialV1 = read(financialArtifacts[0]);
+  for (const invariant of ["money_round_v1", "sync_appointment_invoice_v1", "financial_integrity_issues_v1"]) {
+    if (!financialV1.includes(invariant)) failures.push(`financials: canonical authority missing ${invariant}`);
+  }
+}
+if (fs.existsSync(financialArtifacts[1])) {
+  const invoiceAuthority = read(financialArtifacts[1]);
+  for (const invariant of ["create_invoice_v1", "patch_draft_invoice_v1", "v_line_subtotal", "v_subtotal", "v_total"]) {
+    if (!invoiceAuthority.includes(invariant)) failures.push(`financials: invoice authority missing ${invariant}`);
+  }
+  if (!invoiceAuthority.includes("Client-provided subtotal/tax/total are ignored")) failures.push("financials: client headers must not own invoice totals");
+}
+if (fs.existsSync(financialArtifacts[3])) {
+  const snapshot = read(financialArtifacts[3]);
+  if (!snapshot.includes("subtotal_matches_lines") || !snapshot.includes("total_matches_header")) failures.push("financials: appointment financial snapshot must expose integrity evidence");
 }
 
 const terminalActions = [
@@ -44,4 +105,4 @@ if (failures.length) {
   failures.forEach((f) => console.error("- " + f));
   process.exit(1);
 }
-console.log("CRUD contract certification PASS: canonical mutable resources expose their required lifecycle operations.");
+console.log("CRUD contract certification PASS: canonical mutable resources expose required lifecycle operations, tenant invariants, scheduling policy, and financial authority.");

@@ -1880,17 +1880,16 @@ platformRouter.get("/v1/platform/business-preferences", async (c) => {
 
 platformRouter.get("/v1/platform/business-profile/coordinates", async (c) => {
   const { supabase, user } = await requireAuth(c);
-  const { data, error } = await (supabase as any)
-    .from("business_profiles")
-    .select("service_coordinates")
-    .eq("user_id", user.id)
+  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id, readWorkspaceHint(c));
+  if (!workspaceId) return json(null);
+  const { data: settings, error } = await supabase
+    .from("workspace_settings")
+    .select("operational_settings")
+    .eq("workspace_id", workspaceId)
     .maybeSingle();
-  if (error) throw new Error(error.message);
-  const coords = data?.service_coordinates as { lat?: number; lng?: number } | null;
-  if (coords && typeof coords.lat === "number" && typeof coords.lng === "number") {
-    return json({ lat: coords.lat, lng: coords.lng });
-  }
-  return json(null);
+  if (error) throw error;
+  const coords = serviceCoordinatesFromOperational(settings?.operational_settings);
+  return coords ? json(coords) : json(null);
 });
 
 // ---------------------------------------------------------------------------
@@ -2196,22 +2195,13 @@ async function loadCanonicalOnboardingProfile(supabase: any, userId: string) {
 
 platformRouter.get("/v1/platform/onboarding/status", async (c) => {
   const { supabase, user } = await requireAuth(c);
-
-  const { data: link, error: linkError } = await (supabase as any)
-    .from("team_user_links")
-    .select("id")
-    .eq("member_user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-  if (linkError) throw linkError;
-  if (link) return json({ authenticated: true, onboardingCompleted: true, verified: true });
-
-  const canonical = await loadCanonicalOnboardingProfile(supabase, user.id);
+  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id);
   return json({
     authenticated: true,
-    onboardingCompleted: Boolean(canonical.profile?.onboarding_completed),
-    verified: Boolean(canonical.workspace && canonical.settings),
-    workspaceId: canonical.workspaceId,
+    onboardingCompleted: true,
+    verified: true,
+    workspaceId,
+    sunset: true,
   });
 });
 
@@ -2410,12 +2400,22 @@ platformRouter.get("/v1/platform/onboarding/site-import/latest", async (c) => {
 
 platformRouter.get("/v1/platform/dashboard/onboarding-info", async (c) => {
   const { supabase, user } = await requireAuth(c);
-  const canonical = await loadCanonicalOnboardingProfile(supabase, user.id);
+  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id, readWorkspaceHint(c));
+  let ownerName: string | null = null;
+  if (workspaceId) {
+    const { data: settings } = await supabase
+      .from("workspace_settings")
+      .select("owner_name")
+      .eq("workspace_id", workspaceId)
+      .maybeSingle();
+    ownerName = settings?.owner_name ?? null;
+  }
   return json({
     hasUser: true,
-    onboardingCompleted: Boolean(canonical.profile?.onboarding_completed),
-    ownerName: canonical.settings?.owner_name ?? null,
-    resolved: Boolean(canonical.workspace && canonical.settings),
+    onboardingCompleted: true,
+    ownerName,
+    resolved: true,
+    sunset: true,
   });
 });
 

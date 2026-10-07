@@ -15,7 +15,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { ApiError, json, paginationSchema } from "@/server/api";
-import { createSupabaseAdminClient, createSupabaseAnonServerClient } from "@/lib/supabase";
+import { createSupabaseAdminClient } from "@/lib/supabase";
 import { requireAuth, requireWorkspaceAuth } from "@/server/hono/middleware/auth";
 
 export const workOrdersRouter = new Hono();
@@ -1035,9 +1035,25 @@ workOrdersRouter.get("/v1/detailing-pricing/rules", async (c) => {
 });
 
 workOrdersRouter.get("/v1/detailing-pricing/public-rules", async (c) => {
-  const businessUserId = z.string().min(1).parse(new URL(c.req.url).searchParams.get("business_user_id") ?? "");
-  const anon = createSupabaseAnonServerClient();
-  const { data, error } = await (anon.rpc as any)("get_public_detailing_pricing_rules", { p_business_user_id: businessUserId });
+  const businessUserId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("business_user_id") ?? "");
+  const admin = createSupabaseAdminClient();
+  const db = admin as any;
+  const { data: workspaces, error: workspaceError } = await db
+    .from("workspaces")
+    .select("id")
+    .eq("created_by", businessUserId)
+    .eq("is_active", true);
+  if (workspaceError) throw workspaceError;
+  const workspaceIds = ((workspaces ?? []) as Array<{ id: string }>).map((workspace) => workspace.id);
+  if (!workspaceIds.length) return json({ data: [] });
+
+  const { data, error } = await db
+    .from("detailing_pricing_rules")
+    .select("id,workspace_id,service_catalog_id,size_tier,condition,price_multiplier,duration_multiplier,flat_fee,photo_required,quote_required,requires_water,requires_power,requires_covered_area")
+    .in("workspace_id", workspaceIds)
+    .order("service_catalog_id")
+    .order("size_tier")
+    .order("condition");
   if (error) throw error;
   return json({ data: data ?? [] });
 });

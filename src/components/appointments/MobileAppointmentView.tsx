@@ -152,7 +152,7 @@ export const MobileAppointmentView = ({
     ];
 
     return (
-      <ScrollArea className="h-[calc(100vh-220px)]">
+      <div className="pb-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom)+1rem)] md:max-h-[calc(100dvh-220px)] md:overflow-y-auto md:pb-4">
         <div className="p-4 space-y-6">
           {sortedGroupKeys.length > 0 ? (
             sortedGroupKeys.map(date => {
@@ -192,7 +192,7 @@ export const MobileAppointmentView = ({
             </div>
           )}
         </div>
-      </ScrollArea>
+      </div>
     );
   };
   
