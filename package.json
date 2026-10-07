@@ -12,7 +12,7 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node scripts/check-architecture-contract.mjs && node scripts/check-identity-contract.mjs && node scripts/check-frontend-ui-contract.mjs && node scripts/certify-crud-contract.mjs && node scripts/certify-email-lifecycle.mjs && node scripts/certify-onboarding-contract.mjs",
+    "prebuild": "node scripts/check-architecture-contract.mjs && node scripts/check-identity-contract.mjs && node scripts/check-frontend-ui-contract.mjs && node scripts/certify-crud-contract.mjs && node scripts/certify-email-lifecycle.mjs && node scripts/certify-onboarding-contract.mjs && node scripts/certify-regression-lock.mjs",
     "build": "next build",
     "typecheck": "tsc --noEmit",
     "test": "jest --runInBand",
@@ -30,7 +30,8 @@
     "start": "next start",
     "certify:crud-contract": "node scripts/certify-crud-contract.mjs",
     "certify:email": "node scripts/certify-email-lifecycle.mjs",
-    "certify:onboarding": "node scripts/certify-onboarding-contract.mjs"
+    "certify:onboarding": "node scripts/certify-onboarding-contract.mjs",
+    "certify:regressions": "node scripts/certify-regression-lock.mjs"
   },
   "playwright": {
     "config": "./e2e/playwright.config.ts"
