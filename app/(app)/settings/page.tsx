@@ -86,7 +86,25 @@ function SettingsRoute() {
     <RequireAuth>
       <RouteRoleGuard>
         <RouteErrorBoundary section="Settings">
-          <Settings />
+          <div className="settings-route contents">
+            <Settings />
+          </div>
+          <style>{`
+            /* The Settings save bar is fixed independently of AppLayout.
+               Keep it above the mobile bottom nav and do not reserve desktop
+               sidebar space until AppLayout actually renders the sidebar. */
+            @media (max-width: 767px) {
+              .settings-route .fixed.bottom-0.left-0.right-0.z-30 {
+                bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom));
+              }
+            }
+
+            @media (min-width: 768px) and (max-width: 1023px) {
+              .settings-route .fixed.bottom-0.left-0.right-0.z-30 {
+                left: 0 !important;
+              }
+            }
+          `}</style>
         </RouteErrorBoundary>
       </RouteRoleGuard>
     </RequireAuth>
