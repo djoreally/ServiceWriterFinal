@@ -1,51 +1,50 @@
 import { expect, test } from "@playwright/test";
 
+const bookingUrl = process.env.E2E_PUBLIC_BOOKING_URL || "";
+const authenticatedState = process.env.E2E_AUTH_STORAGE_STATE || "";
+const appointmentId = process.env.E2E_APPOINTMENT_ID || "";
+const invoiceId = process.env.E2E_INVOICE_ID || "";
+
 /**
- * Critical path: public booking → appointment → invoice → payment.
+ * Critical revenue path regression coverage.
  *
- * This is a smoke test of the full revenue cycle. It verifies that:
- * 1. A public booking can be created
- * 2. The booking appears as an appointment
- * 3. An invoice can be generated from the appointment
- * 4. The invoice can be marked as paid
- *
- * Note: This test requires a seeded test workspace. See e2e/README.md for setup.
+ * Always-on tests protect routing/reachability without requiring seeded data.
+ * Seeded environment variables unlock the full browser journey in deployment CI.
  */
-
 test.describe("booking → invoice → payment critical path", () => {
-  test("public booking creates appointment", async ({ page }) => {
-    // TODO: Implement once test workspace seeding is available
-    // Steps:
-    // 1. Navigate to /public-services/test-workspace
-    // 2. Select a service
-    // 3. Fill in customer details
-    // 4. Select date/time
-    // 5. Submit booking
-    // 6. Verify confirmation page
-    test.skip();
+  test("public booking command routes are not swallowed by appointment [id]", async ({ request }) => {
+    for (const route of ["booking-progress", "booking-recovered", "booking-rpc"]) {
+      const response = await request.post(`/api/v1/appointments/${route}`, { data: {} });
+      expect(response.status(), `${route} must reach its POST handler instead of dynamic [id] routing`).not.toBe(405);
+    }
   });
 
-  test("appointment converts to invoice", async ({ page }) => {
-    // TODO: Implement
-    // Steps:
-    // 1. Login as owner
-    // 2. Navigate to appointments
-    // 3. Select test appointment
-    // 4. Generate invoice
-    // 5. Verify invoice details
-    test.skip();
+  test("public booking surface renders without horizontal clipping", async ({ page }) => {
+    test.skip(!bookingUrl, "Set E2E_PUBLIC_BOOKING_URL to exercise a seeded tenant booking surface.");
+    await page.goto(bookingUrl);
+    await expect(page.locator("body")).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });
 
-  test("invoice records payment without date crash", async ({ page }) => {
-    // TODO: Implement
-    // This specifically guards against the "Invalid time value" crash
-    // that occurred with null paid_at dates (fixed in f0b52e4).
-    // Steps:
-    // 1. Login as owner
-    // 2. Navigate to invoices
-    // 3. Select test invoice
-    // 4. Record payment
-    // 5. Verify payment appears in Financials without crash
-    test.skip();
+  test("seeded appointment can be opened and exposes financial controls", async ({ browser }) => {
+    test.skip(!authenticatedState || !appointmentId, "Set authenticated storage state and E2E_APPOINTMENT_ID for the staff revenue journey.");
+    const context = await browser.newContext({ storageState: authenticatedState });
+    const page = await context.newPage();
+    await page.goto(`/appointments/${encodeURIComponent(appointmentId)}`);
+    await expect(page.locator("body")).toBeVisible();
+    await expect(page.getByText(/Financial Summary|Invoice|Payment/i).first()).toBeVisible({ timeout: 15_000 });
+    await context.close();
+  });
+
+  test("seeded invoice opens without invalid-date crash", async ({ browser }) => {
+    test.skip(!authenticatedState || !invoiceId, "Set authenticated storage state and E2E_INVOICE_ID for invoice/payment coverage.");
+    const context = await browser.newContext({ storageState: authenticatedState });
+    const page = await context.newPage();
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    await page.goto(`/invoices/${encodeURIComponent(invoiceId)}`);
+    await expect(page.locator("body")).toBeVisible();
+    expect(pageErrors.some((message) => /Invalid time value/i.test(message))).toBe(false);
+    await context.close();
   });
 });
