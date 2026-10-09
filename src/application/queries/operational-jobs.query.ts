@@ -116,6 +116,12 @@ function optionalString(value: unknown): string | null {
   return typeof value === "string" && value ? value : null;
 }
 
+function optionalNumber(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function customerName(customer: OperationalCustomerSource | null): string | null {
   if (!customer) return null;
   return [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim() || customer.company_name || null;
@@ -170,9 +176,11 @@ function appointmentJob(row: AppointmentJobSource, profileNames: Map<string, str
     dispatch_notes: optionalString(meta.dispatch_notes),
     guest_name: optionalString(meta.guest_name),
     guest_phone: optionalString(meta.guest_phone),
-    location_address: address(location) ?? address(customer),
-    location_lat: location?.latitude == null ? null : Number(location.latitude),
-    location_lng: location?.longitude == null ? null : Number(location.longitude),
+    // Service location is owned by the appointment. Never fall back to a
+    // customer profile address: a missing appointment location must stay missing.
+    location_address: address(location) ?? optionalString(meta.location_address),
+    location_lat: location?.latitude == null ? optionalNumber(meta.location_lat) : Number(location.latitude),
+    location_lng: location?.longitude == null ? optionalNumber(meta.location_lng) : Number(location.longitude),
     estimated_cost: meta.estimated_cost == null ? null : Number(meta.estimated_cost),
     source: "appointment",
     customer_name: customerName(customer),
@@ -216,9 +224,10 @@ function workOrderJob(row: WorkOrderJobSource, assignmentByOrder: Map<string, st
     dispatch_notes: optionalString(meta.dispatch_notes) ?? row.technician_notes,
     guest_name: null,
     guest_phone: null,
-    location_address: address(location) ?? address(customer) ?? optionalString(meta.location_address),
-    location_lat: location?.latitude == null ? (meta.location_lat == null ? null : Number(meta.location_lat)) : Number(location.latitude),
-    location_lng: location?.longitude == null ? (meta.location_lng == null ? null : Number(meta.location_lng)) : Number(location.longitude),
+    // Work orders follow the same rule: use the job-owned location only.
+    location_address: address(location) ?? optionalString(meta.location_address),
+    location_lat: location?.latitude == null ? optionalNumber(meta.location_lat) : Number(location.latitude),
+    location_lng: location?.longitude == null ? optionalNumber(meta.location_lng) : Number(location.longitude),
     estimated_cost: meta.estimated_cost == null ? null : Number(meta.estimated_cost),
     source: "work_order",
     fleet_job_id: optionalString(meta.fleet_job_id),
