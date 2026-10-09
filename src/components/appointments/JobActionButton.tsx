@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { Play, ClipboardCheck, CheckCircle2, Loader2, FileText } from "lucide-react";
+import { Play, ClipboardCheck, CheckCircle2, Loader2, FileText, RefreshCw } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
 import { useNavigate } from "react-router-dom";
 import { startAppointmentJob } from "@/application/commands/appointment-detail.command";
@@ -12,37 +12,41 @@ import type { Appointment } from "@/shared/types";
 
 interface JobActionButtonProps { appointment: JobActionAppointment; onUpdated: () => void; className?: string; }
 type JobActionAppointment = Appointment & { actual_start_time?: string | null; };
-type Step = "loading" | "start" | "inspection" | "complete" | "done";
+type Step = "loading" | "start" | "inspection" | "complete" | "done" | "gate_error";
 
 export function JobActionButton({ appointment, onUpdated, className }: JobActionButtonProps) {
   const navigate = useNavigate();
   const [starting, setStarting] = useState(false);
   const [gate, setGate] = useState<AppointmentInspectionGate | null>(null);
+  const [gateError, setGateError] = useState<string | null>(null);
   const [showInspection, setShowInspection] = useState(false);
   const [showComplete, setShowComplete] = useState(false);
 
   const refreshGate = useCallback(async () => {
-    try { setGate(await fetchAppointmentInspectionGate(appointment.id)); }
-    catch { setGate({ required: [], pendingCount: 0 }); }
+    setGateError(null);
+    try {
+      setGate(await fetchAppointmentInspectionGate(appointment.id));
+    } catch (error) {
+      setGate(null);
+      setGateError(error instanceof Error ? error.message : "Required inspection status could not be verified.");
+    }
   }, [appointment.id]);
 
   useEffect(() => { void Promise.resolve().then(() => refreshGate()); }, [refreshGate]);
 
   const status = (appointment.status || "").toLowerCase();
   const dispatchStatus = (appointment.dispatch_status || "").toLowerCase();
-  const started = status === "in_progress" || dispatchStatus === "in_progress" || Boolean(appointment.actual_start_time);
+  const started = status === "in_progress" || dispatchStatus === "in_progress" || dispatchStatus === "started" || Boolean(appointment.actual_start_time);
   const isCompleted = status === "completed" || dispatchStatus === "completed";
 
   let step: Step = "loading";
-  if (gate === null) step = "loading";
-  else if (isCompleted) step = "done";
+  if (isCompleted) step = "done";
   else if (!started) step = "start";
+  else if (gateError) step = "gate_error";
+  else if (gate === null) step = "loading";
   else if (gate.pendingCount > 0) step = "inspection";
   else step = "complete";
 
-  // On mobile, the active workflow action stays visible above the bottom nav.
-  // The appointment page is long; burying Start/Complete below the financials
-  // makes the primary shop action effectively disappear in real use.
   const actionClass = [
     className,
     "max-md:fixed max-md:left-4 max-md:right-4 max-md:bottom-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom)+0.75rem)]",
@@ -57,12 +61,22 @@ export function JobActionButton({ appointment, onUpdated, className }: JobAction
       toast.error(res.error || "Failed to start job");
       return;
     }
-    const nextGate = await fetchAppointmentInspectionGate(appointment.id).catch(() => ({ required: [], pendingCount: 0 }));
-    setGate(nextGate);
-    setStarting(false);
-    toast.success(res.alreadyStarted ? "Job already started" : "Job started");
-    onUpdated();
-    if (nextGate.pendingCount > 0) setShowInspection(true);
+
+    try {
+      const nextGate = await fetchAppointmentInspectionGate(appointment.id);
+      setGate(nextGate);
+      setGateError(null);
+      toast.success(res.alreadyStarted ? "Job already started" : "Job started");
+      onUpdated();
+      if (nextGate.pendingCount > 0) setShowInspection(true);
+    } catch (error) {
+      setGate(null);
+      setGateError(error instanceof Error ? error.message : "Required inspection status could not be verified.");
+      toast.error("Job started, but the required inspection checklist could not be verified. Retry before completing this job.");
+      onUpdated();
+    } finally {
+      setStarting(false);
+    }
   };
 
   const handleCompleteSuccess = (serviceId: string) => {
@@ -73,12 +87,14 @@ export function JobActionButton({ appointment, onUpdated, className }: JobAction
   };
 
   if (step === "loading") {
-    // Do not hide the workflow behind an indefinite inspection-gate load.
-    // Confirmed jobs can still present a clear start affordance immediately.
     if (!started && !isCompleted) {
       return <Button className={actionClass} variant="default" onClick={handleStart} disabled={starting}>{starting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}Start Job</Button>;
     }
     return <Button className={actionClass} variant="default" disabled><Loader2 className="h-4 w-4 mr-2 animate-spin" />Loading job…</Button>;
+  }
+
+  if (step === "gate_error") {
+    return <Button className={actionClass} variant="destructive" onClick={() => void refreshGate()}><RefreshCw className="h-4 w-4 mr-2" />Retry Inspection Check</Button>;
   }
 
   if (step === "done") return <Button className={actionClass} variant="outline" onClick={() => { const svc = appointment.service_record_id; if (svc) navigate(`/services/${svc}`); }}><FileText className="h-4 w-4 mr-2" />View Service Record</Button>;
