@@ -48,7 +48,9 @@ export async function fetchAppointmentWithRelations(id: string, _userId: string)
       id: customerRow.id,
       name: [customerRow.first_name, customerRow.last_name].filter(Boolean).join(" ") || customerRow.company_name || "Customer",
       email: customerRow.email ?? "", phone: customerRow.phone ?? "",
-      address: [customerRow.address_line1, customerRow.address_line2, customerRow.city, customerRow.region, customerRow.postal_code].filter(Boolean).join(", "),
+      // A customer profile is identity/contact data. It is never an appointment
+      // service-location fallback. The appointment owns its service address.
+      address: null,
       notes: customerRow.notes ?? undefined,
     } : null;
 
@@ -103,15 +105,13 @@ export async function fetchAppointmentWithRelations(id: string, _userId: string)
 /** Legacy compatibility fallback. Canonical appointment detail resolves specs by vehicle_id and booking snapshot above. */
 export async function fetchVehicleSpecs(_make: string, _model: string, _year: string | number) { return { data: null, error: null }; }
 
-export async function fetchCustomerAddressByGuestEmail(email: string, _userId: string) {
-  const context = await resolveCurrentWorkspace();
-  if (!context) return { data: null, error: new Error("No active workspace is available.") };
-  const response = await apiClient.get<{ data: { address_line1: string | null; address_line2: string | null; city: string | null; region: string | null; postal_code: string | null; phone: string | null } | null }>(
-    "/v1/appointments/customer-address-by-email",
-    { query: { email, selected_workspace_id: context.workspaceId } },
-  );
-  const row = response.data;
-  return { data: row ? { address: [row.address_line1, row.address_line2, row.city, row.region, row.postal_code].filter(Boolean).join(", "), phone: row.phone } : null, error: null };
+/**
+ * Legacy signature retained for callers, but customer addresses are intentionally
+ * not returned as appointment locations. A missing appointment address must stay
+ * missing until the appointment itself is corrected.
+ */
+export async function fetchCustomerAddressByGuestEmail(_email: string, _userId: string) {
+  return { data: null, error: null };
 }
 
 export async function fetchSucceededPayments(appointmentId: string) {
