@@ -5,7 +5,6 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ChevronDown, ChevronRight, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useRegionalSettings } from '@/contexts/RegionalSettingsContext';
 import {
@@ -193,7 +192,7 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
       <Card>
         <CardContent className="flex flex-col items-start gap-3 p-5">
           <div className="flex items-center gap-2 text-destructive">
-            <AlertCircle className="h-5 w-5" />
+            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-current text-xs font-bold">!</span>
             <p className="text-sm font-medium">Dashboard data could not be loaded.</p>
           </div>
           <p className="text-sm text-muted-foreground">
@@ -321,7 +320,7 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
           <CardContent className="p-2">
             {attentionItems.length === 0 ? (
               <div className="flex items-center gap-2.5 p-3">
-                <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-500" />
+                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-500 text-xs font-bold">✓</span>
                 <p className="text-sm text-muted-foreground">
                   Nothing needs your attention. The day is running clean.
                 </p>
@@ -344,7 +343,7 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
                     {canOpen && (
                       <span className="flex shrink-0 items-center gap-1 text-sm font-medium text-primary">
                         {item.actionLabel}
-                        <ChevronRight className="h-4 w-4" />
+                        <span aria-hidden="true">›</span>
                       </span>
                     )}
                   </div>
@@ -453,7 +452,7 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
           <h2 id="revenue-heading">
             <CollapsibleTrigger className="group flex w-full items-center gap-1.5 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
               <span className="text-lg font-semibold tracking-tight">Revenue detail</span>
-              <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" aria-hidden="true" />
+              <span className="text-muted-foreground transition-transform group-data-[state=open]:rotate-180" aria-hidden="true">⌄</span>
             </CollapsibleTrigger>
           </h2>
           <CollapsibleContent className="pt-2">
