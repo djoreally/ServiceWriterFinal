@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 
 export type AppRole = "admin" | "moderator" | "user";
@@ -150,14 +150,57 @@ export function useSessionSecurity(options: {
   onIdleTimeout?: () => void;
 } = {}) {
   const { session, signOut } = useAuth();
+  const optionsRef = useRef(options);
+  const signOutRef = useRef(signOut);
+
   useEffect(() => {
-    if (!session || !options.idleTimeoutMs) return;
-    const timer = window.setTimeout(() => {
-      options.onIdleTimeout?.();
-      void signOut();
-    }, options.idleTimeoutMs);
-    return () => window.clearTimeout(timer);
-  }, [session, signOut, options.idleTimeoutMs, options]);
+    optionsRef.current = options;
+  }, [options]);
+
+  useEffect(() => {
+    signOutRef.current = signOut;
+  }, [signOut]);
+
+  useEffect(() => {
+    const idleTimeoutMs = optionsRef.current.idleTimeoutMs;
+    if (!session || !idleTimeoutMs) return;
+
+    let timer: number | undefined;
+
+    const scheduleTimeout = () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        optionsRef.current.onIdleTimeout?.();
+        void signOutRef.current();
+      }, idleTimeoutMs);
+    };
+
+    const activityEvents: Array<keyof WindowEventMap> = [
+      "pointerdown",
+      "keydown",
+      "touchstart",
+      "scroll",
+    ];
+
+    for (const eventName of activityEvents) {
+      window.addEventListener(eventName, scheduleTimeout, { passive: true });
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") scheduleTimeout();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    scheduleTimeout();
+
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      for (const eventName of activityEvents) {
+        window.removeEventListener(eventName, scheduleTimeout);
+      }
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [session?.access_token]);
 }
 
 export async function hasRole(userId: string, role: AppRole): Promise<boolean> {
