@@ -120,20 +120,10 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
   const prevMonthMtdEnd = boundary(new Date(prevMonth.getFullYear(), prevMonth.getMonth(), Math.min(dayOfMonth, prevMonthLastDay)), true);
 
   const [
-    payToday,
-    payYesterday,
-    payWeek,
-    payMonth,
-    payYtd,
-    payPrevMonth,
+    allReceipts,
     cockpitRows,
   ] = await Promise.all([
-    fetchCanonicalCashReceipts({ workspaceId, from: todayStart, to: todayEnd }),
-    fetchCanonicalCashReceipts({ workspaceId, from: yesterdayStart, to: yesterdayEnd }),
-    fetchCanonicalCashReceipts({ workspaceId, from: weekStart }),
-    fetchCanonicalCashReceipts({ workspaceId, from: monthStart }),
     fetchCanonicalCashReceipts({ workspaceId, from: yearStart }),
-    fetchCanonicalCashReceipts({ workspaceId, from: prevMonthStart, to: prevMonthMtdEnd }),
     apiClient.get<{
       todayApptRows: any[];
       upcoming7Rows: any[];
@@ -158,9 +148,22 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
     }),
   ]);
 
-  for (const result of [payToday, payYesterday, payWeek, payMonth, payYtd, payPrevMonth]) {
-    if (result.error) throw result.error;
-  }
+  if (allReceipts.error) throw allReceipts.error;
+
+  // Bucket the single YTD fetch into the date ranges the dashboard needs.
+  // This replaces 6 separate API calls with 1.
+  const receipts = allReceipts.data;
+  const inRange = (from: string, to?: string) =>
+    receipts.filter((r) => {
+      const t = r.collected_at;
+      return t >= from && (to == null || t <= to);
+    });
+  const payToday = { data: inRange(todayStart, todayEnd) };
+  const payYesterday = { data: inRange(yesterdayStart, yesterdayEnd) };
+  const payWeek = { data: inRange(weekStart) };
+  const payMonth = { data: inRange(monthStart) };
+  const payYtd = { data: receipts };
+  const payPrevMonth = { data: inRange(prevMonthStart, prevMonthMtdEnd) };
 
   const { todayApptRows, upcoming7Rows, inProgressRows, completedTodayRows, completedMonthRows, invoiceRows } = cockpitRows;
 
