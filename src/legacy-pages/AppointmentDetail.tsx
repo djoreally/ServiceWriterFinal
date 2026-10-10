@@ -1,5 +1,5 @@
 import { errorMessage } from "@/lib/error-message";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sendReviewRequest } from "@/application/commands/review-request.command";
 import { computeFinancialSummary } from "@/lib/financialMath";
 import { useNavigate, useParams } from "react-router-dom";
@@ -40,11 +40,9 @@ import { formatTimeLabel } from "@/lib/datetime";
 import {
   ArrowLeft,
   MapPin,
-  Car,
   CheckCircle2,
   Clock,
   FileText,
-  User,
   Calendar,
   History,
   Edit,
@@ -57,6 +55,7 @@ import {
   Star,
   UserX,
   MessageSquare,
+  Navigation,
 } from "lucide-react";
 import { InternalInbox } from "@/components/communications/InternalInbox";
 import {
@@ -79,7 +78,7 @@ import { AppointmentServicesList } from "@/components/appointments/AppointmentSe
 import { AppointmentPaymentsTab } from "@/components/appointments/AppointmentPaymentsTab";
 import { CompleteAppointmentDialog } from "@/components/appointments/CompleteAppointmentDialog";
 import { JobActionButton } from "@/components/appointments/JobActionButton";
-import { MobileDispatchView } from "@/components/tech/MobileDispatchView";
+import { FieldJobView } from "@/components/tech/FieldJobView";
 import { AppointmentSmsTimeline } from "@/components/appointments/AppointmentSmsTimeline";
 import { toast } from "@/components/ui/sonner";
 import { useServiceCategoryPolicy } from "@/hooks/useServiceCategoryPolicy";
@@ -123,6 +122,20 @@ function cleanHumanNotes(value?: string | null) {
   }
 
   return kept.join("\n").trim();
+}
+
+/** 12px uppercase eyebrow — establishes context above a heading, never carries content alone. */
+function Eyebrow({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <p className={cn("text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground", className)}>
+      {children}
+    </p>
+  );
+}
+
+/** Definition-list label for field data (VIN, plate, odometer). Caption size, always paired with mono data. */
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return <dt className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">{children}</dt>;
 }
 
 export const AppointmentDetail = ({
@@ -250,6 +263,16 @@ export const AppointmentDetail = ({
     void fetchFees();
   }, [overrideUserId]);
 
+  // Progressive disclosure: a finished job opens on money, everything else opens on services.
+  const defaultTabSet = useRef(false);
+  useEffect(() => {
+    if (appointment && !defaultTabSet.current) {
+      defaultTabSet.current = true;
+      const terminal = appointment.status === "completed" || appointment.status === "cancelled" || appointment.status === "no_show";
+      setActiveTab(terminal ? "payments" : "services");
+    }
+  }, [appointment]);
+
   const handleReschedule = async () => {
     if (!appointment || !rescheduleDate || !rescheduleTime) return;
     setRescheduling(true);
@@ -353,11 +376,42 @@ export const AppointmentDetail = ({
     }
   };
 
+  const stageEyebrow = useMemo(() => {
+    if (!appointment) return "Appointment";
+    switch (appointment.status) {
+      case "completed":
+        return "Finished job";
+      case "cancelled":
+        return "Cancelled appointment";
+      case "no_show":
+        return "No show";
+      case "pending":
+        return "Awaiting approval";
+      default:
+        return "Scheduled job";
+    }
+  }, [appointment]);
+
   if (loading) {
     return (
       <AppointmentDetailLayout embedded={embedded}>
-        <div className="flex h-64 items-center justify-center">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <div className="mx-auto w-full max-w-6xl space-y-6 px-4 pb-12 pt-6" aria-busy="true" aria-label="Loading appointment details">
+          <div className="flex items-center gap-3">
+            <div className="h-12 w-12 animate-pulse rounded-md bg-muted" />
+            <div className="space-y-2">
+              <div className="h-3 w-32 animate-pulse rounded bg-muted" />
+              <div className="h-8 w-64 animate-pulse rounded bg-muted" />
+            </div>
+          </div>
+          <div className="h-20 animate-pulse rounded-xl bg-muted" />
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <div className="space-y-6 lg:col-span-2">
+              <div className="h-72 animate-pulse rounded-xl bg-muted" />
+              <div className="h-48 animate-pulse rounded-xl bg-muted" />
+            </div>
+            <div className="h-96 animate-pulse rounded-xl bg-muted" />
+          </div>
+          <span className="sr-only">Loading appointment details</span>
         </div>
       </AppointmentDetailLayout>
     );
@@ -366,10 +420,17 @@ export const AppointmentDetail = ({
   if (error || !appointment) {
     return (
       <AppointmentDetailLayout embedded={embedded}>
-        <div className="mx-auto max-w-md space-y-4 py-12 text-center">
-          <h1 className="text-xl font-semibold">Appointment unavailable</h1>
-          <p className="text-muted-foreground">{error ?? "This appointment could not be found."}</p>
-          <Button onClick={() => navigate(-1)} className="w-full">Back</Button>
+        <div className="mx-auto max-w-md space-y-4 px-4 py-12 text-center">
+          <h1 className="text-[30px] font-semibold leading-[1.2] tracking-tight">Appointment unavailable</h1>
+          <p className="text-base text-muted-foreground">{error ?? "This appointment could not be found."}</p>
+          <div className="flex flex-col gap-3 pt-2">
+            <Button onClick={() => fetchAppointment()} className="min-h-[56px] text-base">
+              Try again
+            </Button>
+            <Button variant="outline" onClick={() => navigate(-1)} className="min-h-[56px] text-base">
+              Back
+            </Button>
+          </div>
         </div>
       </AppointmentDetailLayout>
     );
@@ -381,6 +442,8 @@ export const AppointmentDetail = ({
     : "Vehicle not specified";
   const customerName = appointment.guest_name || appointment.customer?.name || "Customer";
   const customerEmail = appointment.customer?.email || appointment.guest_email || null;
+  const customerPhone = appointment.customer?.phone || appointment.guest_phone || null;
+  const address = resolvedAddress || appointment.customer?.address || null;
   const humanNotes = cleanHumanNotes(appointment.notes || appointment.description);
   const estimatedCost = servicesTotal || appointment.estimated_cost || 0;
   const taxAmount = appointment.tax_amount || 0;
@@ -397,34 +460,51 @@ export const AppointmentDetail = ({
   const isEditable = appointment.status !== "completed" && appointment.status !== "cancelled";
   const canReactivate = appointment.status === "cancelled" || appointment.status === "no_show";
 
+  const openDirections = () => {
+    if (!address) return;
+    window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`, "_blank", "noopener,noreferrer");
+  };
+
   return (
     <AppointmentDetailLayout embedded={embedded}>
-      <div className="space-y-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <div className="flex flex-wrap items-center gap-3">
-              <Button variant="ghost" size="icon" onClick={() => navigate(-1)} className="mr-2">
-                <ArrowLeft className="h-5 w-5" />
-              </Button>
-              <h1 className="text-2xl font-bold sm:text-3xl">Appointment #{appointment.id.slice(0, 8).toUpperCase()}</h1>
-              <Badge className={cn("capitalize", statusStyle.className)}>
-                {getStatusIcon(appointment.status)}
-                <span className="ml-1">{statusStyle.label}</span>
-              </Badge>
+      <div className="mx-auto w-full max-w-6xl space-y-8 px-4 pb-28 pt-6 md:pb-12">
+        {/* Header — one H1, eyebrow for stage context, mono for the when */}
+        <header className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex items-start gap-3">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => navigate(-1)}
+              className="h-12 w-12 shrink-0"
+              aria-label="Back to appointments"
+            >
+              <ArrowLeft className="h-6 w-6" />
+            </Button>
+            <div className="min-w-0">
+              <Eyebrow>{stageEyebrow}</Eyebrow>
+              <div className="mt-1 flex flex-wrap items-center gap-3">
+                <h1 className="text-[30px] font-semibold leading-[1.2] tracking-tight">
+                  Appointment <span className="font-mono">{appointment.id.slice(0, 8).toUpperCase()}</span>
+                </h1>
+                <Badge className={cn("capitalize", statusStyle.className)}>
+                  {getStatusIcon(appointment.status)}
+                  <span className="ml-1">{statusStyle.label}</span>
+                </Badge>
+              </div>
+              <p className="mt-2 font-mono text-sm text-muted-foreground">
+                {formatDate(appointment.scheduled_date)} at {formatTimeLabel(appointment.scheduled_time, "h:mm a")} · {appointment.duration_minutes} min
+              </p>
             </div>
-            <p className="ml-12 mt-1 text-sm text-muted-foreground">
-              {formatDate(appointment.scheduled_date)} at {formatTimeLabel(appointment.scheduled_time, "h:mm a")} · {appointment.duration_minutes} min
-            </p>
           </div>
           {isEditable && (
-            <Button variant="outline" size="sm" className="gap-2" onClick={() => setEditDialogOpen(true)}>
-              <Edit className="h-4 w-4" />Edit
+            <Button variant="outline" size="sm" className="min-h-[56px] gap-2 px-6 text-base" onClick={() => setEditDialogOpen(true)}>
+              <Edit className="h-5 w-5" />Edit
             </Button>
           )}
-        </div>
+        </header>
 
         {embedded && technicianId && (
-          <MobileDispatchView
+          <FieldJobView
             appointment={{
               id: appointment.id,
               dispatch_status: appointment.dispatch_status || "assigned",
@@ -434,214 +514,341 @@ export const AppointmentDetail = ({
               location_address: appointment.location_address,
               customer: appointment.customer ? { name: appointment.customer.name } : undefined,
               service_catalog: appointment.service_catalog ? { name: appointment.service_catalog.name } : undefined,
+              vehicle: appointment.vehicle
+                ? {
+                    year: appointment.vehicle.year != null ? String(appointment.vehicle.year) : undefined,
+                    make: appointment.vehicle.make,
+                    model: appointment.vehicle.model,
+                  }
+                : null,
             }}
             technician_id={technicianId}
             onStatusChange={() => fetchAppointment()}
           />
         )}
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <div className="space-y-6 lg:col-span-2">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>{terms.customer} & {terms.vehicle}</CardTitle>
-                {appointment.customer && (
-                  <Button variant="link" size="sm" className="gap-1" onClick={() => navigate(`/customers/${appointment.customer!.id}`)}>
-                    <History className="h-4 w-4" />View History
-                  </Button>
-                )}
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                  <div className="flex gap-4">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md bg-primary/10">
-                      <User className="h-6 w-6 text-primary" />
-                    </div>
-                    <div className="min-w-0 space-y-2">
-                      <p className="font-semibold break-words">{customerName}</p>
-                      {(appointment.customer?.phone || appointment.guest_phone) && (
-                        <ClickablePhone phone={(appointment.customer?.phone || appointment.guest_phone)!} className="text-sm" />
-                      )}
-                      {customerEmail && <ClickableEmail email={customerEmail} className="text-sm" />}
-                      {(resolvedAddress || appointment.customer?.address) ? (
-                        <button
-                          onClick={() => window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(resolvedAddress || appointment.customer?.address || "")}`, "_blank", "noopener,noreferrer")}
-                          className="flex items-start gap-2 text-left text-sm text-primary hover:underline"
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
+          {/* Main column — what the job is */}
+          <div className="space-y-8 lg:col-span-2">
+            <section aria-labelledby="customer-vehicle-heading">
+              <h2 id="customer-vehicle-heading" className="text-[24px] font-semibold leading-[1.25] tracking-tight">
+                {terms.customer} &amp; {terms.vehicle}
+              </h2>
+              <Card className="mt-4">
+                <CardContent className="p-0">
+                  {/* Customer block */}
+                  <div className="space-y-4 p-6">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <Eyebrow>{terms.customer}</Eyebrow>
+                        <p className="mt-1 break-words text-[18px] font-semibold leading-[1.35]">{customerName}</p>
+                      </div>
+                      {appointment.customer && (
+                        <Button
+                          variant="link"
+                          className="min-h-[44px] shrink-0 gap-1 px-2"
+                          onClick={() => navigate(`/customers/${appointment.customer!.id}`)}
                         >
-                          <MapPin className="mt-0.5 h-4 w-4 shrink-0" />
-                          <span className="break-words">{resolvedAddress || appointment.customer?.address}</span>
-                        </button>
-                      ) : null}
+                          <History className="h-4 w-4" />History
+                        </Button>
+                      )}
                     </div>
+
+                    {customerPhone && (
+                      <ClickablePhone
+                        phone={customerPhone}
+                        className="flex min-h-[56px] w-full items-center gap-3 rounded-lg border px-4 font-mono text-[15px] text-foreground no-underline hover:bg-muted/40 hover:text-foreground hover:no-underline"
+                        iconClassName="h-5 w-5 text-primary"
+                      >
+                        <span className="sr-only">Call </span>
+                        {customerPhone}
+                      </ClickablePhone>
+                    )}
+
+                    {customerEmail && (
+                      <ClickableEmail
+                        email={customerEmail}
+                        className="flex min-h-[56px] w-full items-center gap-3 rounded-lg border px-4 text-[15px] text-foreground no-underline hover:bg-muted/40 hover:text-foreground hover:no-underline"
+                        iconClassName="h-5 w-5 text-primary"
+                      >
+                        <span className="min-w-0 flex-1 break-all font-mono text-[14px]">
+                          <span className="sr-only">Email </span>
+                          {customerEmail}
+                        </span>
+                      </ClickableEmail>
+                    )}
+
+                    {address ? (
+                      <button
+                        onClick={openDirections}
+                        className="flex min-h-[56px] w-full items-center gap-3 rounded-lg border px-4 text-left transition-colors hover:bg-muted/40"
+                      >
+                        <MapPin className="h-5 w-5 shrink-0 text-primary" aria-hidden />
+                        <span className="min-w-0 flex-1 break-words font-mono text-[14px]">{address}</span>
+                        <Navigation className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+                      </button>
+                    ) : (
+                      <div className="rounded-lg border border-dashed px-4 py-4">
+                        <p className="text-sm text-muted-foreground">
+                          No address on file for this job.{" "}
+                          <button className="underline underline-offset-2" onClick={() => setEditDialogOpen(true)}>
+                            Add one
+                          </button>{" "}
+                          so the tech can navigate.
+                        </p>
+                      </div>
+                    )}
                   </div>
 
-                  <div className="flex gap-4">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-accent/10">
-                      <Car className="h-6 w-6 text-accent-foreground" />
+                  <Separator />
+
+                  {/* Vehicle block */}
+                  <div className="space-y-4 p-6">
+                    <div>
+                      <Eyebrow>{terms.vehicle}</Eyebrow>
+                      <p className="mt-1 text-[18px] font-semibold leading-[1.35]">{vehicleName}</p>
                     </div>
-                    <div className="min-w-0 space-y-1">
-                      <p className="font-semibold">{vehicleName}</p>
-                      {appointment.vehicle?.color && <p className="text-sm text-muted-foreground">{appointment.vehicle.color}</p>}
-                      <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-                        {appointment.vehicle?.vin && (
-                          <>
-                            <span className="font-medium text-muted-foreground">VIN</span>
-                            <span className="font-medium text-muted-foreground">ODOMETER</span>
-                            <span>{appointment.vehicle.vin.slice(0, 10)}...</span>
-                            <span>{appointment.vehicle.mileage?.toLocaleString() || "—"} mi</span>
-                          </>
+                    {appointment.vehicle ? (
+                      <dl className="grid grid-cols-2 gap-x-6 gap-y-4">
+                        {appointment.vehicle.vin && (
+                          <div className="col-span-2 sm:col-span-1">
+                            <FieldLabel>VIN</FieldLabel>
+                            <dd className="mt-1 break-all font-mono text-[14px]">{appointment.vehicle.vin}</dd>
+                          </div>
                         )}
-                        {appointment.vehicle?.license_plate && (
-                          <>
-                            <span className="font-medium text-muted-foreground">PLATE</span>
-                            <span />
-                            <span>{appointment.vehicle.license_plate}</span>
-                          </>
+                        {appointment.vehicle.license_plate && (
+                          <div>
+                            <FieldLabel>Plate</FieldLabel>
+                            <dd className="mt-1 font-mono text-[14px]">{appointment.vehicle.license_plate}</dd>
+                          </div>
                         )}
+                        {appointment.vehicle.mileage != null && (
+                          <div>
+                            <FieldLabel>Odometer</FieldLabel>
+                            <dd className="mt-1 font-mono text-[14px]">{appointment.vehicle.mileage.toLocaleString()} mi</dd>
+                          </div>
+                        )}
+                        {appointment.vehicle.color && (
+                          <div>
+                            <FieldLabel>Color</FieldLabel>
+                            <dd className="mt-1 text-base">{appointment.vehicle.color}</dd>
+                          </div>
+                        )}
+                      </dl>
+                    ) : (
+                      <div className="rounded-lg border border-dashed px-4 py-4">
+                        <p className="text-sm text-muted-foreground">
+                          No vehicle attached yet.{" "}
+                          <button className="underline underline-offset-2" onClick={() => setEditDialogOpen(true)}>
+                            Add one
+                          </button>{" "}
+                          so the tech knows what to service.
+                        </p>
                       </div>
-                    </div>
+                    )}
                   </div>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </section>
 
             <AppointmentConfigurationSummary appointmentId={appointment.id} />
 
-            <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="services" className="gap-2"><Wrench className="h-4 w-4" />Services</TabsTrigger>
-                <TabsTrigger value="payments" className="gap-2"><Receipt className="h-4 w-4" />Invoices & Payments</TabsTrigger>
-                <TabsTrigger value="messages" className="gap-2"><MessageSquare className="h-4 w-4" />Job Messages</TabsTrigger>
-              </TabsList>
+            <section aria-label="Job records">
+              <h2 className="text-[24px] font-semibold leading-[1.25] tracking-tight">Job records</h2>
+              <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-4">
+                <TabsList className="grid h-auto w-full grid-cols-3 gap-1 rounded-xl p-1">
+                  <TabsTrigger value="services" className="min-h-[56px] gap-2 text-base">
+                    <Wrench className="h-5 w-5" />Services
+                  </TabsTrigger>
+                  <TabsTrigger value="payments" className="min-h-[56px] gap-2 text-base">
+                    <Receipt className="h-5 w-5" />Invoices &amp; Payments
+                  </TabsTrigger>
+                  <TabsTrigger value="messages" className="min-h-[56px] gap-2 text-base">
+                    <MessageSquare className="h-5 w-5" />Job Messages
+                  </TabsTrigger>
+                </TabsList>
 
-              <TabsContent value="services" className="mt-4">
-                <AppointmentServicesList
-                  appointmentId={appointment.id}
-                  appointmentStatus={appointment.status}
-                  estimatedCost={appointment.estimated_cost}
-                  taxAmount={appointment.tax_amount}
-                  serviceCatalogId={appointment.service_catalog_id}
-                  isPrepaid={isPrepaid}
-                  onTotalChange={(subtotal) => setServicesTotal(subtotal)}
-                />
-              </TabsContent>
+                <TabsContent value="services" className="mt-4">
+                  <AppointmentServicesList
+                    appointmentId={appointment.id}
+                    appointmentStatus={appointment.status}
+                    estimatedCost={appointment.estimated_cost}
+                    taxAmount={appointment.tax_amount}
+                    serviceCatalogId={appointment.service_catalog_id}
+                    isPrepaid={isPrepaid}
+                    onTotalChange={(subtotal) => setServicesTotal(subtotal)}
+                  />
+                </TabsContent>
 
-              <TabsContent value="payments" className="mt-4">
-                <AppointmentPaymentsTab
-                  appointmentId={appointment.id}
-                  customerEmail={customerEmail}
-                  customerName={customerName}
-                  isPrepaid={isPrepaid}
-                  estimatedTotal={totalDue}
-                  taxAmount={taxAmount}
-                  subtotal={estimatedCost + wasteOilFee + shopFee + surcharge}
-                  taxRate={feeSettings?.tax_rate || undefined}
-                />
-              </TabsContent>
+                <TabsContent value="payments" className="mt-4">
+                  <AppointmentPaymentsTab
+                    appointmentId={appointment.id}
+                    customerEmail={customerEmail}
+                    customerName={customerName}
+                    isPrepaid={isPrepaid}
+                    estimatedTotal={totalDue}
+                    taxAmount={taxAmount}
+                    subtotal={estimatedCost + wasteOilFee + shopFee + surcharge}
+                    taxRate={feeSettings?.tax_rate || undefined}
+                  />
+                </TabsContent>
 
-              <TabsContent value="messages" className="mt-4">
-                <div className="h-[600px] overflow-hidden rounded-lg border">
-                  <InternalInbox initialAppointmentId={appointment.id} embedded />
-                </div>
-              </TabsContent>
-            </Tabs>
+                <TabsContent value="messages" className="mt-4">
+                  <div className="h-[600px] overflow-hidden rounded-xl border">
+                    <InternalInbox initialAppointmentId={appointment.id} embedded />
+                  </div>
+                </TabsContent>
+              </Tabs>
+            </section>
 
             {humanNotes && (
               <Card>
-                <CardHeader><CardTitle>Notes</CardTitle></CardHeader>
+                <CardHeader>
+                  <CardTitle className="text-[18px] font-semibold leading-[1.35]">Notes</CardTitle>
+                </CardHeader>
                 <CardContent>
-                  <div className="rounded-lg bg-muted/30 p-4">
-                    <p className="whitespace-pre-wrap text-sm">{humanNotes}</p>
+                  <div className="rounded-lg bg-muted/30 p-5">
+                    <p className="whitespace-pre-wrap text-base leading-[1.5]">{humanNotes}</p>
                   </div>
                 </CardContent>
               </Card>
             )}
           </div>
 
+          {/* Rail — money and actions, nothing else */}
           <div className="space-y-6 self-start lg:sticky lg:top-24">
             <Card className="border-primary/20">
               <CardHeader>
-                <CardTitle>Financial Summary</CardTitle>
-                <p className="text-xs text-muted-foreground">One total for this appointment</p>
+                <div className="flex items-center justify-between gap-3">
+                  <CardTitle className="text-[18px] font-semibold leading-[1.35]">Financial summary</CardTitle>
+                  {isPrepaid && <Badge className={statusBadgeClasses.completed}>Prepaid</Badge>}
+                </div>
+                <p className="text-sm text-muted-foreground">One total for this appointment</p>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="flex justify-between text-sm"><span className="text-muted-foreground">Services</span><span>{formatCurrency(estimatedCost)}</span></div>
-                {wasteOilFee > 0 && <div className="flex justify-between text-sm"><span className="text-muted-foreground">Waste Oil Disposal Fee</span><span>{formatCurrency(wasteOilFee)}</span></div>}
-                {shopFee > 0 && <div className="flex justify-between text-sm"><span className="text-muted-foreground">{feeSettings?.shop_fee_description || "Shop Supplies Fee"}</span><span>{formatCurrency(shopFee)}</span></div>}
-                {surcharge > 0 && <div className="flex justify-between text-sm"><span className="text-muted-foreground">{feeSettings?.surcharge_description || "Card Processing Fee"}</span><span>{formatCurrency(surcharge)}</span></div>}
-                {taxAmount > 0 && <div className="flex justify-between text-sm"><span className="text-muted-foreground">Tax</span><span>{formatCurrency(taxAmount)}</span></div>}
-                <Separator />
-                <div className="flex items-center justify-between">
-                  <span className="font-medium">{isPrepaid ? "Total" : "Due at Service"}</span>
-                  <span className="text-2xl font-bold text-primary">{formatCurrency(totalDue)}</span>
+                <div className="flex items-baseline justify-between gap-4">
+                  <span className="text-sm text-muted-foreground">Services</span>
+                  <span className="font-mono text-[14px]">{formatCurrency(estimatedCost)}</span>
                 </div>
+                {wasteOilFee > 0 && (
+                  <div className="flex items-baseline justify-between gap-4">
+                    <span className="text-sm text-muted-foreground">Waste oil disposal fee</span>
+                    <span className="font-mono text-[14px]">{formatCurrency(wasteOilFee)}</span>
+                  </div>
+                )}
+                {shopFee > 0 && (
+                  <div className="flex items-baseline justify-between gap-4">
+                    <span className="text-sm text-muted-foreground">{feeSettings?.shop_fee_description || "Shop supplies fee"}</span>
+                    <span className="font-mono text-[14px]">{formatCurrency(shopFee)}</span>
+                  </div>
+                )}
+                {surcharge > 0 && (
+                  <div className="flex items-baseline justify-between gap-4">
+                    <span className="text-sm text-muted-foreground">{feeSettings?.surcharge_description || "Card processing fee"}</span>
+                    <span className="font-mono text-[14px]">{formatCurrency(surcharge)}</span>
+                  </div>
+                )}
+                {taxAmount > 0 && (
+                  <div className="flex items-baseline justify-between gap-4">
+                    <span className="text-sm text-muted-foreground">Tax</span>
+                    <span className="font-mono text-[14px]">{formatCurrency(taxAmount)}</span>
+                  </div>
+                )}
+                <Separator />
+                <div className="flex items-end justify-between gap-4 pt-1">
+                  <div>
+                    <p className="text-base font-semibold">{isPrepaid ? "Total (paid)" : "Due at service"}</p>
+                    <p className="mt-0.5 text-sm text-muted-foreground">
+                      {isPrepaid ? "Paid in full" : "Collect after the job"}
+                    </p>
+                  </div>
+                  <p className="font-mono text-[30px] font-semibold leading-none text-primary">{formatCurrency(totalDue)}</p>
+                </div>
+              </CardContent>
+            </Card>
 
-                <div className="space-y-2 pt-4">
-                  {isEditable && (
-                    <>
-                      {(appointment.assigned_technician_id || appointment.assigned_van_id) && (
-                        <Button className="w-full" variant="outline" onClick={handleUnassign} disabled={unassigning}>
-                          {unassigning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserX className="mr-2 h-4 w-4" />}
-                          Unassign to Dispatch Board
-                        </Button>
-                      )}
-                      <JobActionButton appointment={appointment} onUpdated={fetchAppointment} className="w-full" />
-                      <Button className="w-full" variant="outline" onClick={() => {
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-[18px] font-semibold leading-[1.35]">Job actions</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {isEditable && (
+                  <>
+                    {(appointment.assigned_technician_id || appointment.assigned_van_id) && (
+                      <Button className="min-h-[56px] w-full text-base" variant="outline" onClick={handleUnassign} disabled={unassigning}>
+                        {unassigning ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <UserX className="mr-2 h-5 w-5" />}
+                        Unassign to dispatch board
+                      </Button>
+                    )}
+                    <JobActionButton appointment={appointment} onUpdated={fetchAppointment} className="min-h-[56px] w-full text-base" />
+                    <Button
+                      className="min-h-[56px] w-full text-base"
+                      variant="outline"
+                      onClick={() => {
                         setRescheduleDate(appointment.scheduled_date);
                         setRescheduleTime(appointment.scheduled_time?.slice(0, 5) || "");
                         setRescheduleOpen(true);
-                      }}>
-                        <Calendar className="mr-2 h-4 w-4" />Reschedule
-                      </Button>
-                      <Button className="w-full" variant="destructive" onClick={() => handleStatusChange("cancelled")}>
-                        <XCircle className="mr-2 h-4 w-4" />Cancel
-                      </Button>
-                    </>
-                  )}
+                      }}
+                    >
+                      <Calendar className="mr-2 h-5 w-5" />Reschedule
+                    </Button>
+                    <Button className="min-h-[56px] w-full text-base" variant="destructive" onClick={() => handleStatusChange("cancelled")}>
+                      <XCircle className="mr-2 h-5 w-5" />Cancel
+                    </Button>
+                  </>
+                )}
 
-                  {appointment.status === "completed" && appointment.service_record_id && (
-                    <>
-                      <Button className="w-full gap-2" onClick={() => navigate(`/services/${appointment.service_record_id}`)}>
-                        <FileText className="h-4 w-4" />View Service Record
-                      </Button>
-                      <Button className="w-full gap-2" variant="outline" disabled={reviewRequestLoading || reviewRequestSent} onClick={handleRequestReview}>
-                        {reviewRequestLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Star className="h-4 w-4" />}
-                        {reviewRequestSent ? `Review ${reviewRequestStatus ?? "requested"}` : "Request Review"}
-                      </Button>
-                    </>
-                  )}
+                {appointment.status === "completed" && appointment.service_record_id && (
+                  <>
+                    <Button className="min-h-[56px] w-full gap-2 text-base" onClick={() => navigate(`/services/${appointment.service_record_id}`)}>
+                      <FileText className="h-5 w-5" />View service record
+                    </Button>
+                    <Button
+                      className="min-h-[56px] w-full gap-2 text-base"
+                      variant="outline"
+                      disabled={reviewRequestLoading || reviewRequestSent}
+                      onClick={handleRequestReview}
+                    >
+                      {reviewRequestLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Star className="h-5 w-5" />}
+                      {reviewRequestSent ? `Review ${reviewRequestStatus ?? "requested"}` : "Request review"}
+                    </Button>
+                  </>
+                )}
 
-                  {canReactivate && (
-                    <>
-                      <Separator className="my-2" />
-                      <Button className="w-full" variant="outline" onClick={() => handleStatusChange("confirmed")}>Reactivate</Button>
-                    </>
-                  )}
+                {canReactivate && (
+                  <>
+                    <Separator className="my-2" />
+                    <Button className="min-h-[56px] w-full text-base" variant="outline" onClick={() => handleStatusChange("confirmed")}>
+                      Reactivate
+                    </Button>
+                  </>
+                )}
 
-                  {allowDelete && (
-                    <>
-                      <Separator className="my-2" />
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button className="w-full" variant="ghost" size="sm">
-                            <Trash2 className="mr-2 h-4 w-4 text-destructive" />
-                            <span className="text-destructive">Delete Appointment</span>
-                          </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Delete Appointment?</AlertDialogTitle>
-                            <AlertDialogDescription>This will permanently delete the appointment. This action cannot be undone.</AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete</AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </>
-                  )}
-                </div>
+                {allowDelete && (
+                  <>
+                    <Separator className="my-2" />
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button className="min-h-[56px] w-full text-base" variant="ghost">
+                          <Trash2 className="mr-2 h-5 w-5 text-destructive" />
+                          <span className="text-destructive">Delete appointment</span>
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Delete appointment?</AlertDialogTitle>
+                          <AlertDialogDescription>This will permanently delete the appointment. This action cannot be undone.</AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel className="min-h-[56px]">Cancel</AlertDialogCancel>
+                          <AlertDialogAction onClick={handleDelete} className="min-h-[56px] bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                            Delete
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </>
+                )}
               </CardContent>
             </Card>
 
@@ -652,26 +859,32 @@ export const AppointmentDetail = ({
             <AppointmentSyncCard appointmentId={appointment.id} />
 
             <Card>
-              <CardHeader><CardTitle>Appointment Timeline</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle className="text-[18px] font-semibold leading-[1.35]">Timeline</CardTitle>
+              </CardHeader>
               <CardContent>
-                <div className="space-y-4">
+                <div className="space-y-5">
                   <div className="flex gap-3">
                     <div className="flex flex-col items-center">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10"><Calendar className="h-4 w-4 text-primary" /></div>
+                      <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/10">
+                        <Calendar className="h-5 w-5 text-primary" />
+                      </div>
                       <div className="mt-2 w-0.5 flex-1 bg-border" />
                     </div>
-                    <div>
-                      <p className="font-medium">Scheduled</p>
-                      <p className="text-sm text-muted-foreground">{formatDate(appointment.scheduled_date)} at {formatTimeLabel(appointment.scheduled_time, "h:mm a")}</p>
+                    <div className="pb-1">
+                      <p className="text-base font-semibold">Scheduled</p>
+                      <p className="mt-0.5 font-mono text-[14px] text-muted-foreground">
+                        {formatDate(appointment.scheduled_date)} · {formatTimeLabel(appointment.scheduled_time, "h:mm a")}
+                      </p>
                     </div>
                   </div>
                   <div className="flex gap-3">
-                    <div className="flex flex-col items-center">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10">{getStatusIcon(appointment.status)}</div>
+                    <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/10">
+                      {getStatusIcon(appointment.status)}
                     </div>
                     <div>
-                      <p className="font-medium capitalize">{statusStyle.label}</p>
-                      <p className="text-sm text-muted-foreground">Current status</p>
+                      <p className="text-base font-semibold capitalize">{statusStyle.label}</p>
+                      <p className="mt-0.5 text-sm text-muted-foreground">Current status</p>
                     </div>
                   </div>
                 </div>
@@ -679,6 +892,18 @@ export const AppointmentDetail = ({
             </Card>
           </div>
         </div>
+
+        {/* Text messages — the paper trail, below the fold */}
+        <section aria-labelledby="job-texts-heading">
+          <h2 id="job-texts-heading" className="text-[24px] font-semibold leading-[1.25] tracking-tight">Text messages</h2>
+          <div className="mt-4 overflow-hidden rounded-xl border">
+            <AppointmentSmsTimeline
+              appointmentId={appointment.id}
+              customerPhone={appointment.customer?.phone || appointment.guest_phone}
+              scheduledDate={appointment.scheduled_date}
+            />
+          </div>
+        </section>
       </div>
 
       <EditAppointmentDialog
@@ -691,34 +916,26 @@ export const AppointmentDetail = ({
       <Dialog open={rescheduleOpen} onOpenChange={setRescheduleOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Calendar className="h-5 w-5" />Reschedule Appointment</DialogTitle>
+            <DialogTitle className="flex items-center gap-2 text-[18px]"><Calendar className="h-5 w-5" />Reschedule appointment</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="reschedule-date">New Date</Label>
-              <Input id="reschedule-date" type="date" value={rescheduleDate} onChange={(event) => setRescheduleDate(event.target.value)} />
+              <Label htmlFor="reschedule-date">New date</Label>
+              <Input id="reschedule-date" type="date" value={rescheduleDate} onChange={(event) => setRescheduleDate(event.target.value)} className="min-h-[56px] text-base" />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="reschedule-time">New Time</Label>
-              <Input id="reschedule-time" type="time" value={rescheduleTime} onChange={(event) => setRescheduleTime(event.target.value)} />
+              <Label htmlFor="reschedule-time">New time</Label>
+              <Input id="reschedule-time" type="time" value={rescheduleTime} onChange={(event) => setRescheduleTime(event.target.value)} className="min-h-[56px] text-base" />
             </div>
           </div>
           <div className="flex justify-end gap-3">
-            <Button variant="outline" onClick={() => setRescheduleOpen(false)} disabled={rescheduling}>Cancel</Button>
-            <Button onClick={handleReschedule} disabled={!rescheduleDate || !rescheduleTime || rescheduling}>
-              {rescheduling && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Confirm Reschedule
+            <Button variant="outline" onClick={() => setRescheduleOpen(false)} disabled={rescheduling} className="min-h-[56px] text-base">Cancel</Button>
+            <Button onClick={handleReschedule} disabled={!rescheduleDate || !rescheduleTime || rescheduling} className="min-h-[56px] text-base">
+              {rescheduling && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}Confirm reschedule
             </Button>
           </div>
         </DialogContent>
       </Dialog>
-
-      <div className="container mx-auto max-w-4xl px-4 pb-8">
-        <AppointmentSmsTimeline
-          appointmentId={appointment.id}
-          customerPhone={appointment.customer?.phone || appointment.guest_phone}
-          scheduledDate={appointment.scheduled_date}
-        />
-      </div>
 
       <CompleteAppointmentDialog
         open={completeDialogOpen}

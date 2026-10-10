@@ -1,12 +1,17 @@
 /**
- * DispatchBoard - Real-time job dispatching with timeline Gantt view
+ * DispatchBoard - the dispatcher's day at a glance.
  *
- * Features:
- * - Drag-and-drop job assignment onto technician/van lanes
- * - Completed jobs excluded from assignment flows
- * - Time format consistent with regional settings (12h / 24h)
- * - Timeline Gantt rows per van/tech
- * - Bottom stats: Fleet Stats | Inventory Summary | Service Coverage
+ * Axis commitment (minc): precision leads. An instrument panel that reads
+ * like a foreman talks: unassigned work first, tech lanes below, status
+ * visible on every job without opening anything.
+ *
+ * Cognitive-load rules enforced here:
+ * - Unassigned jobs live in ONE place (the tray), never duplicated on the timeline.
+ * - Every job block/card carries its status pill + mono time + customer phone.
+ * - Assign in two taps: open job -> pick tech chip -> Assign.
+ * - Accent (primary) budget: active segmented controls, dialog CTA, focus rings.
+ *   Status is carried by pastel semantic pills, never the signal color.
+ * - Type scale: H1 30 / H2 24 / H3 18 / body 16 / compact 14 / caption 12 / mono 14.
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -25,15 +30,7 @@ import {
 import { validateAssignment } from "@/lib/dispatch-guardrails";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { CalendarView, type CalendarAppointment } from "@/components/appointments/CalendarView";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -44,22 +41,19 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import {
-  Clock,
-  Wrench,
-  Car,
+  AlertTriangle,
   CalendarDays,
+  Car,
   CheckCircle2,
+  Clock,
   Coffee,
-  XCircle,
-  Truck,
-  Plus,
-  Package,
-  User,
-  Send,
-  Loader2,
   RefreshCw,
-  MapPin,
+  Send,
+  Truck,
+  User,
   Users,
+  Wrench,
+  XCircle,
 } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
 import { format, isToday } from "date-fns";
@@ -73,7 +67,6 @@ import {
   logUnknownOperationalStateForTriage,
 } from "@/lib/command-center-state";
 import { isVisibleInActiveDispatchLanes } from "@/lib/dispatch-board-visibility";
-import { useNavigate } from "react-router-dom";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { useAuth } from "@packages/auth";
 import { emitDispatchCommandVisibilityDelta } from "@/lib/dispatch-telemetry";
@@ -87,7 +80,7 @@ const TECHNICIAN_STATUS_ICONS: Record<TechnicianOperationalStatus, typeof CheckC
   available: CheckCircle2,
   busy: Clock,
   en_route: Truck,
-  on_site: MapPin,
+  on_site: User,
   on_job: Wrench,
   on_break: Coffee,
   offline: XCircle,
@@ -131,11 +124,86 @@ function getCustomerName(job: Job): string {
   return job.customer?.name || job.guest_name || "—";
 }
 
+function getJobStatus(job: Job) {
+  // dispatch_status is the operational truth; fall back to status.
+  const raw = job.dispatch_status && job.dispatch_status !== "scheduled"
+    ? job.dispatch_status
+    : job.status;
+  return getSemanticStatus("appointment", raw);
+}
+
+function isPriorityJob(job: Job): boolean {
+  const p = (job.job_priority || "").toLowerCase();
+  return p === "high" || p === "urgent" || p === "emergency";
+}
+
+// ─── Small presentational pieces ───────────────────────────────────────────
+
+function StatusPill({ job, className }: { job: Job; className?: string }) {
+  const semantic = getJobStatus(job);
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap",
+        semantic.badgeClass,
+        className
+      )}
+    >
+      {semantic.label}
+    </span>
+  );
+}
+
+function SectionHeader({
+  eyebrow,
+  title,
+  action,
+}: {
+  eyebrow: string;
+  title: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-end justify-between gap-3 mb-3">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{eyebrow}</p>
+        <h2 className="text-2xl font-semibold tracking-tight mt-0.5">{title}</h2>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function KpiCard({
+  label,
+  value,
+  accent,
+  sub,
+}: {
+  label: string;
+  value: number;
+  accent?: "amber" | "neutral" | "success";
+  sub?: string;
+}) {
+  return (
+    <Card className={cn(
+      "overflow-hidden",
+      accent === "amber" && "border-l-4 border-l-amber-400",
+      accent === "success" && "border-l-4 border-l-emerald-500/60",
+    )}>
+      <CardContent className="p-4">
+        <p className="font-mono text-3xl font-semibold tracking-tight tabular-nums">{value}</p>
+        <p className="text-sm font-medium text-muted-foreground mt-1">{label}</p>
+        {sub && <p className="text-xs text-muted-foreground/70 mt-0.5">{sub}</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Timeline Job Block ─────────────────────────────────────────────────────
 
 function TimelineJobBlock({
   job,
-  isUnassigned,
   isDragging,
   onDragStart,
   onDragEnd,
@@ -143,7 +211,6 @@ function TimelineJobBlock({
   formatTime,
 }: {
   job: Job;
-  isUnassigned?: boolean;
   isDragging?: boolean;
   onDragStart?: () => void;
   onDragEnd?: () => void;
@@ -154,6 +221,7 @@ function TimelineJobBlock({
   const width = durationToPercent(job.estimated_duration_minutes || 60);
   const timeLabel = formatTime(job.scheduled_time.substring(0, 5));
   const isCompleted = isClosedDispatchJob(job);
+  const semantic = getJobStatus(job);
 
   return (
     <div
@@ -166,25 +234,35 @@ function TimelineJobBlock({
       }}
       onDragEnd={onDragEnd}
       className={cn(
-        "absolute top-1 bottom-1 rounded flex items-start px-2 py-1 text-xs font-medium overflow-hidden border transition-all",
+        "absolute top-1 bottom-1 rounded-md flex items-start px-2 py-1 text-xs font-medium overflow-hidden border transition-all",
         !isCompleted && "cursor-grab active:cursor-grabbing hover:opacity-90",
         isCompleted
-          ? "bg-muted border-border text-muted-foreground opacity-60 cursor-default"
-          : isUnassigned
-          ? "bg-destructive/10 border-destructive/30 text-destructive"
-          : "bg-primary/15 border-primary/30 text-primary",
+          ? "bg-muted/60 border-border text-muted-foreground opacity-60 cursor-default"
+          : "bg-card border-border text-foreground shadow-sm",
         isDragging && "opacity-40"
       )}
-      style={{ left: `${left}%`, width: `${width}%`, minWidth: "60px" }}
-      title={`${timeLabel} — ${job.service_catalog?.name || job.title} (${getCustomerName(job)})${isCompleted ? " [Completed]" : ""}`}
+      style={{ left: `${left}%`, width: `${width}%`, minWidth: "72px" }}
+      title={`${timeLabel} — ${job.service_catalog?.name || job.title} (${getCustomerName(job)}) — ${semantic.label}`}
       onClick={(e) => {
         e.stopPropagation();
         onSelect?.();
       }}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect?.();
+        }
+      }}
     >
-      <div className="leading-tight min-w-0 w-full">
-        <p className="truncate font-semibold">{timeLabel} • {job.service_catalog?.name || job.title}</p>
-        <p className="truncate text-[11px] opacity-90">{getCustomerName(job)}</p>
+      <div className="leading-tight min-w-0 w-full space-y-0.5">
+        <div className="flex items-center gap-1.5">
+          <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", semantic.dotClass)} />
+          <span className="font-mono text-xs font-semibold">{timeLabel}</span>
+        </div>
+        <p className="truncate font-semibold">{job.service_catalog?.name || job.title}</p>
+        <p className="truncate text-xs text-muted-foreground">{getCustomerName(job)}</p>
       </div>
     </div>
   );
@@ -198,7 +276,6 @@ interface TimelineLane {
   sublabel?: string;
   dotColor?: string;
   jobs: Job[];
-  isUnassigned?: boolean;
   noTech?: boolean;
   acceptDrop?: boolean; // whether this lane can receive drops
 }
@@ -231,18 +308,18 @@ function TimelineGrid({
     formatTime(`${h.toString().padStart(2, "0")}:00`);
 
   return (
-    <div className="border rounded-lg overflow-hidden overflow-x-auto">
+    <div className="border rounded-lg overflow-hidden overflow-x-auto bg-card">
       {/* Column headers */}
       <div className="flex border-b bg-muted/40 min-w-[640px]">
-        <div className="w-44 shrink-0 border-r px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-          Team / Van
+        <div className="w-48 shrink-0 border-r px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+          Tech / Van
         </div>
         <div className="flex-1">
           <div className="flex">
             {TIMELINE_HOURS.map((h) => (
               <div
                 key={h}
-                className="flex-1 text-center text-xs font-medium text-muted-foreground py-2 border-r last:border-r-0"
+                className="flex-1 text-center text-xs font-medium text-muted-foreground py-2 border-r last:border-r-0 font-mono"
               >
                 {hourLabel(h)}
               </div>
@@ -267,13 +344,13 @@ function TimelineGrid({
             onDrop={lane.acceptDrop ? (e) => onDropLane(lane.id, e) : undefined}
           >
             {/* Lane label */}
-            <div className="w-44 shrink-0 border-r px-4 py-4 flex items-center gap-2">
+            <div className="w-48 shrink-0 border-r px-4 py-3 flex items-center gap-2">
               {lane.dotColor && (
-                <span className={cn("h-2.5 w-2.5 rounded-md shrink-0", lane.dotColor)} />
+                <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", lane.dotColor)} />
               )}
               <div className="min-w-0">
                 <p className={cn(
-                  "text-xs font-bold tracking-wide truncate",
+                  "text-sm font-semibold truncate",
                   lane.noTech && "text-muted-foreground"
                 )} title={lane.label}>
                   {lane.label}
@@ -285,7 +362,7 @@ function TimelineGrid({
             </div>
 
             {/* Timeline area */}
-            <div className="flex-1 relative py-2" style={{ minHeight: "56px" }}>
+            <div className="flex-1 relative py-2" style={{ minHeight: "60px" }}>
               {/* Grid lines */}
               <div className="absolute inset-0 flex pointer-events-none">
                 {TIMELINE_HOURS.map((h) => (
@@ -296,17 +373,16 @@ function TimelineGrid({
               {/* Jobs or empty state */}
               {lane.jobs.length === 0 ? (
                 <p className={cn(
-                  "absolute inset-0 flex items-center justify-center text-xs italic",
-                  isDropTarget ? "text-primary font-medium" : "text-muted-foreground"
+                  "absolute inset-0 flex items-center justify-center text-xs",
+                  isDropTarget ? "text-primary font-medium" : "text-muted-foreground/60"
                 )}>
-                  {isDropTarget ? "Drop to assign here" : "No routes scheduled for this window"}
+                  {isDropTarget ? "Drop to assign here" : "—"}
                 </p>
               ) : (
                 lane.jobs.map((job) => (
                   <TimelineJobBlock
                     key={job.id}
                     job={job}
-                    isUnassigned={lane.isUnassigned}
                     isDragging={draggedJobId === job.id}
                     onDragStart={() => onDragStartJob(job.id)}
                     onDragEnd={onDragEndJob}
@@ -327,20 +403,22 @@ function TimelineGrid({
 
 function UnassignedJobCard({
   job,
-  onReassign,
+  onAssign,
   onDragStart,
   onDragEnd,
   isDragging,
   formatTime,
 }: {
   job: Job;
-  onReassign: () => void;
+  onAssign: () => void;
   onDragStart: () => void;
   onDragEnd: () => void;
   isDragging: boolean;
   formatTime: (t: string) => string;
 }) {
   const timeLabel = formatTime(job.scheduled_time.substring(0, 5));
+  const priority = isPriorityJob(job);
+
   return (
     <div
       draggable
@@ -350,22 +428,88 @@ function UnassignedJobCard({
         onDragStart();
       }}
       onDragEnd={onDragEnd}
+      onClick={onAssign}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onAssign();
+      }}
       className={cn(
-        "flex items-center gap-4 border rounded-lg p-4 bg-card min-w-[260px] flex-1 cursor-grab active:cursor-grabbing transition-opacity select-none",
+        "border rounded-lg p-4 bg-card w-full sm:w-[320px] cursor-pointer transition-all select-none",
+        "hover:border-primary/40 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+        priority && "border-l-4 border-l-amber-400",
         isDragging && "opacity-50"
       )}
     >
-      <div className="text-center shrink-0">
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Time</p>
-        <p className="text-lg font-bold">{timeLabel}</p>
+      <div className="flex items-start justify-between gap-2">
+        <span className="font-mono text-sm font-semibold tabular-nums">{timeLabel}</span>
+        <div className="flex items-center gap-1.5">
+          {priority && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+              <AlertTriangle className="h-3 w-3" /> Priority
+            </span>
+          )}
+          <StatusPill job={job} />
+        </div>
       </div>
-      <div className="flex-1 min-w-0">
-        <p className="font-semibold text-sm truncate" title={job.service_catalog?.name || job.title}>{job.service_catalog?.name || job.title}</p>
-        <p className="text-xs text-muted-foreground">Customer: {getCustomerName(job)}</p>
+
+      <p className="text-base font-semibold mt-2 leading-snug" title={job.service_catalog?.name || job.title}>
+        {job.service_catalog?.name || job.title}
+      </p>
+      <p className="text-sm text-muted-foreground mt-0.5 truncate" title={getCustomerName(job)}>
+        {getCustomerName(job)}
+      </p>
+
+      <div className="flex items-center justify-between gap-2 mt-3">
+        <div className="min-w-0 text-xs text-muted-foreground space-y-0.5">
+          {job.customer?.phone && (
+            <p className="font-mono text-sm truncate" title={job.customer.phone}>{job.customer.phone}</p>
+          )}
+          {job.vehicle && (
+            <p className="truncate">
+              {job.vehicle.year} {job.vehicle.make} {job.vehicle.model}
+            </p>
+          )}
+        </div>
+        <Button
+          size="sm"
+          variant="secondary"
+          className="shrink-0"
+          onClick={(e) => {
+            e.stopPropagation();
+            onAssign();
+          }}
+        >
+          Assign
+        </Button>
       </div>
-      <Button size="sm" onClick={onReassign}>
-        Reassign
-      </Button>
+    </div>
+  );
+}
+
+// ─── Loading skeleton ───────────────────────────────────────────────────────
+
+function DispatchBoardSkeleton() {
+  return (
+    <div className="space-y-8" aria-busy="true" aria-label="Loading dispatch board">
+      <div className="space-y-2">
+        <div className="h-4 w-24 rounded bg-muted animate-pulse" />
+        <div className="h-8 w-64 rounded bg-muted animate-pulse" />
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="h-24 rounded-lg border bg-card animate-pulse" />
+        ))}
+      </div>
+      <div className="space-y-3">
+        <div className="h-6 w-40 rounded bg-muted animate-pulse" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="h-36 rounded-lg border bg-card animate-pulse" />
+          ))}
+        </div>
+      </div>
+      <div className="h-72 rounded-lg border bg-card animate-pulse" />
     </div>
   );
 }
@@ -373,12 +517,12 @@ function UnassignedJobCard({
 // ─── Main Component ─────────────────────────────────────────────────────────
 
 export function DispatchBoard() {
-  const navigate = useNavigate();
   const { session } = useAuth();
   const userId = session?.user?.id;
   const { formatTime } = useRegionalSettings();
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [technicians, setTechnicians] = useState<Technician[]>([]);
   const [vans, setVans] = useState<Van[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -392,7 +536,6 @@ export function DispatchBoard() {
   const [dispatchNotes, setDispatchNotes] = useState("");
   const [assigning, setAssigning] = useState(false);
   const [unassigning, setUnassigning] = useState(false);
-  const [inventoryCount, setInventoryCount] = useState(0);
 
   // Drag-and-drop state
   const [draggedJobId, setDraggedJobId] = useState<string | null>(null);
@@ -405,15 +548,21 @@ export function DispatchBoard() {
       setTechnicians(data.technicians);
       setVans(data.vans);
       setJobs(data.jobs);
-      setInventoryCount(data.inventoryCount);
+      setLoadError(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to load dispatch jobs";
       console.error("Failed to load dispatch jobs", error);
-      toast.error(message);
+      setLoadError(message);
     } finally {
       setLoading(false);
     }
   }, [selectedDate, viewMode]);
+
+  const retryLoad = useCallback(() => {
+    setLoadError(null);
+    setLoading(true);
+    void fetchData();
+  }, [fetchData]);
 
   useEffect(() => {
     void Promise.resolve().then(() => fetchData());
@@ -602,24 +751,10 @@ export function DispatchBoard() {
 
   const unassignedJobs = activeJobs.filter(j => !j.assigned_technician_id && !j.assigned_van_id);
   const assignedActiveJobs = activeJobs.filter(j => j.assigned_technician_id || j.assigned_van_id);
-  const activeVans = vans.filter(v => v.status === "active").length;
-  const inactiveVans = vans.length - activeVans;
-  const totalZipCodes = vans.reduce((sum, v) => sum + (v.territory_count || 0), 0);
 
-  // Build timeline lanes — ALL states visible, never hidden
+  // Build timeline lanes — unassigned jobs live in the tray above, never duplicated here.
   const buildLanes = (): TimelineLane[] => {
     const lanes: TimelineLane[] = [];
-
-    // Waitlist — unassigned active jobs
-    lanes.push({
-      id: "__waitlist__",
-      label: "WAITLIST",
-      sublabel: `${unassignedJobs.length} unassigned`,
-      dotColor: "bg-amber-400",
-      jobs: unassignedJobs,
-      isUnassigned: true,
-      acceptDrop: false,
-    });
 
     if (viewType === "van") {
       vans.forEach(van => {
@@ -638,9 +773,9 @@ export function DispatchBoard() {
         });
         lanes.push({
           id: van.id,
-          label: van.name.toUpperCase(),
-          sublabel: techName ? `${techName} • ${vanJobs.length} jobs` : `${vanJobs.length} jobs`,
-          dotColor: van.status === "active" ? "bg-gray-500" : "bg-muted-foreground",
+          label: van.name,
+          sublabel: techName ? `${techName} • ${vanJobs.length} job${vanJobs.length !== 1 ? "s" : ""}` : `${vanJobs.length} job${vanJobs.length !== 1 ? "s" : ""}`,
+          dotColor: van.status === "active" ? "bg-emerald-500" : "bg-muted-foreground",
           jobs: vanJobs,
           acceptDrop: true,
         });
@@ -652,8 +787,8 @@ export function DispatchBoard() {
         const techJobs = allJobs.filter(j => j.assigned_technician_id === tech.id);
         lanes.push({
           id: tech.id,
-          label: tech.name.toUpperCase(),
-          sublabel: `${statusConfig.label} • ${techJobs.length} jobs`,
+          label: tech.name,
+          sublabel: `${statusConfig.label} • ${techJobs.length} job${techJobs.length !== 1 ? "s" : ""}`,
           dotColor: statusConfig.color,
           jobs: techJobs,
           acceptDrop: true,
@@ -666,7 +801,7 @@ export function DispatchBoard() {
     if (noTechJobs.length > 0 || (technicians.length === 0 && vans.length === 0)) {
       lanes.push({
         id: "__no_tech__",
-        label: "NO TECHNICIAN ASSIGNED",
+        label: "No technician assigned",
         dotColor: undefined,
         jobs: noTechJobs,
         noTech: true,
@@ -678,7 +813,7 @@ export function DispatchBoard() {
     if (completedJobs.length > 0) {
       lanes.push({
         id: "__completed__",
-        label: "COMPLETED",
+        label: "Completed",
         sublabel: `${completedJobs.length} done`,
         dotColor: "bg-emerald-500",
         jobs: completedJobs,
@@ -690,7 +825,7 @@ export function DispatchBoard() {
     if (cancelledJobs.length > 0) {
       lanes.push({
         id: "__cancelled__",
-        label: "CANCELLED",
+        label: "Cancelled",
         sublabel: `${cancelledJobs.length} cancelled`,
         dotColor: "bg-muted-foreground",
         jobs: cancelledJobs,
@@ -701,15 +836,36 @@ export function DispatchBoard() {
     return lanes;
   };
 
+  // ── States ─────────────────────────────────────────────────────────────────
+
   if (loading) {
+    return <DispatchBoardSkeleton />;
+  }
+
+  if (loadError) {
     return (
-      <Card>
-        <CardContent className="p-6">
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          </div>
-        </CardContent>
-      </Card>
+      <div className="space-y-6">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Dispatch</p>
+          <h1 className="text-[30px] font-semibold tracking-tight mt-0.5">Dispatch Board</h1>
+        </div>
+        <Card>
+          <CardContent className="p-8 flex flex-col items-center text-center gap-3">
+            <span className="flex h-11 w-11 items-center justify-center rounded-full bg-destructive/10">
+              <XCircle className="h-5 w-5 text-destructive" />
+            </span>
+            <div>
+              <p className="text-lg font-semibold">Couldn&apos;t load the dispatch board</p>
+              <p className="text-sm text-muted-foreground mt-1 max-w-md">
+                {loadError} Your jobs are safe — this is a loading problem, not a data problem.
+              </p>
+            </div>
+            <Button onClick={retryLoad} className="gap-2 mt-1">
+              <RefreshCw className="h-4 w-4" /> Try again
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
@@ -732,33 +888,31 @@ export function DispatchBoard() {
     working_days: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"],
   };
 
+  const dateLabel = isToday(selectedDate) ? "Today" : format(selectedDate, "EEEE, MMM d");
+  const attentionLabel = unassignedJobs.length === 0
+    ? "everything's covered"
+    : `${unassignedJobs.length} job${unassignedJobs.length !== 1 ? "s" : ""} need${unassignedJobs.length !== 1 ? "" : "s"} a tech`;
+
   return (
-    <div className="space-y-6">
-      {/* ── Header ── */}
+    <div className="space-y-8">
+      {/* ── Header: one H1, one control bar ── */}
       <div className="flex items-start justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-2xl font-bold">Dispatch Board</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Manage your fleet and daily job assignments in real-time.
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Dispatch</p>
+          <h1 className="text-[30px] font-semibold tracking-tight mt-0.5">Dispatch Board</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            {dateLabel} · {attentionLabel}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Button variant="outline" size="sm" onClick={() => setSelectedDate(new Date())}>
             Today
           </Button>
-          <div className="flex border rounded-md overflow-hidden">
-            <Button
-              variant={viewMode === "all" ? "default" : "ghost"}
-              size="sm"
-              className="rounded-none"
-              onClick={() => setViewMode("all")}
-            >
-              All
-            </Button>
+          <div className="flex border rounded-md overflow-hidden" role="group" aria-label="Date range">
             <Button
               variant={viewMode === "day" ? "default" : "ghost"}
               size="sm"
-              className="rounded-none border-l"
+              className="rounded-none"
               onClick={() => setViewMode("day")}
             >
               Day
@@ -771,11 +925,16 @@ export function DispatchBoard() {
             >
               Week
             </Button>
+            <Button
+              variant={viewMode === "all" ? "default" : "ghost"}
+              size="sm"
+              className="rounded-none border-l"
+              onClick={() => setViewMode("all")}
+            >
+              All
+            </Button>
           </div>
-          <Button variant="outline" size="icon" onClick={fetchData} title="Refresh">
-            <RefreshCw className="h-4 w-4" />
-          </Button>
-          <div className="flex border rounded-md overflow-hidden">
+          <div className="flex border rounded-md overflow-hidden" role="group" aria-label="Board view">
             <Button
               variant={dispatchView === "timeline" ? "default" : "ghost"}
               size="sm"
@@ -794,70 +953,54 @@ export function DispatchBoard() {
               Calendar
             </Button>
           </div>
+          {dispatchView === "timeline" && (
+            <div className="flex border rounded-md overflow-hidden" role="group" aria-label="Group lanes by">
+              <Button
+                variant={viewType === "van" ? "default" : "ghost"}
+                size="sm"
+                className="rounded-none gap-1"
+                onClick={() => setViewType("van")}
+              >
+                <Truck className="h-3.5 w-3.5" /> Vans
+              </Button>
+              <Button
+                variant={viewType === "team" ? "default" : "ghost"}
+                size="sm"
+                className="rounded-none gap-1 border-l"
+                onClick={() => setViewType("team")}
+              >
+                <Users className="h-3.5 w-3.5" /> Team
+              </Button>
+            </div>
+          )}
+          <Button variant="outline" size="icon" onClick={retryLoad} title="Refresh" aria-label="Refresh dispatch board">
+            <RefreshCw className="h-4 w-4" />
+          </Button>
         </div>
       </div>
 
-      {/* ── Lifecycle Status Summary — Central Authority ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <Card className="border-l-4 border-l-amber-400">
-          <CardContent className="p-3">
-            <p className="text-2xl font-bold">{unassignedJobs.length}</p>
-            <p className="text-xs text-muted-foreground font-medium">Unassigned</p>
-          </CardContent>
-        </Card>
-        <Card className="border-l-4 border-l-blue-500">
-          <CardContent className="p-3">
-            <p className="text-2xl font-bold">{assignedActiveJobs.length}</p>
-            <p className="text-xs text-muted-foreground font-medium">Assigned / Active</p>
-          </CardContent>
-        </Card>
-        <Card className="border-l-4 border-l-emerald-500">
-          <CardContent className="p-3">
-            <p className="text-2xl font-bold">{completedJobs.length}</p>
-            <p className="text-xs text-muted-foreground font-medium">Completed</p>
-          </CardContent>
-        </Card>
-        <Card className="border-l-4 border-l-muted-foreground">
-          <CardContent className="p-3">
-            <p className="text-2xl font-bold">{cancelledJobs.length}</p>
-            <p className="text-xs text-muted-foreground font-medium">Cancelled</p>
-          </CardContent>
-        </Card>
-        <Card className="border-l-4 border-l-primary">
-          <CardContent className="p-3">
-            <p className="text-2xl font-bold">{allJobs.length}</p>
-            <p className="text-xs text-muted-foreground font-medium">Total Jobs</p>
-          </CardContent>
-        </Card>
+      {/* ── KPI strip: the day in four numbers ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3" aria-label="Today's dispatch summary">
+        <KpiCard label="Need a tech" value={unassignedJobs.length} accent="amber" />
+        <KpiCard label="Assigned" value={assignedActiveJobs.length} accent="neutral" />
+        <KpiCard label="Completed" value={completedJobs.length} accent="success" />
+        <KpiCard label="Total jobs" value={allJobs.length} accent="neutral" />
       </div>
 
-      {/* ── Unassigned Jobs ── */}
-      <div>
-        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <div className="flex items-center gap-2">
-            <h2 className="text-base font-semibold">Unassigned Jobs</h2>
-            {unassignedJobs.length > 0 && (
-              <Badge className="bg-primary text-primary-foreground text-xs px-2">
-                {unassignedJobs.length} Job{unassignedJobs.length !== 1 ? "s" : ""}
-              </Badge>
-            )}
-          </div>
-          <span className="text-sm text-muted-foreground hidden sm:block">
-            Today's Schedule: {allJobs.length} jobs • {assignedActiveJobs.length} assigned • {unassignedJobs.length} pending • {completedJobs.length} completed
-          </span>
-        </div>
-
-        {draggedJobId && (
-          <p className="text-xs text-primary mb-2 animate-pulse">
-            Drag onto a lane below to assign
-          </p>
-        )}
-
+      {/* ── Unassigned tray: the dispatcher's work queue ── */}
+      <section aria-label="Unassigned jobs">
+        <SectionHeader
+          eyebrow="Needs attention"
+          title="Unassigned jobs"
+          action={draggedJobId ? (
+            <p className="text-xs font-medium text-primary">Drop onto a tech or van lane below</p>
+          ) : undefined}
+        />
         {unassignedJobs.length === 0 ? (
-          <div className="flex items-center gap-3 border rounded-lg p-4 bg-muted/20">
-            <CheckCircle2 className="h-5 w-5 text-gray-500 shrink-0" />
+          <div className="flex items-center gap-3 border rounded-lg p-5 bg-muted/20">
+            <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0" />
             <p className="text-sm text-muted-foreground">
-              All jobs assigned for {isToday(selectedDate) ? "today" : format(selectedDate, "MMM d")}.
+              Every job has a tech. Nothing waiting in the queue{isToday(selectedDate) ? " today" : ` for ${format(selectedDate, "MMM d")}`}.
             </p>
           </div>
         ) : (
@@ -866,7 +1009,7 @@ export function DispatchBoard() {
               <UnassignedJobCard
                 key={job.id}
                 job={job}
-                onReassign={() => openAssignDialog(job)}
+                onAssign={() => openAssignDialog(job)}
                 onDragStart={() => handleDragStartJob(job.id)}
                 onDragEnd={handleDragEndJob}
                 isDragging={draggedJobId === job.id}
@@ -875,147 +1018,61 @@ export function DispatchBoard() {
             ))}
           </div>
         )}
-      </div>
+      </section>
 
-      {/* ── View type toggle ── */}
-      {dispatchView === "timeline" && vans.length > 0 && (
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">View by:</span>
-          <div className="flex border rounded-md overflow-hidden">
-            <Button
-              variant={viewType === "van" ? "default" : "ghost"}
-              size="sm"
-              className="rounded-none gap-1 text-xs"
-              onClick={() => setViewType("van")}
-            >
-              <Truck className="h-3.5 w-3.5" /> Vans
-            </Button>
-            <Button
-              variant={viewType === "team" ? "default" : "ghost"}
-              size="sm"
-              className="rounded-none gap-1 text-xs border-l"
-              onClick={() => setViewType("team")}
-            >
-              <Users className="h-3.5 w-3.5" /> Team
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Dispatch Views ── */}
-      {dispatchView === "timeline" ? (
-        <TimelineGrid
-          lanes={lanes}
-          draggedJobId={draggedJobId}
-          dropTargetId={dropTargetId}
-          onDragStartJob={handleDragStartJob}
-          onDragEndJob={handleDragEndJob}
-          onDragOverLane={handleDragOverLane}
-          onDragLeaveLane={handleDragLeaveLane}
-          onDropLane={handleDropLane}
-          onSelectJob={openAssignDialog}
-          formatTime={formatTime}
-        />
-      ) : (
-        <CalendarView
-          appointments={calendarAppointments}
-          currentDate={selectedDate}
-          onDateChange={setSelectedDate}
-          onAppointmentClick={(appointment) => {
-            const targetJob = jobs.find((j) => j.id === appointment.id);
-            if (targetJob) openAssignDialog(targetJob);
-          }}
-          onDrop={() => toast.info("Use the timeline view to reassign technicians by drag-and-drop.")}
-          onSlotClick={(date, time) => {
-            toast.info(`Dispatch calendar slot selected: ${format(date, "MMM d, yyyy")} ${time}`);
-          }}
-          businessHours={defaultBusinessHours}
-        />
-      )}
-
-      {/* ── Bottom Stats Row ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {/* Fleet Stats */}
-        <Card>
-          <CardContent className="p-5 space-y-3">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Fleet Stats</p>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-2">
-              <div>
-                <p className="text-2xl font-bold">{vans.length}</p>
-                <p className="text-xs text-muted-foreground">Total Vans</p>
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{activeVans}</p>
-                <p className="text-xs text-muted-foreground">Active</p>
-              </div>
-              <div>
-                <p className="text-2xl font-bold">{totalZipCodes}</p>
-                <p className="text-xs text-muted-foreground">Zip Codes</p>
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-muted-foreground">{inactiveVans}</p>
-                <p className="text-xs text-muted-foreground">Inactive</p>
-              </div>
+      {/* ── Timeline ── */}
+      <section aria-label="Dispatch timeline">
+        <SectionHeader eyebrow="The day" title="Today's routes" />
+        {dispatchView === "timeline" ? (
+          lanes.length === 0 ? (
+            <div className="border rounded-lg p-8 text-center">
+              <p className="text-base font-semibold">No lanes to show</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                Add a van or technician to start building routes.
+              </p>
             </div>
-            <Button
-              variant="outline"
-              className="w-full mt-2 gap-1 text-sm"
-              onClick={() => navigate("/fleet")}
-            >
-              <Plus className="h-4 w-4" /> Add Van
-            </Button>
-          </CardContent>
-        </Card>
+          ) : (
+            <>
+              <TimelineGrid
+                lanes={lanes}
+                draggedJobId={draggedJobId}
+                dropTargetId={dropTargetId}
+                onDragStartJob={handleDragStartJob}
+                onDragEndJob={handleDragEndJob}
+                onDragOverLane={handleDragOverLane}
+                onDragLeaveLane={handleDragLeaveLane}
+                onDropLane={handleDropLane}
+                onSelectJob={openAssignDialog}
+                formatTime={formatTime}
+              />
+              <p className="text-xs text-muted-foreground mt-2">
+                Drag a job onto a tech or van lane to assign it. Tap a job to see details and reassign.
+              </p>
+            </>
+          )
+        ) : (
+          <CalendarView
+            appointments={calendarAppointments}
+            currentDate={selectedDate}
+            onDateChange={setSelectedDate}
+            onAppointmentClick={(appointment) => {
+              const targetJob = jobs.find((j) => j.id === appointment.id);
+              if (targetJob) openAssignDialog(targetJob);
+            }}
+            onDrop={() => toast.info("Use the timeline view to reassign technicians by drag-and-drop.")}
+            onSlotClick={(date, time) => {
+              toast.info(`Dispatch calendar slot selected: ${format(date, "MMM d, yyyy")} ${time}`);
+            }}
+            businessHours={defaultBusinessHours}
+          />
+        )}
+      </section>
 
-        {/* Inventory Summary */}
-        <Card>
-          <CardContent className="p-5 space-y-3">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Inventory Summary</p>
-            <div className="text-center py-2">
-              <p className="text-5xl font-bold text-primary">{inventoryCount}</p>
-              <p className="text-sm text-muted-foreground mt-1">Items tracked across fleet</p>
-            </div>
-            <div className="flex gap-1">
-              {[...Array(4)].map((_, i) => (
-                <div
-                  key={i}
-                  className={cn("h-1.5 flex-1 rounded-md", i === 0 ? "bg-primary" : "bg-muted")}
-                />
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Service Coverage */}
-        <Card className="bg-foreground text-background overflow-hidden relative">
-          <CardContent className="p-5 relative z-10">
-            <p className="text-xs font-semibold uppercase tracking-wider opacity-70 mb-2">
-              Service Coverage
-            </p>
-            <p className="text-lg font-bold leading-snug mb-1">
-              Maximize efficiency by analyzing your route density.
-            </p>
-            <p className="text-sm opacity-60 mb-4">
-              Configure territories to see heatmaps and route suggestions.
-            </p>
-            <Button
-              size="sm"
-              className="bg-primary text-primary-foreground hover:bg-primary/90"
-              onClick={() => navigate("/fleet")}
-            >
-              <MapPin className="h-4 w-4 mr-1" />
-              Configure Territories
-            </Button>
-          </CardContent>
-          <div className="absolute right-0 bottom-0 w-32 h-32 rounded-md bg-white/10 translate-x-8 translate-y-8 pointer-events-none" />
-        </Card>
-      </div>
-
-      {/* ── Assign / Reassign Dialog ── */}
+      {/* ── Assign dialog: tap a tech, hit assign — two taps ── */}
       <Dialog open={assignDialogOpen} onOpenChange={setAssignDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Assign Job</DialogTitle>
+            <DialogTitle className="text-lg">Assign job</DialogTitle>
             <DialogDescription>
               {selectedJob?.service_catalog?.name || selectedJob?.title}
             </DialogDescription>
@@ -1025,11 +1082,15 @@ export function DispatchBoard() {
               <div className="bg-muted/30 rounded-lg p-3 space-y-1.5 text-sm">
                 <div className="flex items-center gap-2">
                   <Clock className="h-4 w-4 text-muted-foreground" />
-                  <span>{formatTime(selectedJob.scheduled_time.substring(0, 5))}</span>
+                  <span className="font-mono text-sm">{formatTime(selectedJob.scheduled_time.substring(0, 5))}</span>
+                  <StatusPill job={selectedJob} className="ml-auto" />
                 </div>
                 <div className="flex items-center gap-2">
                   <User className="h-4 w-4 text-muted-foreground" />
                   <span>{getCustomerName(selectedJob)}</span>
+                  {selectedJob.customer?.phone && (
+                    <span className="font-mono text-sm text-muted-foreground ml-auto">{selectedJob.customer.phone}</span>
+                  )}
                 </div>
                 {selectedJob.vehicle && (
                   <div className="flex items-center gap-2">
@@ -1043,12 +1104,13 @@ export function DispatchBoard() {
             )}
 
             <div className="space-y-2">
-              <Label>Assign to Technician</Label>
-              <Select value={selectedTech} onValueChange={setSelectedTech}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select technician" />
-                </SelectTrigger>
-                <SelectContent>
+              <Label id="assign-tech-label">Pick a technician</Label>
+              {technicians.length === 0 ? (
+                <p className="text-sm text-muted-foreground border rounded-lg p-4">
+                  No technicians on the roster. Add one in team settings to start assigning.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1" role="radiogroup" aria-labelledby="assign-tech-label">
                   {technicians.map((tech) => {
                     const normalizedStatus = normalizeTechnicianStatus(tech.status);
                     const cfg = STATUS_CONFIG[normalizedStatus];
@@ -1057,29 +1119,46 @@ export function DispatchBoard() {
                         j.assigned_technician_id === tech.id &&
                         isVisibleInActiveDispatchLanes(j)
                     ).length;
+                    const atCapacity = tech.max_jobs_per_day > 0 && jobCount >= tech.max_jobs_per_day;
+                    const isSelected = selectedTech === tech.id;
                     return (
-                      <SelectItem key={tech.id} value={tech.id}>
-                        <div className="flex items-center gap-2">
-                          <div className={cn("w-2 h-2 rounded-md", cfg?.color || "bg-muted")} />
-                          <span>{tech.name}</span>
-                          <span className="text-muted-foreground text-xs">
-                            ({jobCount} active job{jobCount !== 1 ? "s" : ""})
+                      <button
+                        key={tech.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={isSelected}
+                        onClick={() => setSelectedTech(tech.id)}
+                        className={cn(
+                          "flex items-center gap-2.5 rounded-lg border p-3 text-left transition-all",
+                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                          isSelected
+                            ? "border-primary ring-2 ring-primary/30 bg-primary/5"
+                            : "hover:border-primary/40"
+                        )}
+                      >
+                        <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", cfg?.color || "bg-muted")} />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-semibold truncate">{tech.name}</span>
+                          <span className="block text-xs text-muted-foreground">
+                            {cfg?.label} · {jobCount} active{atCapacity ? " · at capacity" : ""}
                           </span>
-                        </div>
-                      </SelectItem>
+                        </span>
+                        {isSelected && <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />}
+                      </button>
                     );
                   })}
-                </SelectContent>
-              </Select>
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">
-              <Label>Dispatch Notes (Optional)</Label>
+              <Label htmlFor="dispatch-notes">Dispatch notes <span className="text-muted-foreground font-normal">(optional)</span></Label>
               <Textarea
-                placeholder="Special instructions for the technician..."
+                id="dispatch-notes"
+                placeholder="Gate code, parking notes, anything the tech needs…"
                 value={dispatchNotes}
                 onChange={(e) => setDispatchNotes(e.target.value)}
-                rows={3}
+                rows={2}
               />
             </div>
 
@@ -1098,18 +1177,19 @@ export function DispatchBoard() {
                   disabled={assigning || unassigning}
                   className="flex-1"
                 >
-                  {unassigning ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                   Unassign
                 </Button>
               )}
               <Button
                 onClick={handleAssignJob}
                 disabled={!selectedTech || assigning || unassigning}
-                className="flex-1"
+                className="flex-1 gap-2"
               >
-                {assigning
-                  ? <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  : <Send className="h-4 w-4 mr-2" />}
+                {assigning ? (
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
                 Assign
               </Button>
             </div>

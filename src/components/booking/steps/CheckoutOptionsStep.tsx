@@ -186,7 +186,7 @@ export const CheckoutOptionsStep = memo(function CheckoutOptionsStep({
       )}
       <div className="text-center mb-8">
         <Sparkles className="h-12 w-12 mx-auto text-primary mb-4" />
-        <h2 className="text-2xl font-bold mb-2">Enhance Your Service</h2>
+        <h1 className="text-[30px] font-semibold leading-[1.2] tracking-[-0.01em] mb-2">Enhance Your Service</h1>
         <p className="text-muted-foreground">
           Add filters, wipers, or other services to your appointment
         </p>

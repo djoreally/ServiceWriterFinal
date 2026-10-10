@@ -61,7 +61,7 @@ export function VehicleStep({
         ) : (
           <Car className="h-10 w-10 text-primary mb-3" />
         )}
-        <h2 className="text-2xl font-bold mb-2">Tell us about your vehicle(s)</h2>
+        <h1 className="text-[30px] font-semibold leading-[1.2] tracking-[-0.01em] mb-2">Tell us about your vehicle(s)</h1>
         <p className="text-muted-foreground">
           {isTireFlow
             ? "We'll confirm your factory tire size — you can override it if your tires are different"

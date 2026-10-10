@@ -40,11 +40,11 @@ import { mergeBookingRequirements, vehicleMeetsBookingRequirements } from "@/lib
 import type { DetailingPricingRule } from "@/lib/detailing-pricing";
 import { fetchPublicDetailingPricingRules } from "@/application/queries/detailing-pricing.query";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { StickyActionBar } from "@/components/layout/PagePrimitives";
+import { cn } from "@/lib/utils";
 
 import { toast } from "@/components/ui/sonner";
-import { Wrench, ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
+import { Check, Wrench, ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
 import { format, parse } from "date-fns";
 import { geocodeAddress } from "@/application/queries/mapbox";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/mapbox";
@@ -59,7 +59,6 @@ import type { VehicleData } from "@/components/booking/VehicleEntry";
 import { useServiceCategoryPolicy } from "@/hooks/useServiceCategoryPolicy";
 import { applyProviderVerticalDefault } from "@/lib/service-category-policy";
 
-import { CheckoutProgress } from "@/components/booking/CheckoutProgress";
 import { LocationStep } from "@/components/booking/steps/LocationStep";
 import { VehicleStep } from "@/components/booking/steps/VehicleStep";
 import { ServiceSelectionStep, type ServiceCatalogItem } from "@/components/booking/steps/ServiceSelectionStep";
@@ -167,6 +166,83 @@ interface ServicePackage {
 
 interface PublicBookingProps {
   tenantSlug?: string;
+}
+
+// ---------------------------------------------------------------------------
+// BookingStepper — labeled progress with 44px tap targets and theme tokens.
+//
+// Completed steps are tappable (jump back to edit); the current step carries
+// aria-current. Labels stay visible on the current step at every width so the
+// customer always knows where they are.
+// ---------------------------------------------------------------------------
+
+const BOOKING_STEP_LABELS = ["Address", "Vehicle", "Service", "Time", "Book"] as const;
+
+function BookingStepper({
+  currentStep,
+  onStepClick,
+}: {
+  currentStep: number;
+  onStepClick: (step: number) => void;
+}) {
+  return (
+    <ol className="flex items-center">
+      {BOOKING_STEP_LABELS.map((label, index) => {
+        const stepId = index + 1;
+        const isCurrent = stepId === currentStep;
+        const isCompleted = stepId < currentStep;
+        const isLast = index === BOOKING_STEP_LABELS.length - 1;
+        return (
+          <li key={label} className={cn("flex min-w-0 items-center", !isLast && "flex-1")}>
+            <button
+              type="button"
+              onClick={() => onStepClick(stepId)}
+              disabled={!isCompleted}
+              aria-current={isCurrent ? "step" : undefined}
+              aria-label={isCompleted ? `${label} — done, tap to change` : label}
+              className={cn(
+                "flex min-h-[44px] min-w-0 items-center gap-2 rounded-lg px-1.5",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                isCompleted ? "cursor-pointer" : "cursor-default",
+              )}
+            >
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[13px] font-semibold",
+                  isCurrent && "bg-primary text-primary-foreground",
+                  isCompleted && "bg-primary/15 text-primary",
+                  !isCurrent && !isCompleted && "bg-muted text-muted-foreground",
+                )}
+              >
+                {isCompleted ? <Check className="h-4 w-4" strokeWidth={3} /> : stepId}
+              </span>
+              <span
+                className={cn(
+                  "truncate text-[13px] font-medium",
+                  isCurrent ? "text-foreground" : "text-muted-foreground",
+                  // The current step's label is always visible; the rest
+                  // collapse to dots on very narrow phones.
+                  !isCurrent && "hidden min-[400px]:inline",
+                )}
+              >
+                {label}
+              </span>
+            </button>
+            {!isLast && (
+              <div
+                aria-hidden="true"
+                className={cn(
+                  "mx-1 h-0.5 min-w-[12px] flex-1 rounded-full sm:mx-2",
+                  isCompleted ? "bg-primary/50" : "bg-border",
+                )}
+              />
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -964,6 +1040,24 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
     }
   };
 
+  // A disabled primary button is a dead end unless it says why. This caption
+  // tells the customer the single thing they still need to do on this step.
+  const continueHint: string | null = (() => {
+    if (canProceed() || bs.submitting) return null;
+    switch (bs.step) {
+      case 1:
+        return "Enter your full address to check the service area.";
+      case 2:
+        return "Add at least one vehicle to continue.";
+      case 3:
+        return "Choose a service to continue.";
+      case 4:
+        return "Pick a date and time to continue.";
+      default:
+        return null;
+    }
+  })();
+
   useEffect(() => {
     if (!bs.selectedDate) return;
     const selectedDateIsBlocked =
@@ -1047,27 +1141,57 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
   };
 
   // ── Loading / Not Found ─────────────────────────────────────────────────
+  // Loading mirrors the real page chrome (header → stepper → form → action
+  // bar) as a skeleton so the layout doesn't jump when content arrives.
   if (loading) {
     return (
       <>
         {business?.user_id && <TenantTrackingScripts userId={business.user_id} />}
-        <div className="min-h-screen bg-background flex items-center justify-center">
-          <div className="animate-pulse text-muted-foreground">Loading...</div>
+        <div className="min-h-screen bg-background" aria-busy="true" aria-label="Loading booking page">
+          <div className="border-b border-border bg-card">
+            <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-3">
+              <div className="h-10 w-10 animate-pulse rounded-lg bg-muted" />
+              <div className="h-5 w-44 animate-pulse rounded bg-muted" />
+            </div>
+          </div>
+          <div className="border-b border-border bg-muted/30">
+            <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-3">
+              {[0, 1, 2, 3, 4].map((i) => (
+                <div key={i} className="h-7 w-7 animate-pulse rounded-full bg-muted" />
+              ))}
+            </div>
+          </div>
+          <main className="mx-auto max-w-2xl space-y-4 px-4 py-8">
+            <div className="h-8 w-2/3 animate-pulse rounded bg-muted" />
+            <div className="h-4 w-1/2 animate-pulse rounded bg-muted" />
+            <div className="h-56 animate-pulse rounded-2xl bg-muted" />
+            <div className="h-14 animate-pulse rounded-xl bg-muted" />
+          </main>
         </div>
       </>
     );
   }
 
+  // Not-found is honest about the two possible causes (bad link vs. a failed
+  // load) and offers a retry instead of a dead end.
   if (notFound) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <Card className="max-w-md w-full mx-4">
-          <CardContent className="pt-6 text-center">
-            <Wrench className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-            <h1 className="text-xl font-semibold mb-2">Shop Not Found</h1>
-            <p className="text-muted-foreground">This booking link is invalid or has expired.</p>
-          </CardContent>
-        </Card>
+      <div className="min-h-screen bg-background flex items-center justify-center px-4">
+        <div className="max-w-md w-full text-center">
+          <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-muted">
+            <Wrench className="h-7 w-7 text-muted-foreground" />
+          </div>
+          <h1 className="text-[30px] font-semibold leading-[1.2] tracking-[-0.01em]">
+            We couldn't load this booking page
+          </h1>
+          <p className="mt-2 text-muted-foreground">
+            The link may be mistyped, or the page failed to load. Check the link
+            and try again — if it keeps failing, call the shop directly.
+          </p>
+          <Button className="mt-6 h-12 px-8 text-[16px] font-semibold" onClick={() => window.location.reload()}>
+            Try again
+          </Button>
+        </div>
       </div>
     );
   }
@@ -1091,11 +1215,12 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
           services={services.map(s => ({ name: s.name, price: s.default_price, description: s.description }))}
         />
       )}
-      {/* Header */}
-      <header className="bg-card border-b border-border sticky top-0 z-10">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
+      {/* Header — trust chrome only: logo + name on the left, quiet secondary
+          actions on the right. Step position lives in the stepper below. */}
+      <header className="bg-card/95 border-b border-border sticky top-0 z-40 backdrop-blur supports-[backdrop-filter]:bg-card/80">
+        <div className="mx-auto max-w-2xl px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
               {business?.logo_url ? (
                 <ProgressiveImage src={business.logo_url} alt="Logo" className="h-10 w-10 rounded-lg object-cover" placeholderClassName="h-10 w-10 rounded-lg" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
               ) : (
@@ -1103,17 +1228,15 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
                   <Wrench className="h-5 w-5" />
                 </div>
               )}
-              <span className="font-semibold text-lg">{business?.business_name || "Auto Shop"}</span>
+              <span className="truncate font-semibold text-[18px] leading-tight">{business?.business_name || "Auto Shop"}</span>
             </div>
-            <div className="flex items-center gap-4">
-              {bs.step < 6 && (
-                <span className="text-sm text-muted-foreground hidden sm:inline">Step {bs.step} of 5</span>
-              )}
+            <div className="flex shrink-0 items-center gap-1">
               {business?.user_id && bs.step < 6 && (
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
                   onClick={() => setQuoteRequestOpen(true)}
+                  className="text-muted-foreground"
                 >
                   Just need a price?
                 </Button>
@@ -1148,20 +1271,16 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
 
 
 
-      {/* Progress */}
+      {/* Progress — labeled stepper with tappable completed steps */}
       {bs.step < 6 && (
-        <div className="bg-muted/30 border-b border-border">
-          <div className="container mx-auto px-4 py-3">
-            <CheckoutProgress
-              currentStep={bs.step}
-              onStepClick={handleStepClick}
-              completedSteps={Array.from({ length: bs.step - 1 }, (_, i) => i + 1)}
-            />
+        <nav aria-label="Booking progress" className="bg-muted/30 border-b border-border">
+          <div className="mx-auto max-w-2xl px-4 py-2">
+            <BookingStepper currentStep={bs.step} onStepClick={handleStepClick} />
           </div>
-        </div>
+        </nav>
       )}
 
-      <main className="container mx-auto max-w-4xl px-4 py-6 pb-40 sm:py-8 sm:pb-44">
+      <main className="mx-auto max-w-2xl px-4 py-6 pb-40 sm:py-8 sm:pb-44">
         {/* Step 1: Location */}
         {bs.step === 1 && (
           <LocationStep
@@ -1437,11 +1556,14 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
           />
         )}
 
-        {/* Navigation */}
+        {/* Navigation — one dominant action per screen. Back is quiet; the
+            primary button says what it does (and what it costs on the final
+            step), and a caption explains a disabled button so it's never a
+            mystery. */}
         {bs.step < 6 && (
           <StickyActionBar>
             <Button
-              variant="outline"
+              variant="ghost"
               onClick={() => {
                 if (bs.step === 5 && step5View === "contact") {
                   setStep5View("options");
@@ -1451,7 +1573,7 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
                 setStep(bs.step - 1);
               }}
               disabled={bs.step === 1}
-              className="gap-2"
+              className="h-12 shrink-0 gap-2 px-3 text-muted-foreground"
             >
               <ArrowLeft className="h-4 w-4" />
               Back
@@ -1459,19 +1581,25 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
 
             {!(bs.step === 5 && step5View === "contact" && bs.paymentChoice === "pay_now" && (business?.stripe_charges_enabled || business?.square_charges_enabled)) && (
               <div
-                className="flex flex-col items-end gap-1"
+                className="flex min-w-0 flex-1 flex-col items-stretch gap-1.5"
                 onPointerDownCapture={() => {
                   if (bs.step === 5 && step5View === "contact") setContactAttempted(true);
                 }}
               >
-                <Button onClick={handleNext} disabled={!canProceed() || bs.submitting} className="gap-2">
+                <Button
+                  onClick={handleNext}
+                  disabled={!canProceed() || bs.submitting}
+                  className="h-12 w-full gap-2 text-[16px] font-semibold"
+                >
                   {bs.submitting ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
                       Processing...
                     </>
                   ) : bs.step === 5 && step5View === "contact" ? (
-                    "Complete Booking"
+                    <>Complete booking · {pricing.formatCurrency(pricing.grandTotal)}</>
+                  ) : bs.step === 1 ? (
+                    "Check my address"
                   ) : (
                     <>
                       Continue
@@ -1479,8 +1607,11 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
                     </>
                   )}
                 </Button>
+                {continueHint && (
+                  <p className="text-center text-[13px] text-muted-foreground">{continueHint}</p>
+                )}
                 {bs.step === 5 && step5View === "contact" && !bs.emailVerified && (
-                  <p className="text-muted-foreground text-xs">
+                  <p className="text-muted-foreground text-xs text-center">
                     Enter your email above, then continue as a guest or sign in.
                   </p>
                 )}
@@ -1489,7 +1620,7 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
                   bs.emailVerified &&
                   (contactAttempted || !!bs.guestName.trim() || !!bs.guestPhone.trim()) &&
                   missingStep5Fields().length > 0 && (
-                    <p className="text-xs text-destructive">
+                    <p className="text-xs text-destructive text-center">
                       Please fill in: {missingStep5Fields().join(", ")}
                     </p>
                   )}

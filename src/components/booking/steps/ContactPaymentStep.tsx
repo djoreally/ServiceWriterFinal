@@ -184,7 +184,7 @@ export const ContactPaymentStep = memo(function ContactPaymentStep({
     <div className="grid md:grid-cols-2 gap-6">
       <div>
         <div className="mb-6">
-          <h2 className="text-2xl font-bold mb-2">Complete Your Booking</h2>
+          <h1 className="text-[30px] font-semibold leading-[1.2] tracking-[-0.01em] mb-2">Complete Your Booking</h1>
           <p className="text-muted-foreground">Enter your details and choose payment</p>
         </div>
 

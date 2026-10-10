@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Appointment } from "@/shared/types";
-import { format, isSameDay, parseISO } from "date-fns";
+import { isSameDay, parseISO } from "date-fns";
 import { CurbeeScheduleBoard, type ScheduleEvent, type ScheduleResource } from "@/components/schedule/CurbeeScheduleBoard";
 
 interface DayCalendarViewProps {
@@ -11,10 +11,15 @@ interface DayCalendarViewProps {
   onDateChange?: (date: Date) => void;
   businessHours?: { opening_time: string; closing_time: string } | null;
   resources?: ScheduleResource[];
-  brand?: string;
   title?: string;
   subtitle?: string;
   primaryActionLabel?: string;
+  /** Optional: render the loading state instead of the board. */
+  isLoading?: boolean;
+  /** Optional: render the error state. Pair with onRetry. */
+  error?: string | null;
+  /** Optional: retry handler for the error state. */
+  onRetry?: () => void;
 }
 
 function parseHour(value: string | undefined, fallback: number): number {
@@ -43,8 +48,8 @@ function fallbackResources(appointments: Appointment[]): ScheduleResource[] {
   }
   return [
     { id: "diagnostic", name: "Diagnostic Van" },
-    { id: "oil-change", name: "Oil Change Van", subtitle: "Scheduled hours have been modified for this day" },
-    { id: "tire", name: "Tire Van", subtitle: "Scheduled hours have been modified for this day" },
+    { id: "oil-change", name: "Oil Change Van" },
+    { id: "tire", name: "Tire Van" },
   ];
 }
 
@@ -56,10 +61,12 @@ export const DayCalendarView = ({
   onDateChange,
   businessHours,
   resources,
-  brand,
-  title = "Mobile Service Schedule",
-  subtitle = "View and update your mobile appointment schedule.",
-  primaryActionLabel,
+  title = "Day schedule",
+  subtitle,
+  primaryActionLabel = "New appointment",
+  isLoading = false,
+  error = null,
+  onRetry,
 }: DayCalendarViewProps) => {
   const [search, setSearch] = useState("");
   const openingHour = Math.min(parseHour(businessHours?.opening_time, 6), 6);
@@ -85,7 +92,9 @@ export const DayCalendarView = ({
     });
   }, [appointments, currentDate, search]);
 
-  const events: ScheduleEvent[] = visibleAppointments.map((appointment, index) => {
+  // Event color is derived from appointment status inside the board —
+  // color must mean something, so it is never assigned by list position.
+  const events: ScheduleEvent[] = visibleAppointments.map((appointment) => {
     const start = `${appointment.scheduled_date}T${appointment.scheduled_time || "08:00"}`;
     const customerName = appointment.customer?.name || appointment.guest_name || appointment.title;
     const vehicleLabel = appointment.vehicle
@@ -101,14 +110,12 @@ export const DayCalendarView = ({
       durationMinutes: appointment.duration_minutes || 60,
       amountCents: appointment.estimated_cost != null ? Math.round(Number(appointment.estimated_cost) * 100) : null,
       status: appointment.status,
-      color: (["blue", "yellow", "green", "cyan", "purple", "orange"] as const)[index % 6],
       onClick: () => onAppointmentClick(appointment),
     };
   });
 
   return (
     <CurbeeScheduleBoard
-      brand={brand}
       title={title}
       subtitle={subtitle}
       date={currentDate}
@@ -117,10 +124,13 @@ export const DayCalendarView = ({
       events={events}
       searchValue={search}
       onSearchChange={setSearch}
-      primaryActionLabel={primaryActionLabel ?? "Modify Van Schedule"}
+      primaryActionLabel={primaryActionLabel}
       onPrimaryAction={() => onTimeSlotClick(currentDate)}
       openingHour={openingHour}
       closingHour={closingHour}
+      isLoading={isLoading}
+      error={error}
+      onRetry={onRetry}
     />
   );
 };

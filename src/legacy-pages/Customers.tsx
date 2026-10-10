@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
@@ -13,6 +13,13 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Table,
   TableBody,
   TableCell,
@@ -20,11 +27,23 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Plus, Search, Users, Car, Edit, Trash2, Eye, Upload, Download } from "lucide-react";
+import {
+  Plus,
+  Search,
+  SearchX,
+  Users,
+  Edit,
+  Trash2,
+  Eye,
+  Upload,
+  Download,
+  X,
+  MoreHorizontal,
+  RefreshCw,
+} from "lucide-react";
 import { ClickablePhone, ClickableEmail } from "@/components/ui/clickable-contact";
 import { toast } from "@/components/ui/sonner";
 import { useTerminology } from "@/contexts/TerminologyContext";
-import { StatCard } from "@/components/dashboard/StatCard";
 import { customerSchema, getFirstError } from "@/lib/validation";
 import { useDebounce } from "@/hooks/useDebounce";
 import { ImportDialog, FieldMapping } from "@/components/import/ImportDialog";
@@ -64,6 +83,111 @@ const customerImportFields: FieldMapping[] = [
   { field: 'mileage', label: 'Mileage' },
 ];
 
+/**
+ * Row-level actions collapsed into a single overflow menu so the list
+ * stays scannable — view, edit, and delete without three icons per row.
+ */
+function CustomerRowActions({
+  customer,
+  onView,
+  onEdit,
+  onDelete,
+}: {
+  customer: Customer;
+  onView: (id: string) => void;
+  onEdit: (customer: Customer) => void;
+  onDelete: (id: string) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="iconXs" aria-label={`Actions for ${customer.name}`}>
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => onView(customer.id)}>
+          <Eye className="mr-2 h-4 w-4" />
+          View details
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onEdit(customer)}>
+          <Edit className="mr-2 h-4 w-4" />
+          Edit
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={() => onDelete(customer.id)}
+          className="text-destructive focus:text-destructive"
+        >
+          <Trash2 className="mr-2 h-4 w-4" />
+          Delete
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function CustomersErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="flex flex-col items-center gap-1 px-4 py-10 text-center">
+      <h3 className="text-lg font-semibold text-foreground">Couldn't load customers</h3>
+      <p className="max-w-sm text-sm text-muted-foreground">{message}</p>
+      <Button variant="outline" size="sm" className="mt-3 gap-2" onClick={onRetry}>
+        <RefreshCw className="h-4 w-4" />
+        Try again
+      </Button>
+    </div>
+  );
+}
+
+function CustomersEmptyState({
+  searching,
+  query,
+  customerNoun,
+  vehicleNoun,
+  onClearSearch,
+  onAdd,
+}: {
+  searching: boolean;
+  query: string;
+  customerNoun: string;
+  vehicleNoun: string;
+  onClearSearch: () => void;
+  onAdd: () => void;
+}) {
+  if (searching) {
+    return (
+      <div className="flex flex-col items-center gap-1 px-4 py-10 text-center">
+        <div className="rounded-full bg-muted p-4">
+          <SearchX className="h-6 w-6 text-muted-foreground" />
+        </div>
+        <h3 className="mt-2 text-lg font-semibold text-foreground">No {customerNoun.toLowerCase()}s found</h3>
+        <p className="max-w-xs text-sm text-muted-foreground">
+          Nothing matches &ldquo;{query}&rdquo;. Check the spelling or try a phone number.
+        </p>
+        <Button variant="outline" size="sm" className="mt-3" onClick={onClearSearch}>
+          Clear search
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col items-center gap-1 px-4 py-10 text-center">
+      <div className="rounded-full bg-muted p-4">
+        <Users className="h-6 w-6 text-muted-foreground" />
+      </div>
+      <h3 className="mt-2 text-lg font-semibold text-foreground">No {customerNoun.toLowerCase()}s yet</h3>
+      <p className="max-w-xs text-sm text-muted-foreground">
+        Add your first {customerNoun.toLowerCase()} to start tracking {vehicleNoun.toLowerCase()}s and service history.
+      </p>
+      <Button size="sm" className="mt-3 gap-2" onClick={onAdd}>
+        <Plus className="h-4 w-4" />
+        New {customerNoun}
+      </Button>
+    </div>
+  );
+}
+
 const Customers = () => {
   const navigate = useNavigate();
   const { terms } = useTerminology();
@@ -90,6 +214,7 @@ const Customers = () => {
   });
 
   const { importCustomers } = useCustomerImport();
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Export customers as CSV
   const handleExport = () => {
@@ -137,6 +262,20 @@ const Customers = () => {
   useEffect(() => {
     if (!workspaceLoading) void Promise.resolve().then(() => fetchCustomers());
   }, [fetchCustomers, workspaceLoading]);
+
+  // Press "/" anywhere on this screen to jump to search.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) return;
+      e.preventDefault();
+      searchInputRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   const { containerRef, isRefreshing } = usePullToRefresh({
     onRefresh: fetchCustomers,
@@ -236,6 +375,36 @@ const Customers = () => {
   useEffect(() => { void Promise.resolve().then(() => setPage(1)); }, [debouncedSearchQuery, pageSize]);
   const pagedCustomers = usePageSlice(filteredCustomers, page, pageSize);
 
+  // Slim KPI strip data — derived from the same overview fetch, no extra queries.
+  const totalVehicles = useMemo(
+    () => Object.values(vehicleCounts).reduce((a, b) => a + b, 0),
+    [vehicleCounts]
+  );
+  const servicedCount = Object.keys(lastServiceDates).length;
+
+  const vehicleLabel = (customerId: string) => {
+    const count = vehicleCounts[customerId] || 0;
+    return `${count} ${terms.vehicle}${count !== 1 ? "s" : ""}`;
+  };
+  const lastServiceLabel = (customerId: string) =>
+    lastServiceDates[customerId]
+      ? formatDateLabel(lastServiceDates[customerId], "MMM dd, yyyy")
+      : "—";
+
+  const emptyState = (
+    <CustomersEmptyState
+      searching={debouncedSearchQuery.trim().length > 0}
+      query={debouncedSearchQuery.trim()}
+      customerNoun={terms.customer}
+      vehicleNoun={terms.vehicle}
+      onClearSearch={() => setSearchQuery("")}
+      onAdd={() => setOpen(true)}
+    />
+  );
+  const errorState = (
+    <CustomersErrorState message={customersError || ""} onRetry={() => fetchCustomers()} />
+  );
+
   return (
     <AppLayout title={`${terms.customer}s`}>
       <PullToRefreshContainer
@@ -243,13 +412,16 @@ const Customers = () => {
         isRefreshing={isRefreshing}
       >
       <div className="space-y-4">
-        {/* Header */}
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        {/* Page header: eyebrow + H2 (the shell owns the H1) + the one primary action */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h2 className="text-2xl sm:text-3xl font-bold">All {terms.customer}s</h2>
-            <p className="text-sm sm:text-base text-muted-foreground">Manage your {terms.customer.toLowerCase()} base, {terms.vehicle.toLowerCase()}s, and {terms.service.toLowerCase()} history.</p>
+            <p className="text-xs font-medium uppercase tracking-widest text-muted-foreground">Directory</p>
+            <h2 className="mt-1 text-2xl font-semibold text-foreground">{terms.customer}s</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Find a {terms.customer.toLowerCase()} to see their {terms.vehicle.toLowerCase()}s and service history.
+            </p>
           </div>
-          <div className="flex gap-2 flex-col sm:flex-row">
+          <div className="flex flex-wrap gap-2">
             <Button variant="outline" className="gap-2" onClick={() => setImportOpen(true)}>
               <Upload className="h-4 w-4" />
               Import
@@ -260,9 +432,9 @@ const Customers = () => {
             </Button>
             <Dialog open={open} onOpenChange={(isOpen) => { setOpen(isOpen); if (!isOpen) resetForm(); }}>
               <DialogTrigger asChild>
-                <Button className="gap-2 w-full sm:w-auto">
+                <Button className="gap-2">
                   <Plus className="h-4 w-4" />
-                  Add New {terms.customer}
+                  Add {terms.customer}
                 </Button>
               </DialogTrigger>
             <DialogContent className="w-[95vw] max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -302,120 +474,234 @@ const Customers = () => {
           </div>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-2 gap-3 lg:max-w-xl">
-          <StatCard title={`Total ${terms.customer}s`} value={customers.length} icon={Users} iconBgColor="bg-primary/10" iconColor="text-primary" />
-          <StatCard title={`Active ${terms.vehicle}s`} value={Object.values(vehicleCounts).reduce((a, b) => a + b, 0)} icon={Car} iconBgColor="bg-gray-500/10" iconColor="text-gray-600" />
+        {/* Search is the primary job — prominent, full-width, live result count */}
+        <div className="space-y-2">
+          <div className="relative">
+            <Search className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              ref={searchInputRef}
+              placeholder={`Search by name, phone, or email`}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-12 pl-11 pr-20 text-base"
+              aria-label={`Search ${terms.customer.toLowerCase()}s`}
+            />
+            {searchQuery && (
+              <Button
+                variant="ghost"
+                size="iconXs"
+                onClick={() => setSearchQuery("")}
+                aria-label="Clear search"
+                className="absolute right-11 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            )}
+            <kbd className="pointer-events-none absolute right-4 top-1/2 hidden -translate-y-1/2 rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground sm:block" aria-hidden="true">
+              /
+            </kbd>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+            <p className="font-mono text-sm" aria-live="polite">
+              <span className="font-semibold text-foreground">{filteredCustomers.length}</span>{" "}
+              <span className="text-muted-foreground">of {customers.length} {terms.customer.toLowerCase()}s</span>
+            </p>
+            {!customersLoading && !customersError && (
+              <p className="font-mono text-sm text-muted-foreground">
+                <span className="font-semibold text-foreground">{totalVehicles}</span> {terms.vehicle.toLowerCase()}s
+                <span className="mx-2" aria-hidden="true">·</span>
+                <span className="font-semibold text-foreground">{servicedCount}</span> serviced
+              </p>
+            )}
+          </div>
         </div>
 
-        {/* Search */}
-        <Card density="compact" className="rounded-b-none border-border/50">
-          <CardContent>
-            <div className="flex flex-col sm:flex-row gap-4">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  density="compact"
-                  placeholder="Search by name, phone, or email"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Table */}
-        <Card density="compact" className="-mt-4 rounded-t-none border-border/50">
+        {/* Directory — one panel: desktop table, mobile cards */}
+        <Card density="compact" className="border-border/50">
           <CardContent className="p-0">
-            <div className="overflow-x-auto">
-            <Table density="compact">
-              <TableHeader>
-                <TableRow className="border-border/50">
-                  <TableHead className="font-medium">{terms.customer.toUpperCase()}</TableHead>
-                  <TableHead className="font-medium">PHONE</TableHead>
-                  <TableHead className="font-medium">{terms.vehicle.toUpperCase()}S</TableHead>
-                  <TableHead className="font-medium">LAST {terms.service.toUpperCase()}</TableHead>
-                  <TableHead className="font-medium">STATUS</TableHead>
-                  <TableHead className="font-medium w-20"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {customersLoading ? (
-                  Array.from({ length: 5 }).map((_, idx) => (
-                    <TableRow key={`skeleton-${idx}`}>
-                      <TableCell colSpan={6} className="py-4">
-                        <Skeleton className="h-12 w-full" />
-                      </TableCell>
-                    </TableRow>
-                  ))
-                ) : customersError ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="bg-destructive/5 py-4 text-center text-destructive">{customersError}</TableCell>
+            <div className="hidden overflow-x-auto md:block">
+              <Table density="compact">
+                <TableHeader>
+                  <TableRow className="border-border/50">
+                    <TableHead className="text-xs font-medium uppercase tracking-wider">{terms.customer}</TableHead>
+                    <TableHead className="text-xs font-medium uppercase tracking-wider">Phone</TableHead>
+                    <TableHead className="text-xs font-medium uppercase tracking-wider">{terms.vehicle}s</TableHead>
+                    <TableHead className="text-xs font-medium uppercase tracking-wider">Last {terms.service}</TableHead>
+                    <TableHead className="w-12">
+                      <span className="sr-only">Actions</span>
+                    </TableHead>
                   </TableRow>
-                ) : filteredCustomers.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="py-8">
-                      <div className="flex flex-col items-center gap-4 py-8 text-center">
-                        <div className="rounded-md bg-muted p-6 text-4xl">👥</div>
-                        <h3 className="font-semibold">No {terms.customer.toLowerCase()}s yet</h3>
-                        <p className="text-muted-foreground text-sm max-w-xs">
-                          Add your first {terms.customer.toLowerCase()} to start tracking service history and activity.
-                        </p>
-                        <Button onClick={() => setOpen(true)}>
-                          <Plus className="mr-2 h-4 w-4" /> New {terms.customer}
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  pagedCustomers.map((customer) => (
-                    <TableRow key={customer.id} className="border-border/50">
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          <Avatar className="h-8 w-8">
-                            <AvatarFallback className="bg-primary/10 text-primary text-sm">
-                              {getInitials(customer.name)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div>
-                            <p className="font-medium">{customer.name}</p>
-                            {customer.email && <ClickableEmail email={customer.email} showIcon={false} className="text-sm" />}
+                </TableHeader>
+                <TableBody>
+                  {customersLoading ? (
+                    Array.from({ length: 6 }).map((_, idx) => (
+                      <TableRow key={`skeleton-${idx}`} className="border-border/50">
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <Skeleton className="h-8 w-8 rounded-full" />
+                            <div className="space-y-1.5">
+                              <Skeleton className="h-4 w-32" />
+                              <Skeleton className="h-3 w-24" />
+                            </div>
                           </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {customer.phone ? (
-                          <ClickablePhone phone={customer.phone} showIcon={false} />
-                        ) : "—"}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="font-normal">
-                          {vehicleCounts[customer.id] || 0} {terms.vehicle}{(vehicleCounts[customer.id] || 0) !== 1 ? "s" : ""}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {lastServiceDates[customer.id]
-                          ? formatDateLabel(lastServiceDates[customer.id], "MMM dd, yyyy")
-                          : "—"}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">Active</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button variant="ghost" size="iconXs" onClick={() => navigate(`/customers/${customer.id}`)}><Eye className="h-4 w-4" /></Button>
-                          <Button variant="ghost" size="iconXs" onClick={() => openEditDialog(customer)}><Edit className="h-4 w-4" /></Button>
-                          <Button variant="ghost" size="iconXs" onClick={() => handleDelete(customer.id)}><Trash2 className="h-4 w-4" /></Button>
-                        </div>
-                      </TableCell>
+                        </TableCell>
+                        <TableCell><Skeleton className="h-4 w-28" /></TableCell>
+                        <TableCell><Skeleton className="h-6 w-20 rounded-full" /></TableCell>
+                        <TableCell><Skeleton className="h-4 w-24" /></TableCell>
+                        <TableCell><Skeleton className="h-8 w-8 rounded-md" /></TableCell>
+                      </TableRow>
+                    ))
+                  ) : customersError ? (
+                    <TableRow>
+                      <TableCell colSpan={5}>{errorState}</TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+                  ) : filteredCustomers.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={5}>{emptyState}</TableCell>
+                    </TableRow>
+                  ) : (
+                    pagedCustomers.map((customer) => (
+                      <TableRow
+                        key={customer.id}
+                        className="cursor-pointer border-border/50 transition-colors hover:bg-muted/40"
+                        onClick={() => navigate(`/customers/${customer.id}`)}
+                      >
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            <Avatar className="h-8 w-8">
+                              <AvatarFallback className="bg-primary/10 text-sm text-primary">
+                                {getInitials(customer.name)}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div className="min-w-0">
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); navigate(`/customers/${customer.id}`); }}
+                                className="block max-w-full truncate text-left text-sm font-medium text-foreground hover:underline"
+                              >
+                                {customer.name}
+                              </button>
+                              {customer.email && (
+                                <span className="block truncate" onClick={(e) => e.stopPropagation()}>
+                                  <ClickableEmail email={customer.email} showIcon={false} className="text-sm font-normal" />
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          {customer.phone ? (
+                            <ClickablePhone
+                              phone={customer.phone}
+                              showIcon={false}
+                              className="font-mono text-sm font-normal text-foreground hover:text-primary"
+                            />
+                          ) : (
+                            <span className="text-sm text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="font-normal">
+                            {vehicleLabel(customer.id)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {lastServiceLabel(customer.id)}
+                        </TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <CustomerRowActions
+                            customer={customer}
+                            onView={(id) => navigate(`/customers/${id}`)}
+                            onEdit={openEditDialog}
+                            onDelete={handleDelete}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
             </div>
+
+            {/* Mobile: same data as stacked cards */}
+            <div className="space-y-2 p-3 md:hidden">
+              {customersLoading ? (
+                Array.from({ length: 4 }).map((_, idx) => (
+                  <div key={`m-skeleton-${idx}`} className="rounded-lg border border-border/50 p-4">
+                    <div className="flex items-center gap-3">
+                      <Skeleton className="h-10 w-10 rounded-full" />
+                      <div className="flex-1 space-y-1.5">
+                        <Skeleton className="h-4 w-2/3" />
+                        <Skeleton className="h-3 w-1/2" />
+                      </div>
+                    </div>
+                    <Skeleton className="mt-3 h-4 w-1/2" />
+                  </div>
+                ))
+              ) : customersError ? (
+                <div className="rounded-lg border border-border/50">{errorState}</div>
+              ) : filteredCustomers.length === 0 ? (
+                <div className="rounded-lg border border-border/50">{emptyState}</div>
+              ) : (
+                pagedCustomers.map((customer) => (
+                  <div
+                    key={customer.id}
+                    className="rounded-lg border border-border/50 p-4 transition-colors active:bg-muted/40"
+                    onClick={() => navigate(`/customers/${customer.id}`)}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <Avatar className="h-10 w-10">
+                          <AvatarFallback className="bg-primary/10 text-sm text-primary">
+                            {getInitials(customer.name)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0">
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); navigate(`/customers/${customer.id}`); }}
+                            className="block max-w-full truncate text-left text-sm font-medium text-foreground"
+                          >
+                            {customer.name}
+                          </button>
+                          {customer.email && (
+                            <span className="block truncate" onClick={(e) => e.stopPropagation()}>
+                              <ClickableEmail email={customer.email} showIcon={false} className="text-sm font-normal" />
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <span onClick={(e) => e.stopPropagation()}>
+                        <CustomerRowActions
+                          customer={customer}
+                          onView={(id) => navigate(`/customers/${id}`)}
+                          onEdit={openEditDialog}
+                          onDelete={handleDelete}
+                        />
+                      </span>
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                      {customer.phone && (
+                        <span onClick={(e) => e.stopPropagation()}>
+                          <ClickablePhone
+                            phone={customer.phone}
+                            showIcon={false}
+                            className="font-mono text-sm font-normal text-foreground hover:text-primary"
+                          />
+                        </span>
+                      )}
+                      <Badge variant="outline" className="font-normal">
+                        {vehicleLabel(customer.id)}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
+                        Last {terms.service.toLowerCase()}: {lastServiceLabel(customer.id)}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
             <ListPagination
               totalCount={filteredCustomers.length}
               page={page}

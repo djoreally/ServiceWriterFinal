@@ -371,7 +371,7 @@ export const ServiceSelectionStep = memo(function ServiceSelectionStep({
     <div>
       <div className="text-center mb-8">
         <Wrench className="h-12 w-12 mx-auto text-primary mb-4" />
-        <h2 className="text-2xl font-bold mb-2">Select your services</h2>
+        <h1 className="text-[30px] font-semibold leading-[1.2] tracking-[-0.01em] mb-2">Select your services</h1>
         <p className="text-muted-foreground">Choose a one-time service or save with a package.</p>
       </div>
 

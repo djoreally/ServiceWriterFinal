@@ -1,22 +1,23 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
-import { Search } from "lucide-react";
+import { Search, X } from "lucide-react";
 import { EmbedCodeSection } from "@/components/settings/EmbedCodeSection";
 import { getCurrentUser, fetchBusinessProfileDirect, checkSlugDirect } from "@/application/queries/settings-page.query";
 import { isReservedSubdomain } from "@/lib/reserved-subdomains";
 
 import { uploadCoverImage, uploadLogo, upsertBusinessProfile } from "@/application/commands/settings-page.command";
 import { loadStarterBusinessData } from "@/application/commands/starter-business-data.command";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import useIsClient from "@/hooks/useIsClient";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Building, Upload, Save, Loader2, Tags, Globe, Clock, Link, Copy, ExternalLink, CheckCircle2, XCircle, MapPin, Navigation, DollarSign, ClipboardCheck, Bot } from "lucide-react";
+import { Building, Upload, Save, Loader2, Tags, Globe, Clock, Link, Copy, ExternalLink, CheckCircle2, XCircle, MapPin, Navigation, Zap, RotateCcw, CalendarClock, Users, CreditCard, MessageSquareText, Plug, ShieldCheck, ClipboardCheck, Bot, type LucideIcon } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/components/ui/sonner";
 import { useTerminology, Terminology } from "@/contexts/TerminologyContext";
 import { useRegionalSettings, CURRENCIES, TIMEZONES } from "@/contexts/RegionalSettingsContext";
@@ -91,70 +92,180 @@ type SettingsTabId =
   | "integrations"
   | "advanced";
 
-const SETTINGS_TABS: ReadonlyArray<{
+interface SettingsSectionDef {
+  id: string;
+  label: string;
+  description: string;
+  keywords: string[];
+}
+
+interface SettingsTabDef {
   id: SettingsTabId;
   label: string;
-  icon: typeof Building;
   description: string;
-  sections: string[];
-}> = [
+  icon: LucideIcon;
+  sections: SettingsSectionDef[];
+}
+
+/**
+ * Single source of truth for the settings information architecture.
+ * Drives the sidebar nav, the in-tab table of contents, and cross-tab search.
+ */
+const SETTINGS_TABS: ReadonlyArray<SettingsTabDef> = [
   {
     id: "business",
     label: "Business",
-    icon: Building,
     description: "Profile, regional settings, terminology",
-    sections: ["Business Profile", "Regional", "Terminology", "Date", "Currency", "Timezone"],
+    icon: Building,
+    sections: [
+      { id: "starter-data", label: "Starter business data", description: "Seed the service catalog", keywords: ["templates", "seed", "services", "packages", "subscription plans"] },
+      { id: "business-profile", label: "Business profile", description: "Name, contact, logo, cover", keywords: ["logo", "cover", "phone", "email", "address", "website"] },
+      { id: "regional", label: "Regional settings", description: "Date format, timezone, currency", keywords: ["date", "time", "timezone", "currency", "format"] },
+      { id: "terminology", label: "Terminology", description: "Labels used across the app", keywords: ["labels", "customer", "vehicle", "service", "quote", "wording"] },
+    ],
   },
   {
     id: "booking",
     label: "Booking & Hours",
-    icon: Link,
     description: "Booking link, hours, service area, weather",
-    sections: ["Booking", "Hours", "Service Area", "Services", "Catalog", "Weather", "Embed", "Subdomain", "Working Days"],
+    icon: CalendarClock,
+    sections: [
+      { id: "booking-link", label: "Online booking link", description: "Your subdomain", keywords: ["subdomain", "url", "link", "slug"] },
+      { id: "service-display", label: "Public service selection", description: "How customers browse services", keywords: ["catalog", "categories", "public booking"] },
+      { id: "embed-code", label: "Embed codes", description: "Booking widget for your site", keywords: ["embed", "widget", "website", "iframe"] },
+      { id: "business-hours", label: "Business hours", description: "Opening hours and working days", keywords: ["hours", "opening", "closing", "working days", "schedule"] },
+      { id: "service-area", label: "Service area", description: "Radius, map, marketplace", keywords: ["radius", "map", "location", "marketplace", "coverage"] },
+      { id: "weather-guard", label: "Weather guard", description: "Weather-based protections", keywords: ["weather", "rain", "reschedule"] },
+    ],
   },
   {
     id: "team",
     label: "Team & Dispatch",
-    icon: Navigation,
     description: "Team members and auto-dispatch engine",
-    sections: ["Team", "Members", "Dispatch", "Technician"],
+    icon: Users,
+    sections: [
+      { id: "team-members", label: "Team members", description: "Staff, roles, technicians", keywords: ["staff", "technicians", "roles", "members", "invite"] },
+      { id: "auto-dispatch", label: "Dispatch automation", description: "Auto-assign algorithm", keywords: ["dispatch", "auto-assign", "algorithm", "technician"] },
+    ],
   },
   {
     id: "payments",
     label: "Payments & Tax",
-    icon: DollarSign,
     description: "Stripe/Square, billing, tax, QuickBooks, cash drawer",
-    sections: ["Payment", "Tax", "QuickBooks", "QBO", "Cash Drawer", "Stripe", "Square", "Billing", "Subscription", "Deposit"],
+    icon: CreditCard,
+    sections: [
+      { id: "payment-provider", label: "Payment provider", description: "Stripe / Square connection", keywords: ["stripe", "square", "connect", "provider"] },
+      { id: "provider-sync", label: "Provider sync status", description: "Push pipeline health", keywords: ["sync", "stripe", "square", "push", "status"] },
+      { id: "stripe-methods", label: "Stripe payment methods", description: "Methods on your Stripe account", keywords: ["stripe", "cards", "wallets", "payment methods"] },
+      { id: "billing", label: "Subscription billing", description: "Your Service Writer plan", keywords: ["plan", "subscription", "billing", "platform"] },
+      { id: "payment-controls", label: "Payment & financial controls", description: "Deposits, taxes, promo codes", keywords: ["deposits", "promo", "coupons", "financial"] },
+      { id: "tax", label: "Tax settings", description: "Location-based tax", keywords: ["tax", "sales tax", "location"] },
+      { id: "quickbooks", label: "QuickBooks", description: "Accounting integration", keywords: ["quickbooks", "qbo", "accounting", "sync"] },
+      { id: "cash-drawer", label: "Cash drawer", description: "POS cash drawer", keywords: ["cash", "drawer", "pos"] },
+    ],
   },
   {
     id: "comms",
     label: "Comms & Marketing",
-    icon: Tags,
     description: "Marketing, email, SMS, voice agent",
-    sections: ["Marketing", "Email", "SMTP", "Voice", "Agent", "ElevenLabs", "Newsletter"],
+    icon: MessageSquareText,
+    sections: [
+      { id: "sms-credits", label: "SMS credits", description: "Prepaid balance", keywords: ["credits", "prepaid", "balance", "sms"] },
+      { id: "sms", label: "SMS automation", description: "Messages and templates", keywords: ["sms", "text", "messages", "templates", "reminders", "automation"] },
+      { id: "marketing", label: "Marketing", description: "Campaigns and outreach", keywords: ["marketing", "campaigns", "newsletter"] },
+      { id: "tracking", label: "Tracking & ads", description: "Pixels and ad tracking", keywords: ["tracking", "pixels", "ads", "analytics"] },
+      { id: "email", label: "Email settings", description: "White-label SMTP", keywords: ["email", "smtp", "white label", "from address"] },
+      { id: "voice-agent", label: "Voice agent", description: "AI phone receptionist", keywords: ["voice", "agent", "elevenlabs", "ai", "phone", "receptionist"] },
+    ],
   },
   {
     id: "integrations",
     label: "Integrations",
-    icon: Globe,
     description: "Calendar, inspections, link health",
-    sections: ["Google Calendar", "Calendar", "Inspection", "Templates", "Link Health"],
+    icon: Plug,
+    sections: [
+      { id: "calendar", label: "Google Calendar", description: "Two-way calendar sync", keywords: ["calendar", "google", "sync"] },
+      { id: "inspection-templates", label: "Inspection templates", description: "Reusable checklists", keywords: ["inspection", "templates", "checklists"] },
+      { id: "agent-integrations", label: "Agent integrations", description: "ChatGPT, Claude, Cursor", keywords: ["mcp", "chatgpt", "claude", "cursor", "ai", "assistant"] },
+      { id: "link-health", label: "Link health", description: "Broken-link monitoring", keywords: ["links", "health", "broken", "monitoring"] },
+    ],
   },
   {
     id: "advanced",
     label: "Advanced",
-    icon: ClipboardCheck,
     description: "Offline sync, GDPR data management",
-    sections: ["Offline", "Sync", "GDPR", "Data", "Export", "Erasure"],
+    icon: ShieldCheck,
+    sections: [
+      { id: "offline-sync", label: "Offline sync", description: "Offline queue status", keywords: ["offline", "sync", "queue"] },
+      { id: "gdpr", label: "Data & privacy", description: "Export and erasure", keywords: ["gdpr", "privacy", "export", "erasure", "delete", "data"] },
+    ],
   },
 ];
+
+/** Anchored, labelled wrapper so search and the table of contents can jump to any section. */
+const SectionAnchor = ({ id, label, children }: { id: string; label: string; children: React.ReactNode }) => (
+  <section id={`settings-section-${id}`} aria-label={label} className="scroll-mt-24">
+    {children}
+  </section>
+);
+
+/** Page-shaped skeleton — the loading state mirrors the real layout, never a lone spinner. */
+const SettingsSkeleton = () => (
+  <AppLayout title="Settings">
+    <div className="space-y-6 pb-24" aria-hidden="true">
+      <div className="space-y-2">
+        <Skeleton className="h-3 w-24" />
+        <Skeleton className="h-8 w-64" />
+        <Skeleton className="h-4 w-96 max-w-full" />
+      </div>
+      <div className="grid min-w-0 gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
+        <div className="space-y-2">
+          <Skeleton className="h-10 w-full" />
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-11 w-full" />
+          ))}
+        </div>
+        <div className="max-w-3xl space-y-6">
+          <Skeleton className="h-72 w-full" />
+          <Skeleton className="h-56 w-full" />
+          <Skeleton className="h-48 w-full" />
+        </div>
+      </div>
+    </div>
+    <span className="sr-only">Loading settings</span>
+  </AppLayout>
+);
+
+/** Normalize a website URL exactly the way the save path does, so dirty-tracking never lies. */
+const normalizeWebsiteInput = (raw: string): { ok: boolean; value: string | null } => {
+  const input = raw.trim();
+  if (!input) return { ok: true, value: null };
+  let normalized = input;
+  if (!/^https?:\/\//i.test(normalized)) {
+    normalized = `https://${normalized}`;
+  }
+  try {
+    const url = new URL(normalized);
+    if (url.protocol !== "https:" && url.protocol !== "http:") {
+      return { ok: false, value: null };
+    }
+    return { ok: true, value: url.toString() };
+  } catch {
+    return { ok: false, value: null };
+  }
+};
 
 const Settings = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [sectionSearch, setSectionSearch] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [loadState, setLoadState] = useState<"loading" | "error" | "ready">("loading");
+  const [loadErrorMsg, setLoadErrorMsg] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [saveErrorMsg, setSaveErrorMsg] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+  const savedSignatureRef = useRef<string | null>(null);
   const [loadingStarterData, setLoadingStarterData] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [checkingSlug, setCheckingSlug] = useState(false);
@@ -199,59 +310,83 @@ const Settings = () => {
   });
 
   useEffect(() => {
+    let cancelled = false;
     const fetchProfile = async () => {
-      const user = await getCurrentUser();
-      if (!user) return;
-
-      const { data, error } = await fetchBusinessProfileDirect(user.id);
-
-      if (data) {
-        const terminology = data.terminology && typeof data.terminology === "object" && !Array.isArray(data.terminology)
-          ? {
-              customer: typeof (data.terminology as Record<string, unknown>).customer === "string" ? (data.terminology as Record<string, unknown>).customer as string : "Customer",
-              vehicle: typeof (data.terminology as Record<string, unknown>).vehicle === "string" ? (data.terminology as Record<string, unknown>).vehicle as string : "Vehicle",
-              service: typeof (data.terminology as Record<string, unknown>).service === "string" ? (data.terminology as Record<string, unknown>).service as string : "Service",
-              quote: typeof (data.terminology as Record<string, unknown>).quote === "string" ? (data.terminology as Record<string, unknown>).quote as string : "Quote",
-            }
-          : { customer: "Customer", vehicle: "Vehicle", service: "Service", quote: "Quote" };
-        
-        setProfile({
-          ...data,
-          terminology,
-          date_format: data.date_format || "DD/MM/YYYY HH:mm",
-          timezone: data.timezone || "UTC",
-          currency: data.currency || "USD",
-          opening_time: data.opening_time || "08:00",
-          closing_time: data.closing_time || "17:00",
-          working_days: data.working_days || ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
-          booking_slug: data.booking_slug || "",
-          website_url: data.website_url || "",
-          cover_image_url: (data as { cover_image_url?: string | null }).cover_image_url || "",
-          service_radius_miles: data.service_radius_miles || 25,
-          marketplace_opt_in: (data as { marketplace_opt_in?: boolean }).marketplace_opt_in ?? false,
-          service_address: data.service_address || "",
-          service_coordinates: (data.service_coordinates as { lat: number; lng: number } | null) || null,
-          weather_guard_enabled: (data as Record<string, unknown>).weather_guard_enabled as boolean ?? false,
-          weather_guard_settings: parseWeatherGuardSettings((data as Record<string, unknown>).weather_guard_settings),
-          day_hours: (data as Record<string, unknown>).day_hours as Record<string, unknown> | null ?? null,
-        });
-        const rawDayHours = (data as Record<string, unknown>).day_hours as Record<string, unknown> | null;
-        const areaRules = rawDayHours && Array.isArray(rawDayHours.service_area_rules)
-          ? (rawDayHours.service_area_rules as ServiceAreaRule[])
-          : [];
-        setServiceAreaRules(areaRules);
-        setSlugInput(data.booking_slug || "");
-        if (data.booking_slug) {
-          setSlugAvailable(true);
+      setLoadState("loading");
+      setLoadErrorMsg(null);
+      try {
+        const user = await getCurrentUser();
+        if (!user) {
+          if (!cancelled) {
+            setLoadErrorMsg("Your session has expired. Sign in again, then try reloading your settings.");
+            setLoadState("error");
+          }
+          return;
         }
-      } else {
-        setProfile(prev => ({ ...prev, user_id: user.id, email: user.email || "" }));
+
+        const { data, error } = await fetchBusinessProfileDirect(user.id);
+        if (cancelled) return;
+
+        // A failed fetch is not an empty profile — surface it instead of showing a blank form.
+        if (error && !data) {
+          throw error;
+        }
+
+        if (data) {
+          const terminology = data.terminology && typeof data.terminology === "object" && !Array.isArray(data.terminology)
+            ? {
+                customer: typeof (data.terminology as Record<string, unknown>).customer === "string" ? (data.terminology as Record<string, unknown>).customer as string : "Customer",
+                vehicle: typeof (data.terminology as Record<string, unknown>).vehicle === "string" ? (data.terminology as Record<string, unknown>).vehicle as string : "Vehicle",
+                service: typeof (data.terminology as Record<string, unknown>).service === "string" ? (data.terminology as Record<string, unknown>).service as string : "Service",
+                quote: typeof (data.terminology as Record<string, unknown>).quote === "string" ? (data.terminology as Record<string, unknown>).quote as string : "Quote",
+              }
+            : { customer: "Customer", vehicle: "Vehicle", service: "Service", quote: "Quote" };
+
+          setProfile({
+            ...data,
+            terminology,
+            date_format: data.date_format || "DD/MM/YYYY HH:mm",
+            timezone: data.timezone || "UTC",
+            currency: data.currency || "USD",
+            opening_time: data.opening_time || "08:00",
+            closing_time: data.closing_time || "17:00",
+            working_days: data.working_days || ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+            booking_slug: data.booking_slug || "",
+            website_url: data.website_url || "",
+            cover_image_url: (data as { cover_image_url?: string | null }).cover_image_url || "",
+            service_radius_miles: data.service_radius_miles || 25,
+            marketplace_opt_in: (data as { marketplace_opt_in?: boolean }).marketplace_opt_in ?? false,
+            service_address: data.service_address || "",
+            service_coordinates: (data.service_coordinates as { lat: number; lng: number } | null) || null,
+            weather_guard_enabled: (data as Record<string, unknown>).weather_guard_enabled as boolean ?? false,
+            weather_guard_settings: parseWeatherGuardSettings((data as Record<string, unknown>).weather_guard_settings),
+            day_hours: (data as Record<string, unknown>).day_hours as Record<string, unknown> | null ?? null,
+          });
+          const rawDayHours = (data as Record<string, unknown>).day_hours as Record<string, unknown> | null;
+          const areaRules = rawDayHours && Array.isArray(rawDayHours.service_area_rules)
+            ? (rawDayHours.service_area_rules as ServiceAreaRule[])
+            : [];
+          setServiceAreaRules(areaRules);
+          setSlugInput(data.booking_slug || "");
+          if (data.booking_slug) {
+            setSlugAvailable(true);
+          }
+        } else {
+          setProfile(prev => ({ ...prev, user_id: user.id, email: user.email || "" }));
+        }
+        setLoadState("ready");
+      } catch (err) {
+        if (!cancelled) {
+          console.error("[Settings] Profile load error:", err);
+          setLoadErrorMsg("We couldn't load your settings. Check your connection and try again.");
+          setLoadState("error");
+        }
       }
-      setLoading(false);
     };
 
     fetchProfile();
-  }, []);
+    return () => { cancelled = true; };
+  }, [reloadToken]);
 
   const checkSlugAvailability = async (slug: string) => {
     if (!slug || slug.length < 3) {
@@ -277,7 +412,7 @@ const Settings = () => {
 
 
     setCheckingSlug(true);
-    
+
     const user = await getCurrentUser();
     const { data, error } = await checkSlugDirect(slug);
 
@@ -345,76 +480,71 @@ const Settings = () => {
     }
   };
 
+  /**
+   * The exact payload the save writes — built in one place so the save,
+   * the "saved" confirmation, and dirty-tracking all agree on what changed.
+   */
+  const buildProfilePayload = (userId: string, websiteUrl: string | null) => ({
+    user_id: userId,
+    business_name: profile.business_name,
+    owner_name: profile.owner_name,
+    phone: profile.phone,
+    email: profile.email,
+    address: profile.address,
+    website_url: websiteUrl,
+    logo_url: profile.logo_url,
+    cover_image_url: profile.cover_image_url || null,
+    terminology: JSON.parse(JSON.stringify(profile.terminology)) as Json,
+    date_format: profile.date_format,
+    timezone: profile.timezone,
+    currency: "USD",
+    opening_time: profile.opening_time,
+    closing_time: profile.closing_time,
+    working_days: profile.working_days,
+    booking_slug: slugInput || profile.booking_slug || null,
+    service_radius_miles: profile.service_radius_miles,
+    service_address: profile.service_address,
+    service_coordinates: profile.service_coordinates as Json,
+    marketplace_opt_in: profile.marketplace_opt_in,
+    weather_guard_enabled: profile.weather_guard_enabled,
+    weather_guard_settings: JSON.parse(JSON.stringify(profile.weather_guard_settings)) as Json,
+    day_hours: JSON.parse(JSON.stringify({
+      ...(profile.day_hours || {}),
+      service_area_rules: serviceAreaRules,
+    })) as Json,
+  });
+
   const handleSave = async () => {
-    setSaving(true);
+    setSaveStatus("saving");
+    setSaveErrorMsg(null);
     const user = await getCurrentUser();
     if (!user) {
       toast.error("Your session has expired. Sign in again to continue.");
-      setSaving(false);
+      setSaveStatus("error");
+      setSaveErrorMsg("Your session has expired. Sign in again, then retry.");
       return;
     }
 
-    const websiteInput = profile.website_url.trim();
-    let normalizedWebsiteUrl = websiteInput;
-
     // Validate website_url if provided (auto-prefix https:// when protocol is omitted)
-    if (websiteInput) {
-      try {
-        if (!/^https?:\/\//i.test(normalizedWebsiteUrl)) {
-          normalizedWebsiteUrl = `https://${normalizedWebsiteUrl}`;
-        }
-        const url = new URL(normalizedWebsiteUrl);
-        if (url.protocol !== "https:" && url.protocol !== "http:") {
-          toast.error("Website URL must start with http:// or https://");
-          setSaving(false);
-          return;
-        }
-        normalizedWebsiteUrl = url.toString();
-      } catch {
-        toast.error("Please enter a valid website URL");
-        setSaving(false);
-        return;
-      }
+    const { ok: websiteOk, value: normalizedWebsiteUrl } = normalizeWebsiteInput(profile.website_url);
+    if (!websiteOk) {
+      toast.error("Please enter a valid website URL");
+      setSaveStatus("error");
+      setSaveErrorMsg("That website URL doesn't look valid. Fix it and try again.");
+      return;
     }
 
     // If user is trying to save a new slug, validate it
     if (slugInput && slugInput !== profile.booking_slug) {
       if (slugAvailable !== true) {
         toast.error("Please check slug availability before saving");
-        setSaving(false);
+        setSaveStatus("error");
+        setSaveErrorMsg("Check that the booking subdomain is available before saving.");
         return;
       }
     }
 
-    const profileData = {
-      user_id: user.id,
-      business_name: profile.business_name,
-      owner_name: profile.owner_name,
-      phone: profile.phone,
-      email: profile.email,
-      address: profile.address,
-      website_url: normalizedWebsiteUrl || null,
-      logo_url: profile.logo_url,
-      cover_image_url: profile.cover_image_url || null,
-      terminology: JSON.parse(JSON.stringify(profile.terminology)) as Json,
-      date_format: profile.date_format,
-      timezone: profile.timezone,
-      currency: "USD",
-      opening_time: profile.opening_time,
-      closing_time: profile.closing_time,
-      working_days: profile.working_days,
-      booking_slug: slugInput || profile.booking_slug || null,
-      service_radius_miles: profile.service_radius_miles,
-      service_address: profile.service_address,
-      service_coordinates: profile.service_coordinates as Json,
-      marketplace_opt_in: profile.marketplace_opt_in,
-      weather_guard_enabled: profile.weather_guard_enabled,
-      weather_guard_settings: JSON.parse(JSON.stringify(profile.weather_guard_settings)) as Json,
-      day_hours: JSON.parse(JSON.stringify({
-        ...(profile.day_hours || {}),
-        service_area_rules: serviceAreaRules,
-      })) as Json,
-    };
+    const profileData = buildProfilePayload(user.id, normalizedWebsiteUrl);
 
     const { error } = await upsertBusinessProfile(user.id, profileData as Record<string, unknown>);
 
@@ -422,22 +552,39 @@ const Settings = () => {
       if (error.code === '23505') {
         toast.error("This booking link is already taken. Please choose another.");
         setSlugAvailable(false);
+        setSaveErrorMsg("This booking link is already taken. Choose another and retry.");
       } else {
         console.error("[Settings] Profile save error:", error);
         toast.error(`Could not save changes: ${error.message || "Check required fields and try again."}`);
+        setSaveErrorMsg(error.message || "Couldn't save. Check required fields and try again.");
       }
+      setSaveStatus("error");
     } else {
       setProfile(prev => ({ ...prev, booking_slug: slugInput || prev.booking_slug }));
       setTerms(profile.terminology);
       await refetch();
       await refetchRegional();
+      // Snapshot what was just written: any later edit flips the footer back to idle.
+      savedSignatureRef.current = JSON.stringify(profileData);
+      setSavedAt(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
+      setSaveStatus("saved");
       toast.success(setupMode ? "Business settings saved. Opening dashboard…" : "Profile saved successfully");
       if (setupMode) {
         navigate("/dashboard", { replace: true });
       }
     }
-    setSaving(false);
   };
+
+  // A "Saved" badge must never outlive the edits that followed it.
+  useEffect(() => {
+    if (saveStatus !== "saved" || !savedSignatureRef.current || !profile.user_id) return;
+    const { ok, value } = normalizeWebsiteInput(profile.website_url);
+    if (!ok) return;
+    const current = JSON.stringify(buildProfilePayload(profile.user_id, value));
+    if (current !== savedSignatureRef.current) {
+      setSaveStatus("idle");
+    }
+  }, [profile, slugInput, serviceAreaRules, saveStatus]);
 
   const handleTerminologyChange = (key: keyof Terminology, value: string) => {
     setProfile(prev => ({
@@ -499,15 +646,25 @@ const Settings = () => {
     setSearchParams(next, { replace: true });
   };
 
-  const filteredTabs = useMemo(() => {
-    const source = setupMode ? SETTINGS_TABS.filter((tab) => tab.id === "business") : SETTINGS_TABS;
-    if (!sectionSearch.trim()) return source;
-    const q = sectionSearch.toLowerCase();
-    return source.filter((t) =>
-      t.label.toLowerCase().includes(q) ||
-      t.sections.some((s) => s.toLowerCase().includes(q)),
-    );
-  }, [sectionSearch, setupMode]);
+  const jumpToSection = (tabId: SettingsTabId, sectionId: string) => {
+    setActiveTab(tabId);
+    window.setTimeout(() => {
+      document.getElementById(`settings-section-${sectionId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 120);
+  };
+
+  const searchResults = useMemo(() => {
+    const q = sectionSearch.trim().toLowerCase();
+    if (!q) return null;
+    const out: Array<{ tab: SettingsTabDef; section: SettingsSectionDef }> = [];
+    for (const tab of SETTINGS_TABS) {
+      for (const section of tab.sections) {
+        const haystack = `${section.label} ${section.description} ${section.keywords.join(" ")} ${tab.label}`.toLowerCase();
+        if (haystack.includes(q)) out.push({ tab, section });
+      }
+    }
+    return out;
+  }, [sectionSearch]);
 
   const handleLoadStarterData = async () => {
     setLoadingStarterData(true);
@@ -526,96 +683,185 @@ const Settings = () => {
     }
   };
 
-  if (loading) {
+  if (loadState === "loading") {
+    return <SettingsSkeleton />;
+  }
+
+  if (loadState === "error") {
     return (
       <AppLayout title="Settings">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <div className="mx-auto max-w-xl py-16">
+          <Card>
+            <CardContent className="space-y-4 py-10 text-center">
+              <XCircle className="mx-auto h-10 w-10 text-destructive" />
+              <div>
+                <h2 className="text-lg font-semibold">Settings couldn&apos;t load</h2>
+                <p className="mt-1 text-sm text-muted-foreground">{loadErrorMsg}</p>
+              </div>
+              <Button onClick={() => setReloadToken((t) => t + 1)} className="gap-2">
+                <RotateCcw className="h-4 w-4" />
+                Try again
+              </Button>
+            </CardContent>
+          </Card>
         </div>
       </AppLayout>
     );
   }
 
+  const saving = saveStatus === "saving";
 
   return (
     <AppLayout title="Settings">
       <div className="space-y-6 pb-24">
+        {/* Page header: eyebrow + title (H2 — the single H1 lives in the top bar) */}
         <div>
-          <h2 className="text-3xl font-bold mb-2">{setupMode ? "Business setup" : "Settings"}</h2>
-          <p className="text-muted-foreground">
-            {setupMode ? "Add your business details, load the starter catalog if you want it, save, and go straight to your dashboard." : "Find and manage every part of your business in one place."}
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">Workspace</p>
+          <h2 className="mt-1 text-2xl font-semibold tracking-tight">{setupMode ? "Business setup" : "Settings"}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {setupMode
+              ? "Add your business details, load the starter catalog if you want it, save, and go straight to your dashboard."
+              : "Find and manage every part of your business in one place."}
           </p>
         </div>
 
         <div className={`grid min-w-0 gap-6 ${setupMode ? "" : "lg:grid-cols-[240px_minmax(0,1fr)]"}`}>
-          {!setupMode && <aside className="min-w-0 lg:sticky lg:top-4 lg:self-start">
-            <div className="rounded-lg border bg-card p-2 shadow-[var(--shadow-card)]">
-              <div className="relative mb-2">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  placeholder="Search settings"
-                  value={sectionSearch}
-                  onChange={(e) => setSectionSearch(e.target.value)}
-                  className="pl-9"
-                  density="compact"
-                />
-              </div>
-              <nav className="space-y-1" aria-label="Settings sections">
-                {filteredTabs.map((t) => {
-                  const Icon = t.icon;
-                  const isActive = activeTab === t.id;
-                  return (
+          {!setupMode && (
+            <aside className="min-w-0 lg:sticky lg:top-4 lg:self-start">
+              <div className="rounded-lg border bg-card p-2 shadow-[var(--shadow-card)]">
+                <div className="relative mb-2">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder="Search settings"
+                    value={sectionSearch}
+                    onChange={(e) => setSectionSearch(e.target.value)}
+                    className="pl-9 pr-8"
+                    density="compact"
+                    aria-label="Search settings sections"
+                  />
+                  {sectionSearch && (
                     <button
-                      key={t.id}
                       type="button"
-                      onClick={() => { setActiveTab(t.id); setSectionSearch(""); }}
-                      className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
-                        isActive
-                          ? "bg-[hsl(var(--primary-container))] font-semibold text-[hsl(var(--on-primary-container))]"
-                          : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-                      }`}
+                      onClick={() => setSectionSearch("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"
+                      aria-label="Clear search"
                     >
-                      <Icon className="h-4 w-4 shrink-0" />
-                      <span className="truncate">{t.label}</span>
+                      <X className="h-4 w-4" />
                     </button>
-                  );
-                })}
-                {filteredTabs.length === 0 && (
-                  <p className="px-3 py-3 text-sm text-muted-foreground">No settings match "{sectionSearch}".</p>
+                  )}
+                </div>
+
+                {searchResults ? (
+                  <div aria-label="Search results">
+                    {searchResults.length === 0 ? (
+                      <div className="px-3 py-4 text-center">
+                        <p className="text-sm text-muted-foreground">No settings match &ldquo;{sectionSearch}&rdquo;.</p>
+                        <Button variant="link" size="sm" onClick={() => setSectionSearch("")} className="mt-1">
+                          Clear search
+                        </Button>
+                      </div>
+                    ) : (
+                      <ul className="space-y-1">
+                        {searchResults.map(({ tab, section }) => (
+                          <li key={`${tab.id}-${section.id}`}>
+                            <button
+                              type="button"
+                              onClick={() => jumpToSection(tab.id, section.id)}
+                              className="flex w-full flex-col gap-0.5 rounded-md px-3 py-2 text-left transition-colors hover:bg-muted/60"
+                            >
+                              <span className="text-sm font-medium">{section.label}</span>
+                              <span className="text-xs text-muted-foreground">{tab.label} · {section.description}</span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ) : (
+                  <nav className="space-y-1" aria-label="Settings sections">
+                    {SETTINGS_TABS.map((t) => {
+                      const Icon = t.icon;
+                      const isActive = activeTab === t.id;
+                      return (
+                        <div key={t.id}>
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab(t.id)}
+                            aria-current={isActive ? "page" : undefined}
+                            className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
+                              isActive
+                                ? "bg-[hsl(var(--primary-container))] font-semibold text-[hsl(var(--on-primary-container))]"
+                                : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                            }`}
+                          >
+                            <Icon className="h-4 w-4 shrink-0" />
+                            <span className="min-w-0 flex-1 truncate">{t.label}</span>
+                            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                              {t.sections.length}
+                            </span>
+                          </button>
+                          {isActive && (
+                            <div className="mb-1 ml-[26px] space-y-0.5 border-l border-border pl-3">
+                              <p className="px-2 pb-1 pt-2 text-xs text-muted-foreground">{t.description}</p>
+                              {t.sections.map((s) => (
+                                <button
+                                  key={s.id}
+                                  type="button"
+                                  onClick={() => jumpToSection(t.id, s.id)}
+                                  className="block w-full truncate rounded px-2 py-1 text-left text-[13px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                                >
+                                  {s.label}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </nav>
                 )}
-              </nav>
-            </div>
-          </aside>}
+              </div>
+            </aside>
+          )}
 
           <div className="min-w-0">
             <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as SettingsTabId)} className="w-full">
 
           {/* ======================== BUSINESS TAB ======================== */}
-          <TabsContent value="business" className="space-y-6 mt-6 max-w-3xl">
+          <TabsContent value="business" className="mt-0">
+            <div className="max-w-3xl space-y-6">
+              <SectionAnchor id="starter-data" label="Starter business data">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <ClipboardCheck className="h-5 w-5" />
+                      Starter business data
+                    </CardTitle>
+                    <CardDescription>
+                      One click loads the standard oil-change add-ons, basic tire services, detailing services,
+                      starter service packages, and the three editable customer subscription plans. Existing rows are left alone.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Button type="button" variant="outline" onClick={() => void handleLoadStarterData()} disabled={loadingStarterData}>
+                      {loadingStarterData ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ClipboardCheck className="mr-2 h-4 w-4" />}
+                      {loadingStarterData ? "Loading starter data…" : "Load starter templates"}
+                    </Button>
+                  </CardContent>
+                </Card>
+              </SectionAnchor>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Starter business data</CardTitle>
-            <p className="text-sm text-muted-foreground">
-              One click loads the standard oil-change add-ons, basic tire services, detailing services,
-              starter service packages, and the three editable customer subscription plans. Existing rows are left alone.
-            </p>
-          </CardHeader>
-          <CardContent>
-            <Button type="button" variant="outline" onClick={() => void handleLoadStarterData()} disabled={loadingStarterData}>
-              {loadingStarterData ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ClipboardCheck className="mr-2 h-4 w-4" />}
-              {loadingStarterData ? "Loading starter data…" : "Load starter templates"}
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Building className="h-5 w-5" />
-              Business Profile
-            </CardTitle>
-          </CardHeader>
+              <SectionAnchor id="business-profile" label="Business profile">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <Building className="h-5 w-5" />
+                      Business Profile
+                    </CardTitle>
+                    <CardDescription>
+                      The name, contact details, and branding customers see on bookings and invoices.
+                    </CardDescription>
+                  </CardHeader>
           <CardContent className="space-y-6">
             {/* Logo Upload */}
             <div className="flex items-center gap-6">
@@ -747,311 +993,19 @@ const Settings = () => {
             </div>
           </CardContent>
         </Card>
+              </SectionAnchor>
 
-          </TabsContent>
-
-          {/* ======================== BOOKING TAB (Link + Embed) ======================== */}
-          <TabsContent value="booking" className="space-y-6 mt-6 max-w-3xl">
-        {/* Online Booking Link */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Link className="h-5 w-5" />
-              Online Booking Link
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Create a custom booking link to share with your customers
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="booking_slug">Your Subdomain</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="booking_slug"
-                  value={slugInput}
-                  onChange={(e) => handleSlugChange(e.target.value)}
-                  placeholder="your-shop-name"
-                  className="flex-1 font-mono"
-                />
-                <div className="flex items-center bg-muted rounded-lg px-3 py-2 text-sm text-muted-foreground whitespace-nowrap">
-                  .servicewriter.xyz
-                </div>
-                <Button
-                  variant="outline"
-                  onClick={() => checkSlugAvailability(slugInput)}
-                  disabled={checkingSlug || !slugInput || slugInput.length < 3}
-                >
-                  {checkingSlug ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    "Check"
-                  )}
-                </Button>
-              </div>
-              
-              {/* Availability status */}
-              {slugInput && slugInput.length >= 3 && slugAvailable !== null && (
-                <div className="space-y-3">
-                  <div className={`flex items-center gap-2 text-sm ${slugAvailable ? 'text-gray-600' : 'text-destructive'}`}>
-                    {slugAvailable ? (
-                      <>
-                        <CheckCircle2 className="h-4 w-4" />
-                        <span>This subdomain is available!</span>
-                      </>
-                    ) : (
-                      <>
-                        <XCircle className="h-4 w-4" />
-                        <span>This subdomain is taken or invalid. Use only lowercase letters, numbers, and hyphens.</span>
-                      </>
-                    )}
-                  </div>
-                  
-                  {/* Show confirm button when available and not yet saved */}
-                  {slugAvailable && slugInput !== profile.booking_slug && (
-                    <Button
-                      onClick={handleSave}
-                      disabled={saving}
-                      className="gap-2"
-                    >
-                      {saving ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <CheckCircle2 className="h-4 w-4" />
-                      )}
-                      Confirm & Activate Subdomain
-                    </Button>
-                  )}
-                </div>
-              )}
-              
-              {slugInput && slugInput.length < 3 && (
-                <p className="text-xs text-muted-foreground">
-                  Must be at least 3 characters. Use lowercase letters, numbers, and hyphens only.
-                </p>
-              )}
-            </div>
-
-            {/* Show active link if exists */}
-            {profile.booking_slug && (
-              <div className="pt-4 border-t border-border space-y-3">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="h-5 w-5 text-primary" />
-                  <Label className="text-base font-semibold">Your Subdomain is Live!</Label>
-                </div>
-                
-                <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 space-y-3">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <code className="flex-1 min-w-0 bg-background px-3 py-2 rounded-md text-sm font-mono truncate border">
-                      https://{profile.booking_slug}.servicewriter.xyz
-                    </code>
-                  </div>
-                  
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="default"
-                      size="sm"
-                      className="gap-2"
-                      onClick={() => {
-                        if (typeof navigator !== 'undefined' && navigator.clipboard) {
-                          navigator.clipboard.writeText(`https://${profile.booking_slug}.servicewriter.xyz`);
-                          toast.success("Booking link copied to clipboard!");
-                        } else {
-                          toast.error("Copy not available in this environment");
-                        }
-                      }}
-                    >
-                      <Copy className="h-4 w-4" />
-                      Copy Link
-                    </Button>
-                    
-                    {isClient && typeof navigator !== 'undefined' && typeof navigator.share === 'function' && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="gap-2"
-                        onClick={async () => {
-                          try {
-                            await navigator.share({
-                              title: `Book with ${profile.business_name || 'us'}`,
-                              text: `Book your appointment online!`,
-                              url: `https://${profile.booking_slug}.servicewriter.xyz`,
-                            });
-                          } catch (err) {
-                            // User cancelled or share failed silently
-                          }
-                        }}
-                      >
-                        <ExternalLink className="h-4 w-4" />
-                        Share
-                      </Button>
-                    )}
-                    
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="gap-2"
-                      onClick={() => {
-                        if (typeof window !== 'undefined') {
-                          window.open(`https://${profile.booking_slug}.servicewriter.xyz`, '_blank');
-                        }
-                      }}
-                    >
-                      <ExternalLink className="h-4 w-4" />
-                      Preview
-                    </Button>
-                  </div>
-                </div>
-                
-                <p className="text-xs text-muted-foreground">
-                  Share this link with customers. Make sure you have active services in your Service Catalog.
-                </p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <ClipboardCheck className="h-5 w-5" />
-              Public Service Selection
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Choose how customers browse your services during public booking.
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <button
-                type="button"
-                onClick={() => setServiceDisplayMode("full_list")}
-                className={`rounded-lg border p-4 text-left transition-colors ${serviceDisplayMode === "full_list" ? "border-primary bg-primary/5" : "hover:bg-muted/50"}`}
-              >
-                <p className="font-semibold">Full service list</p>
-                <p className="mt-1 text-sm text-muted-foreground">Show every service immediately, with search and category filters.</p>
-              </button>
-              <button
-                type="button"
-                onClick={() => setServiceDisplayMode("category_first")}
-                className={`rounded-lg border p-4 text-left transition-colors ${serviceDisplayMode === "category_first" ? "border-primary bg-primary/5" : "hover:bg-muted/50"}`}
-              >
-                <p className="font-semibold">Categories first</p>
-                <p className="mt-1 text-sm text-muted-foreground">Start customers with compact category cards before showing services.</p>
-              </button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              This setting is saved with your profile and applies to the service step on your public booking page.
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Embed Codes — only shown when a slug is active */}
-{/* (still in booking) */}
-        {profile.booking_slug && <EmbedCodeSection currentSlug={profile.booking_slug} />}
-
-          </TabsContent>
-
-          {/* ======================== TEAM TAB ======================== */}
-          <TabsContent value="team" className="space-y-6 mt-6 max-w-3xl">
-        {/* Team Members */}
-        <TeamMembersSettings />
-
-        {/* Auto-Dispatch Engine */}
-{/* (still in team) */}
-        <div>
-          <h2 className="text-lg font-semibold mb-1 flex items-center gap-2">
-            <span>⚡</span> Dispatch Automation
-          </h2>
-          <p className="text-sm text-muted-foreground mb-4">
-            Configure the algorithm that automatically assigns the best available technician to each job based on skills, proximity, workload, and performance.
-          </p>
-          <AutoDispatchSettings />
-        </div>
-
-          </TabsContent>
-
-          {/* ======================== PAYMENTS TAB ======================== */}
-          <TabsContent value="payments" className="space-y-6 mt-6 max-w-3xl">
-        {/* Payment Provider Selection (Stripe / Square) */}
-        <PaymentProviderCard />
-
-        {/* Provider Sync Status — UI for Stripe/Square push pipeline */}
-        <ProviderSyncStatusCard />
-
-        {/* Read-only mirror of payment methods enabled on the connected Stripe Standard account */}
-        <StripePaymentMethodsCard />
-
-        {/* Platform Subscription Billing */}
-{/* (still in payments) */}
-        <BillingSettings />
-
-        {/* Payment & Financial Controls */}
-{/* (still in payments) */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <DollarSign className="h-5 w-5" />
-              Payment & Financial Controls
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Manage deposits, taxes, and promotional codes
-            </p>
-          </CardHeader>
-          <CardContent>
-            <PaymentSettings />
-          </CardContent>
-        </Card>
-
-        {/* Location-Based Tax Settings */}
-{/* (still in payments) */}
-        <TaxSettings />
-
-        {/* QuickBooks Online Integration */}
-{/* (still in payments) */}
-        <QuickBooksSettings />
-
-        {/* Cash Drawer Integration */}
-{/* (still in payments) */}
-        <CashDrawerSettings />
-
-          </TabsContent>
-
-          {/* ======================== COMMS TAB ======================== */}
-          <TabsContent value="comms" className="space-y-6 mt-6 max-w-3xl">
-        {/* Prepaid SMS credits */}
-        <SmsCreditsCard />
-
-        {/* SMS automation toggles + templates */}
-        <SmsSettings />
-
-        {/* Marketing Settings */}
-        <MarketingSettings />
-
-        <TrackingSettings />
-
-        {/* Email Settings - White Label SMTP */}
-{/* (still in comms) */}
-        <EmailSettings />
-
-
-
-
-          </TabsContent>
-
-          {/* ===== BUSINESS TAB (Regional Settings) ===== */}
-          <TabsContent value="business" className="space-y-6 mt-6 max-w-3xl">
-        {/* Regional Settings */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Globe className="h-5 w-5" />
-              Regional Settings
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Configure date format, timezone, and currency for your business
-            </p>
-          </CardHeader>
+              <SectionAnchor id="regional" label="Regional settings">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <Globe className="h-5 w-5" />
+                      Regional Settings
+                    </CardTitle>
+                    <CardDescription>
+                      Configure date format, timezone, and currency for your business
+                    </CardDescription>
+                  </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="grid gap-2">
@@ -1098,22 +1052,285 @@ const Settings = () => {
             </div>
           </CardContent>
         </Card>
+              </SectionAnchor>
 
+              <SectionAnchor id="terminology" label="Terminology">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <Tags className="h-5 w-5" />
+                      Terminology
+                    </CardTitle>
+                    <CardDescription>
+                      Customize the labels used throughout the app to match your business
+                    </CardDescription>
+                  </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="term_customer">Customer Label</Label>
+                <Input
+                  id="term_customer"
+                  placeholder="Customer, Client, Account..."
+                  value={profile.terminology.customer}
+                  onChange={(e) => handleTerminologyChange("customer", e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">e.g., Client, Account, Contact</p>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="term_vehicle">Vehicle Label</Label>
+                <Input
+                  id="term_vehicle"
+                  placeholder="Vehicle, Unit, Asset..."
+                  value={profile.terminology.vehicle}
+                  onChange={(e) => handleTerminologyChange("vehicle", e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">e.g., Unit, Asset, Equipment</p>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="term_service">Service Label</Label>
+                <Input
+                  id="term_service"
+                  placeholder="Service, Work Order, Job..."
+                  value={profile.terminology.service}
+                  onChange={(e) => handleTerminologyChange("service", e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">e.g., Work Order, Job, Repair</p>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="term_quote">Quote Label</Label>
+                <Input
+                  id="term_quote"
+                  placeholder="Quote, Estimate, Proposal..."
+                  value={profile.terminology.quote}
+                  onChange={(e) => handleTerminologyChange("quote", e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">e.g., Estimate, Proposal, Bid</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+              </SectionAnchor>
+            </div>
           </TabsContent>
 
-          {/* ===== BOOKING TAB (Hours, Service Area, Weather) ===== */}
-          <TabsContent value="booking" className="space-y-6 mt-6 max-w-3xl">
-        {/* Business Hours */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Clock className="h-5 w-5" />
-              Business Hours
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Set your shop's operating hours and working days
+          {/* ======================== BOOKING TAB ======================== */}
+          <TabsContent value="booking" className="mt-0">
+            <div className="max-w-3xl space-y-6">
+              <SectionAnchor id="booking-link" label="Online booking link">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <Link className="h-5 w-5" />
+                      Online Booking Link
+                    </CardTitle>
+                    <CardDescription>
+                      Create a custom booking link to share with your customers
+                    </CardDescription>
+                  </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="booking_slug">Your Subdomain</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="booking_slug"
+                  value={slugInput}
+                  onChange={(e) => handleSlugChange(e.target.value)}
+                  placeholder="your-shop-name"
+                  className="flex-1 font-mono"
+                />
+                <div className="flex items-center bg-muted rounded-lg px-3 py-2 text-sm text-muted-foreground whitespace-nowrap">
+                  .servicewriter.xyz
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => checkSlugAvailability(slugInput)}
+                  disabled={checkingSlug || !slugInput || slugInput.length < 3}
+                >
+                  {checkingSlug ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    "Check"
+                  )}
+                </Button>
+              </div>
+
+              {/* Availability status */}
+              {slugInput && slugInput.length >= 3 && slugAvailable !== null && (
+                <div className="space-y-3">
+                  <div className={`flex items-center gap-2 text-sm ${slugAvailable ? 'text-muted-foreground' : 'text-destructive'}`}>
+                    {slugAvailable ? (
+                      <>
+                        <CheckCircle2 className="h-4 w-4 text-success" />
+                        <span>This subdomain is available!</span>
+                      </>
+                    ) : (
+                      <>
+                        <XCircle className="h-4 w-4" />
+                        <span>This subdomain is taken or invalid. Use only lowercase letters, numbers, and hyphens.</span>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Show confirm button when available and not yet saved */}
+                  {slugAvailable && slugInput !== profile.booking_slug && (
+                    <Button
+                      onClick={handleSave}
+                      disabled={saving}
+                      className="gap-2"
+                    >
+                      {saving ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="h-4 w-4" />
+                      )}
+                      Confirm & Activate Subdomain
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              {slugInput && slugInput.length < 3 && (
+                <p className="text-xs text-muted-foreground">
+                  Must be at least 3 characters. Use lowercase letters, numbers, and hyphens only.
+                </p>
+              )}
+            </div>
+
+            {/* Show active link if exists */}
+            {profile.booking_slug && (
+              <div className="pt-4 border-t border-border space-y-3">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="h-5 w-5 text-success" />
+                  <Label className="text-base font-semibold">Your Subdomain is Live!</Label>
+                </div>
+
+                <div className="bg-primary/5 border border-primary/20 rounded-lg p-4 space-y-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <code className="flex-1 min-w-0 bg-background px-3 py-2 rounded-md text-sm font-mono truncate border">
+                      https://{profile.booking_slug}.servicewriter.xyz
+                    </code>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="default"
+                      size="sm"
+                      className="gap-2"
+                      onClick={() => {
+                        if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                          navigator.clipboard.writeText(`https://${profile.booking_slug}.servicewriter.xyz`);
+                          toast.success("Booking link copied to clipboard!");
+                        } else {
+                          toast.error("Copy not available in this environment");
+                        }
+                      }}
+                    >
+                      <Copy className="h-4 w-4" />
+                      Copy Link
+                    </Button>
+
+                    {isClient && typeof navigator !== 'undefined' && typeof navigator.share === 'function' && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-2"
+                        onClick={async () => {
+                          try {
+                            await navigator.share({
+                              title: `Book with ${profile.business_name || 'us'}`,
+                              text: `Book your appointment online!`,
+                              url: `https://${profile.booking_slug}.servicewriter.xyz`,
+                            });
+                          } catch (err) {
+                            // User cancelled or share failed silently
+                          }
+                        }}
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                        Share
+                      </Button>
+                    )}
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2"
+                      onClick={() => {
+                        if (typeof window !== 'undefined') {
+                          window.open(`https://${profile.booking_slug}.servicewriter.xyz`, '_blank');
+                        }
+                      }}
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      Preview
+                    </Button>
+                  </div>
+                </div>
+
+                <p className="text-xs text-muted-foreground">
+                  Share this link with customers. Make sure you have active services in your Service Catalog.
+                </p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+              </SectionAnchor>
+
+              <SectionAnchor id="service-display" label="Public service selection">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <ClipboardCheck className="h-5 w-5" />
+                      Public Service Selection
+                    </CardTitle>
+                    <CardDescription>
+                      Choose how customers browse your services during public booking.
+                    </CardDescription>
+                  </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => setServiceDisplayMode("full_list")}
+                className={`rounded-lg border p-4 text-left transition-colors ${serviceDisplayMode === "full_list" ? "border-primary bg-primary/5" : "hover:bg-muted/50"}`}
+              >
+                <p className="font-semibold">Full service list</p>
+                <p className="mt-1 text-sm text-muted-foreground">Show every service immediately, with search and category filters.</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setServiceDisplayMode("category_first")}
+                className={`rounded-lg border p-4 text-left transition-colors ${serviceDisplayMode === "category_first" ? "border-primary bg-primary/5" : "hover:bg-muted/50"}`}
+              >
+                <p className="font-semibold">Categories first</p>
+                <p className="mt-1 text-sm text-muted-foreground">Start customers with compact category cards before showing services.</p>
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              This setting is saved with your profile and applies to the service step on your public booking page.
             </p>
-          </CardHeader>
+          </CardContent>
+        </Card>
+              </SectionAnchor>
+
+              {profile.booking_slug && (
+                <SectionAnchor id="embed-code" label="Embed codes">
+                  <EmbedCodeSection currentSlug={profile.booking_slug} />
+                </SectionAnchor>
+              )}
+
+              <SectionAnchor id="business-hours" label="Business hours">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <Clock className="h-5 w-5" />
+                      Business Hours
+                    </CardTitle>
+                    <CardDescription>
+                      Set your shop&apos;s operating hours and working days
+                    </CardDescription>
+                  </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="grid gap-2">
@@ -1163,19 +1380,19 @@ const Settings = () => {
             </div>
           </CardContent>
         </Card>
+              </SectionAnchor>
 
-        {/* Service Area */}
-{/* (still in booking) */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Navigation className="h-5 w-5" />
-              Service Area
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Set your service radius to define the area you serve. Customers outside this area will not be able to book online.
-            </p>
-          </CardHeader>
+              <SectionAnchor id="service-area" label="Service area">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <Navigation className="h-5 w-5" />
+                      Service Area
+                    </CardTitle>
+                    <CardDescription>
+                      Set your service radius to define the area you serve. Customers outside this area will not be able to book online.
+                    </CardDescription>
+                  </CardHeader>
           <CardContent className="space-y-6">
             <div className="space-y-4">
               <div className="grid gap-2">
@@ -1300,161 +1517,233 @@ const Settings = () => {
             </div>
           </CardContent>
         </Card>
+              </SectionAnchor>
 
-        {/* Weather Guard */}
-{/* (still in booking) */}
-        <WeatherGuardSettings
-          enabled={profile.weather_guard_enabled}
-          settings={profile.weather_guard_settings as unknown as Json}
-          hasCoordinates={!!profile.service_coordinates}
-          onEnabledChange={(v) => setProfile(prev => ({ ...prev, weather_guard_enabled: v }))}
-          onSettingsChange={(s) => setProfile(prev => ({ ...prev, weather_guard_settings: s }))}
-        />
-
-          </TabsContent>
-
-          {/* ===== BUSINESS TAB (Terminology — completes Profile/Regional block) ===== */}
-          <TabsContent value="business" className="space-y-6 mt-6 max-w-3xl">
-        {/* Terminology Settings */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Tags className="h-5 w-5" />
-              Terminology
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Customize the labels used throughout the app to match your business
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="term_customer">Customer Label</Label>
-                <Input
-                  id="term_customer"
-                  placeholder="Customer, Client, Account..."
-                  value={profile.terminology.customer}
-                  onChange={(e) => handleTerminologyChange("customer", e.target.value)}
+              <SectionAnchor id="weather-guard" label="Weather guard">
+                <WeatherGuardSettings
+                  enabled={profile.weather_guard_enabled}
+                  settings={profile.weather_guard_settings as unknown as Json}
+                  hasCoordinates={!!profile.service_coordinates}
+                  onEnabledChange={(v) => setProfile(prev => ({ ...prev, weather_guard_enabled: v }))}
+                  onSettingsChange={(s) => setProfile(prev => ({ ...prev, weather_guard_settings: s }))}
                 />
-                <p className="text-xs text-muted-foreground">e.g., Client, Account, Contact</p>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="term_vehicle">Vehicle Label</Label>
-                <Input
-                  id="term_vehicle"
-                  placeholder="Vehicle, Unit, Asset..."
-                  value={profile.terminology.vehicle}
-                  onChange={(e) => handleTerminologyChange("vehicle", e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">e.g., Unit, Asset, Equipment</p>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="term_service">Service Label</Label>
-                <Input
-                  id="term_service"
-                  placeholder="Service, Work Order, Job..."
-                  value={profile.terminology.service}
-                  onChange={(e) => handleTerminologyChange("service", e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">e.g., Work Order, Job, Repair</p>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="term_quote">Quote Label</Label>
-                <Input
-                  id="term_quote"
-                  placeholder="Quote, Estimate, Proposal..."
-                  value={profile.terminology.quote}
-                  onChange={(e) => handleTerminologyChange("quote", e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">e.g., Estimate, Proposal, Bid</p>
-              </div>
+              </SectionAnchor>
             </div>
-          </CardContent>
-        </Card>
-
           </TabsContent>
 
-          {/* ===== COMMS TAB (Voice Agent — completes Marketing/Email block) ===== */}
-          <TabsContent value="comms" className="space-y-6 mt-6 max-w-3xl">
-        {/* Voice Agent */}
-        <VoiceAgentSettings />
+          {/* ======================== TEAM TAB ======================== */}
+          <TabsContent value="team" className="mt-0">
+            <div className="max-w-3xl space-y-6">
+              <SectionAnchor id="team-members" label="Team members">
+                <TeamMembersSettings />
+              </SectionAnchor>
 
+              <SectionAnchor id="auto-dispatch" label="Dispatch automation">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <Zap className="h-5 w-5" />
+                      Dispatch Automation
+                    </CardTitle>
+                    <CardDescription>
+                      Configure the algorithm that automatically assigns the best available technician to each job based on skills, proximity, workload, and performance.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <AutoDispatchSettings />
+                  </CardContent>
+                </Card>
+              </SectionAnchor>
+            </div>
+          </TabsContent>
+
+          {/* ======================== PAYMENTS TAB ======================== */}
+          <TabsContent value="payments" className="mt-0">
+            <div className="max-w-3xl space-y-6">
+              <SectionAnchor id="payment-provider" label="Payment provider">
+                <PaymentProviderCard />
+              </SectionAnchor>
+
+              <SectionAnchor id="provider-sync" label="Provider sync status">
+                <ProviderSyncStatusCard />
+              </SectionAnchor>
+
+              <SectionAnchor id="stripe-methods" label="Stripe payment methods">
+                <StripePaymentMethodsCard />
+              </SectionAnchor>
+
+              <SectionAnchor id="billing" label="Subscription billing">
+                <BillingSettings />
+              </SectionAnchor>
+
+              <SectionAnchor id="payment-controls" label="Payment and financial controls">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <CreditCard className="h-5 w-5" />
+                      Payment & Financial Controls
+                    </CardTitle>
+                    <CardDescription>
+                      Manage deposits, taxes, and promotional codes
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <PaymentSettings />
+                  </CardContent>
+                </Card>
+              </SectionAnchor>
+
+              <SectionAnchor id="tax" label="Tax settings">
+                <TaxSettings />
+              </SectionAnchor>
+
+              <SectionAnchor id="quickbooks" label="QuickBooks">
+                <QuickBooksSettings />
+              </SectionAnchor>
+
+              <SectionAnchor id="cash-drawer" label="Cash drawer">
+                <CashDrawerSettings />
+              </SectionAnchor>
+            </div>
+          </TabsContent>
+
+          {/* ======================== COMMS TAB ======================== */}
+          <TabsContent value="comms" className="mt-0">
+            <div className="max-w-3xl space-y-6">
+              <SectionAnchor id="sms-credits" label="SMS credits">
+                <SmsCreditsCard />
+              </SectionAnchor>
+
+              <SectionAnchor id="sms" label="SMS automation">
+                <SmsSettings />
+              </SectionAnchor>
+
+              <SectionAnchor id="marketing" label="Marketing">
+                <MarketingSettings />
+              </SectionAnchor>
+
+              <SectionAnchor id="tracking" label="Tracking and ads">
+                <TrackingSettings />
+              </SectionAnchor>
+
+              <SectionAnchor id="email" label="Email settings">
+                <EmailSettings />
+              </SectionAnchor>
+
+              <SectionAnchor id="voice-agent" label="Voice agent">
+                <VoiceAgentSettings />
+              </SectionAnchor>
+            </div>
           </TabsContent>
 
           {/* ======================== INTEGRATIONS TAB ======================== */}
-          <TabsContent value="integrations" className="space-y-6 mt-6 max-w-3xl">
-        {/* Google Calendar Integration */}
-        <CalendarIntegration />
+          <TabsContent value="integrations" className="mt-0">
+            <div className="max-w-3xl space-y-6">
+              <SectionAnchor id="calendar" label="Google Calendar">
+                <CalendarIntegration />
+              </SectionAnchor>
 
-        {/* Inspection Templates */}
-{/* (still in integrations) */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <ClipboardCheck className="h-5 w-5" />
-              Inspection Templates
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Create reusable inspection checklists for your services
-            </p>
-          </CardHeader>
-          <CardContent>
-            <InspectionTemplateManager />
-          </CardContent>
-        </Card>
+              <SectionAnchor id="inspection-templates" label="Inspection templates">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <ClipboardCheck className="h-5 w-5" />
+                      Inspection Templates
+                    </CardTitle>
+                    <CardDescription>
+                      Create reusable inspection checklists for your services
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <InspectionTemplateManager />
+                  </CardContent>
+                </Card>
+              </SectionAnchor>
 
-        {/* Agent integrations (MCP) */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Bot className="h-5 w-5" />
-              Agent integrations
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Connect ChatGPT, Claude, or Cursor to your workspace so an assistant can read your schedule, customers,
-              and service catalog.
-            </p>
-          </CardHeader>
-          <CardContent>
-            <Button variant="outline" className="gap-2 rounded-md" onClick={() => navigate("/agent-integrations")}>
-              <Bot className="h-4 w-4" />
-              View connection instructions
-            </Button>
-          </CardContent>
-        </Card>
+              <SectionAnchor id="agent-integrations" label="Agent integrations">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <Bot className="h-5 w-5" />
+                      Agent integrations
+                    </CardTitle>
+                    <CardDescription>
+                      Connect ChatGPT, Claude, or Cursor to your workspace so an assistant can read your schedule, customers,
+                      and service catalog.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <Button variant="outline" className="gap-2 rounded-md" onClick={() => navigate("/agent-integrations")}>
+                      <Bot className="h-4 w-4" />
+                      View connection instructions
+                    </Button>
+                  </CardContent>
+                </Card>
+              </SectionAnchor>
 
-        {/* Link Health */}
-{/* (still in integrations) */}
-        <LinkHealthSection />
-
-
+              <SectionAnchor id="link-health" label="Link health">
+                <LinkHealthSection />
+              </SectionAnchor>
+            </div>
           </TabsContent>
 
           {/* ======================== ADVANCED TAB ======================== */}
-          <TabsContent value="advanced" className="space-y-6 mt-6 max-w-3xl">
-        {/* Offline Sync */}
-        <OfflineSyncDashboard />
+          <TabsContent value="advanced" className="mt-0">
+            <div className="max-w-3xl space-y-6">
+              <SectionAnchor id="offline-sync" label="Offline sync">
+                <OfflineSyncDashboard />
+              </SectionAnchor>
 
-        {/* GDPR Data Management */}
-        <GDPRDataManagement />
+              <SectionAnchor id="gdpr" label="Data and privacy">
+                <GDPRDataManagement />
+              </SectionAnchor>
+            </div>
           </TabsContent>
             </Tabs>
           </div>
         </div>
 
-        {/* Sticky Save Footer */}
-        <div className="fixed bottom-0 left-0 right-0 md:left-[var(--sidebar-width,16rem)] z-30 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 px-4 py-3 flex items-center justify-end gap-3">
-          <p className="text-xs text-muted-foreground hidden sm:block">
-            Changes affect Business, Booking & Hours, and related settings.
-          </p>
-          <Button onClick={handleSave} disabled={saving} className="gap-2">
-            {saving ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Save className="h-4 w-4" />
-            )}
-            {setupMode ? "Save & open dashboard" : "Save settings"}
-          </Button>
+        {/* Sticky save bar — keep the fixed positioning classes the route CSS hooks into.
+            The button only writes the business profile record; every other section saves itself. */}
+        <div className="fixed bottom-0 left-0 right-0 md:left-[var(--sidebar-width,16rem)] z-30 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 px-4 py-3">
+          <div className="mx-auto flex max-w-[1440px] items-center justify-between gap-3">
+            <div className="min-w-0 text-xs" aria-live="polite">
+              {saveStatus === "saving" && (
+                <p className="flex items-center gap-2 text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Saving your profile…
+                </p>
+              )}
+              {saveStatus === "saved" && savedAt && (
+                <p className="flex items-center gap-2 text-success">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Saved at {savedAt}
+                </p>
+              )}
+              {saveStatus === "error" && (
+                <p className="flex items-center gap-2 text-destructive">
+                  <XCircle className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{saveErrorMsg || "Couldn't save."}</span>
+                  <button type="button" onClick={() => void handleSave()} className="shrink-0 font-medium underline underline-offset-2">
+                    Try again
+                  </button>
+                </p>
+              )}
+              {saveStatus === "idle" && (
+                <p className="hidden text-muted-foreground sm:block">
+                  This button saves your profile, booking link, hours, and service area. Every other section saves itself.
+                </p>
+              )}
+            </div>
+            <Button onClick={() => void handleSave()} disabled={saving} className="shrink-0 gap-2">
+              {saving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4" />
+              )}
+              {setupMode ? "Save & open dashboard" : "Save profile settings"}
+            </Button>
+          </div>
         </div>
       </div>
     </AppLayout>

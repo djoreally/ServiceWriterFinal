@@ -72,7 +72,7 @@ export const LocationStep = memo(function LocationStep({
       <div className="min-w-0">
         <div className="mb-5 text-left">
           <MapPin className="mb-3 h-9 w-9 text-primary" />
-          <h2 className="mb-2 text-2xl font-bold sm:text-3xl">Where should we service your vehicle?</h2>
+          <h1 className="mb-2 text-[30px] font-semibold leading-[1.2] tracking-[-0.01em]">Where should we service your vehicle?</h1>
           <p className="text-muted-foreground">Start typing your street address and select the matching address.</p>
         </div>
 

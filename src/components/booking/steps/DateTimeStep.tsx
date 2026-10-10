@@ -125,7 +125,7 @@ export const DateTimeStep = memo(function DateTimeStep({
       <section className="min-w-0">
         <div className="mb-5 text-center">
           <CalendarIcon className="mx-auto mb-3 h-12 w-12 text-primary" />
-          <h2 className="mb-2 text-2xl font-bold">Choose your date</h2>
+          <h1 className="mb-2 text-[30px] font-semibold leading-[1.2] tracking-[-0.01em]">Choose your date</h1>
           <p className="text-muted-foreground">Select one available date, then choose an appointment window.</p>
         </div>
 

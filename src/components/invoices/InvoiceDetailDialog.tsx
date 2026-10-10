@@ -7,11 +7,11 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, Mail, Pencil, Printer, Trash2, Car } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Loader2, Mail, Pencil, Printer, Trash2, Car, AlertCircle } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { toast } from "@/components/ui/sonner";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
@@ -23,7 +23,15 @@ import {
   deleteInvoice,
   recordFleetInvoicePayment,
 } from "@/application/commands/invoices.command";
+import {
+  invoiceBalance,
+  isInvoiceOverdue,
+  overdueDays,
+  InvoiceStatusPill,
+  OverduePill,
+} from "./invoice-ui";
 import { SendInvoiceDialog } from "./SendInvoiceDialog";
+import { cn } from "@/lib/utils";
 
 interface Props {
   invoiceId: string | null;
@@ -37,6 +45,8 @@ export function InvoiceDetailDialog({ invoiceId, open, onOpenChange, onEdit, onC
   const { formatCurrency } = useRegionalSettings();
   const [invoice, setInvoice] = useState<InvoiceFullRow | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
   const [sendOpen, setSendOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
@@ -47,21 +57,25 @@ export function InvoiceDetailDialog({ invoiceId, open, onOpenChange, onEdit, onC
   useEffect(() => {
     if (!open || !invoiceId) return;
     let cancelled = false;
-    void Promise.resolve().then(() => setLoading(true));
-    void Promise.resolve().then(() => fetchInvoiceDetail(invoiceId)
-      .then((d) => !cancelled && setInvoice(d))
+    setLoading(true);
+    setLoadError(false);
+    fetchInvoiceDetail(invoiceId)
+      .then((d) => { if (!cancelled) setInvoice(d); })
       .catch((err) => {
         console.error("[InvoiceDetailDialog] fetch failed", err);
-        toast.error("Failed to load invoice");
+        if (!cancelled) {
+          setLoadError(true);
+          toast.error("Failed to load invoice");
+        }
       })
-      .finally(() => !cancelled && setLoading(false)));
+      .finally(() => { if (!cancelled) setLoading(false); });
     return () => {
       cancelled = true;
     };
-  }, [open, invoiceId]);
+  }, [open, invoiceId, reloadToken]);
 
   useEffect(() => {
-    if (!open) void Promise.resolve().then(() => setInvoice(null));
+    if (!open) void Promise.resolve().then(() => { setInvoice(null); setLoadError(false); });
   }, [open]);
 
   const billToName = invoice?.bill_to_type === "fleet"
@@ -71,6 +85,11 @@ export function InvoiceDetailDialog({ invoiceId, open, onOpenChange, onEdit, onC
     ? invoice?.fleet_clients?.billing_email ?? invoice?.fleet_clients?.ap_contact_email ?? null
     : invoice?.customers?.email ?? null;
 
+  const balance = invoice ? invoiceBalance(invoice) : 0;
+  const overdue = invoice ? isInvoiceOverdue(invoice) : false;
+  const collectable = !!invoice && !["paid", "void"].includes(invoice.status) && balance > 0.01;
+  const showRecordPayment = !!invoice && !["paid", "void"].includes(invoice.status);
+
   const handleSend = () => {
     if (!invoice) return;
     setSendOpen(true);
@@ -79,7 +98,6 @@ export function InvoiceDetailDialog({ invoiceId, open, onOpenChange, onEdit, onC
   const handleRecordPayment = async () => {
     if (!invoice) return;
     const amount = Number(paymentAmount);
-    const balance = Math.max(0, Number(invoice.total) - Number(invoice.amount_paid || 0));
     if (!Number.isFinite(amount) || amount <= 0 || amount > balance) {
       toast.error(`Enter an amount between 0.01 and ${formatCurrency(balance)}`);
       return;
@@ -121,41 +139,79 @@ export function InvoiceDetailDialog({ invoiceId, open, onOpenChange, onEdit, onC
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto print:max-w-full">
         <DialogHeader>
-          <DialogTitle className="flex items-center justify-between gap-3">
-            <span className="font-mono">{invoice?.invoice_number ?? "Invoice"}</span>
-            {invoice && (
-              <Badge variant="outline" className="capitalize">{invoice.status}</Badge>
-            )}
+          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Invoice</p>
+          <DialogTitle className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-lg font-semibold">{invoice?.invoice_number ?? "Invoice"}</span>
+            {invoice && <InvoiceStatusPill status={invoice.status} />}
+            {invoice && overdue && <OverduePill days={overdueDays(invoice)} />}
           </DialogTitle>
         </DialogHeader>
 
-        {loading || !invoice ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        {loading ? (
+          <div className="space-y-4">
+            <Skeleton className="h-24 w-full rounded-xl" />
+            <Skeleton className="h-16 w-full rounded-lg" />
+            <Skeleton className="h-40 w-full rounded-lg" />
+            <Skeleton className="h-20 w-2/3 rounded-lg ml-auto" />
           </div>
-        ) : (
+        ) : loadError ? (
+          <div className="py-12 text-center space-y-3">
+            <AlertCircle className="h-8 w-8 mx-auto text-destructive" />
+            <p className="font-semibold">Couldn&apos;t load this invoice</p>
+            <p className="text-sm text-muted-foreground">Check your connection and try again.</p>
+            <Button variant="outline" onClick={() => setReloadToken((t) => t + 1)}>Try again</Button>
+          </div>
+        ) : !invoice ? null : (
           <div className="space-y-5 text-sm">
+            {/* The money answer first: total, paid, balance */}
+            <section aria-label="Amounts" className="grid grid-cols-3 gap-3 rounded-xl border bg-muted/30 p-4">
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Total</p>
+                <p className="font-mono text-lg font-semibold tabular-nums mt-1">{formatCurrency(Number(invoice.total))}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Paid</p>
+                <p className="font-mono text-lg tabular-nums mt-1">{formatCurrency(Number(invoice.amount_paid || 0))}</p>
+              </div>
+              <div>
+                <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Balance due</p>
+                <p className={cn(
+                  "font-mono text-lg font-semibold tabular-nums mt-1",
+                  balance > 0.01 ? (overdue ? "text-destructive" : "text-primary") : "text-muted-foreground",
+                )}>
+                  {formatCurrency(balance)}
+                </p>
+              </div>
+            </section>
+            {overdue && (
+              <p className="text-sm font-medium text-destructive -mt-2">
+                Overdue {overdueDays(invoice)} days · due {invoice.due_date && format(parseISO(invoice.due_date), "MMM d, yyyy")}. A reminder keeps cash flowing.
+              </p>
+            )}
+
             <section className="grid grid-cols-2 gap-4">
               <div>
-                <p className="text-xs uppercase tracking-wider text-muted-foreground font-bold">Bill To</p>
-                <p className="font-bold">{billToName}</p>
+                <p className="text-xs uppercase tracking-wider text-muted-foreground font-medium">Bill To</p>
+                <p className="font-semibold mt-1">{billToName}</p>
                 {billToEmail && <p className="text-muted-foreground">{billToEmail}</p>}
                 {invoice.customers?.phone && (
-                  <p className="text-muted-foreground">{invoice.customers.phone}</p>
+                  <p className="text-muted-foreground font-mono text-[13px]">{invoice.customers.phone}</p>
                 )}
                 {invoice.customers?.address && (
                   <p className="text-muted-foreground">{invoice.customers.address}</p>
                 )}
               </div>
-              <div className="text-right">
+              <div className="text-right space-y-1">
                 <p>
                   <span className="text-muted-foreground">Issued: </span>
-                  {format(parseISO(invoice.issue_date), "MMM d, yyyy")}
+                  <span className="font-mono text-[13px]">{format(parseISO(invoice.issue_date), "MMM d, yyyy")}</span>
                 </p>
                 {invoice.due_date && (
                   <p>
                     <span className="text-muted-foreground">Due: </span>
-                    {format(parseISO(invoice.due_date), "MMM d, yyyy")}
+                    <span className={cn("font-mono text-[13px]", overdue && "text-destructive font-semibold")}>
+                      {format(parseISO(invoice.due_date), "MMM d, yyyy")}
+                    </span>
                   </p>
                 )}
                 {invoice.payment_terms && (
@@ -166,7 +222,8 @@ export function InvoiceDetailDialog({ invoiceId, open, onOpenChange, onEdit, onC
 
             <Separator />
 
-            <section className="space-y-3">
+            {/* Line items, grouped by vehicle — the work behind the money */}
+            <section aria-label="Line items" className="space-y-3">
               {(() => {
                 const groups = new Map<string, typeof invoice.invoice_line_items>();
                 for (const li of invoice.invoice_line_items) {
@@ -178,9 +235,9 @@ export function InvoiceDetailDialog({ invoiceId, open, onOpenChange, onEdit, onC
                 return Array.from(groups.entries()).map(([vin, lines]) => {
                   const head = lines[0];
                   return (
-                    <div key={vin} className="rounded-lg border">
+                    <div key={vin} className="rounded-xl border overflow-hidden">
                       {(head.vin || head.vehicle_make) && (
-                        <div className="flex items-center gap-2 px-3 py-2 bg-muted/40 border-b">
+                        <div className="flex items-center gap-2 px-4 py-2 bg-muted/40 border-b">
                           <Car className="h-3.5 w-3.5 text-muted-foreground" />
                           <span className="font-medium text-xs">
                             {[head.vehicle_year, head.vehicle_make, head.vehicle_model, head.vehicle_trim]
@@ -188,20 +245,20 @@ export function InvoiceDetailDialog({ invoiceId, open, onOpenChange, onEdit, onC
                               .join(" ") || "Vehicle"}
                           </span>
                           {head.vin && (
-                            <span className="font-mono text-[10px] text-muted-foreground">{head.vin}</span>
+                            <span className="font-mono text-[11px] text-muted-foreground">{head.vin}</span>
                           )}
                         </div>
                       )}
                       <div className="divide-y">
                         {lines.map((l) => (
-                          <div key={l.id} className="grid grid-cols-12 gap-2 px-3 py-2 items-center">
+                          <div key={l.id} className="grid grid-cols-12 gap-2 px-4 py-2.5 items-baseline">
                             <div className="col-span-7">
-                              <p className="font-medium text-sm whitespace-pre-wrap">{l.description}</p>
+                              <p className="text-sm whitespace-pre-wrap">{l.description}</p>
                             </div>
-                            <div className="col-span-2 text-right text-muted-foreground">
+                            <div className="col-span-2 text-right font-mono text-xs text-muted-foreground tabular-nums">
                               {Number(l.quantity)} × {formatCurrency(Number(l.unit_price))}
                             </div>
-                            <div className="col-span-3 text-right font-bold">
+                            <div className="col-span-3 text-right font-mono text-sm tabular-nums">
                               {formatCurrency(Number(l.line_total))}
                             </div>
                           </div>
@@ -215,48 +272,49 @@ export function InvoiceDetailDialog({ invoiceId, open, onOpenChange, onEdit, onC
 
             <Separator />
 
-            <section className="ml-auto max-w-xs space-y-1">
-              <Row
+            <section aria-label="Totals" className="ml-auto max-w-xs space-y-1.5">
+              <MoneyRow
                 label={invoice.surcharge_enabled ? "Work subtotal" : "Subtotal"}
                 value={formatCurrency(
                   Number(invoice.subtotal) - (invoice.surcharge_enabled ? Number(invoice.surcharge) : 0),
                 )}
               />
               {invoice.surcharge_enabled && Number(invoice.surcharge) > 0 && (
-                <Row label="Credit card processing fee" value={formatCurrency(Number(invoice.surcharge))} />
+                <MoneyRow label="Credit card processing fee" value={formatCurrency(Number(invoice.surcharge))} />
               )}
               {Number(invoice.discount_amount) > 0 && (
-                <Row
+                <MoneyRow
                   label="Discount"
                   value={`−${formatCurrency(Number(invoice.discount_amount))}`}
-                  accent
+                  valueClassName="text-primary"
                 />
               )}
               {invoice.tax_enabled && (
-                <Row
+                <MoneyRow
                   label={`Tax (${Number(invoice.tax_rate)}%)`}
                   value={formatCurrency(Number(invoice.tax_amount))}
                 />
               )}
               <Separator className="my-1" />
-              <Row label="Total" value={formatCurrency(Number(invoice.total))} bold />
+              <MoneyRow label="Total" value={formatCurrency(Number(invoice.total))} bold />
               {Number(invoice.amount_paid) > 0 && (
-                <Row label="Paid" value={formatCurrency(Number(invoice.amount_paid))} />
+                <MoneyRow label="Paid" value={formatCurrency(Number(invoice.amount_paid))} />
               )}
+              <LineItemCheck invoice={invoice} formatCurrency={formatCurrency} />
             </section>
 
             {invoice.notes && (
               <>
                 <Separator />
                 <section>
-                  <p className="text-xs uppercase tracking-wider text-muted-foreground font-bold mb-1">Notes</p>
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground font-medium mb-1">Notes</p>
                   <p className="whitespace-pre-wrap text-muted-foreground">{invoice.notes}</p>
                 </section>
               </>
             )}
             {invoice.delivery_status === "failed" && (
-              <section className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
-                <p className="font-medium text-destructive">Last delivery failed</p>
+              <section className="rounded-xl border border-destructive/25 bg-destructive/[0.06] p-4 text-sm">
+                <p className="font-semibold text-destructive">Last delivery failed</p>
                 <p className="mt-1 text-muted-foreground">{invoice.delivery_last_error || "The invoice email provider returned an unknown error."}</p>
                 <p className="mt-1 text-xs text-muted-foreground">Attempts: {invoice.delivery_attempt_count}. Use Send Invoice below to retry.</p>
               </section>
@@ -290,17 +348,26 @@ export function InvoiceDetailDialog({ invoiceId, open, onOpenChange, onEdit, onC
           >
             <Pencil className="h-4 w-4" /> Edit
           </Button>
-          {invoice && !["paid", "void"].includes(invoice.status) && (
-            <Button variant="outline" onClick={() => { setPaymentAmount(String(Math.max(0, Number(invoice.total) - Number(invoice.amount_paid || 0)))); setPaymentOpen(true); }}>
+          {showRecordPayment && (
+            <Button
+              variant={collectable ? "default" : "outline"}
+              onClick={() => { setPaymentAmount(String(balance.toFixed(2))); setPaymentOpen(true); }}
+            >
               Record payment
             </Button>
           )}
-          <Button onClick={handleSend} disabled={!invoice} className="gap-2">
+          <Button
+            variant={collectable ? "outline" : "default"}
+            onClick={handleSend}
+            disabled={!invoice}
+            className="gap-2"
+          >
             <Mail className="h-4 w-4" />
-            Send Invoice
+            Send invoice
           </Button>
         </DialogFooter>
       </DialogContent>
+
       <SendInvoiceDialog
         invoice={invoice}
         open={sendOpen}
@@ -310,11 +377,28 @@ export function InvoiceDetailDialog({ invoiceId, open, onOpenChange, onEdit, onC
           onOpenChange(false);
         }}
       />
+
       <Dialog open={paymentOpen} onOpenChange={(open) => !recordingPayment && setPaymentOpen(open)}>
         <DialogContent className="max-w-md">
           <DialogHeader><DialogTitle>Record invoice payment</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-1"><Label htmlFor="invoice-payment-amount">Amount</Label><Input id="invoice-payment-amount" type="number" min="0.01" step="0.01" value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} /></div>
+            <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2.5 text-sm">
+              <span className="text-muted-foreground">Balance due</span>
+              <span className="font-mono font-semibold tabular-nums">{formatCurrency(balance)}</span>
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="invoice-payment-amount">Amount</Label>
+                <button
+                  type="button"
+                  onClick={() => setPaymentAmount(String(balance.toFixed(2)))}
+                  className="text-xs font-medium text-primary hover:underline"
+                >
+                  Use full balance
+                </button>
+              </div>
+              <Input id="invoice-payment-amount" type="number" min="0.01" step="0.01" value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} />
+            </div>
             <div className="space-y-1"><Label htmlFor="invoice-payment-note">Reference or note</Label><Input id="invoice-payment-note" value={paymentNote} onChange={(event) => setPaymentNote(event.target.value)} placeholder="Check, ACH, or reconciliation reference" /></div>
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setPaymentOpen(false)} disabled={recordingPayment}>Cancel</Button><Button onClick={handleRecordPayment} disabled={recordingPayment}>{recordingPayment ? "Recording…" : "Record payment"}</Button></DialogFooter>
@@ -324,11 +408,23 @@ export function InvoiceDetailDialog({ invoiceId, open, onOpenChange, onEdit, onC
   );
 }
 
-function Row({ label, value, bold, accent }: { label: string; value: string; bold?: boolean; accent?: boolean }) {
+function MoneyRow({ label, value, bold, valueClassName }: { label: string; value: string; bold?: boolean; valueClassName?: string }) {
   return (
-    <div className={`flex justify-between ${bold ? "text-base font-black" : ""} ${accent ? "text-primary" : ""}`}>
+    <div className={cn("flex justify-between gap-4 text-sm", bold && "text-base font-semibold")}>
       <span className={bold ? "" : "text-muted-foreground"}>{label}</span>
-      <span>{value}</span>
+      <span className={cn("font-mono tabular-nums", valueClassName)}>{value}</span>
     </div>
+  );
+}
+
+/** Display-only check: line items should add up to the shown subtotal. */
+function LineItemCheck({ invoice, formatCurrency }: { invoice: InvoiceFullRow; formatCurrency: (n: number) => string }) {
+  const itemSum = invoice.invoice_line_items.reduce((s, l) => s + (Number(l.line_total) || 0), 0);
+  const shownSubtotal = Number(invoice.subtotal) - (invoice.surcharge_enabled ? Number(invoice.surcharge) : 0);
+  if (Math.abs(itemSum - shownSubtotal) <= 0.01) return null;
+  return (
+    <p className="text-xs text-amber-700 dark:text-amber-500 pt-1">
+      Line items add up to {formatCurrency(itemSum)} — double-check before sending.
+    </p>
   );
 }

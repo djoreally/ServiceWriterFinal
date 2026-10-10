@@ -1,11 +1,17 @@
 /**
- * Fleet OS — Operations Center Dashboard (Phase 1)
+ * Fleet OS — Operations Center Dashboard (visual redesign).
  *
- * Operations-first layout: KPIs, today's schedule, customer attention,
- * work order pipeline, technician status, revenue, PM forecast,
- * customer health, inventory signals, quick actions.
+ * Cognitive-load design: the first viewport answers "what needs me right
+ * now?" — 4 KPIs (mono numerals, one key metric), then a ranked attention
+ * queue, then today's schedule. Everything below is supporting detail.
  *
- * Data source: fetchFleetOpsDashboard (single Promise.all aggregator).
+ * - Signal (primary blue) is reserved for the primary CTA and the key metric.
+ * - Status color comes from the canonical semantic registry, one hue per
+ *   status family. No rainbow.
+ * - Data (money, times, counts, WO numbers) renders in mono.
+ * - Every data surface ships loading (skeleton), empty, error, and populated
+ *   states. The page H1 is owned by TopHeader (FleetOSLayout title).
+ * Data logic (queries, realtime tech updates, completion flow) is unchanged.
  */
 
 import { useEffect, useState, useMemo } from "react";
@@ -14,9 +20,8 @@ import { FleetOSLayout } from "@/components/layout/FleetOSLayout";
 import { CompleteFleetWorkOrderDialog } from "@/components/fleet/CompleteFleetWorkOrderDialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { EmptyState } from "@/components/layout/PagePrimitives";
 import { useAuth } from "@packages/auth";
 import { useRealtimeTechLocations } from "@/hooks/useRealtimeTechLocations";
 import {
@@ -24,32 +29,18 @@ import {
   type FleetOpsDashboard,
   type FleetOpsTechnicianRow,
 } from "@/application/queries/fleet-ops-dashboard.query";
+import { AlertTriangle, Calendar, ChevronRight, Plus, Wrench } from "lucide-react";
+import { getSemanticStatus } from "@/lib/semantic-status";
+import { cn } from "@/lib/utils";
 import {
-  Briefcase,
-  DollarSign,
-  Car,
-  Building2,
-  Users,
-  AlertTriangle,
-  Receipt,
-  HeartPulse,
-  Calendar,
-  ChevronRight,
-  Circle,
-  Coffee,
-  Truck,
-  Wrench,
-  Plus,
-  ScanLine,
-  FileText,
-  Upload,
-  PackagePlus,
-  MapPin,
-  Activity,
-} from "lucide-react";
-
-const currency = (n: number) =>
-  `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  FleetIntro,
+  FleetKpi,
+  FleetKpiSkeleton,
+  FleetStatusPill,
+  FleetListSkeleton,
+  FleetError,
+  fmtMoney,
+} from "@/components/fleet/FleetViewPrimitives";
 
 const timeFmt = (t: string | null) => {
   if (!t) return "—";
@@ -60,36 +51,42 @@ const timeFmt = (t: string | null) => {
   return `${displayHour}:${m} ${suffix}`;
 };
 
-const techStatusMeta: Record<
-  string,
-  { label: string; icon: typeof Circle; className: string }
-> = {
-  driving: { label: "Driving", icon: Truck, className: "bg-blue-500/10 text-blue-600" },
-  en_route: { label: "Driving", icon: Truck, className: "bg-blue-500/10 text-blue-600" },
-  on_site: { label: "On Site", icon: Wrench, className: "bg-amber-500/10 text-amber-600" },
-  arrived: { label: "On Site", icon: Wrench, className: "bg-amber-500/10 text-amber-600" },
-  in_progress: { label: "On Site", icon: Wrench, className: "bg-amber-500/10 text-amber-600" },
-  break: { label: "Lunch", icon: Coffee, className: "bg-purple-500/10 text-purple-600" },
-  lunch: { label: "Lunch", icon: Coffee, className: "bg-purple-500/10 text-purple-600" },
-  available: { label: "Available", icon: Circle, className: "bg-emerald-500/10 text-emerald-600" },
-  offline: { label: "Offline", icon: Circle, className: "bg-muted text-muted-foreground" },
+/** Map legacy/raw statuses onto the canonical registry keys. */
+const woStatusKey = (status: string) =>
+  status === "pending_review" ? "blocked" : status;
+const woStatusLabel = (status: string) =>
+  status === "pending_review" ? "Pending review" : undefined;
+
+const normalizeTechStatus = (t: FleetOpsTechnicianRow) => {
+  const raw =
+    t.status === "break" || t.status === "lunch" ? "on_break" : t.status;
+  const meta = getSemanticStatus("technician", raw);
+  if (meta.label === "Unknown") {
+    return getSemanticStatus("technician", t.clockedIn ? "available" : "offline");
+  }
+  return meta;
 };
 
-const woStatusBadge = (status: string) => {
-  const map: Record<string, string> = {
-    draft: "bg-muted text-muted-foreground",
-    scheduled: "bg-blue-500/10 text-blue-600",
-    assigned: "bg-indigo-500/10 text-indigo-600",
-    in_progress: "bg-amber-500/10 text-amber-600",
-    completed: "bg-emerald-500/10 text-emerald-600",
-    invoiced: "bg-purple-500/10 text-purple-600",
-    pending_review: "bg-orange-500/10 text-orange-600",
-  };
-  return (
-    <Badge variant="secondary" className={map[status] || map.draft}>
-      {status.replace("_", " ")}
-    </Badge>
-  );
+/** Pipeline stages → registry keys for the status dots. */
+const pipelineStageKey: Record<string, string> = {
+  new: "new",
+  assigned: "assigned",
+  traveling: "en_route",
+  onSite: "on_site",
+  waitingApproval: "blocked",
+  completed: "completed",
+  invoiced: "invoiced",
+};
+
+type AttentionRow = {
+  key: string;
+  clientId: string;
+  clientName: string;
+  severity: number;
+  overdue: number;
+  dueThisWeek: number;
+  upcoming: number;
+  awaitingApproval: number;
 };
 
 const FleetOSDashboard = () => {
@@ -97,6 +94,7 @@ const FleetOSDashboard = () => {
   const navigate = useNavigate();
   const [data, setData] = useState<FleetOpsDashboard | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [liveTechs, setLiveTechs] = useState<Record<string, FleetOpsTechnicianRow>>({});
 
   // Direct completion states
@@ -110,18 +108,23 @@ const FleetOSDashboard = () => {
   useEffect(() => {
     if (!user?.id) return;
     let cancelled = false;
-    void Promise.resolve().then(() => setLoading(true));
-    void Promise.resolve().then(() => fetchFleetOpsDashboard(user.id)
-      .then((d) => {
+    const load = async () => {
+      setLoading(true);
+      setError(false);
+      try {
+        const d = await fetchFleetOpsDashboard(user.id);
         if (cancelled) return;
         setData(d);
         const map: Record<string, FleetOpsTechnicianRow> = {};
         d.technicians.forEach((t) => (map[t.id] = t));
         setLiveTechs(map);
-      })
-      .finally(() => {
+      } catch {
+        if (!cancelled) setError(true);
+      } finally {
         if (!cancelled) setLoading(false);
-      }));
+      }
+    };
+    void load();
     return () => {
       cancelled = true;
     };
@@ -161,16 +164,23 @@ const FleetOSDashboard = () => {
 
   const kpis = data?.kpis;
 
-  const kpiCards = [
-    { label: "Today's Jobs", value: kpis?.todayJobs ?? 0, icon: Briefcase, color: "text-blue-500" },
-    { label: "Today's Revenue", value: currency(kpis?.todayRevenue ?? 0), icon: DollarSign, color: "text-emerald-500" },
-    { label: "Vehicles Scheduled", value: kpis?.vehiclesScheduledToday ?? 0, icon: Car, color: "text-indigo-500" },
-    { label: "Fleet Customers", value: kpis?.fleetCustomers ?? 0, icon: Building2, color: "text-cyan-500" },
-    { label: "Techs Working", value: kpis?.techniciansWorking ?? 0, icon: Users, color: "text-amber-500" },
-    { label: "Overdue PMs", value: kpis?.overduePms ?? 0, icon: AlertTriangle, color: (kpis?.overduePms ?? 0) > 0 ? "text-red-500" : "text-muted-foreground" },
-    { label: "Outstanding", value: currency(kpis?.outstandingInvoices ?? 0), icon: Receipt, color: "text-purple-500" },
-    { label: "Fleet Health", value: `${kpis?.fleetHealth ?? 0}%`, icon: HeartPulse, color: (kpis?.fleetHealth ?? 100) >= 90 ? "text-emerald-500" : (kpis?.fleetHealth ?? 100) >= 75 ? "text-amber-500" : "text-red-500" },
-  ];
+  /** Attention queue, ranked: overdue → approvals → due this week → upcoming. */
+  const attentionRows: AttentionRow[] = useMemo(() => {
+    if (!data) return [];
+    return data.attention
+      .map((c) => ({
+        key: c.fleetClientId,
+        clientId: c.fleetClientId,
+        clientName: c.clientName,
+        severity:
+          c.overdue > 0 ? 0 : c.awaitingApproval > 0 ? 1 : c.dueThisWeek > 0 ? 2 : 3,
+        overdue: c.overdue,
+        dueThisWeek: c.dueThisWeek,
+        upcoming: c.upcoming,
+        awaitingApproval: c.awaitingApproval,
+      }))
+      .sort((a, b) => a.severity - b.severity || b.overdue - a.overdue);
+  }, [data]);
 
   const pipelineStages = data
     ? [
@@ -184,455 +194,403 @@ const FleetOSDashboard = () => {
       ]
     : [];
 
-  const quickActions = [
-    { label: "New Fleet Customer", icon: Building2, onClick: () => navigate("/fleet-os/clients/new") },
-    { label: "Schedule Service", icon: Calendar, onClick: () => navigate("/fleet-os/scheduler") },
-    { label: "Create Work Order", icon: Plus, onClick: () => navigate("/fleet-os/work-orders/new") },
-    { label: "Add Vehicle", icon: Car, onClick: () => navigate("/fleet-os/vehicles") },
-    { label: "Import Fleet", icon: Upload, onClick: () => navigate("/fleet-os/vehicles/import") },
-    { label: "Scan VIN", icon: ScanLine, onClick: () => navigate("/fleet-os/vehicles?scan=1") },
-    { label: "Create Estimate", icon: FileText, onClick: () => navigate("/fleet-os/work-orders/new?estimate=1") },
-    { label: "Receive Inventory", icon: PackagePlus, onClick: () => navigate("/inventory") },
-    { label: "Invoice Customer", icon: Receipt, onClick: () => navigate("/fleet-os/invoices") },
-  ];
+  const inventoryRows = data
+    ? [
+        { label: "Oil grades", count: data.inventory.oil.length },
+        { label: "Filters", count: data.inventory.filters.length },
+        { label: "Drain plugs", count: data.inventory.drainPlugs.length },
+        { label: "Shop supplies", count: data.inventory.supplies.length },
+      ]
+    : [];
+
+  const pmDueTotal =
+    (data?.forecast.today ?? 0) +
+    (data?.forecast.thisWeek ?? 0) +
+    (data?.forecast.thirtyDays ?? 0);
+
+  const reload = async () => {
+    if (!user?.id) return;
+    setLoading(true);
+    setError(false);
+    try {
+      setData(await fetchFleetOpsDashboard(user.id));
+    } catch {
+      setError(true);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <FleetOSLayout title="Fleet OS — Operations Center">
       <div className="space-y-6">
-        {/* KPI Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
-          {kpiCards.map((kpi) => (
-            <Card key={kpi.label} className="border-border">
-              <CardContent className="p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <kpi.icon className={`h-4 w-4 ${kpi.color}`} />
-                  <span className="text-xs text-muted-foreground truncate">{kpi.label}</span>
-                </div>
-                <p className="text-2xl font-bold text-foreground">
-                  {loading ? "—" : kpi.value}
-                </p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-
-        <div className="grid xl:grid-cols-3 gap-6">
-          {/* Today's Schedule */}
-          <Card className="xl:col-span-2">
-            <CardHeader className="pb-3 flex flex-row items-center justify-between">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Calendar className="h-4 w-4 text-blue-500" />
-                Today's Schedule
-              </CardTitle>
-              <Button variant="ghost" size="sm" onClick={() => navigate("/fleet-os/scheduler")}>
-                View all <ChevronRight className="h-4 w-4 ml-1" />
+        <FleetIntro
+          eyebrow="Fleet operations"
+          description="Today's schedule, open work, and the accounts that need you — across every fleet you run."
+          actions={
+            <>
+              <Button variant="outline" size="sm" onClick={() => navigate("/fleet-os/work-orders/new")}>
+                <Plus className="h-4 w-4 mr-1" /> New work order
               </Button>
-            </CardHeader>
-            <CardContent>
-              {loading ? (
-                <p className="text-sm text-muted-foreground">Loading…</p>
-              ) : !data || data.todaySchedule.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-6">
-                  Nothing scheduled today
-                </p>
-              ) : (
-                <div className="divide-y divide-border">
-                  {data.todaySchedule.map((item) => (
-                    <div
-                      key={item.id}
-                      className="flex items-center gap-4 py-3 hover:bg-muted/30 transition-colors cursor-pointer px-2 -mx-2 rounded"
-                      onClick={() => navigate(`/fleet-os/work-orders/${item.id}`)}
-                    >
-                      <div className="w-20 text-sm font-medium text-foreground shrink-0">
-                        {timeFmt(item.time)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{item.clientName}</p>
-                        <p className="text-xs text-muted-foreground truncate">
-                          {item.vehicleCount} {item.vehicleCount === 1 ? "vehicle" : "vehicles"}
-                          {item.locationName && ` • ${item.locationName}`}
-                          {item.technicianName && ` • ${item.technicianName}`}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-                        {item.total > 0 && (
-                          <span className="text-xs font-medium">{currency(item.total)}</span>
-                        )}
-                        {woStatusBadge(item.status)}
-                        {isBypassRole && ["scheduled", "assigned", "en_route", "arrived", "in_progress"].includes(item.status) && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="text-xs h-7 px-2 border-emerald-500/30 text-emerald-600 hover:bg-emerald-500/10 shrink-0"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedWoId(item.id);
-                              setShowCompleteDialog(true);
-                            }}
-                          >
-                            Complete
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+              <Button size="sm" onClick={() => navigate("/fleet-os/scheduler")}>
+                <Calendar className="h-4 w-4 mr-1" /> Schedule service
+              </Button>
+            </>
+          }
+        />
 
-          {/* Revenue Widget */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <DollarSign className="h-4 w-4 text-emerald-500" />
-                Revenue
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {[
-                { label: "Scheduled Today", value: data?.revenue.scheduledToday ?? 0 },
-                { label: "Completed", value: data?.revenue.completedToday ?? 0 },
-                { label: "Pending Approval", value: data?.revenue.pendingApproval ?? 0 },
-                { label: "Outstanding", value: data?.revenue.outstanding ?? 0 },
-              ].map((row) => (
-                <div key={row.label} className="flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">{row.label}</span>
-                  <span className="text-sm font-semibold">{currency(row.value)}</span>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Work Order Pipeline */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Activity className="h-4 w-4 text-primary" />
-              Work Order Pipeline
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-2">
-              {pipelineStages.map((stage, i) => (
-                <div key={stage.key} className="relative">
-                  <button
-                    onClick={() => navigate(`/fleet-os/work-orders?stage=${stage.key}`)}
-                    className="w-full text-left rounded-lg border border-border bg-card hover:bg-muted/50 transition-colors p-3"
-                  >
-                    <p className="text-xs text-muted-foreground truncate">{stage.label}</p>
-                    <p className="text-2xl font-bold mt-1">
-                      {loading ? "—" : stage.value}
-                    </p>
-                  </button>
-                  {i < pipelineStages.length - 1 && (
-                    <ChevronRight className="hidden lg:block absolute -right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/40 pointer-events-none" />
-                  )}
-                </div>
-              ))}
+        {loading ? (
+          <FleetKpiSkeleton count={4} />
+        ) : error || !data ? (
+          <FleetError
+            title="Couldn't load the operations dashboard"
+            message="Check your connection and try again. Your fleet data is safe."
+            onRetry={reload}
+          />
+        ) : (
+          <>
+            {/* KPI strip — one key metric (today's revenue), everything else ink */}
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <FleetKpi
+                label="Today's jobs"
+                value={kpis?.todayJobs ?? 0}
+                onClick={() => navigate("/fleet-os/scheduler")}
+              />
+              <FleetKpi
+                label="Today's revenue"
+                value={fmtMoney(kpis?.todayRevenue ?? 0)}
+                tone="signal"
+                onClick={() => navigate("/fleet-os/invoices")}
+              />
+              <FleetKpi
+                label="Techs working"
+                value={kpis?.techniciansWorking ?? 0}
+                onClick={() => navigate("/fleet-os/command-center")}
+              />
+              <FleetKpi
+                label="Overdue PMs"
+                value={kpis?.overduePms ?? 0}
+                tone={(kpis?.overduePms ?? 0) > 0 ? "critical" : "default"}
+                hint={(kpis?.overduePms ?? 0) > 0 ? "Service is past due on these units" : "All PMs current"}
+              />
             </div>
-          </CardContent>
-        </Card>
 
-        <div className="grid lg:grid-cols-2 gap-6">
-          {/* Customers Requiring Attention */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-amber-500" />
-                Customers Requiring Attention
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {loading ? (
-                <p className="text-sm text-muted-foreground">Loading…</p>
-              ) : !data || data.attention.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">
-                  All accounts current
-                </p>
-              ) : (
-                <div className="divide-y divide-border">
-                  {data.attention.slice(0, 6).map((c) => (
-                    <button
-                      key={c.fleetClientId}
-                      onClick={() => navigate(`/fleet-os/clients/${c.fleetClientId}`)}
-                      className="flex items-center justify-between w-full py-2.5 hover:bg-muted/30 rounded px-2 -mx-2 transition-colors text-left"
-                    >
-                      <span className="text-sm font-medium truncate flex-1">{c.clientName}</span>
-                      <div className="flex items-center gap-1.5 text-xs shrink-0">
-                        {c.overdue > 0 && (
-                          <Badge variant="secondary" className="bg-red-500/10 text-red-600">
-                            {c.overdue} overdue
-                          </Badge>
-                        )}
-                        {c.dueThisWeek > 0 && (
-                          <Badge variant="secondary" className="bg-amber-500/10 text-amber-600">
-                            {c.dueThisWeek} due
-                          </Badge>
-                        )}
-                        {c.upcoming > 0 && (
-                          <Badge variant="secondary" className="bg-blue-500/10 text-blue-600">
-                            {c.upcoming} upcoming
-                          </Badge>
-                        )}
-                        {c.awaitingApproval > 0 && (
-                          <Badge variant="secondary" className="bg-orange-500/10 text-orange-600">
-                            {c.awaitingApproval} approval
-                          </Badge>
-                        )}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Technician Status */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Users className="h-4 w-4 text-indigo-500" />
-                Technician Status
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {loading ? (
-                <p className="text-sm text-muted-foreground">Loading…</p>
-              ) : techList.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">
-                  No active technicians
-                </p>
-              ) : (
-                <div className="divide-y divide-border">
-                  {techList.map((t) => {
-                    const meta =
-                      techStatusMeta[t.status] ??
-                      (t.clockedIn ? techStatusMeta.available : techStatusMeta.offline);
-                    const Icon = meta.icon;
-                    return (
-                      <div
-                        key={t.id}
-                        className="flex items-center gap-3 py-2.5"
-                      >
-                        <div className={`h-8 w-8 rounded-md flex items-center justify-center ${meta.className}`}>
-                          <Icon className="h-4 w-4" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{t.name}</p>
-                          <p className="text-xs text-muted-foreground truncate">
-                            {meta.label}
-                            {t.currentJob?.clientName && ` • ${t.currentJob.clientName}`}
-                            {t.currentLocation && ` • GPS live`}
-                          </p>
-                        </div>
-                        {t.currentJob && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => navigate(`/fleet-os/work-orders/${t.currentJob!.id}`)}
+            <div className="grid gap-6 xl:grid-cols-3">
+              <div className="space-y-6 xl:col-span-2">
+                {/* ── Needs attention: the first thing on the screen ── */}
+                <Card className="border-border">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <AlertTriangle className="h-4 w-4 text-amber-600" />
+                      Needs attention
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {attentionRows.length === 0 ? (
+                      <EmptyState
+                        variant="inline"
+                        title="All accounts current"
+                        description="No overdue work, approvals waiting, or PMs due. The day is yours."
+                      />
+                    ) : (
+                      <div className="divide-y divide-border">
+                        {attentionRows.slice(0, 6).map((c) => (
+                          <button
+                            key={c.key}
+                            onClick={() => navigate(`/fleet-os/clients/${c.clientId}`)}
+                            className="flex w-full items-center justify-between gap-3 rounded px-2 py-2.5 text-left transition-colors hover:bg-muted/40"
                           >
-                            View
-                          </Button>
-                        )}
+                            <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+                              {c.clientName}
+                            </span>
+                            <span className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+                              {c.overdue > 0 && (
+                                <FleetStatusPill domain="invoice" status="overdue" label={`${c.overdue} overdue`} />
+                              )}
+                              {c.awaitingApproval > 0 && (
+                                <FleetStatusPill domain="appointment" status="blocked" label={`${c.awaitingApproval} approval`} />
+                              )}
+                              {c.dueThisWeek > 0 && (
+                                <FleetStatusPill domain="appointment" status="scheduled" label={`${c.dueThisWeek} due`} />
+                              )}
+                              {c.upcoming > 0 && (
+                                <FleetStatusPill domain="appointment" status="pending" label={`${c.upcoming} upcoming`} />
+                              )}
+                            </span>
+                          </button>
+                        ))}
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="grid lg:grid-cols-3 gap-6">
-          {/* PM Forecast */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Calendar className="h-4 w-4 text-primary" />
-                PM Forecast
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Tabs defaultValue="today">
-                <TabsList className="grid grid-cols-4 w-full">
-                  <TabsTrigger value="today">Today</TabsTrigger>
-                  <TabsTrigger value="week">Week</TabsTrigger>
-                  <TabsTrigger value="next">Next</TabsTrigger>
-                  <TabsTrigger value="thirty">30d</TabsTrigger>
-                </TabsList>
-                {(["today", "week", "next", "thirty"] as const).map((k) => {
-                  const map = {
-                    today: data?.forecast.today ?? 0,
-                    week: data?.forecast.thisWeek ?? 0,
-                    next: data?.forecast.nextWeek ?? 0,
-                    thirty: data?.forecast.thirtyDays ?? 0,
-                  };
-                  return (
-                    <TabsContent key={k} value={k} className="mt-4 text-center">
-                      <p className="text-4xl font-bold text-foreground">{map[k]}</p>
-                      <p className="text-xs text-muted-foreground mt-1">vehicles due</p>
-                    </TabsContent>
-                  );
-                })}
-              </Tabs>
-            </CardContent>
-          </Card>
-
-          {/* Inventory Signals */}
-          <Card>
-            <CardHeader className="pb-3 flex flex-row items-center justify-between">
-              <CardTitle className="text-base flex items-center gap-2">
-                <PackagePlus className="h-4 w-4 text-orange-500" />
-                Low Inventory
-              </CardTitle>
-              <Button variant="ghost" size="sm" onClick={() => navigate("/inventory")}>
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </CardHeader>
-            <CardContent>
-              {loading ? (
-                <p className="text-sm text-muted-foreground">Loading…</p>
-              ) : !data || data.inventory.totalLow === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">
-                  Inventory healthy
-                </p>
-              ) : (
-                <div className="space-y-2 text-sm">
-                  {[
-                    { label: "Oil Grades", items: data.inventory.oil },
-                    { label: "Filters", items: data.inventory.filters },
-                    { label: "Drain Plugs", items: data.inventory.drainPlugs },
-                    { label: "Shop Supplies", items: data.inventory.supplies },
-                  ].map((row) => (
-                    <div key={row.label} className="flex items-center justify-between">
-                      <span className="text-muted-foreground">{row.label}</span>
-                      <Badge
-                        variant="secondary"
-                        className={
-                          row.items.length > 0
-                            ? "bg-orange-500/10 text-orange-600"
-                            : "bg-emerald-500/10 text-emerald-600"
-                        }
-                      >
-                        {row.items.length > 0 ? `${row.items.length} low` : "OK"}
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Fleet Map placeholder — embed link */}
-          <Card>
-            <CardHeader className="pb-3 flex flex-row items-center justify-between">
-              <CardTitle className="text-base flex items-center gap-2">
-                <MapPin className="h-4 w-4 text-primary" />
-                Fleet Map
-              </CardTitle>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => navigate("/fleet-os")}
-              >
-                Open
-              </Button>
-            </CardHeader>
-            <CardContent>
-              <button
-                onClick={() => navigate("/fleet-os")}
-                className="w-full h-40 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors flex flex-col items-center justify-center text-muted-foreground"
-              >
-                <MapPin className="h-8 w-8 mb-2" />
-                <p className="text-xs">{techList.filter((t) => t.currentLocation).length} techs live</p>
-              </button>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Customer Health */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <HeartPulse className="h-4 w-4 text-rose-500" />
-              Top Fleet Customers
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {loading ? (
-              <p className="text-sm text-muted-foreground">Loading…</p>
-            ) : !data || data.health.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">
-                No completed work orders yet
-              </p>
-            ) : (
-              <div className="grid md:grid-cols-2 xl:grid-cols-5 gap-3">
-                {data.health.map((c) => (
-                  <button
-                    key={c.fleetClientId}
-                    onClick={() => navigate(`/fleet-os/clients/${c.fleetClientId}`)}
-                    className="text-left rounded-lg border border-border p-4 hover:border-primary/40 transition-colors"
-                  >
-                    <p className="text-sm font-semibold truncate">{c.clientName}</p>
-                    <p className="text-xs text-muted-foreground mb-3">
-                      {c.vehicleCount} {c.vehicleCount === 1 ? "vehicle" : "vehicles"}
-                    </p>
-                    <div className="space-y-2">
-                      <div>
-                        <div className="flex items-center justify-between text-xs mb-1">
-                          <span className="text-muted-foreground">PM Compliance</span>
-                          <span className="font-medium">{c.pmCompliance}%</span>
-                        </div>
-                        <Progress value={c.pmCompliance} className="h-1.5" />
-                      </div>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-muted-foreground">Outstanding</span>
-                        <span className="font-medium">{currency(c.outstandingAr)}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-muted-foreground">LTV</span>
-                        <span className="font-medium">{currency(c.lifetimeRevenue)}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-muted-foreground">Monthly avg</span>
-                        <span className="font-medium">{currency(c.monthlyAverage)}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-muted-foreground">Last visit</span>
-                        <span className="font-medium">
-                          {c.lastVisit ? new Date(c.lastVisit).toLocaleDateString() : "—"}
+                    )}
+                    {pmDueTotal > 0 && (
+                      <div className="mt-3 flex items-center gap-2 border-t border-border pt-3 text-sm text-muted-foreground">
+                        <Wrench className="h-4 w-4 shrink-0" />
+                        <span>
+                          PM due:{" "}
+                          <span className="font-mono font-medium text-foreground">{data.forecast.today}</span> today
+                          {" · "}
+                          <span className="font-mono font-medium text-foreground">{data.forecast.thisWeek}</span> this week
+                          {" · "}
+                          <span className="font-mono font-medium text-foreground">{data.forecast.thirtyDays}</span> in 30 days
                         </span>
                       </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                    )}
+                  </CardContent>
+                </Card>
 
-        {/* Quick Actions */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Quick Actions</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-2">
-              {quickActions.map((a) => (
-                <button
-                  key={a.label}
-                  onClick={a.onClick}
-                  className="flex flex-col items-center gap-2 rounded-lg border border-border p-4 hover:border-primary/40 hover:bg-muted/30 transition-colors text-center"
-                >
-                  <a.icon className="h-5 w-5 text-primary" />
-                  <span className="text-xs font-medium leading-tight">{a.label}</span>
-                </button>
-              ))}
+                {/* ── Today's schedule ── */}
+                <Card className="border-border">
+                  <CardHeader className="flex flex-row items-center justify-between pb-3">
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <Calendar className="h-4 w-4 text-muted-foreground" />
+                      Today's schedule
+                    </CardTitle>
+                    <Button variant="ghost" size="sm" onClick={() => navigate("/fleet-os/scheduler")}>
+                      View all <ChevronRight className="ml-1 h-4 w-4" />
+                    </Button>
+                  </CardHeader>
+                  <CardContent>
+                    {data.todaySchedule.length === 0 ? (
+                      <EmptyState
+                        variant="inline"
+                        title="Nothing scheduled today"
+                        description="Booked jobs show up here, in order."
+                      />
+                    ) : (
+                      <div className="divide-y divide-border">
+                        {data.todaySchedule.map((item) => (
+                          <div
+                            key={item.id}
+                            className="flex cursor-pointer items-center gap-4 rounded px-2 py-3 transition-colors hover:bg-muted/40"
+                            onClick={() => navigate(`/fleet-os/work-orders/${item.id}`)}
+                          >
+                            <div className="w-20 shrink-0 font-mono text-sm font-medium text-foreground">
+                              {timeFmt(item.time)}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-sm font-semibold">{item.clientName}</p>
+                              <p className="truncate text-xs text-muted-foreground">
+                                {item.vehicleCount} {item.vehicleCount === 1 ? "vehicle" : "vehicles"}
+                                {item.locationName && ` · ${item.locationName}`}
+                                {item.technicianName && ` · ${item.technicianName}`}
+                              </p>
+                            </div>
+                            <div
+                              className="flex shrink-0 items-center gap-2"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {item.total > 0 && (
+                                <span className="font-mono text-sm font-medium">{fmtMoney(item.total)}</span>
+                              )}
+                              <FleetStatusPill
+                                domain="appointment"
+                                status={woStatusKey(item.status)}
+                                label={woStatusLabel(item.status)}
+                              />
+                              {isBypassRole &&
+                                ["scheduled", "assigned", "en_route", "arrived", "in_progress"].includes(item.status) && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 shrink-0 border-emerald-500/30 px-2 text-xs text-emerald-600 hover:bg-emerald-500/10"
+                                    onClick={() => {
+                                      setSelectedWoId(item.id);
+                                      setShowCompleteDialog(true);
+                                    }}
+                                  >
+                                    Complete
+                                  </Button>
+                                )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* ── Work order pipeline ── */}
+                <Card className="border-border">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-lg">Work order pipeline</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 gap-2 md:grid-cols-4 lg:grid-cols-7">
+                      {pipelineStages.map((stage, i) => {
+                        const meta = getSemanticStatus("appointment", pipelineStageKey[stage.key]);
+                        return (
+                          <div key={stage.key} className="relative">
+                            <button
+                              onClick={() => navigate(`/fleet-os/work-orders?stage=${stage.key}`)}
+                              className="w-full rounded-lg border border-border bg-card p-3 text-left transition-colors hover:border-primary/40"
+                            >
+                              <p className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">
+                                <span className={cn("h-2 w-2 shrink-0 rounded-full", meta.dotClass)} />
+                                {stage.label}
+                              </p>
+                              <p className="mt-1 font-mono text-2xl font-semibold">{stage.value}</p>
+                            </button>
+                            {i < pipelineStages.length - 1 && (
+                              <ChevronRight className="pointer-events-none absolute -right-3 top-1/2 hidden h-4 w-4 -translate-y-1/2 text-muted-foreground/40 lg:block" />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* ── Right rail: supporting detail ── */}
+              <div className="space-y-6">
+                <Card className="border-border">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-lg">Techs on the road</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {techList.length === 0 ? (
+                      <p className="py-4 text-center text-sm text-muted-foreground">
+                        No active technicians
+                      </p>
+                    ) : (
+                      <div className="divide-y divide-border">
+                        {techList.map((t) => {
+                          const meta = normalizeTechStatus(t);
+                          const Icon = meta.icon;
+                          return (
+                            <div key={t.id} className="flex items-center gap-3 py-2.5">
+                              <span className={cn("h-2 w-2 shrink-0 rounded-full", meta.dotClass)} />
+                              <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", meta.badgeClass)}>
+                                <Icon className="h-4 w-4" />
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm font-semibold">{t.name}</p>
+                                <p className="truncate text-xs text-muted-foreground">
+                                  {meta.label}
+                                  {t.currentJob?.clientName && ` · ${t.currentJob.clientName}`}
+                                  {t.currentLocation && " · GPS live"}
+                                </p>
+                              </div>
+                              {t.currentJob && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => navigate(`/fleet-os/work-orders/${t.currentJob!.id}`)}
+                                >
+                                  View
+                                </Button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card className="border-border">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-lg">Revenue</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2.5">
+                    {[
+                      { label: "Scheduled today", value: data.revenue.scheduledToday },
+                      { label: "Completed", value: data.revenue.completedToday },
+                      { label: "Pending approval", value: data.revenue.pendingApproval },
+                      { label: "Outstanding", value: data.revenue.outstanding },
+                    ].map((row) => (
+                      <div key={row.label} className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">{row.label}</span>
+                        <span className="font-mono font-semibold">{fmtMoney(row.value)}</span>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+
+                <Card className="border-border">
+                  <CardHeader className="flex flex-row items-center justify-between pb-3">
+                    <CardTitle className="text-lg">Low inventory</CardTitle>
+                    <Button variant="ghost" size="sm" onClick={() => navigate("/inventory")}>
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </CardHeader>
+                  <CardContent>
+                    {data.inventory.totalLow === 0 ? (
+                      <p className="py-2 text-center text-sm text-muted-foreground">
+                        Inventory healthy
+                      </p>
+                    ) : (
+                      <div className="space-y-2 text-sm">
+                        {inventoryRows.map((row) => (
+                          <div key={row.label} className="flex items-center justify-between">
+                            <span className="text-muted-foreground">{row.label}</span>
+                            <FleetStatusPill
+                              domain="inventory"
+                              status={row.count > 0 ? "low_stock" : "in_stock"}
+                              label={row.count > 0 ? `${row.count} low` : "OK"}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
             </div>
-          </CardContent>
-        </Card>
+
+            {/* ── Top fleet customers ── */}
+            <Card className="border-border">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg">Top fleet customers</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {data.health.length === 0 ? (
+                  <p className="py-4 text-center text-sm text-muted-foreground">
+                    No completed work orders yet
+                  </p>
+                ) : (
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                    {data.health.map((c) => (
+                      <button
+                        key={c.fleetClientId}
+                        onClick={() => navigate(`/fleet-os/clients/${c.fleetClientId}`)}
+                        className="rounded-lg border border-border p-4 text-left transition-colors hover:border-primary/40"
+                      >
+                        <p className="truncate text-sm font-semibold">{c.clientName}</p>
+                        <p className="mb-3 mt-0.5 font-mono text-xs text-muted-foreground">
+                          {c.vehicleCount} {c.vehicleCount === 1 ? "vehicle" : "vehicles"}
+                        </p>
+                        <div className="space-y-2 text-sm">
+                          <div>
+                            <div className="mb-1 flex items-center justify-between text-xs">
+                              <span className="text-muted-foreground">PM compliance</span>
+                              <span className="font-mono font-medium">{c.pmCompliance}%</span>
+                            </div>
+                            <Progress value={c.pmCompliance} className="h-1.5" />
+                          </div>
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-muted-foreground">Outstanding</span>
+                            <span className="font-mono font-medium">{fmtMoney(c.outstandingAr)}</span>
+                          </div>
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-muted-foreground">Lifetime</span>
+                            <span className="font-mono font-medium">{fmtMoney(c.lifetimeRevenue)}</span>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </>
+        )}
+
+        {loading && !error && (
+          <div className="space-y-6">
+            <FleetListSkeleton rows={3} />
+            <FleetListSkeleton rows={5} />
+          </div>
+        )}
       </div>
 
       <CompleteFleetWorkOrderDialog
@@ -642,7 +600,11 @@ const FleetOSDashboard = () => {
         workOrderLabel="Work order"
         onCompleted={async () => {
           if (!user?.id) return;
-          setData(await fetchFleetOpsDashboard(user.id));
+          try {
+            setData(await fetchFleetOpsDashboard(user.id));
+          } catch {
+            setError(true);
+          }
         }}
       />
     </FleetOSLayout>
