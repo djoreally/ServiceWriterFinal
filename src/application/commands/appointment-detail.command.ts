@@ -10,7 +10,6 @@ import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { trackAppointmentStatusChanged } from "@/lib/posthog/analytics";
 import { nextApi } from "@/lib/nextApiClient";
 import { apiClient } from "@/lib/api-client";
-import { updateTechJobDispatchStatus } from "@/application/commands/tech-app.command";
 
 async function readCurrentStatus(_workspaceId: string, id: string): Promise<string | undefined> {
   const response = await apiClient.get<{ data: { status?: string } | null }>(
@@ -62,9 +61,10 @@ export async function deleteAppointment(id: string) {
 }
 
 /**
- * Start an appointment through the same atomic transition path used by the
- * technician app. This prevents the appointment-detail UI from drifting onto a
- * second mutation contract with different authorization/presence semantics.
+ * Start an appointment through the appointment-domain start endpoint. That
+ * endpoint owns authorization, lifecycle mutation, timestamps, dispatch state,
+ * and technician-presence synchronization. Appointment Detail must not detour
+ * through technician-app client state to start the service.
  */
 export async function startAppointmentJob(appointmentId: string): Promise<{ success: boolean; alreadyStarted?: boolean; error?: string }> {
   try {
@@ -74,10 +74,16 @@ export async function startAppointmentJob(appointmentId: string): Promise<{ succ
     const currentStatus = await readCurrentStatus(context.workspaceId, appointmentId).catch(() => undefined);
     if (currentStatus === "in_progress") return { success: true, alreadyStarted: true };
 
-    const { error } = await updateTechJobDispatchStatus(appointmentId, "in_progress", undefined, false);
-    if (error) return { success: false, error };
+    const response = await apiClient.post<{ data: { status?: string; already_started?: boolean } | null }>(
+      `/v1/appointments/${encodeURIComponent(appointmentId)}/start`,
+      { selected_workspace_id: context.workspaceId },
+    );
 
-    return { success: true, alreadyStarted: false };
+    return {
+      success: response.data?.status === "in_progress",
+      alreadyStarted: Boolean(response.data?.already_started),
+      ...(response.data?.status === "in_progress" ? {} : { error: "Appointment did not enter in-progress state." }),
+    };
   } catch (err: unknown) {
     return { success: false, error: errorMessage(err, "Failed to start job") };
   }
