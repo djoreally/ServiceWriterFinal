@@ -3980,6 +3980,226 @@ vehiclesRouter.get("/v1/fleet/work-orders/:id/dispatch-score", async (c) => {
   return json({ data: breakdown });
 });
 
+// ---------------------------------------------------------------------------
+// POST /v1/fleet/work-orders/:id/dispatch
+//
+// Real fleet dispatch: assigns a technician (and optional van) to a fleet
+// work order. The assignment AND the status transition both go through the
+// fleet lifecycle RPC (transition_fleet_work_order) — never a raw status
+// .update() — and a dispatch event is recorded in fleet_activity_logs.
+// ---------------------------------------------------------------------------
+
+const fleetDispatchSchema = z.object({
+  technician_id: z.string().uuid(),
+  van_id: z.string().uuid().nullable().optional(),
+  override_reason: z.string().trim().max(500).nullable().optional(),
+});
+
+const FLEET_DISPATCHABLE_STATUSES = ["draft", "pending_review", "scheduled", "assigned", "en_route", "in_progress"];
+
+/** Roles allowed to dispatch fleet work in a workspace. */
+const FLEET_DISPATCH_ROLES = ["owner", "admin", "manager", "service_advisor", "dispatcher"];
+
+interface FleetDispatchResult {
+  ok: boolean;
+  status?: number;
+  code?: string;
+  message?: string;
+  workOrder?: Record<string, unknown> | null;
+}
+
+/**
+ * Loads a fleet work order and authorizes the caller against its workspace:
+ * workspace_id on the row, backfilled from the owner's memberships where
+ * unset; the caller must hold an ops role in that workspace. Throws ApiError
+ * (404/409/403) when the order is missing, unscoped, or the caller lacks
+ * permission.
+ */
+async function authorizeFleetWorkOrder(
+  db: any,
+  callerUserId: string,
+  workOrderId: string,
+): Promise<{ order: Record<string, any>; workspaceId: string }> {
+  const { data: order, error: loadError } = await db
+    .from("fleet_work_orders")
+    .select("id,status,user_id,workspace_id,assigned_technician_id,assigned_van_id")
+    .eq("id", workOrderId)
+    .single();
+  if (loadError || !order) {
+    throw new ApiError(404, "Work order not found.", "not_found");
+  }
+
+  let workspaceId: string | null = order.workspace_id ?? null;
+  if (!workspaceId) {
+    const { data: ownerMembership } = await db
+      .from("workspace_members")
+      .select("workspace_id")
+      .eq("user_id", order.user_id)
+      .eq("is_active", true)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    workspaceId = ownerMembership?.workspace_id ?? null;
+  }
+  if (!workspaceId) {
+    throw new ApiError(409, "Work order has no workspace scope.", "no_workspace_scope");
+  }
+
+  const { data: callerMembership, error: callerError } = await db
+    .from("workspace_members")
+    .select("role")
+    .eq("workspace_id", workspaceId)
+    .eq("user_id", callerUserId)
+    .eq("is_active", true)
+    .maybeSingle();
+  if (callerError) throw callerError;
+  if (!callerMembership || !FLEET_DISPATCH_ROLES.includes(String(callerMembership.role))) {
+    throw new ApiError(403, "You do not have permission to dispatch in this workspace.", "forbidden");
+  }
+
+  return { order, workspaceId };
+}
+
+/**
+ * Server-side fleet dispatch used by both the single dispatch endpoint and
+ * batch-assign. Validates (1) the work order exists, (2) it belongs to the
+ * caller's workspace via workspace_id (backfilled from the owner's
+ * memberships where unset), (3) the caller holds an ops role in that
+ * workspace, and (4) the technician is an active technician row in that
+ * workspace. The status transition goes through the fleet lifecycle RPC
+ * (transition_fleet_work_order) — never a raw status .update(). The
+ * assignment fields are then written explicitly because the RPC's production
+ * body is a black box and may ignore p_details; the status move itself is
+ * still the RPC's doing. A dispatch event is recorded in fleet_activity_logs.
+ */
+async function dispatchFleetWorkOrderServer(
+  db: any,
+  callerUserId: string,
+  input: { workOrderId: string; technicianId: string; vanId?: string | null; overrideReason?: string | null },
+): Promise<FleetDispatchResult> {
+  let order: Record<string, any>;
+  let workspaceId: string;
+  try {
+    ({ order, workspaceId } = await authorizeFleetWorkOrder(db, callerUserId, input.workOrderId));
+  } catch (error) {
+    if (error instanceof ApiError) {
+      return { ok: false, status: error.status, code: error.code, message: error.message };
+    }
+    throw error;
+  }
+
+  if (!FLEET_DISPATCHABLE_STATUSES.includes(String(order.status))) {
+    return {
+      ok: false,
+      status: 409,
+      code: "invalid_status",
+      message: `Work order status '${order.status}' cannot be dispatched.`,
+    };
+  }
+
+  // Technician must be a real, active member of this workspace. Resolved
+  // through workspace_members on the technician's linked auth identity (no
+  // dependency on a technicians.workspace_id column, which is not in the
+  // generated schema).
+  const { data: technician, error: techError } = await db
+    .from("technicians")
+    .select("id,auth_user_id,user_id")
+    .eq("id", input.technicianId)
+    .neq("is_active", false)
+    .maybeSingle();
+  if (techError) throw techError;
+  if (!technician) {
+    return { ok: false, status: 404, code: "invalid_technician", message: "Technician not found." };
+  }
+  const techUserIds = [technician.auth_user_id, technician.user_id].filter(
+    (id): id is string => typeof id === "string" && id.length > 0,
+  );
+  const { data: techMembership, error: techMemberError } = await db
+    .from("workspace_members")
+    .select("role")
+    .eq("workspace_id", workspaceId)
+    .in("user_id", techUserIds.length > 0 ? techUserIds : ["00000000-0000-0000-0000-000000000000"])
+    .eq("is_active", true)
+    .maybeSingle();
+  if (techMemberError) throw techMemberError;
+  if (!techMembership) {
+    return { ok: false, status: 404, code: "invalid_technician", message: "Technician is not a member of this workspace." };
+  }
+
+  await transitionFleetWorkOrderStatus(db, callerUserId, {
+    workOrderId: input.workOrderId,
+    targetStatus: "assigned",
+    actorRole: "provider",
+    reasonCode: "dispatch_assigned",
+    details: {
+      technician_id: input.technicianId,
+      van_id: input.vanId ?? null,
+      override_reason: input.overrideReason ?? null,
+      previous_status: order.status,
+      previous_technician_id: order.assigned_technician_id ?? null,
+    },
+  });
+
+  // Persist the assignment payload explicitly (idempotent if the RPC already
+  // applied p_details). This writes assignment columns only — the status
+  // transition above stays inside the lifecycle RPC.
+  const { error: assignError } = await db
+    .from("fleet_work_orders")
+    .update({
+      assigned_technician_id: input.technicianId,
+      assigned_van_id: input.vanId ?? null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.workOrderId)
+    .eq("workspace_id", workspaceId);
+  if (assignError) throw assignError;
+
+  await db.from("fleet_activity_logs").insert({
+    fleet_work_order_id: input.workOrderId,
+    user_id: callerUserId,
+    action: "dispatched",
+    actor_role: "provider",
+    details: {
+      message: "Work order dispatched",
+      technician_id: input.technicianId,
+      van_id: input.vanId ?? null,
+      override_reason: input.overrideReason ?? null,
+      previous_status: order.status,
+      new_status: "assigned",
+    },
+  });
+
+  const { data: updated } = await db
+    .from("fleet_work_orders")
+    .select("id,status,assigned_technician_id,assigned_van_id,updated_at")
+    .eq("id", input.workOrderId)
+    .eq("workspace_id", workspaceId)
+    .single();
+
+  return { ok: true, workOrder: updated ?? { id: input.workOrderId, status: "assigned" } };
+}
+
+vehiclesRouter.post("/v1/fleet/work-orders/:id/dispatch", async (c) => {
+  const workOrderId = c.req.param("id");
+  const body = fleetDispatchSchema.parse(await c.req.json());
+  const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  const db = supabase as any;
+
+  const result = await dispatchFleetWorkOrderServer(db, user.id, {
+    workOrderId,
+    technicianId: body.technician_id,
+    vanId: body.van_id ?? null,
+    overrideReason: body.override_reason ?? null,
+  });
+  if (!result.ok) {
+    return json(
+      { error: { code: result.code ?? "dispatch_failed", message: result.message ?? "Dispatch failed." } },
+      { status: result.status ?? 500 },
+    );
+  }
+  return json({ data: result.workOrder });
+});
+
 vehiclesRouter.post("/v1/fleet/work-orders/:id/advance", async (c) => {
   const workOrderId = c.req.param("id");
   const body = await c.req.json().catch(() => ({}));
@@ -4946,63 +5166,97 @@ vehiclesRouter.post("/v1/fleet/approvals/:id/respond", async (c) => {
   return json({ data: { ok: true } });
 });
 
+const fleetBatchAssignSchema = z.object({
+  workOrderIds: z.array(z.string().uuid()).min(1).max(100),
+  technicianId: z.string().uuid().nullable().optional(),
+  scheduledDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  scheduledTime: z.string().max(16).nullable().optional(),
+  status: z.string().trim().min(1).max(40).nullable().optional(),
+});
+
+// POST /v1/fleet/work-orders/batch-assign
+//
+// Batch assignment through the validated dispatch path: every item with a
+// technicianId is dispatched via dispatchFleetWorkOrderServer (workspace
+// scoping, role + technician validation, lifecycle RPC, audit log) — never a
+// raw status .update(). Schedule fields are plain validated column writes;
+// an explicit status still goes through the lifecycle RPC. Returns honest
+// per-item results alongside the success/failed counts the client reads.
 vehiclesRouter.post("/v1/fleet/work-orders/batch-assign", async (c) => {
   const body = await c.req.json().catch(() => ({}));
-  const payload = body.payload ?? body;
+  const payload = fleetBatchAssignSchema.parse(body.payload ?? body);
   const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
   const db = supabase as any;
 
-  let success = 0;
-  let failed = 0;
+  const results: Array<{ work_order_id: string; ok: boolean; error?: string }> = [];
 
-  for (const id of payload.workOrderIds ?? []) {
+  for (const id of payload.workOrderIds) {
     try {
-      const updates: Record<string, unknown> = {
-        updated_at: new Date().toISOString(),
-      };
-
-      if (payload.technicianId !== undefined) {
-        updates.assigned_technician_id = payload.technicianId;
-      }
-      if (payload.scheduledDate !== undefined) {
-        updates.scheduled_date = payload.scheduledDate;
-      }
-      if (payload.scheduledTime !== undefined) {
-        updates.scheduled_time = payload.scheduledTime;
-      }
-      if (payload.status) {
-        updates.status = payload.status;
+      let dispatchedStatus: string | null = null;
+      if (payload.technicianId) {
+        const dispatched = await dispatchFleetWorkOrderServer(db, user.id, {
+          workOrderId: id,
+          technicianId: payload.technicianId,
+        });
+        if (!dispatched.ok) {
+          throw new ApiError(dispatched.status ?? 500, dispatched.message ?? "Dispatch failed.", dispatched.code ?? "dispatch_failed");
+        }
+        // Dispatch already moves the order to "assigned" through the
+        // lifecycle RPC; don't re-transition to the same status below.
+        dispatchedStatus = String((dispatched.workOrder as { status?: unknown } | null)?.status ?? "assigned");
       }
 
-      const { error } = await db
-        .from("fleet_work_orders")
-        .update(updates)
-        .eq("id", id)
-        .eq("user_id", user.id);
+      const schedulePatch: Record<string, unknown> = {};
+      if (payload.scheduledDate) schedulePatch.scheduled_date = payload.scheduledDate;
+      if (payload.scheduledTime) schedulePatch.scheduled_time = payload.scheduledTime;
+      if (Object.keys(schedulePatch).length > 0) {
+        // Schedule-only items still get the workspace authorization gate.
+        const { workspaceId } = await authorizeFleetWorkOrder(db, user.id, id);
+        schedulePatch.updated_at = new Date().toISOString();
+        const { error: scheduleError } = await db
+          .from("fleet_work_orders")
+          .update(schedulePatch)
+          .eq("id", id)
+          .eq("workspace_id", workspaceId);
+        if (scheduleError) throw scheduleError;
+      }
 
-      if (error) throw error;
-
-      // Log activity
-      const details: Record<string, string> = {};
-      if (payload.technicianId) details.technician_id = payload.technicianId;
-      if (payload.scheduledDate) details.scheduled_date = payload.scheduledDate;
-      if (payload.status) details.status = payload.status;
+      if (payload.status && payload.status !== dispatchedStatus) {
+        await transitionFleetWorkOrderStatus(db, user.id, {
+          workOrderId: id,
+          targetStatus: payload.status,
+          actorRole: "provider",
+          reasonCode: "batch_assign",
+          details: { technician_id: payload.technicianId ?? null },
+        });
+      }
 
       await db.from("fleet_activity_logs").insert({
         fleet_work_order_id: id,
         user_id: user.id,
-        action: "batch_update",
+        action: "batch_assign",
         actor_role: "provider",
-        details: { message: "Batch update", ...details },
+        details: {
+          message: "Batch assignment",
+          technician_id: payload.technicianId ?? null,
+          scheduled_date: payload.scheduledDate ?? null,
+          scheduled_time: payload.scheduledTime ?? null,
+          status: payload.status ?? null,
+        },
       });
 
-      success++;
-    } catch {
-      failed++;
+      results.push({ work_order_id: id, ok: true });
+    } catch (error) {
+      results.push({
+        work_order_id: id,
+        ok: false,
+        error: error instanceof Error ? error.message : "Batch assignment failed.",
+      });
     }
   }
 
-  return json({ data: { success, failed } });
+  const success = results.filter((r) => r.ok).length;
+  return json({ data: { success, failed: results.length - success, results } });
 });
 
 vehiclesRouter.post("/v1/fleet/work-orders/batch-process", async (c) => {

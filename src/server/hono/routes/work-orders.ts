@@ -1925,37 +1925,6 @@ workOrdersRouter.get("/v1/tech-app/job-detail", async (c) => {
   return json({ data: { appointment, service: service ?? null } });
 });
 
-workOrdersRouter.get("/v1/tech-app/fleet-assignments", async (c) => {
-  const { supabase } = await requireAuth(c);
-  const params = new URL(c.req.url).searchParams;
-  const techId = params.get("tech_id");
-  const scopeUserId = z.string().min(1).parse(params.get("scope_user_id") ?? "");
-  const isAdmin = params.get("is_admin") === "true";
-  const workspaceId = scopeUserId;
-  let query = (supabase.from("appointments") as any)
-    .select("id, title, starts_at, ends_at, status, fleet_vehicle_id, fleet_owner_id, assigned_technician_id, customer_id, vehicle_id, address, notes, metadata, customers(first_name, last_name, company_name, phone), vehicles(year, make, model, license_plate)")
-    .eq("workspace_id", workspaceId)
-    .in("status", ["scheduled", "in_progress", "en_route", "arrived"])
-    .order("starts_at", { ascending: true });
-  query = isAdmin ? query.eq("fleet_owner_id", scopeUserId) : query.eq("assigned_technician_id", techId);
-  const { data: appointments, error } = await query;
-  if (error) throw error;
-  const vehicleIds = Array.from(new Set(
-    (appointments ?? []).map((a: any) => a.fleet_vehicle_id).filter((id: unknown): id is string => typeof id === "string"),
-  ));
-  const { data: fleetVehicles, error: fleetError } = vehicleIds.length > 0
-    ? await (supabase.from("fleet_vehicles") as any).select("*").in("id", vehicleIds)
-    : { data: [], error: null };
-  if (fleetError) throw fleetError;
-  const fleetById = new Map((fleetVehicles ?? []).map((v: any) => [v.id, v]));
-  return json({
-    data: (appointments ?? []).map((a: any) => ({
-      ...a,
-      fleet_vehicle: a.fleet_vehicle_id ? fleetById.get(a.fleet_vehicle_id) ?? null : null,
-    })),
-  });
-});
-
 // ---------------------------------------------------------------------------
 // Tech app mutations — POST /v1/tech-app/*
 // ---------------------------------------------------------------------------
@@ -2393,28 +2362,6 @@ workOrdersRouter.post("/v1/inventory/transfer-to-van", async (c) => {
   });
   if (error) throw error;
   return json({ data: { ok: true, idempotency_key: body.idempotency_key } });
-});
-
-// ---------------------------------------------------------------------------
-// Offline gap 2 — fleet work-order pull.
-//
-// GET /v1/fleet/dispatcher-work-orders returns appointments, not
-// fleet_work_orders rows. The offline pull needs the canonical
-// fleet_work_orders table. The table is user-scoped (no workspace_id
-// column); identity comes from the auth token. Paginated `{ data,
-// pagination }` to match the offline fetchAllPages contract.
-// ---------------------------------------------------------------------------
-
-workOrdersRouter.get("/v1/fleet/work-orders", async (c) => {
-  const { supabase, user } = await requireAuth(c);
-  const { limit, offset } = paginationSchema.parse(Object.fromEntries(new URL(c.req.url).searchParams));
-  const { data, error } = await (supabase.from("fleet_work_orders") as any)
-    .select("id,order_number,status,priority,scheduled_date,service_type,po_number,total,fleet_vehicle_id,fleet_client_id,updated_at")
-    .eq("user_id", user.id)
-    .order("updated_at", { ascending: false })
-    .range(offset, offset + limit - 1);
-  if (error) throw error;
-  return json({ data: data ?? [], pagination: { limit, offset } });
 });
 
 // ---------------------------------------------------------------------------
@@ -3336,7 +3283,23 @@ workOrdersRouter.get("/v1/tech-app/fleet-assignments", async (c) => {
   const techId = params.get("tech_id") || null;
   const isAdmin = params.get("is_admin") === "true";
   const scopeUserId = params.get("user_id") || null;
-  let query = (supabase as any)
+  const db = supabase as any;
+
+  // Technician path: fleet_work_orders is owner-scoped under RLS, so the
+  // assigned technician (a different auth user) cannot read it directly.
+  // The SECURITY DEFINER RPC enforces tech-or-ops-member access and returns
+  // the same nested shape the client maps.
+  if (techId && !isAdmin) {
+    const { data, error } = await db.rpc("get_tech_fleet_assignments_v1", {
+      p_technician_id: techId,
+    });
+    if (error) throw error;
+    return json({ data: data ?? [] });
+  }
+
+  // Admin/owner queue view: rows owned by the scope user (RLS permits the
+  // owner to read their own rows).
+  let query = db
     .from("fleet_work_orders")
     .select(`id, order_number, scheduled_date, scheduled_time, status, priority, service_type, description, total, fleet_job_id,
        fleet_jobs(job_number),
@@ -3346,13 +3309,7 @@ workOrdersRouter.get("/v1/tech-app/fleet-assignments", async (c) => {
     .order("scheduled_date", { ascending: true })
     .order("scheduled_time", { ascending: true })
     .limit(200);
-  if (techId && !isAdmin) {
-    query = query.eq("assigned_technician_id", techId);
-  } else if (scopeUserId) {
-    query = query.eq("user_id", scopeUserId);
-  } else {
-    query = query.eq("user_id", user.id);
-  }
+  query = scopeUserId ? query.eq("user_id", scopeUserId) : query.eq("user_id", user.id);
   const { data, error } = await query;
   if (error) throw error;
   return json({ data: data ?? [] });

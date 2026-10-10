@@ -17,6 +17,7 @@ import {
   requireUser,
   requireWorkspaceMember,
   requireWorkspacePaymentsAddon,
+  toError,
   workspaceIdSchema,
 } from "@/server/api";
 import { createSupabaseRequestClient, createSupabaseServerClient } from "@/lib/supabase";
@@ -199,6 +200,30 @@ describe("errorResponse", () => {
     } finally {
       consoleSpy.mockRestore();
     }
+  });
+});
+
+describe("toError", () => {
+  it("passes Error instances through untouched", () => {
+    const err = new ApiError(409, "nope", "nope_code");
+    expect(toError(err)).toBe(err);
+  });
+
+  it("wraps a PostgREST plain-object error preserving message and code", () => {
+    const err = toError({ code: "P0001", message: "INVALID_TRANSITION: nope", details: "d", hint: "h" });
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toBe("INVALID_TRANSITION: nope");
+    expect((err as unknown as { code: string }).code).toBe("P0001");
+    // ...so the P0001 mapping in errorResponse still applies after normalization.
+    return errorResponse(err).json().then((body) => {
+      expect(body).toEqual({ error: { code: "invalid_transition", message: "nope" } });
+    });
+  });
+
+  it("falls back to a generic message for garbage", () => {
+    const err = toError("totally not an error object");
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toBe("The request could not be completed.");
   });
 });
 

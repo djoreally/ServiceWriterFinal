@@ -26,6 +26,7 @@ import { z } from "zod";
 // eslint-disable-next-line no-restricted-imports
 import Stripe from "stripe";
 import { ApiError, json, paginationSchema } from "@/server/api";
+import { upsertBusinessProfile } from "@/server/business-profiles";
 import {
   requireAuth,
   requireWorkspaceAuth,
@@ -2030,10 +2031,9 @@ const qboSettingsSchema = z.object({
 billingRouter.put("/v1/billing/qbo/settings", async (c) => {
   const { supabase, user } = await requireAuth(c);
   const body = qboSettingsSchema.parse(await c.req.raw.json());
-  const { error } = await (supabase.from("business_profiles") as any)
-    .update(body)
-    .eq("user_id", user.id);
-  if (error) throw error;
+  // Upsert: a missing business_profiles row must not turn the save into a
+  // silent zero-write. The helper throws when the write cannot be verified.
+  await upsertBusinessProfile(supabase as any, user.id, body);
   return json({ data: { success: true } });
 });
 
@@ -2429,17 +2429,42 @@ billingRouter.get("/v1/billing/tax-settings", async (c) => {
 });
 
 billingRouter.put("/v1/billing/tax-settings", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase } = await requireAuth(c);
   const body = taxSettingsWriteSchema.parse(await c.req.raw.json());
-  const { error } = await (supabase.from("business_profiles") as any)
-    .update({
-      location_tax_enabled: body.location_tax_enabled,
-      tax_provider: body.tax_provider,
-      default_tax_nexus_state: body.default_tax_nexus_state,
-      tax_rate: body.flat_tax_rate,
-    })
-    .eq("user_id", user.id);
+  // Canonical store is workspace_settings (tax_rate + operational_settings),
+  // which is also what GET /v1/billing/tax-settings reads. Upsert so a
+  // missing row cannot turn the save into a silent zero-write.
+  const { workspaceId } = await resolveBillingWorkspace(c);
+  const db = supabase as any;
+  const { data: current, error: readError } = await db
+    .from("workspace_settings")
+    .select("operational_settings")
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (readError) throw readError;
+  const operational =
+    current?.operational_settings && typeof current.operational_settings === "object" && !Array.isArray(current.operational_settings)
+      ? (current.operational_settings as Record<string, unknown>)
+      : {};
+  const { data: saved, error } = await db
+    .from("workspace_settings")
+    .upsert(
+      {
+        workspace_id: workspaceId,
+        tax_rate: body.flat_tax_rate,
+        operational_settings: {
+          ...operational,
+          location_tax_enabled: body.location_tax_enabled,
+          tax_provider: body.tax_provider,
+          default_tax_nexus_state: body.default_tax_nexus_state,
+        },
+      },
+      { onConflict: "workspace_id" },
+    )
+    .select("workspace_id")
+    .single();
   if (error) throw error;
+  if (!saved) throw new ApiError(500, "Tax settings could not be saved.", "save_failed");
   return json({ data: { success: true } });
 });
 
@@ -2448,6 +2473,17 @@ billingRouter.post("/v1/billing/tax-settings/seed", async (c) => {
   const { data, error } = await (supabase.rpc as any)("seed_default_tax_rates", { p_user_id: user.id });
   if (error) throw error;
   return json({ data: { seeded: (data as number) ?? 0 } });
+});
+
+billingRouter.get("/v1/billing/tax-rates", async (c) => {
+  const { supabase, user } = await requireAuth(c);
+  const { data, error } = await (supabase.from("tax_rates") as any)
+    .select("id,state_code,county,city,postal_code,state_rate,county_rate,city_rate,special_rate,combined_rate,is_active")
+    .eq("user_id", user.id)
+    .order("state_code", { ascending: true })
+    .order("county", { ascending: true, nullsFirst: true });
+  if (error) throw error;
+  return json({ data: data ?? [] });
 });
 
 const taxRateSchema = z.object({

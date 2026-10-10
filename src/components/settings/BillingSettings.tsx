@@ -6,7 +6,6 @@
 
 import { useSubscription } from '@/contexts/SubscriptionContext';
 import { fetchMessagingStats, type MessagingStats } from '@/application/queries/billing-settings.query';
-import { startMessagingAddonCheckout } from '@/application/commands/billing-settings.command';
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -53,7 +52,6 @@ export function BillingSettings() {
     replies: 0,
     optOuts: 0,
   });
-  const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -93,19 +91,6 @@ export function BillingSettings() {
   const currentPlan = subscription?.plan || 'free';
   const meta = planMeta[currentPlan] || planMeta.free;
   const PlanIcon = meta.icon;
-
-  const startMessagingCheckout = async (bundleKey: string) => {
-    setCheckoutLoading(bundleKey);
-    try {
-      const data = await startMessagingAddonCheckout(bundleKey);
-      if (data?.url) {
-        window.location.href = data.url;
-      }
-    } finally {
-      setCheckoutLoading(null);
-    }
-  };
-
 
   return (
     <div className="space-y-6">
@@ -186,32 +171,32 @@ export function BillingSettings() {
             <MessagingMetric label="Opt-outs" value={messagingStats.optOuts} />
           </div>
           <p className="text-xs text-muted-foreground">
-            Bundle purchasing is driven by Stripe messaging add-on prices configured by the platform administrator.
+            Bundle purchasing is not configured — the messaging checkout service is unavailable, so these bundles cannot be bought right now.
           </p>
           <div className="flex flex-wrap gap-2">
             <Button
               variant="outline"
               size="sm"
-              onClick={() => startMessagingCheckout('sms_starter')}
-              disabled={checkoutLoading !== null}
+              disabled
+              title="Not configured: the messaging checkout service is unavailable"
             >
-              {checkoutLoading === 'sms_starter' ? 'Opening…' : 'Buy SMS Starter'}
+              Buy SMS Starter
             </Button>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => startMessagingCheckout('sms_growth')}
-              disabled={checkoutLoading !== null}
+              disabled
+              title="Not configured: the messaging checkout service is unavailable"
             >
-              {checkoutLoading === 'sms_growth' ? 'Opening…' : 'Buy SMS Growth'}
+              Buy SMS Growth
             </Button>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => startMessagingCheckout('marketing_email')}
-              disabled={checkoutLoading !== null}
+              disabled
+              title="Not configured: the messaging checkout service is unavailable"
             >
-              {checkoutLoading === 'marketing_email' ? 'Opening…' : 'Add Marketing Email'}
+              Add Marketing Email
             </Button>
           </div>
         </CardContent>

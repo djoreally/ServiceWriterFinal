@@ -3,6 +3,8 @@ import { dispatchAppointmentLifecycle } from "@/server/messaging/appointment-eve
 import { LIFECYCLE_EVENT_KEYS } from "@/server/messaging/lifecycle-events";
 import { conflictWindow, validateLocalAvailability } from "@/server/scheduling/appointment-availability";
 import { zonedDateTimeParts, zonedLocalDateTimeToUtc } from "@/server/scheduling/timezone";
+import { syncAppointmentToGoogleCalendar } from "@/server/google-calendar/sync";
+import { after } from "next/server";
 import { z } from "zod";
 import { createHonoApp } from "@/server/hono/app";
 
@@ -147,7 +149,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     const id = z.string().uuid().parse((await context.params).id);
     const body = patchSchema.parse(await request.json());
     const { workspace_id } = body;
-    const { supabase } = await requireWorkspaceMember(
+    const { supabase, user } = await requireWorkspaceMember(
       workspace_id,
       ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher"],
       request,
@@ -294,6 +296,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       console.error("[Lifecycle] appointment update email enqueue failed", lifecycleError);
     }
 
+    // Google Calendar auto-sync (create/update/delete handled by status in the
+    // edge function) runs after the response; it can never fail this update.
+    after(() => {
+      void syncAppointmentToGoogleCalendar({ supabase, userId: user.id, appointmentId: id });
+    });
+
     return json({ data });
   } catch (error) {
     return errorResponse(error);
@@ -304,7 +312,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   try {
     const id = z.string().uuid().parse((await context.params).id);
     const workspaceId = z.string().uuid().parse(new URL(request.url).searchParams.get("workspace_id"));
-    const { supabase } = await requireWorkspaceMember(
+    const { supabase, user } = await requireWorkspaceMember(
       workspaceId,
       ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher"],
       request,
@@ -336,6 +344,13 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
     } catch (lifecycleError) {
       console.error("[Lifecycle] appointment cancellation email enqueue failed", lifecycleError);
     }
+
+    // Remove the calendar event (the edge function deletes on cancelled
+    // status) after the response; it can never fail this cancellation.
+    after(() => {
+      void syncAppointmentToGoogleCalendar({ supabase, userId: user.id, appointmentId: id });
+    });
+
     return json({ data });
   } catch (error) {
     return errorResponse(error);

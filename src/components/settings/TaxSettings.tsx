@@ -14,7 +14,6 @@ import {
 } from "@/application/queries/tax-settings.query";
 import {
   saveTaxSettings as saveTaxSettingsApi,
-  seedDefaultTaxRates,
   saveTaxRate as saveTaxRateApi,
   deleteTaxRate as deleteTaxRateApi,
 } from "@/application/commands/tax-settings.command";
@@ -67,7 +66,6 @@ import {
   Loader2,
   Receipt,
   Globe,
-  Download,
   AlertTriangle,
 } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
@@ -135,7 +133,6 @@ const NO_TAX_STATES = ["AK", "DE", "MT", "NH", "OR"];
 export const TaxSettings = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [seeding, setSeeding] = useState(false);
   const [settings, setSettings] = useState<TaxSettingsData>({
     location_tax_enabled: false,
     tax_provider: "manual",
@@ -184,18 +181,6 @@ export const TaxSettings = () => {
       toast.error("Failed to save tax settings");
     }
     setSaving(false);
-  };
-
-  const handleSeedDefaultRates = async () => {
-    setSeeding(true);
-    try {
-      await seedDefaultTaxRates();
-      toast.success("Default state tax rates added");
-      fetchData();
-    } catch {
-      toast.error("Failed to seed default rates");
-    }
-    setSeeding(false);
   };
 
   const calculateCombinedRate = () => {
@@ -443,19 +428,6 @@ export const TaxSettings = () => {
                 </CardDescription>
               </div>
               <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleSeedDefaultRates}
-                  disabled={seeding}
-                >
-                  {seeding ? (
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  ) : (
-                    <Download className="h-4 w-4 mr-2" />
-                  )}
-                  Load Default Rates
-                </Button>
                 <Dialog open={dialogOpen} onOpenChange={(open) => {
                   setDialogOpen(open);
                   if (!open) resetForm();
@@ -624,7 +596,7 @@ export const TaxSettings = () => {
                 <Receipt className="h-12 w-12 mx-auto mb-3 opacity-50" />
                 <p>No tax rates configured</p>
                 <p className="text-sm">
-                  Click "Load Default Rates" to add US state rates, or add rates manually.
+                  Add rates manually for the jurisdictions where you collect tax.
                 </p>
               </div>
             ) : (

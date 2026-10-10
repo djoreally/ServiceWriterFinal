@@ -29,8 +29,55 @@ export function json<T>(data: T, init?: ResponseInit) {
   return NextResponse.json(data, { ...init, headers });
 }
 
+/**
+ * Sanitize a Postgres raise_exception message for client display.
+ * Keeps the human-readable part ("Cannot start appointment from current
+ * status") while stripping machine prefixes ("INVALID_TRANSITION: ") and
+ * refusing to leak internal record/field references.
+ */
+function sanitizeRpcMessage(message: string | undefined): { code: string; message: string } {
+  const text = (message ?? "").trim();
+  if (!text) return { code: "transition_rejected", message: "The requested change was rejected." };
+  const prefix = /^([A-Z][A-Z0-9_]+):\s*/.exec(text)?.[1]?.toLowerCase();
+  const stripped = text.replace(/^[A-Z][A-Z0-9_]+:\s*/, "");
+  if (/record\s+".*?"\s+has no field/i.test(stripped) || /column\s+.*?\s+does not exist/i.test(stripped)) {
+    return { code: prefix ?? "transition_rejected", message: "The requested change could not be completed." };
+  }
+  return { code: prefix ?? "transition_rejected", message: stripped.slice(0, 300) };
+}
+
+/**
+ * Hono only routes `instanceof Error` throws to `onError`. PostgREST returns
+ * plain-object errors (`{ message, details, hint, code }`), so `if (error)
+ * throw error` in a route would bypass `errorResponse` entirely — and the
+ * P0001 mapping with it — surfacing as a bare 500 instead of the honest
+ * error. Normalize non-Error throws so every route keeps the error contract.
+ * `Error` instances (ApiError, ZodError, PostgrestError, ...) pass through
+ * untouched; the PostgREST `code`/`details`/`hint` fields are preserved so
+ * `errorResponse` can still map them.
+ */
+export function toError(value: unknown): Error {
+  if (value instanceof Error) return value;
+  const record = (typeof value === "object" && value !== null ? value : {}) as Record<string, unknown>;
+  const message = typeof record.message === "string" && record.message.trim()
+    ? record.message
+    : "The request could not be completed.";
+  const error = new Error(message);
+  for (const key of ["code", "details", "hint", "status"] as const) {
+    const field = record[key];
+    if (field !== undefined) (error as unknown as Record<string, unknown>)[key] = field;
+  }
+  return error;
+}
+
 export function errorResponse(error: unknown) {
   if (error instanceof ApiError) return json({ error: { code: error.code, message: error.message } }, { status: error.status });
+
+  // Postgres raise_exception from RPCs (e.g. technician_transition_job_v1
+  // INVALID_TRANSITION / CONFLICT_ERROR). Surface the RPC's own message as a
+  // 409 instead of hiding it behind "An unexpected error occurred."
+  // Exclusion-constraint violations (23P01) are booking conflicts: the slot
+  // was taken between the availability check and the insert.
 
   // Client input failed validation — this is a 400, never a 500.
   if (error instanceof z.ZodError) {
@@ -58,6 +105,16 @@ export function errorResponse(error: unknown) {
   }
   if (code === "23503") {
     return json({ error: { code: "invalid_reference", message: "A related record could not be found." } }, { status: 409 });
+  }
+  if (code === "P0001") {
+    const sanitized = sanitizeRpcMessage(candidate?.message);
+    return json({ error: { code: sanitized.code, message: sanitized.message } }, { status: 409 });
+  }
+  if (code === "23P01") {
+    return json(
+      { error: { code: "schedule_conflict", message: "The requested time overlaps an existing appointment or buffer." } },
+      { status: 409 },
+    );
   }
   if (code === "22P02" || code === "22007" || code === "22023") {
     return json({ error: { code: "invalid_input", message: "One or more values are invalid." } }, { status: 400 });

@@ -10,8 +10,6 @@ import {
   saveEmailSettings as saveEmailSettingsData,
   encryptSmtpPassword,
   encryptEmailPassword,
-  invokeTestEmail,
-  invokeTestIncomingEmail,
 } from "@/application/commands/email-settings.command";
 import { getCurrentUserId } from "@/application/queries/email-auth.query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -19,8 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Mail, Server, Save, Loader2, TestTube, CheckCircle2, AlertTriangle, Eye, EyeOff } from "lucide-react";
+import { Mail, Server, Save, Loader2, TestTube, Eye, EyeOff } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
 
 interface EmailSettingsData {
@@ -43,9 +40,7 @@ interface EmailSettingsData {
 export const EmailSettings = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [hasStoredPassword, setHasStoredPassword] = useState(false);
   const [hasStoredImapPassword, setHasStoredImapPassword] = useState(false);
   const [settings, setSettings] = useState<EmailSettingsData>({
@@ -98,7 +93,6 @@ export const EmailSettings = () => {
 
   const handleSave = async () => {
     setSaving(true);
-    setTestResult(null);
     
     const userId = await getCurrentUserId();
     if (!userId) {
@@ -197,49 +191,6 @@ export const EmailSettings = () => {
     }
     
     setSaving(false);
-  };
-
-  const handleTestEmail = async () => {
-    setTesting(true);
-    setTestResult(null);
-
-    const userId = await getCurrentUserId();
-    if (!userId) {
-      toast.error("Not authenticated");
-      setTesting(false);
-      return;
-    }
-
-    try {
-      const { data, error } = await invokeTestEmail(userId);
-
-        if (error) {
-          setTestResult({ success: false, message: error.message || "Test failed" });
-        } else if (data?.success) {
-          setTestResult({ success: true, message: data?.message || "Test email sent successfully!" });
-        } else {
-          setTestResult({ success: false, message: data?.error || "Test failed" });
-        }
-    } catch (err) {
-      setTestResult({ success: false, message: "Failed to send test email" });
-    }
-
-    setTesting(false);
-  };
-
-  const handleTestIncoming = async () => {
-    setTesting(true);
-    setTestResult(null);
-    try {
-      const { data, error } = await invokeTestIncomingEmail();
-      setTestResult(error || !data?.success
-        ? { success: false, message: data?.error || error?.message || "IMAP connection failed" }
-        : { success: true, message: data.message || "Incoming mailbox connected" });
-    } catch (error) {
-      setTestResult({ success: false, message: error instanceof Error ? error.message : "IMAP connection failed" });
-    } finally {
-      setTesting(false);
-    }
   };
 
   if (loading) {
@@ -420,37 +371,27 @@ export const EmailSettings = () => {
           </div>
         )}
 
-        {/* Test Result Alert */}
-        {testResult && (
-          <Alert variant={testResult.success ? "default" : "destructive"}>
-            {testResult.success ? (
-              <CheckCircle2 className="h-4 w-4" />
-            ) : (
-              <AlertTriangle className="h-4 w-4" />
-            )}
-            <AlertDescription>{testResult.message}</AlertDescription>
-          </Alert>
-        )}
-
         {/* Actions */}
         <div className="flex flex-col sm:flex-row gap-3">
           <Button onClick={handleSave} disabled={saving}>
             {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
             Save Email Settings
           </Button>
-          <Button variant="outline" onClick={handleTestEmail} disabled={testing || saving}>
-            {testing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <TestTube className="mr-2 h-4 w-4" />}
+          <Button variant="outline" disabled title="Not configured: the email test service is unavailable">
+            <TestTube className="mr-2 h-4 w-4" />
             Send Test Email
           </Button>
-          {settings.imap_enabled && <Button variant="outline" onClick={handleTestIncoming} disabled={testing || saving}><TestTube className="mr-2 h-4 w-4" />Test Incoming Mail</Button>}
+          {settings.imap_enabled && (
+            <Button variant="outline" disabled title="Not configured: the email test service is unavailable">
+              <TestTube className="mr-2 h-4 w-4" />
+              Test Incoming Mail
+            </Button>
+          )}
         </div>
 
         {/* Info Note */}
         <p className="text-xs text-muted-foreground">
-          {settings.use_custom_smtp 
-            ? "Test sends try your SMTP server first and automatically fall back to the platform sender if SMTP authentication fails."
-            : "Emails are sent via our platform service (noreply@servicewriter.xyz). Custom sender names work, but custom domains require DNS verification."
-          }
+          Email test sending is not configured, so test emails cannot be sent from here. Save your settings first — delivery is verified when real emails go out.
         </p>
       </CardContent>
     </Card>

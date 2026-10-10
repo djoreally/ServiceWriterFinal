@@ -1,21 +1,27 @@
 import { errorMessage } from "@/lib/error-message";
-import { useState } from "react";
-import { sendMaintenanceReminders } from "@/application/commands/maintenance-reminders.command";
+import { useState, useEffect } from "react";
+import {
+  sendMaintenanceReminders,
+  fetchMaintenanceReminderSettings,
+  saveMaintenanceReminderSettings,
+} from "@/application/commands/maintenance-reminders.command";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { 
-  Bell, 
-  Send, 
-  Clock, 
+import {
+  Bell,
+  Send,
+  Clock,
   Gauge,
   RefreshCw,
   CheckCircle2,
   AlertCircle,
-  Mail
+  Mail,
+  Save,
+  Loader2
 } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
 
@@ -31,6 +37,8 @@ export const MaintenanceReminderSettings = ({
   onSave 
 }: MaintenanceReminderSettingsProps) => {
   const [sending, setSending] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loadingSettings, setLoadingSettings] = useState(true);
   const [lastResult, setLastResult] = useState<{ sent: number; errors?: string[] } | null>(null);
   const [settings, setSettings] = useState({
     autoSend: false,
@@ -40,6 +48,55 @@ export const MaintenanceReminderSettings = ({
     includeMediumPriority: true,
     includeLowPriority: false
   });
+
+  // The switches and inputs below are persisted server-side — loading them
+  // here keeps them real controls instead of decorative local state.
+  useEffect(() => {
+    let active = true;
+    fetchMaintenanceReminderSettings()
+      .then((saved) => {
+        if (!active) return;
+        setSettings({
+          autoSend: saved.auto_send,
+          daysBeforeDue: saved.days_before_due,
+          milesBeforeDue: saved.miles_before_due,
+          includeHighPriority: saved.include_high_priority,
+          includeMediumPriority: saved.include_medium_priority,
+          includeLowPriority: saved.include_low_priority,
+        });
+      })
+      .catch((error: unknown) => {
+        console.error("Failed to load reminder settings:", error);
+      })
+      .finally(() => {
+        if (active) setLoadingSettings(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleSaveSettings = async () => {
+    setSaving(true);
+    try {
+      // Throws unless the server confirms the write — no success toast on a
+      // zero-write path.
+      await saveMaintenanceReminderSettings({
+        auto_send: settings.autoSend,
+        days_before_due: settings.daysBeforeDue,
+        miles_before_due: settings.milesBeforeDue,
+        include_high_priority: settings.includeHighPriority,
+        include_medium_priority: settings.includeMediumPriority,
+        include_low_priority: settings.includeLowPriority,
+      });
+      toast.success("Reminder settings saved");
+      onSave?.();
+    } catch (error: unknown) {
+      toast.error(errorMessage(error, "Failed to save reminder settings"));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleSendReminders = async (sendAll = false) => {
     setSending(true);
@@ -98,6 +155,7 @@ export const MaintenanceReminderSettings = ({
               </div>
               <Input
                 type="number"
+                disabled={loadingSettings}
                 value={settings.daysBeforeDue}
                 onChange={(e) => setSettings(prev => ({ ...prev, daysBeforeDue: parseInt(e.target.value) || 7 }))}
                 className="w-20"
@@ -113,6 +171,7 @@ export const MaintenanceReminderSettings = ({
               </div>
               <Input
                 type="number"
+                disabled={loadingSettings}
                 value={settings.milesBeforeDue}
                 onChange={(e) => setSettings(prev => ({ ...prev, milesBeforeDue: parseInt(e.target.value) || 500 }))}
                 className="w-20"
@@ -131,6 +190,7 @@ export const MaintenanceReminderSettings = ({
             <div className="flex items-center gap-2">
               <Switch
                 id="high-priority"
+                disabled={loadingSettings}
                 checked={settings.includeHighPriority}
                 onCheckedChange={(checked) => setSettings(prev => ({ ...prev, includeHighPriority: checked }))}
               />
@@ -142,6 +202,7 @@ export const MaintenanceReminderSettings = ({
             <div className="flex items-center gap-2">
               <Switch
                 id="medium-priority"
+                disabled={loadingSettings}
                 checked={settings.includeMediumPriority}
                 onCheckedChange={(checked) => setSettings(prev => ({ ...prev, includeMediumPriority: checked }))}
               />
@@ -153,6 +214,7 @@ export const MaintenanceReminderSettings = ({
             <div className="flex items-center gap-2">
               <Switch
                 id="low-priority"
+                disabled={loadingSettings}
                 checked={settings.includeLowPriority}
                 onCheckedChange={(checked) => setSettings(prev => ({ ...prev, includeLowPriority: checked }))}
               />
@@ -189,6 +251,19 @@ export const MaintenanceReminderSettings = ({
 
         {/* Actions */}
         <div className="flex flex-wrap gap-3 pt-2">
+          <Button
+            onClick={handleSaveSettings}
+            disabled={saving || loadingSettings}
+            variant="secondary"
+            className="gap-2"
+          >
+            {saving ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="h-4 w-4" />
+            )}
+            Save Reminder Settings
+          </Button>
           <Button
             onClick={() => handleSendReminders(false)}
             disabled={sending}

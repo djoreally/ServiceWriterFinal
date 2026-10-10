@@ -270,6 +270,148 @@ describe("appointments router", () => {
     });
   });
 
+  describe("Google Calendar auto-sync", () => {
+    function seedConnectedUser(action = "created") {
+      db["google_calendar_sync_tokens"] = {
+        data: { sync_enabled: true },
+        error: null,
+      };
+      db["fn:google-calendar-sync"] = {
+        data: { synced: true, action, google_event_id: "evt-1" },
+        error: null,
+      };
+    }
+
+    function seedCreateHappyPath() {
+      db["customers:single"] = {
+        data: { id: CUSTOMER_ID, status: "active" },
+        error: null,
+      };
+      db["workspaces:single"] = { data: { timezone: "UTC" }, error: null };
+      db["workspace_settings:single"] = { data: {}, error: null };
+      db["appointments:single"] = {
+        data: { id: APPT_ID, status: "confirmed" },
+        error: null,
+      };
+    }
+
+    /** calendar_sync records written by the auto-sync hook (not the route's own update). */
+    function calendarSyncRecords() {
+      return calls.updates
+        .map((u) => (u.patch as Record<string, unknown>).metadata)
+        .filter(
+          (metadata): metadata is Record<string, unknown> =>
+            Boolean(metadata) && typeof metadata === "object" && "calendar_sync" in metadata,
+        )
+        .map((metadata) => metadata.calendar_sync as Record<string, unknown>);
+    }
+
+    beforeEach(() => {
+      jest.spyOn(console, "error").mockImplementation(() => undefined);
+    });
+
+    it("syncs on create and records a synced status in metadata", async () => {
+      seedCreateHappyPath();
+      seedConnectedUser("created");
+      const res = await appointmentsRouter.request("/v1/appointments", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(validCreateBody),
+      });
+      expect(res.status).toBe(201);
+
+      const records = calendarSyncRecords();
+      expect(records).toHaveLength(1);
+      expect(records[0].status).toBe("synced");
+      expect(records[0].action).toBe("created");
+      expect(records[0].google_event_id).toBe("evt-1");
+    });
+
+    it("syncs on update (reschedule) and records the updated action", async () => {
+      seedConnectedUser("updated");
+      db["appointments:single"] = {
+        data: {
+          id: APPT_ID,
+          workspace_id: WS_ID,
+          starts_at: "2026-10-01T16:00:00Z",
+          ends_at: "2026-10-01T17:00:00Z",
+          status: "confirmed",
+          metadata: {},
+        },
+        error: null,
+      };
+      db["workspaces:single"] = { data: { name: "Test Shop", timezone: "UTC" }, error: null };
+      const res = await appointmentsRouter.request(`/v1/appointments/${APPT_ID}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workspace_id: WS_ID,
+          starts_at: "2026-10-01T16:00:00Z",
+        }),
+      });
+      expect(res.status).toBe(200);
+
+      const records = calendarSyncRecords();
+      expect(records).toHaveLength(1);
+      expect(records[0].status).toBe("synced");
+      expect(records[0].action).toBe("updated");
+    });
+
+    it("syncs on cancel so the edge function removes the calendar event", async () => {
+      seedConnectedUser("deleted");
+      db["appointments:single"] = {
+        data: { id: APPT_ID, status: "cancelled", metadata: {} },
+        error: null,
+      };
+      const res = await appointmentsRouter.request(
+        `/v1/appointments/${APPT_ID}?workspace_id=${WS_ID}`,
+        { method: "DELETE" },
+      );
+      expect(res.status).toBe(200);
+
+      const records = calendarSyncRecords();
+      expect(records).toHaveLength(1);
+      expect(records[0].status).toBe("synced");
+      expect(records[0].action).toBe("deleted");
+    });
+
+    it("still returns 201 when the edge function fails, recording a failed sync status", async () => {
+      seedCreateHappyPath();
+      db["google_calendar_sync_tokens"] = {
+        data: { sync_enabled: true },
+        error: null,
+      };
+      db["fn:google-calendar-sync"] = {
+        data: null,
+        error: new Error("edge function unavailable"),
+      };
+      const res = await appointmentsRouter.request("/v1/appointments", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(validCreateBody),
+      });
+      expect(res.status).toBe(201);
+
+      const records = calendarSyncRecords();
+      expect(records).toHaveLength(1);
+      expect(records[0].status).toBe("failed");
+      expect(records[0].error).toContain("edge function unavailable");
+    });
+
+    it("does not touch calendar state when the user never connected Google", async () => {
+      seedCreateHappyPath();
+      // No google_calendar_sync_tokens row and no edge-function stub.
+      const res = await appointmentsRouter.request("/v1/appointments", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(validCreateBody),
+      });
+      expect(res.status).toBe(201);
+      expect(calendarSyncRecords()).toHaveLength(0);
+      expect(calls.updates).toHaveLength(0);
+    });
+  });
+
   describe("POST /v1/appointments/:id/complete", () => {
     it("runs closeout and returns completion summary", async () => {
       db["workspace_members"] = {

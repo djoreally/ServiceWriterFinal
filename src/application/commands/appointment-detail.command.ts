@@ -74,9 +74,13 @@ export async function startAppointmentJob(appointmentId: string): Promise<{ succ
     const currentStatus = await readCurrentStatus(context.workspaceId, appointmentId).catch(() => undefined);
     if (currentStatus === "in_progress") return { success: true, alreadyStarted: true };
 
+    // Idempotency-Key is stable per (actor, appointment): a retried start
+    // (double-tap, timeout retry) replays the stored result server-side
+    // instead of re-executing the transition.
     const response = await apiClient.post<{ data: { status?: string; already_started?: boolean } | null }>(
       `/v1/appointments/${encodeURIComponent(appointmentId)}/start`,
       { selected_workspace_id: context.workspaceId },
+      { headers: { "Idempotency-Key": `appointment-start:${appointmentId}` } },
     );
 
     return {

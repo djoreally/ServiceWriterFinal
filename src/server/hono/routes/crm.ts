@@ -2312,6 +2312,111 @@ crmRouter.post("/v1/crm/maintenance-reminders/send", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// /v1/crm/maintenance-reminders/settings — persisted reminder preferences.
+// Stored in workspace_settings.operational_settings.maintenance_reminders so
+// the switches in MaintenanceReminderSettings are real, persisted controls.
+// ---------------------------------------------------------------------------
+
+const maintenanceReminderSettingsSchema = z.object({
+  auto_send: z.boolean(),
+  days_before_due: z.number().int().min(1).max(90),
+  miles_before_due: z.number().int().min(0).max(10000),
+  include_high_priority: z.boolean(),
+  include_medium_priority: z.boolean(),
+  include_low_priority: z.boolean(),
+  selected_workspace_id: z.string().uuid().optional(),
+});
+
+const DEFAULT_MAINTENANCE_REMINDER_SETTINGS = {
+  auto_send: false,
+  days_before_due: 7,
+  miles_before_due: 500,
+  include_high_priority: true,
+  include_medium_priority: true,
+  include_low_priority: false,
+};
+
+async function resolveSettingsWorkspaceId(c: Context, hint?: string | null): Promise<string> {
+  const { supabase, user } = await requireAuth(c);
+  const { data, error } = await supabase
+    .from("workspace_members")
+    .select("workspace_id")
+    .eq("user_id", user.id)
+    .eq("is_active", true)
+    .order("workspace_id", { ascending: true });
+  if (error) throw error;
+  const memberships = (data ?? []) as Array<{ workspace_id: string }>;
+  if (hint) {
+    const match = memberships.find((m) => m.workspace_id === hint);
+    if (!match) throw new ApiError(403, "You are not a member of this workspace", "forbidden");
+    return hint;
+  }
+  const first = memberships[0]?.workspace_id;
+  if (!first) throw new ApiError(403, "No active workspace is available for this account", "workspace_missing");
+  return first;
+}
+
+crmRouter.get("/v1/crm/maintenance-reminders/settings", async (c) => {
+  const url = new URL(c.req.url);
+  const workspaceId = await resolveSettingsWorkspaceId(c, url.searchParams.get("selected_workspace_id"));
+  const { supabase } = await requireAuth(c);
+  const { data, error } = await (supabase as any)
+    .from("workspace_settings")
+    .select("operational_settings")
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (error) throw error;
+  const operational =
+    data?.operational_settings && typeof data.operational_settings === "object" && !Array.isArray(data.operational_settings)
+      ? (data.operational_settings as Record<string, unknown>)
+      : {};
+  const saved =
+    operational.maintenance_reminders && typeof operational.maintenance_reminders === "object"
+      ? (operational.maintenance_reminders as Record<string, unknown>)
+      : {};
+  return json({ data: { ...DEFAULT_MAINTENANCE_REMINDER_SETTINGS, ...saved } });
+});
+
+crmRouter.put("/v1/crm/maintenance-reminders/settings", async (c) => {
+  const body = maintenanceReminderSettingsSchema.parse(await c.req.json());
+  const workspaceId = await resolveSettingsWorkspaceId(c, body.selected_workspace_id ?? null);
+  const { supabase } = await requireAuth(c);
+  const db = supabase as any;
+  const { data: current, error: readError } = await db
+    .from("workspace_settings")
+    .select("operational_settings")
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (readError) throw readError;
+  const operational =
+    current?.operational_settings && typeof current.operational_settings === "object" && !Array.isArray(current.operational_settings)
+      ? (current.operational_settings as Record<string, unknown>)
+      : {};
+  const next = {
+    auto_send: body.auto_send,
+    days_before_due: body.days_before_due,
+    miles_before_due: body.miles_before_due,
+    include_high_priority: body.include_high_priority,
+    include_medium_priority: body.include_medium_priority,
+    include_low_priority: body.include_low_priority,
+  };
+  // Upsert: a missing workspace_settings row must not turn the save into a
+  // silent zero-write. The returned row verifies the write happened.
+  const { data: saved, error } = await db
+    .from("workspace_settings")
+    .upsert(
+      { workspace_id: workspaceId, operational_settings: { ...operational, maintenance_reminders: next } },
+      { onConflict: "workspace_id" },
+    )
+    .select("operational_settings")
+    .single();
+  if (error) throw error;
+  const written = (saved?.operational_settings as Record<string, unknown> | undefined)?.maintenance_reminders;
+  if (!written) throw new ApiError(500, "Reminder settings could not be saved.", "save_failed");
+  return json({ data: written });
+});
+
+// ---------------------------------------------------------------------------
 // /v1/crm/receptionist/* — AI receptionist profile + provisioning proxies
 // ---------------------------------------------------------------------------
 crmRouter.get("/v1/crm/receptionist/profile", async (c) => {

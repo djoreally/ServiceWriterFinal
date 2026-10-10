@@ -6,8 +6,11 @@
  * - app/api/v1/appointments/[id]/route.ts (GET, PATCH, DELETE)
  * - app/api/v1/appointments/[id]/complete/route.ts (POST)
  * - app/api/v1/appointments/[id]/confirmation/route.ts (POST)
- * - app/api/v1/appointments/[id]/start/route.ts (POST)
  * - app/api/v1/appointments/[id]/technician-status/route.ts (POST)
+ *   (app/api/v1/appointments/[id]/start/route.ts was removed 2026-10-10:
+ *   it duplicated this router's POST /v1/appointments/:id/start and Next.js
+ *   routing gave it precedence, so this router is now the single live
+ *   implementation.)
  * - app/api/v1/appointment-items/route.ts (GET, PUT)
  * - app/api/v1/dispatch-events/route.ts (GET, POST)
  * - app/api/v1/dispatch/assign/route.ts (POST)
@@ -21,9 +24,11 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { ApiError, json, paginationSchema } from "@/server/api";
+import { upsertBusinessProfile } from "@/server/business-profiles";
 import { requireAuth, requireWorkspaceAuth } from "@/server/hono/middleware/auth";
 import { dispatchAppointmentLifecycle } from "@/server/messaging/appointment-events";
 import { dispatchLifecycleEvent, LIFECYCLE_EVENT_KEYS } from "@/server/messaging/lifecycle-events";
+import { syncAppointmentToGoogleCalendar } from "@/server/google-calendar/sync";
 import { zonedDateTimeParts, zonedLocalDateTimeToUtc } from "@/server/scheduling/timezone";
 import { syncCanonicalInvoiceToStripe } from "@/server/payments/stripe-invoice-sync";
 import { technicianJobUrl } from "@/server/messaging/lifecycle-action-urls";
@@ -58,6 +63,12 @@ appointmentsRouter.post("/v1/appointments", async (c: Context) => {
   // bookAppointmentCore. Auth (membership + role list) stays on the route.
   const result = await bookAppointmentCore(supabase, body, { createdBy: user.id });
   if ("error" in result) return result.error;
+  // Google Calendar auto-sync (insert event). Never fails the booking:
+  // failures are logged and recorded in the appointment's metadata.
+  const createdId = (result.data as { id?: unknown } | null)?.id;
+  if (typeof createdId === "string" && createdId) {
+    await syncAppointmentToGoogleCalendar({ supabase, userId: user.id, appointmentId: createdId });
+  }
   return json({ data: result.data }, { status: 201 });
 });
 
@@ -322,7 +333,7 @@ appointmentsRouter.get("/v1/appointments/:id{[0-9a-fA-F-]{36}}", async (c: Conte
 
 appointmentsRouter.patch("/v1/appointments/:id", async (c: Context) => {
   const id = z.string().uuid().parse(c.req.param("id")), body = patchSchema.parse(await c.req.json()), { workspace_id } = body;
-  const { supabase } = await requireWorkspaceAuth(c, workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher"]);
+  const { supabase, user } = await requireWorkspaceAuth(c, workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher"]);
   const [{ data: current, error: currentError }, { data: workspace, error: workspaceError }] = await Promise.all([supabase.from("appointments").select("id,workspace_id,customer_id,vehicle_id,location_id,starts_at,ends_at,status,assigned_user_id,metadata").eq("id", id).eq("workspace_id", workspace_id).single(), supabase.from("workspaces").select("name,timezone").eq("id", workspace_id).single()]);
   if (currentError || !current) throw currentError ?? new Error("Appointment was not found in this workspace.");
   if (workspaceError || !workspace) throw workspaceError ?? new Error("Workspace was not found.");
@@ -351,12 +362,15 @@ appointmentsRouter.patch("/v1/appointments/:id", async (c: Context) => {
     const eventKey = data.status === "cancelled" && current.status !== "cancelled" ? LIFECYCLE_EVENT_KEYS.appointmentCancelled : data.starts_at !== current.starts_at || data.ends_at !== current.ends_at ? LIFECYCLE_EVENT_KEYS.appointmentRescheduled : LIFECYCLE_EVENT_KEYS.bookingDetailsChanged;
     await dispatchAppointmentLifecycle({ eventKey, eventId: `${id}:${eventKey}:${data.updated_at}`, appointment: data, workspaceName: workspace.name ?? "Service Writer", workspaceTimezone, actionUrl: customerUrl, changedFields: changed });
   } catch (e) { console.error("[Lifecycle] appointment update email enqueue failed", e); }
+  // Google Calendar auto-sync (patch event; the edge function deletes the
+  // event when the status is cancelled/no_show). Never fails this update.
+  await syncAppointmentToGoogleCalendar({ supabase, userId: user.id, appointmentId: id });
   return json({ data });
 });
 
 appointmentsRouter.delete("/v1/appointments/:id", async (c: Context) => {
   const id = z.string().uuid().parse(c.req.param("id")), workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
-  const { supabase } = await requireWorkspaceAuth(c, workspaceId, ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher"]);
+  const { supabase, user } = await requireWorkspaceAuth(c, workspaceId, ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher"]);
   const { data, error } = await supabase.from("appointments").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("id", id).eq("workspace_id", workspaceId).select("id,workspace_id,customer_id,starts_at,ends_at,status,notes,metadata,updated_at,customers(id,first_name,last_name,email),vehicles(id,year,make,model)").single();
   if (error) throw error;
   try {
@@ -365,6 +379,8 @@ appointmentsRouter.delete("/v1/appointments/:id", async (c: Context) => {
     const url = typeof metadata.manage_url === "string" && /^https?:\/\//i.test(metadata.manage_url) ? metadata.manage_url : new URL("/my-bookings", c.req.url).toString();
     await dispatchAppointmentLifecycle({ eventKey: LIFECYCLE_EVENT_KEYS.appointmentCancelled, eventId: `${id}:cancelled:${data.updated_at}`, appointment: data, workspaceName: workspace?.name ?? "Service Writer", workspaceTimezone: workspace?.timezone ?? "UTC", actionUrl: url });
   } catch (e) { console.error("[Lifecycle] appointment cancellation email enqueue failed", e); }
+  // Google Calendar auto-sync (delete event). Never fails this cancellation.
+  await syncAppointmentToGoogleCalendar({ supabase, userId: user.id, appointmentId: id });
   return json({ data });
 });
 
@@ -545,9 +561,10 @@ appointmentsRouter.post("/v1/appointments/:id/start", async (c: Context) => {
   const { supabase, user, membership, workspace_id } = await requireWorkspaceFromBody(c, body, ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher", "technician"]);
   const db = supabase as any;
 
+  // 404 here so a missing appointment reads as 404, not as an RPC 409.
   const { data: current, error: readError } = await db
     .from("appointments")
-    .select("id,status,assigned_user_id,metadata,customer_id,vehicle_id")
+    .select("id,assigned_user_id")
     .eq("workspace_id", workspace_id)
     .eq("id", id)
     .maybeSingle();
@@ -556,28 +573,19 @@ appointmentsRouter.post("/v1/appointments/:id/start", async (c: Context) => {
   if (membership.role === "technician" && current.assigned_user_id !== user.id) {
     throw new ApiError(403, "This appointment is not assigned to you.", "forbidden");
   }
-  if (current.status === "in_progress") return json({ data: { id, status: current.status, already_started: true } });
-  if (["completed", "cancelled", "no_show"].includes(current.status)) {
-    return json({ error: { code: "invalid_status", message: "This appointment can no longer be started." } }, { status: 409 });
-  }
 
-  if (!current.customer_id || !current.vehicle_id) return json({ error: { code: "missing_job_context", message: "Start Job requires customer and vehicle context." } }, { status: 409 });
+  // Idempotency-Key: a retried start (double-tap, offline replay, timeout
+  // retry) returns the stored result instead of re-executing the transition.
+  const idempotencyKey = c.req.header("Idempotency-Key")?.trim() || crypto.randomUUID();
 
-  const metadata = current.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata)
-    ? current.metadata as Record<string, unknown>
-    : {};
-  const now = new Date().toISOString();
-  const { data, error } = await db
-    .from("appointments")
-    .update({
-      status: "in_progress",
-      metadata: { ...metadata, dispatch_status: "started", actual_start_time: metadata.actual_start_time ?? now },
-      updated_at: now,
-    })
-    .eq("workspace_id", workspace_id)
-    .eq("id", id)
-    .select("id,status,assigned_user_id,metadata,updated_at")
-    .single();
+  // The transition itself — row locking, the confirm-on-start policy, the
+  // audit event, and idempotent replay — lives in start_appointment_job_v1.
+  // This endpoint owns auth only; do not re-implement the policy here.
+  const { data: result, error } = await db.rpc("start_appointment_job_v1", {
+    p_workspace_id: workspace_id,
+    p_appointment_id: id,
+    p_idempotency_key: idempotencyKey,
+  });
   if (error) throw error;
 
   if (membership.role === "technician") {
@@ -594,7 +602,16 @@ appointmentsRouter.post("/v1/appointments/:id/start", async (c: Context) => {
   // start timestamp, in-progress state, and technician presence. Customer
   // communication begins only when there is something actionable to send,
   // such as an inspection recommendation/approval request.
-  return json({ data: { ...data, already_started: false } });
+  const started = (result ?? {}) as { already_started?: boolean; replayed?: boolean; updated_at?: string };
+  return json({
+    data: {
+      id,
+      status: "in_progress",
+      already_started: Boolean(started.already_started),
+      replayed: Boolean(started.replayed),
+      updated_at: started.updated_at ?? null,
+    },
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -2765,7 +2782,16 @@ appointmentsRouter.get("/v1/dispatch/operational-jobs", async (c: Context) => {
   const startIso = new Date(`${fromDate}T00:00:00`).toISOString();
   const endIso = new Date(`${toDate}T23:59:59.999`).toISOString();
   const db = supabase as any;
-  const [appointmentsRes, workOrdersRes, membersRes] = await Promise.all([
+  // Fleet work orders share the dispatch board: tech status transitions
+  // (en route → arrived → in progress → complete) write fleet_work_orders
+  // directly, so the board must read that table for the round trip to close.
+  // Workspace-scoped; RLS on fleet_work_orders is owner-only, so non-owner
+  // staff see only rows they own until the policy is widened.
+  //
+  // Technician names resolve through workspace_members on the techs' linked
+  // auth identities (no dependency on a technicians.workspace_id column,
+  // which is not in the generated schema).
+  const [appointmentsRes, workOrdersRes, membersRes, fleetRes] = await Promise.all([
     db.from("appointments")
       .select("id,status,starts_at,ends_at,assigned_user_id,updated_at,metadata,customers(first_name,last_name,company_name,phone,address_line1,address_line2,city,region,postal_code),vehicles(year,make,model),locations(address_line1,address_line2,city,region,postal_code,latitude,longitude)")
       .eq("workspace_id", workspaceId)
@@ -2783,14 +2809,31 @@ appointmentsRouter.get("/v1/dispatch/operational-jobs", async (c: Context) => {
       .select("user_id,profiles!workspace_members_user_id_fkey(display_name)")
       .eq("workspace_id", workspaceId)
       .eq("is_active", true),
+    db.from("fleet_work_orders")
+      .select("id,order_number,status,priority,scheduled_date,scheduled_time,assigned_technician_id,assigned_van_id,technician_notes,description,service_type,total,updated_at,fleet_clients(company_name),fleet_vehicles(year,make,model),fleet_locations(name,address)")
+      .eq("workspace_id", workspaceId)
+      .not("status", "in", '("completed","cancelled","invoiced")')
+      .or(`and(scheduled_date.gte.${fromDate},scheduled_date.lte.${toDate}),scheduled_date.is.null`)
+      .order("scheduled_date", { ascending: true, nullsFirst: false }),
   ]);
-  const error = appointmentsRes.error ?? workOrdersRes.error ?? membersRes.error;
+  const error = appointmentsRes.error ?? workOrdersRes.error ?? membersRes.error ?? fleetRes.error;
   if (error) throw error;
+
+  // Technician display names for fleet assignments: techs linked to this
+  // workspace through their auth identity.
+  const memberUserIds = (membersRes.data ?? []).map((m: { user_id: string }) => m.user_id).filter(Boolean);
+  const { data: fleetTechs, error: fleetTechsError } = memberUserIds.length > 0
+    ? await db.from("technicians").select("id,name,auth_user_id").in("auth_user_id", memberUserIds).neq("is_active", false)
+    : { data: [], error: null };
+  if (fleetTechsError) throw fleetTechsError;
+
   return json({
     data: {
       appointments: appointmentsRes.data ?? [],
       work_orders: workOrdersRes.data ?? [],
       members: membersRes.data ?? [],
+      fleet_work_orders: fleetRes.data ?? [],
+      technicians: fleetTechs ?? [],
     },
   });
 });
@@ -2859,10 +2902,9 @@ appointmentsRouter.patch("/v1/dispatch/settings", async (c: Context) => {
   const { supabase, user } = await requireAuth(c);
   if (user_id !== user.id) throw new ApiError(403, "user_id must match the caller.", "forbidden");
   const db = supabase as any;
-  const { error: profileError } = await db.from("business_profiles").select("user_id").eq("user_id", user_id).maybeSingle();
-  if (profileError) throw profileError;
-  const { error } = await db.from("business_profiles").update(values).eq("user_id", user_id);
-  if (error) throw error;
+  // Upsert: a missing business_profiles row must not turn the save into a
+  // silent zero-write. The helper throws when the write cannot be verified.
+  await upsertBusinessProfile(db, user_id, values);
   return json({ data: { ok: true } });
 });
 

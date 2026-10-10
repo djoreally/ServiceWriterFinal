@@ -24,9 +24,12 @@ export interface TaxSettingsData {
 
 export async function fetchTaxSettings(): Promise<{ settings: TaxSettingsData; rates: TaxRate[] }> {
   try {
-    const { data } = await apiClient.get<{ data: { tax_rate: number | null; operational_settings: Record<string, unknown> | null } | null }>(
-      "/v1/billing/tax-settings",
-    );
+    const [{ data }, { data: rates }] = await Promise.all([
+      apiClient.get<{ data: { tax_rate: number | null; operational_settings: Record<string, unknown> | null } | null }>(
+        "/v1/billing/tax-settings",
+      ),
+      apiClient.get<{ data: TaxRate[] }>("/v1/billing/tax-rates"),
+    ]);
     const operational = data?.operational_settings && typeof data.operational_settings === "object"
       ? data.operational_settings as Record<string, any>
       : {};
@@ -40,10 +43,9 @@ export async function fetchTaxSettings(): Promise<{ settings: TaxSettingsData; r
       flat_tax_rate: Number(data?.tax_rate ?? 0),
     };
 
-    // Final currently uses a canonical flat/workspace tax configuration. Legacy
-    // per-location tax_rates are intentionally not queried until that model is
-    // reintroduced as a first-class Final table.
-    return { settings, rates: [] };
+    // Per-location rates are read from the same tax_rates table the Add/Edit
+    // dialogs write to, so saved rates are always visible.
+    return { settings, rates: Array.isArray(rates) ? rates : [] };
   } catch (error) {
     if (error instanceof ApiClientError && error.code === "workspace_missing") {
       throw new Error("Not authenticated");

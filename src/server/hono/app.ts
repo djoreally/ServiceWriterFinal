@@ -10,11 +10,14 @@
  * - Global `onError` delegates to `errorResponse` from `@/server/api`,
  *   preserving the exact `{ error: { code, message } }` JSON shape, status
  *   codes, and CORS headers of the original handlers.
+ * - A global middleware normalizes non-`Error` throws (PostgREST returns
+ *   plain-object errors) via `toError` so `onError` — and the P0001 mapping —
+ *   actually runs for every route.
  * - Global `OPTIONS *` returns 204 with the same CORS headers the original
  *   `json()` helper sets, so preflight behavior is unchanged.
  */
 import { Hono } from "hono";
-import { corsHeaders, errorResponse } from "@/server/api";
+import { corsHeaders, errorResponse, toError } from "@/server/api";
 import { appointmentsRouter } from "./routes/appointments";
 import { billingRouter } from "./routes/billing";
 import { catalogRouter } from "./routes/catalog";
@@ -30,6 +33,18 @@ export function createHonoApp(): Hono {
 
   // Preserve the exact error contract of the original route handlers.
   app.onError((error) => errorResponse(error));
+
+  // Hono only routes `instanceof Error` throws to onError. PostgREST errors
+  // are plain objects, so without this a route's `if (error) throw error`
+  // would bypass errorResponse (and the P0001 mapping) and surface as a bare
+  // 500. Normalize here so every route keeps the honest-error contract.
+  app.use(async (_c, next) => {
+    try {
+      await next();
+    } catch (e) {
+      throw toError(e);
+    }
+  });
 
   // CORS preflight: mirror the headers the original `json()` helper sets.
   app.options("*", () => new Response(null, { status: 204, headers: corsHeaders() }));

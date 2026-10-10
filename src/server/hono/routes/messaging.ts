@@ -71,6 +71,7 @@ import Stripe from "stripe";
 import { z } from "zod";
 import type { Context } from "hono";
 import { ApiError, json, requireWorkspaceMember } from "@/server/api";
+import { upsertBusinessProfile } from "@/server/business-profiles";
 import { requireAuth } from "@/server/hono/middleware/auth";
 import { createSupabaseAdminClient, createSupabaseRequestClient } from "@/lib/supabase";
 import { EnginemailerEmailAdapter } from "@/server/messaging/enginemailer";
@@ -1804,11 +1805,9 @@ messagingRouter.put("/v1/voice-agent/settings", async (c) => {
   const body = z.object({ enabled: z.boolean(), agentId: z.string().max(200) }).parse(await c.req.json());
   const { supabase, user } = await requireAuth(c);
   const nextValue = body.enabled ? body.agentId || null : null;
-  const { error } = await supabase
-    .from("business_profiles")
-    .update({ elevenlabs_agent_id: nextValue })
-    .eq("user_id", user.id);
-  if (error) throw error;
+  // Upsert: a missing business_profiles row must not turn the save into a
+  // silent zero-write. The helper throws when the write cannot be verified.
+  await upsertBusinessProfile(supabase as any, user.id, { elevenlabs_agent_id: nextValue });
   return json({ ok: true });
 });
 

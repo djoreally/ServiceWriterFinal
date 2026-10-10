@@ -2003,9 +2003,18 @@ platformRouter.post("/v1/platform/settings/business-profile", async (c) => {
     day_hours: data.day_hours ?? {},
     operational_settings: operational,
   };
-  const { data: updated, error } = await db.from("workspace_settings").update(settingsPatch).eq("workspace_id", workspaceId);
+  // Upsert, not update: workspaces whose workspace_settings row was never
+  // seeded must still save. workspace_id is the primary key, so it is the
+  // conflict target. A missing row after the write is a failed save, not a
+  // success — the client only toasts when error is null.
+  const { data: updated, error } = await db
+    .from("workspace_settings")
+    .upsert({ workspace_id: workspaceId, ...settingsPatch }, { onConflict: "workspace_id" })
+    .select()
+    .single();
   if (error) return json({ data: null, error: { message: error.message } });
-  return json({ data: updated ?? null, error: null });
+  if (!updated) return json({ data: null, error: { message: "Business profile could not be saved." } });
+  return json({ data: updated, error: null });
 });
 
 async function uploadBrandAsset(c: Context, kind: "logo" | "cover") {

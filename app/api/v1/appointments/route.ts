@@ -1,5 +1,7 @@
 import { json, errorResponse, paginationSchema, requireWorkspaceMember } from "@/server/api";
 import { conflictWindow, validateLocalAvailability } from "@/server/scheduling/appointment-availability";
+import { syncAppointmentToGoogleCalendar } from "@/server/google-calendar/sync";
+import { after } from "next/server";
 import { z } from "zod";
 
 const appointmentSchema = z.object({
@@ -253,6 +255,11 @@ export async function POST(request: Request) {
       .select()
       .single();
     if (error) throw error;
+    // Google Calendar auto-sync runs after the response is on its way; it can
+    // never fail the booking (failures are logged + recorded in metadata).
+    after(() => {
+      void syncAppointmentToGoogleCalendar({ supabase, userId: user.id, appointmentId: data.id });
+    });
     return json({ data }, { status: 201 });
   } catch (error) {
     return errorResponse(error);

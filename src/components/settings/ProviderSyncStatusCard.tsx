@@ -23,10 +23,6 @@ import {
   type ProviderSyncLog,
 } from "@/application/queries/provider-sync.query";
 import {
-  retryProviderSyncRecord,
-  retryAllFailedProviderSyncs,
-} from "@/application/commands/provider-sync-manager.command";
-import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -77,8 +73,6 @@ export function ProviderSyncStatusCard() {
   const [summary, setSummary] = useState<ProviderSyncSummary | null>(null);
   const [records, setRecords] = useState<ProviderSyncRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [retryingAll, setRetryingAll] = useState(false);
   const [filter, setFilter] = useState<"all" | "failed" | "succeeded">("all");
   const [logsOpen, setLogsOpen] = useState(false);
   const [activeLogs, setActiveLogs] = useState<ProviderSyncLog[]>([]);
@@ -106,32 +100,6 @@ export function ProviderSyncStatusCard() {
     void Promise.resolve().then(() => refresh());
     const interval = setInterval((): void => { void refresh(); }, REFRESH_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [refresh]);
-
-  const handleRetry = useCallback(async (record: ProviderSyncRecord) => {
-    setBusyId(record.id);
-    try {
-      await retryProviderSyncRecord(record.id);
-      toast.success("Sync retried");
-      await refresh();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Retry failed");
-    } finally {
-      setBusyId(null);
-    }
-  }, [refresh]);
-
-  const handleRetryAll = useCallback(async () => {
-    setRetryingAll(true);
-    try {
-      const result = await retryAllFailedProviderSyncs();
-      toast.success(`Retried ${result.retried ?? 0} failed sync${result.retried === 1 ? "" : "s"}`);
-      await refresh();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Bulk retry failed");
-    } finally {
-      setRetryingAll(false);
-    }
   }, [refresh]);
 
   const handleViewLogs = useCallback(async (record: ProviderSyncRecord) => {
@@ -174,11 +142,11 @@ export function ProviderSyncStatusCard() {
               <Button
                 size="sm"
                 variant="default"
-                onClick={() => void handleRetryAll()}
-                disabled={retryingAll}
+                disabled
+                title="Not configured: the provider sync service is unavailable"
                 className="gap-2"
               >
-                {retryingAll ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                <RotateCcw className="h-4 w-4" />
                 Retry all ({summary.failed})
               </Button>
             )}
@@ -264,11 +232,11 @@ export function ProviderSyncStatusCard() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => void handleRetry(record)}
-                      disabled={busyId === record.id}
+                      disabled
+                      title="Not configured: the provider sync service is unavailable"
                       className="gap-1"
                     >
-                      {busyId === record.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <RotateCcw className="h-3 w-3" />}
+                      <RotateCcw className="h-3 w-3" />
                       Retry
                     </Button>
                   )}

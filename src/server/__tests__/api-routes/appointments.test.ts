@@ -95,7 +95,12 @@ import {
 } from "../../../../app/api/v1/appointments/[id]/route";
 import { POST as appointmentComplete } from "../../../../app/api/v1/appointments/[id]/complete/route";
 import { POST as appointmentConfirmation } from "../../../../app/api/v1/appointments/[id]/confirmation/route";
-import { POST as appointmentStart } from "../../../../app/api/v1/appointments/[id]/start/route";
+// POST /v1/appointments/:id/start is served by the Hono appointments router
+// (the duplicate Next.js route was removed 2026-10-10).
+import { appointmentsRouter } from "@/server/hono/routes/appointments";
+import { testRouter } from "../../hono/test-support/routerTest";
+
+const startApp = testRouter(appointmentsRouter);
 import { POST as technicianStatusPost } from "../../../../app/api/v1/appointments/[id]/technician-status/route";
 import { GET as itemsGet, PUT as itemsPut } from "../../../../app/api/v1/appointment-items/route";
 import {
@@ -106,6 +111,8 @@ import {
   makeSupabaseClient,
   stubWorkspaceMember,
   stubWorkspaceMemberReject,
+  stubRequireUser,
+  stubRequireUserReject,
   WS_ID,
   USER_ID,
   APPOINTMENT_ID,
@@ -704,148 +711,160 @@ describe("appointments/[id]/confirmation/route", () => {
   });
 });
 
-describe("appointments/[id]/start/route", () => {
+describe("POST /v1/appointments/:id/start (Hono appointments router)", () => {
+  // The duplicate Next.js start route was removed 2026-10-10: the Hono
+  // endpoint is the single live implementation. These tests drive the router
+  // directly with the same mock style as the old route tests.
   const startable = () => ({
     id: APPOINTMENT_ID,
-    status: "confirmed",
     assigned_user_id: USER_ID,
-    metadata: {},
-    customer_id: CUSTOMER_ID,
-    vehicle_id: VEHICLE_ID,
   });
 
-  it("returns 401 when workspace membership check fails", async () => {
-    stubWorkspaceMemberReject(api);
-    const { status } = await readJson(
-      await appointmentStart(
-        makeRequest(`/api/v1/appointments/${APPOINTMENT_ID}/start`, {
-          method: "POST",
-          body: { workspace_id: WS_ID },
-        }),
-        contextWithParams({ id: APPOINTMENT_ID }),
-      ),
-    );
+  function startSupabase(
+    tables: Record<string, { data?: unknown; error?: unknown }> = {},
+  ) {
+    return makeSupabaseClient({
+      workspace_members: { data: [{ workspace_id: WS_ID }], error: null },
+      ...tables,
+    });
+  }
+
+  function stubStartAuth(supabase: MockSupabaseClient, role = "owner") {
+    stubRequireUser(api, supabase);
+    stubMember(supabase, role);
+  }
+
+  async function postStart(body: unknown, headers: Record<string, string> = {}) {
+    const res = await startApp.request(`/v1/appointments/${APPOINTMENT_ID}/start`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    });
+    return readJson(res);
+  }
+
+  function rpcResult(result: unknown) {
+    return { data: result, error: null };
+  }
+
+  it("returns 401 when the caller is not authenticated", async () => {
+    stubRequireUserReject(api);
+    const { status, body } = await postStart({ selected_workspace_id: WS_ID });
     expect(status).toBe(401);
+    expect(body.error.code).toBe("unauthenticated");
   });
 
-  it("returns 500 when the body fails zod validation", async () => {
-    stubMember(makeSupabaseClient());
-    const { status } = await readJson(
-      await appointmentStart(
-        makeRequest(`/api/v1/appointments/${APPOINTMENT_ID}/start`, { method: "POST", body: {} }),
-        contextWithParams({ id: APPOINTMENT_ID }),
-      ),
-    );
-    expect(status).toBe(500);
+  it("returns 400 when the id is not a uuid", async () => {
+    const supabase = startSupabase();
+    stubStartAuth(supabase);
+    const res = await startApp.request("/v1/appointments/not-a-uuid/start", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const { status, body } = await readJson(res);
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("invalid_input");
   });
 
   it("returns 404 when the appointment is not in the workspace", async () => {
-    const supabase = makeSupabaseClient({ appointments: { data: null, error: null } });
-    stubMember(supabase);
-    const { status, body } = await readJson(
-      await appointmentStart(
-        makeRequest(`/api/v1/appointments/${APPOINTMENT_ID}/start`, {
-          method: "POST",
-          body: { workspace_id: WS_ID },
-        }),
-        contextWithParams({ id: APPOINTMENT_ID }),
-      ),
-    );
+    const supabase = startSupabase({ appointments: { data: null, error: null } });
+    stubStartAuth(supabase);
+    const { status, body } = await postStart({ selected_workspace_id: WS_ID });
     expect(status).toBe(404);
     expect(body.error.code).toBe("not_found");
   });
 
-  it("returns 409 invalid_status for a completed appointment", async () => {
-    const supabase = makeSupabaseClient({
-      appointments: { data: { ...startable(), status: "completed" }, error: null },
-    });
-    stubMember(supabase);
-    const { status, body } = await readJson(
-      await appointmentStart(
-        makeRequest(`/api/v1/appointments/${APPOINTMENT_ID}/start`, {
-          method: "POST",
-          body: { workspace_id: WS_ID },
-        }),
-        contextWithParams({ id: APPOINTMENT_ID }),
-      ),
-    );
-    expect(status).toBe(409);
-    expect(body.error.code).toBe("invalid_status");
-  });
-
-  it("returns 409 missing_job_context when customer/vehicle are absent", async () => {
-    const supabase = makeSupabaseClient({
-      appointments: { data: { ...startable(), customer_id: null, vehicle_id: null }, error: null },
-    });
-    stubMember(supabase);
-    const { status, body } = await readJson(
-      await appointmentStart(
-        makeRequest(`/api/v1/appointments/${APPOINTMENT_ID}/start`, {
-          method: "POST",
-          body: { workspace_id: WS_ID },
-        }),
-        contextWithParams({ id: APPOINTMENT_ID }),
-      ),
-    );
-    expect(status).toBe(409);
-    expect(body.error.code).toBe("missing_job_context");
-  });
-
   it("returns 403 when a technician starts someone else's appointment", async () => {
-    const supabase = makeSupabaseClient({
+    const supabase = startSupabase({
       appointments: { data: { ...startable(), assigned_user_id: OTHER_USER_ID }, error: null },
     });
-    stubMember(supabase, "technician");
-    const { status, body } = await readJson(
-      await appointmentStart(
-        makeRequest(`/api/v1/appointments/${APPOINTMENT_ID}/start`, {
-          method: "POST",
-          body: { workspace_id: WS_ID },
-        }),
-        contextWithParams({ id: APPOINTMENT_ID }),
-      ),
-    );
+    stubStartAuth(supabase, "technician");
+    const { status, body } = await postStart({ selected_workspace_id: WS_ID });
     expect(status).toBe(403);
     expect(body.error.code).toBe("forbidden");
   });
 
-  it("returns already_started for an in_progress appointment without updating", async () => {
-    const supabase = makeSupabaseClient({
-      appointments: { data: { ...startable(), status: "in_progress" }, error: null },
-    });
-    stubMember(supabase);
-    const { status, body } = await readJson(
-      await appointmentStart(
-        makeRequest(`/api/v1/appointments/${APPOINTMENT_ID}/start`, {
-          method: "POST",
-          body: { workspace_id: WS_ID },
-        }),
-        contextWithParams({ id: APPOINTMENT_ID }),
-      ),
+  it("starts the job through start_appointment_job_v1 and forwards the Idempotency-Key", async () => {
+    const supabase = startSupabase({ appointments: { data: startable(), error: null } });
+    stubStartAuth(supabase);
+    (supabase.rpc as jest.Mock).mockResolvedValue(
+      rpcResult({ already_started: false, replayed: false, status: "in_progress", updated_at: "2026-10-10T12:00:00Z" }),
     );
+    const { status, body } = await postStart(
+      { selected_workspace_id: WS_ID },
+      { "Idempotency-Key": "test-key-1" },
+    );
+    expect(status).toBe(200);
+    expect(body.data.already_started).toBe(false);
+    expect(body.data.status).toBe("in_progress");
+    expect(body.data.id).toBe(APPOINTMENT_ID);
+    expect(supabase.rpc).toHaveBeenCalledWith("start_appointment_job_v1", {
+      p_workspace_id: WS_ID,
+      p_appointment_id: APPOINTMENT_ID,
+      p_idempotency_key: "test-key-1",
+    });
+  });
+
+  it("accepts an empty body — the workspace resolves from the auth token", async () => {
+    const supabase = startSupabase({ appointments: { data: startable(), error: null } });
+    stubStartAuth(supabase);
+    (supabase.rpc as jest.Mock).mockResolvedValue(
+      rpcResult({ already_started: false, replayed: false, status: "in_progress", updated_at: null }),
+    );
+    const { status } = await postStart({});
+    expect(status).toBe(200);
+    expect(supabase.rpc).toHaveBeenCalledWith(
+      "start_appointment_job_v1",
+      expect.objectContaining({ p_workspace_id: WS_ID, p_appointment_id: APPOINTMENT_ID }),
+    );
+  });
+
+  it("returns already_started for an in_progress appointment without re-executing", async () => {
+    const supabase = startSupabase({ appointments: { data: startable(), error: null } });
+    stubStartAuth(supabase);
+    (supabase.rpc as jest.Mock).mockResolvedValue(
+      rpcResult({ already_started: true, replayed: false, status: "in_progress", updated_at: "2026-10-10T12:00:00Z" }),
+    );
+    const { status, body } = await postStart({ selected_workspace_id: WS_ID });
     expect(status).toBe(200);
     expect(body.data.already_started).toBe(true);
     expect(body.data.status).toBe("in_progress");
   });
 
-  it("starts the job and returns already_started=false", async () => {
-    const supabase = makeSupabaseClient({ appointments: { data: startable(), error: null } });
-    stubMember(supabase);
-    const { status, body } = await readJson(
-      await appointmentStart(
-        makeRequest(`/api/v1/appointments/${APPOINTMENT_ID}/start`, {
-          method: "POST",
-          body: { workspace_id: WS_ID },
-        }),
-        contextWithParams({ id: APPOINTMENT_ID }),
-      ),
-    );
+  it("surfaces the RPC's real message on a rejected transition (no generic 500)", async () => {
+    const supabase = startSupabase({ appointments: { data: startable(), error: null } });
+    stubStartAuth(supabase);
+    (supabase.rpc as jest.Mock).mockResolvedValue({
+      data: null,
+      error: { code: "P0001", message: "INVALID_TRANSITION: This appointment can no longer be started." },
+    });
+    const { status, body } = await postStart({ selected_workspace_id: WS_ID });
+    expect(status).toBe(409);
+    expect(body.error.code).toBe("invalid_transition");
+    expect(body.error.message).toBe("This appointment can no longer be started.");
+    expect(body.error.message).not.toMatch(/unexpected error/i);
+  });
+
+  it("sets technician presence on_job after a technician start", async () => {
+    const supabase = startSupabase({ appointments: { data: startable(), error: null } });
+    stubStartAuth(supabase, "technician");
+    (supabase.rpc as jest.Mock).mockImplementation((fn: string) => {
+      if (fn === "start_appointment_job_v1") {
+        return Promise.resolve(rpcResult({ already_started: false, replayed: false, status: "in_progress", updated_at: null }));
+      }
+      return Promise.resolve({ data: null, error: null });
+    });
+    const { status } = await postStart({ selected_workspace_id: WS_ID });
     expect(status).toBe(200);
-    expect(body.data.already_started).toBe(false);
-    expect(body.data.id).toBe(APPOINTMENT_ID);
+    expect(supabase.rpc).toHaveBeenCalledWith("set_technician_presence_v1", {
+      p_workspace_id: WS_ID,
+      p_status: "on_job",
+      p_appointment_id: APPOINTMENT_ID,
+      p_location: null,
+    });
   });
 });
-
 describe("appointments/[id]/technician-status/route", () => {
   const currentRow = () => ({
     id: APPOINTMENT_ID,

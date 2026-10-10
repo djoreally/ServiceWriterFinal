@@ -11,9 +11,6 @@ import {
 } from "@/application/queries/quickbooks.query";
 import {
   saveQBOSettings,
-  invokeQBOConnect,
-  invokeQBODisconnect,
-  invokeQBOSync,
 } from "@/application/commands/quickbooks.command";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -37,16 +34,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import {
   BookOpen,
   Link,
@@ -97,11 +84,7 @@ interface EntityMappingStats {
 
 export const QuickBooksSettings = () => {
   const [loading, setLoading] = useState(true);
-  const [connecting, setConnecting] = useState(false);
-  const [disconnecting, setDisconnecting] = useState(false);
-  const [syncing, setSyncing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [disconnectDialogOpen, setDisconnectDialogOpen] = useState(false);
   
   const [settings, setSettings] = useState<QBOSettings>({
     qbo_enabled: false,
@@ -161,55 +144,6 @@ export const QuickBooksSettings = () => {
     }
   }, []);
 
-  const handleConnect = async () => {
-    setConnecting(true);
-    try {
-      const response = await invokeQBOConnect();
-      if (response.error) throw new Error(response.error.message || "Failed to start connection");
-      if (response.data?.authUrl) {
-        window.location.href = response.data.authUrl;
-      } else {
-        throw new Error("No authorization URL received");
-      }
-    } catch (error) {
-      console.error("Error connecting to QuickBooks:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to connect to QuickBooks");
-    } finally {
-      setConnecting(false);
-    }
-  };
-
-  const handleDisconnect = async () => {
-    setDisconnecting(true);
-    try {
-      const response = await invokeQBODisconnect();
-      if (response.error) throw new Error(response.error.message || "Failed to disconnect");
-      toast.success("QuickBooks disconnected");
-      fetchData();
-    } catch (error) {
-      console.error("Error disconnecting QuickBooks:", error);
-      toast.error(error instanceof Error ? error.message : "Failed to disconnect");
-    } finally {
-      setDisconnecting(false);
-      setDisconnectDialogOpen(false);
-    }
-  };
-
-  const handleSync = async (entityType?: string) => {
-    setSyncing(true);
-    try {
-      const response = await invokeQBOSync(entityType);
-      if (response.error) throw new Error(response.error.message || "Sync failed");
-      toast.success(response.data?.message || "Sync completed");
-      fetchData();
-    } catch (error) {
-      console.error("Error syncing:", error);
-      toast.error(error instanceof Error ? error.message : "Sync failed");
-    } finally {
-      setSyncing(false);
-    }
-  };
-
   const handleSaveSettings = async () => {
     setSaving(true);
     const { error } = await saveQBOSettings({
@@ -266,7 +200,10 @@ export const QuickBooksSettings = () => {
             QuickBooks Online Integration
           </CardTitle>
           <CardDescription>
-            Connect your QuickBooks Online account to sync customers and invoices
+            Connect your QuickBooks Online account to sync customers and invoices.
+            <span className="block mt-1 text-amber-600 dark:text-amber-400">
+              QuickBooks integration is not configured — connecting is unavailable.
+            </span>
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -280,12 +217,12 @@ export const QuickBooksSettings = () => {
                   <li>Payment sync is currently unavailable in this integration</li>
                 </ul>
               </div>
-              <Button onClick={handleConnect} disabled={connecting} className="gap-2">
-                {connecting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Link className="h-4 w-4" />
-                )}
+              <Button
+                disabled
+                title="Not configured: the QuickBooks integration service is unavailable"
+                className="gap-2"
+              >
+                <Link className="h-4 w-4" />
                 Connect QuickBooks Online
               </Button>
             </div>
@@ -313,7 +250,8 @@ export const QuickBooksSettings = () => {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => setDisconnectDialogOpen(true)}
+                        disabled
+                        title="Not configured: the QuickBooks integration service is unavailable"
                         className="text-red-600 hover:text-red-700 hover:bg-red-50"
                       >
                         <Unlink className="h-4 w-4 mr-2" />
@@ -354,15 +292,11 @@ export const QuickBooksSettings = () => {
                 </div>
                 <Button
                   variant="outline"
-                  onClick={() => handleSync()}
-                  disabled={syncing}
+                  disabled
+                  title="Not configured: the QuickBooks integration service is unavailable"
                   className="gap-2"
                 >
-                  {syncing ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-4 w-4" />
-                  )}
+                  <RefreshCw className="h-4 w-4" />
                   Sync Now
                 </Button>
               </div>
@@ -542,31 +476,6 @@ export const QuickBooksSettings = () => {
         </CardContent>
       </Card>
 
-      {/* Disconnect Confirmation Dialog */}
-      <AlertDialog open={disconnectDialogOpen} onOpenChange={setDisconnectDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Disconnect QuickBooks?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will stop syncing data between your shop and QuickBooks Online. 
-              Previously synced data will remain in both systems.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDisconnect}
-              disabled={disconnecting}
-              className="bg-destructive text-destructive-foreground"
-            >
-              {disconnecting ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              ) : null}
-              Disconnect
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 };
