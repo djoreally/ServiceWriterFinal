@@ -3,27 +3,37 @@ import { cn } from "@/lib/utils";
 import "./responsive-table.css";
 
 /**
- * ResponsiveTable — mobile table spec.
+ * ResponsiveTable — six decisions fix the spreadsheet in disguise.
  *
- * Desktop (container >= 700px): full column table.
- * Mobile (container < 700px): stacked cards, two lines per row.
+ * 1. NUMBERS RIGHT, TEXT LEFT. Amounts centered never line up — the eye
+ *    can't compare. Right-aligned tabular figures read like a receipt.
+ * 2. NO ZEBRA STRIPES. One hairline between rows. Hover lights the row
+ *    you're on. Stripes earn their place on wide rows only.
+ * 3. ROW HEIGHT IS A DECISION: compact 40, default 48, comfortable 56.
+ *    Dense for ops, airy for review. One toggle.
+ * 4. PIN THE FIRST COLUMN + HEADER. 12 columns, screen shows 6 — scroll
+ *    right and the name stays. Context never leaves the screen.
+ * 5. EMPTY CELL IS A DASH. Missing, zero, or loading? A dash answers.
+ *    Long text truncates with tooltip. Numbers never truncate.
+ * 6. ACTIONS REVEAL ON HOVER. 50 rows, 50 pencils is noise. Hover/focus
+ *    reveals, touch gets a kebab.
  *
- * Card layout rules:
- * - Line 1: identity (left) | amount (right, tabular-nums, fixed slot)
- * - Line 2: status + labeled dates ("Due Mar 4", never bare "Mar 4")
- * - Amounts need no label ($120 is self-evident); ambiguous fields get one.
- * - Tap row: ID, notes, actions expand in place.
- * - Full record: bottom sheet, never a new page.
- * - Sorting lives in an external control, not column headers.
- *
- * The breakpoint belongs to the TABLE (container query), not the screen.
+ * Mobile (< 700px container): stacked cards, two lines per row.
+ * - Line 1: identity left | amount right (tabular, fixed slot)
+ * - Line 2: status + labeled dates. Tap: ID/notes/actions expand in place.
  */
+
+export type TableDensity = "compact" | "default" | "comfortable";
 
 export interface ResponsiveColumn<T> {
   key: string;
   header: string;
   /** Priority for mobile: 1 = stays visible, higher = hides first. ID/state hide first. */
   priority: number;
+  /** Alignment: numbers right + tabular, text left. Amounts centered is a spreadsheet in disguise. */
+  align?: "left" | "right";
+  /** Pin this column on horizontal scroll. First column default. */
+  pinned?: boolean;
   render: (row: T) => ReactNode;
   cardPrimary?: (row: T) => ReactNode;
   cardAmount?: (row: T) => ReactNode;
@@ -39,8 +49,18 @@ interface ResponsiveTableProps<T> {
   toolbar?: ReactNode;
   emptyState?: ReactNode;
   onViewRecord?: (row: T) => void;
+  /** Row height: compact 40, default 48, comfortable 56. Dense for ops, airy for review. */
+  density?: TableDensity;
+  /** Row actions — revealed on hover/focus, kebab on touch. Not a column of pencils. */
+  rowActions?: (row: T) => ReactNode;
   className?: string;
 }
+
+const densityPx: Record<TableDensity, number> = {
+  compact: 40,
+  default: 48,
+  comfortable: 56,
+};
 
 export function ResponsiveTable<T>({
   columns,
@@ -49,6 +69,8 @@ export function ResponsiveTable<T>({
   toolbar,
   emptyState,
   onViewRecord,
+  density = "default",
+  rowActions,
   className,
 }: ResponsiveTableProps<T>) {
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
@@ -65,29 +87,54 @@ export function ResponsiveTable<T>({
 
       <div className="responsive-table-desktop overflow-x-auto rounded-lg border">
         <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b bg-muted/50">
-              {columns.map((col) => (
+          <thead className="sticky top-0 z-10">
+            <tr className="border-b bg-muted/50 backdrop-blur">
+              {columns.map((col, i) => (
                 <th
                   key={col.key}
                   className={cn(
-                    "px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground",
+                    "px-4 text-xs font-medium uppercase tracking-wide text-muted-foreground",
+                    col.align === "right" ? "text-right" : "text-left",
+                    (col.pinned || i === 0) && "sticky left-0 bg-muted/50 backdrop-blur z-10",
                     col.className
                   )}
+                  style={{ height: densityPx[density] }}
                 >
                   {col.header}
                 </th>
               ))}
+              {rowActions && <th className="w-10" aria-label="Actions" />}
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => (
-              <tr key={rowKey(row)} className="border-b last:border-0 hover:bg-muted/30">
-                {columns.map((col) => (
-                  <td key={col.key} className={cn("px-4 py-3", col.className)}>
-                    {col.render(row)}
+              <tr
+                key={rowKey(row)}
+                className="border-b border-border/50 last:border-0 hover:bg-muted/40 group"
+              >
+                {columns.map((col, i) => (
+                  <td
+                    key={col.key}
+                    className={cn(
+                      "px-4",
+                      col.align === "right" && "text-right font-mono tabular-nums",
+                      (col.pinned || i === 0) && "sticky left-0 bg-card group-hover:bg-muted/40 z-10",
+                      col.className
+                    )}
+                    style={{ height: densityPx[density] }}
+                  >
+                    <span className="block truncate" title={typeof col.render(row) === "string" ? String(col.render(row)) : undefined}>
+                      {col.render(row) ?? <span className="text-muted-foreground">—</span>}
+                    </span>
                   </td>
                 ))}
+                {rowActions && (
+                  <td className="w-10 px-2">
+                    <span className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100">
+                      {rowActions(row)}
+                    </span>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
