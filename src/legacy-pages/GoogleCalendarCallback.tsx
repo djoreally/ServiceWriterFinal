@@ -7,6 +7,7 @@ import {
   completeGoogleCalendarOAuth,
   exchangeGoogleTokens,
   GOOGLE_CALENDAR_REDIRECT_PATH,
+  GOOGLE_OAUTH_INITIATOR_KEY,
   runGoogleCalendarBackfill,
 } from "@/application/commands/google-calendar.command";
 import { completeGoogleInsightsOAuth } from "@/application/commands/google-insights";
@@ -28,6 +29,20 @@ export default function GoogleCalendarCallback() {
       try {
         const oauthError = params.get("error") || params.get("error_description");
         if (oauthError) throw new Error(oauthError);
+
+        // Identity-switch guard: the connect flow is supposed to link the Google
+        // identity to the session that started it. If the round-trip came back
+        // as a DIFFERENT user (fresh sign-in with a different Google email), do
+        // not store tokens under the wrong account — sign it out and say so.
+        const expectedUserId = sessionStorage.getItem(GOOGLE_OAUTH_INITIATOR_KEY);
+        const currentUser = (await supabase.auth.getUser()).data.user;
+        if (expectedUserId && currentUser && currentUser.id !== expectedUserId) {
+          await supabase.auth.signOut();
+          sessionStorage.removeItem(GOOGLE_OAUTH_INITIATOR_KEY);
+          throw new Error(
+            `The Google account you authorized (${currentUser.email ?? "unknown email"}) is signed in to Service Writer as a different login than the one you started with. Please connect with the Google account that matches your login, or unlink the other account first.`,
+          );
+        }
 
         // Calendar authorization now uses the Google provider already configured
         // in Supabase Auth. After the provider round-trip Supabase owns the OAuth
@@ -70,6 +85,7 @@ export default function GoogleCalendarCallback() {
         sessionStorage.removeItem("google_oauth_integration");
         sessionStorage.removeItem("google_oauth_return_to");
         sessionStorage.removeItem("gcal_return_to");
+        sessionStorage.removeItem(GOOGLE_OAUTH_INITIATOR_KEY);
         navigate(returnTo, { replace: true });
       } catch (caught) {
         setError(caught instanceof Error ? caught.message : "Failed to complete Google authorization");

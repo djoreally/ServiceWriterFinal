@@ -6,6 +6,8 @@ import { apiClient } from "@/lib/api-client";
 /** Get Google Calendar connection status */
 export interface GoogleCalendarStatusData {
   connected: boolean | null;
+  /** Login email of the user whose Google account the sync runs under (tokens are per-user). */
+  connected_email: string | null;
   sync_enabled: boolean | null;
   needs_reauth: boolean | null;
   last_sync_at: string | null;

@@ -14,11 +14,14 @@ import {
   syncAppointmentToGoogle,
   disconnectGoogleCalendar,
   runGoogleCalendarBackfill,
+  GOOGLE_OAUTH_INITIATOR_KEY,
 } from "@/application/commands/google-calendar.command";
 import { toast } from "@/components/ui/sonner";
 
 export interface GoogleCalendarStatus {
   connected: boolean;
+  /** Login email of the user whose Google account the sync runs under (tokens are per-user, not per-workspace). */
+  connectedEmail: string | null;
   syncEnabled: boolean;
   /** True when Google revoked/expired the grant — sync is stopped until the user reconnects. */
   needsReauth: boolean;
@@ -30,6 +33,7 @@ export interface GoogleCalendarStatus {
 
 const DEFAULT_STATUS: GoogleCalendarStatus = {
   connected: false,
+  connectedEmail: null,
   syncEnabled: false,
   needsReauth: false,
   lastSyncAt: null,
@@ -50,6 +54,7 @@ export function useGoogleCalendar() {
       if (error) throw error;
       setStatus({
         connected: data?.connected ?? false,
+        connectedEmail: data?.connected_email ?? null,
         syncEnabled: data?.sync_enabled ?? false,
         needsReauth: data?.needs_reauth ?? false,
         lastSyncAt: data?.last_sync_at ?? null,
@@ -74,6 +79,11 @@ export function useGoogleCalendar() {
    * Listen for Google OAuth sign-in and auto-exchange provider tokens.
    * When a user signs in with Google and has calendar scope,
    * Supabase provides provider_token and provider_refresh_token on the session.
+   *
+   * Identity-switch guard: if the OAuth round-trip came back as a different
+   * user than the one who started the connect flow, do NOT exchange tokens
+   * under the wrong account — the callback page shows the honest mismatch
+   * error and signs that session out.
    */
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -83,6 +93,8 @@ export function useGoogleCalendar() {
           session?.provider_token
         ) {
           try {
+            const expectedUserId = sessionStorage.getItem(GOOGLE_OAUTH_INITIATOR_KEY);
+            if (expectedUserId && session.user.id !== expectedUserId) return;
             await exchangeGoogleTokens(
               session.provider_token,
               session.provider_refresh_token ?? null

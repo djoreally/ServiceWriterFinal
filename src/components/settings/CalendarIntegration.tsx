@@ -79,7 +79,7 @@ export function CalendarIntegration() {
           <CalendarDays className="h-5 w-5 text-primary" />
           Google Calendar Sync
         </CardTitle>
-        <p className="text-sm text-muted-foreground">Automatically push appointments to your Google Calendar</p>
+        <p className="text-sm text-muted-foreground">Automatically push appointments to the connected Google Calendar</p>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex items-center justify-between">
@@ -106,7 +106,9 @@ export function CalendarIntegration() {
               <div className="flex justify-between"><span className="text-muted-foreground">Calendar</span><span className="font-medium">{status.calendarId || "Primary"}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Last Synced</span><span className="font-medium">{status.lastSyncAt ? formatDistanceToNow(new Date(status.lastSyncAt), { addSuffix: true }) : "Never"}</span></div>
               {status.connectedAt && <div className="flex justify-between"><span className="text-muted-foreground">Connected</span><span className="font-medium">{formatDistanceToNow(new Date(status.connectedAt), { addSuffix: true })}</span></div>}
+              {status.connectedEmail && <div className="flex justify-between"><span className="text-muted-foreground">Syncing account</span><span className="font-medium">{status.connectedEmail}</span></div>}
             </div>
+            <p className="text-xs text-muted-foreground">Sync runs through the Google account above — calendar tokens are per user, not per workspace. Each team member connects their own account.</p>
             {status.needsReauth && (
               <div className="flex items-start gap-2 rounded-md border border-destructive/20 bg-destructive/10 p-3">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
@@ -141,7 +143,7 @@ export function CalendarIntegration() {
             </Button>
           )}
         </div>
-        <p className="text-xs text-muted-foreground">{status.connected ? "New appointments will be automatically synced to your Google Calendar." : "Connect your Google account to automatically push appointments to your calendar."}</p>
+        <p className="text-xs text-muted-foreground">{status.connected ? "New and updated appointments sync automatically to the connected calendar. Cancelled appointments are removed from it. Use \"Run sync now\" to catch up anything missed." : "Connect your Google account to automatically push appointments to your calendar."}</p>
       </CardContent>
     </Card>
   );

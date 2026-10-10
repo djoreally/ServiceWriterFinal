@@ -1091,23 +1091,9 @@ const Settings = () => {
                 <p className="text-xs text-muted-foreground">Your business timezone</p>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="currency">Currency</Label>
-                <Select
-                  value="USD"
-                  onValueChange={() => setProfile(prev => ({ ...prev, currency: "USD" }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select currency" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CURRENCIES.filter((c) => c.code === "USD").map(c => (
-                      <SelectItem key={c.code} value={c.code}>
-                        {c.code} ({c.symbol}) - {c.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">Currency for prices and invoices</p>
+                <Label>Currency</Label>
+                <p className="text-sm font-medium">USD — US Dollar ($)</p>
+                <p className="text-xs text-muted-foreground">Only USD is supported. Currency for prices and invoices</p>
               </div>
             </div>
           </CardContent>
