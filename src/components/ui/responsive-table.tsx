@@ -53,6 +53,17 @@ interface ResponsiveTableProps<T> {
   density?: TableDensity;
   /** Row actions — revealed on hover/focus, kebab on touch. Not a column of pencils. */
   rowActions?: (row: T) => ReactNode;
+  /**
+   * Bulk selection. Pass the return of useRowSelection.
+   * Header checkbox: checked / empty / partial. Clicking partial selects all.
+   */
+  selection?: {
+    headerState: "checked" | "empty" | "partial";
+    toggleHeader: () => void;
+    toggleRow: (row: T, visibleIdx: number, shiftKey: boolean) => void;
+    isSelected: (row: T) => boolean;
+    selectAllLabel: string;
+  };
   className?: string;
 }
 
@@ -71,6 +82,7 @@ export function ResponsiveTable<T>({
   onViewRecord,
   density = "default",
   rowActions,
+  selection,
   className,
 }: ResponsiveTableProps<T>) {
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
@@ -89,6 +101,38 @@ export function ResponsiveTable<T>({
         <table className="w-full text-sm">
           <thead className="sticky top-0 z-10">
             <tr className="border-b bg-muted/50 backdrop-blur">
+              {selection && (
+                <th className="w-10 px-2" aria-label="Select rows">
+                  <button
+                    type="button"
+                    onClick={selection.toggleHeader}
+                    aria-label={selection.selectAllLabel}
+                    title={selection.selectAllLabel}
+                    className="flex h-10 w-10 items-center justify-center"
+                  >
+                    <span
+                      className={cn(
+                        "flex h-5 w-5 items-center justify-center rounded border-2",
+                        selection.headerState === "checked" &&
+                          "border-primary bg-primary text-primary-foreground",
+                        selection.headerState === "empty" &&
+                          "border-muted-foreground/40",
+                        selection.headerState === "partial" &&
+                          "border-primary bg-primary/30"
+                      )}
+                    >
+                      {selection.headerState === "checked" && (
+                        <svg viewBox="0 0 12 12" className="h-3 w-3 fill-current">
+                          <path d="M10.5 2.5 4.5 8.5 1.5 5.5" stroke="currentColor" strokeWidth="2" fill="none" />
+                        </svg>
+                      )}
+                      {selection.headerState === "partial" && (
+                        <span className="h-0.5 w-2.5 bg-primary" />
+                      )}
+                    </span>
+                  </button>
+                </th>
+              )}
               {columns.map((col, i) => (
                 <th
                   key={col.key}
@@ -107,11 +151,38 @@ export function ResponsiveTable<T>({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {rows.map((row, visibleIdx) => (
               <tr
                 key={rowKey(row)}
                 className="border-b border-border/50 last:border-0 hover:bg-muted/40 group"
               >
+                {selection && (
+                  <td className="w-10 px-2">
+                    <button
+                      type="button"
+                      onClick={(e) =>
+                        selection.toggleRow(row, visibleIdx, e.shiftKey)
+                      }
+                      aria-label={`Select row ${visibleIdx + 1}`}
+                      className="flex h-10 w-10 items-center justify-center"
+                    >
+                      <span
+                        className={cn(
+                          "flex h-5 w-5 items-center justify-center rounded border-2",
+                          selection.isSelected(row)
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-muted-foreground/40"
+                        )}
+                      >
+                        {selection.isSelected(row) && (
+                          <svg viewBox="0 0 12 12" className="h-3 w-3 fill-current">
+                            <path d="M10.5 2.5 4.5 8.5 1.5 5.5" stroke="currentColor" strokeWidth="2" fill="none" />
+                          </svg>
+                        )}
+                      </span>
+                    </button>
+                  </td>
+                )}
                 {columns.map((col, i) => (
                   <td
                     key={col.key}
