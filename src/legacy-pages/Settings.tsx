@@ -24,6 +24,7 @@ import { useRegionalSettings, CURRENCIES, TIMEZONES } from "@/contexts/RegionalS
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
+import { InstantSwitch } from "@/components/ui/setting-controls";
 import { Slider } from "@/components/ui/slider";
 import { LazyServiceAreaMap } from "@/components/settings/LazyServiceAreaMap";
 import { StripeConnectCard } from "@/components/settings/StripeConnectCard";
@@ -1455,19 +1456,28 @@ const Settings = () => {
               </div>
 
               <div className="rounded-lg border border-border p-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium">Marketplace Visibility</p>
-                    <p className="text-xs text-muted-foreground">
-                      Opt in to show your business in the Find Provider marketplace.
-                    </p>
-                  </div>
-                  <Switch
-                    checked={profile.marketplace_opt_in}
-                    onCheckedChange={(checked) => setProfile(prev => ({ ...prev, marketplace_opt_in: checked }))}
-                    aria-label="Toggle marketplace visibility"
-                  />
-                </div>
+                <InstantSwitch
+                  label="Marketplace Visibility"
+                  description="Opt in to show your business in the Find Provider marketplace."
+                  checked={profile.marketplace_opt_in}
+                  onFlip={async (checked) => {
+                    const user = await getCurrentUser();
+                    if (!user) {
+                      toast.error("Your session has expired. Sign in again.");
+                      return;
+                    }
+                    setProfile(prev => ({ ...prev, marketplace_opt_in: checked }));
+                    const { error } = await upsertBusinessProfile(user.id, {
+                      marketplace_opt_in: checked,
+                    } as Record<string, unknown>);
+                    if (error) {
+                      setProfile(prev => ({ ...prev, marketplace_opt_in: !checked }));
+                      toast.error("Could not update visibility. Try again.");
+                    } else {
+                      toast.success(checked ? "Visible in marketplace" : "Hidden from marketplace");
+                    }
+                  }}
+                />
               </div>
             </div>
 
