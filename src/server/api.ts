@@ -32,6 +32,15 @@ export function json<T>(data: T, init?: ResponseInit) {
 export function errorResponse(error: unknown) {
   if (error instanceof ApiError) return json({ error: { code: error.code, message: error.message } }, { status: error.status });
 
+  // Client input failed validation — this is a 400, never a 500.
+  if (error instanceof z.ZodError) {
+    const firstIssue = error.issues[0];
+    const detail = firstIssue
+      ? `${firstIssue.path.join(".") || "input"}: ${firstIssue.message}`
+      : "Invalid request input.";
+    return json({ error: { code: "invalid_input", message: detail } }, { status: 400 });
+  }
+
   const candidate = error as {
     code?: string;
     message?: string;

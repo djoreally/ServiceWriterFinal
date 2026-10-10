@@ -52,6 +52,38 @@ const IdentityUnavailable = ({ retry, signOut }: { retry: () => void; signOut: (
 );
 
 /**
+ * TenantLoadError — full-screen, retryable error for tenant-subdomain hosts
+ * when the tenant profile request fails or times out. A network failure must
+ * NEVER fall back to the marketing homepage; it renders this instead, with
+ * an explicit retry action that re-runs the tenant load.
+ */
+export const TenantLoadError = ({
+  message = "We couldn't reach the booking service. Please try again.",
+  notFound = false,
+  onRetry,
+}: {
+  message?: string;
+  notFound?: boolean;
+  onRetry: () => void;
+}) => (
+  <div className="min-h-screen flex items-center justify-center bg-background">
+    <div className="text-center max-w-sm px-6">
+      <h1 className="text-lg font-semibold mb-2">
+        {notFound ? "Shop not found" : "Couldn't load this shop"}
+      </h1>
+      <p className="text-muted-foreground mb-6">{message}</p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+      >
+        Try again
+      </button>
+    </div>
+  </div>
+);
+
+/**
  * RequireAuth — auth/session render gate plus the single role-authorization
  * choke point for every workforce-protected route.
  *

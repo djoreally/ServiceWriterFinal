@@ -16,6 +16,9 @@
  * - JSON request/response by default; non-2xx responses are parsed into
  *   `ApiClientError { status, code, message }` from the
  *   `{ error: { code, message } }` envelope the server always returns.
+ * - Every request has a 15s timeout by default (override with `timeout`;
+ *   `0` disables it). A timeout throws `ApiClientError` with code `"timeout"`
+ *   so callers can distinguish it from other network failures and offer retry.
  * - Query params and extra headers are supported per call.
  */
 
@@ -54,8 +57,16 @@ export interface ApiRequestOptions {
   /** Extra headers. An explicit `Authorization` header always wins over the session token. */
   headers?: HeadersInit;
   signal?: AbortSignal;
+  /**
+   * Request timeout in milliseconds. Defaults to 15s. Set to `0` to disable
+   * (e.g. long uploads). A timeout throws `ApiClientError` with code `"timeout"`.
+   */
+  timeout?: number;
   credentials?: RequestCredentials;
 }
+
+/** Default request timeout — a hung serverless function must never brick the UI. */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "/api").replace(/\/$/, "");
 
@@ -108,7 +119,7 @@ export async function apiRequest<T>(
   path: string,
   init: RequestInit & ApiRequestOptions = {},
 ): Promise<T> {
-  const { query, credentials, ...rest } = init;
+  const { query, credentials, timeout, ...rest } = init;
   const headers = new Headers(rest.headers);
   headers.set("Accept", "application/json");
 
@@ -120,13 +131,32 @@ export async function apiRequest<T>(
 
   await attachSessionToken(headers);
 
+  const timeoutMs = timeout ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  const timeoutSignal = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
+  const signal =
+    timeoutSignal && rest.signal ? AbortSignal.any([rest.signal, timeoutSignal]) : (timeoutSignal ?? rest.signal);
+
   const url = appendQuery(path.startsWith("http") ? path : `${API_BASE}${path}`, query);
-  const response = await fetch(url, {
-    ...rest,
-    headers,
-    body,
-    credentials: credentials ?? "include",
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...rest,
+      headers,
+      body,
+      signal,
+      credentials: credentials ?? "include",
+    });
+  } catch (err) {
+    // AbortSignal.timeout() aborts with a DOMException named "TimeoutError".
+    if (timeoutSignal?.aborted && err instanceof DOMException && err.name === "TimeoutError") {
+      throw new ApiClientError(
+        0,
+        "timeout",
+        `Request timed out after ${timeoutMs}ms: ${path}`,
+      );
+    }
+    throw err;
+  }
 
   if (!response.ok) {
     const errorBody = (await response.json().catch(() => ({}))) as ApiErrorBody;

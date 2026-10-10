@@ -12,7 +12,7 @@ import { TenantProvider, useTenant } from "@/contexts/TenantContext";
 import { SubscriptionProvider } from "@/contexts/SubscriptionContext";
 import { useAuth } from "@packages/auth";
 import { lazyRetry } from "./lib/lazyRetry";
-import { LoadingScreen, RequireAuth, RequirePlanFeature } from "./components/routing/legacy-guards";
+import { LoadingScreen, RequireAuth, RequirePlanFeature, TenantLoadError } from "./components/routing/legacy-guards";
 import { useSeoSync } from "./components/routing/useSeoSync";
 // AIAssistant is lazy-loaded — it is a heavy, always-mounted component that only
 // activates when opened. Deferring it removes it from the critical-path bundle.
@@ -163,7 +163,13 @@ const HomeRoute = () => {
 };
 
 export const AppRoutes = () => {
-  const { loading: tenantLoading, slug: tenantSlug } = useTenant();
+  const {
+    loading: tenantLoading,
+    slug: tenantSlug,
+    error: tenantError,
+    errorKind: tenantErrorKind,
+    retry: retryTenant,
+  } = useTenant();
   // Route by hostname resolution, not by successful tenant-profile lookup.
   // A valid tenant subdomain must never fall through to the platform marketing
   // homepage just because its profile is missing or the backend is unavailable.
@@ -192,9 +198,17 @@ export const AppRoutes = () => {
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
         </div>
       }>
-        {/* Only tenant booking hosts wait for tenant resolution; normal app hosts render immediately. */}
+        {/* Only tenant booking hosts wait for tenant resolution; normal app hosts render immediately.
+            A failed tenant load never falls through to the routes or the marketing
+            homepage — it renders a retryable error instead of a stuck spinner. */}
         {tenantLoading || startupBlocking ? (
           <LoadingScreen message={startupBlocking ? "Opening your workspace..." : "Loading..."} />
+        ) : isTenant && tenantErrorKind ? (
+          <TenantLoadError
+            message={tenantError ?? undefined}
+            notFound={tenantErrorKind === "not_found"}
+            onRetry={retryTenant}
+          />
         ) : (
         <Routes>
           {isTenant ? (
