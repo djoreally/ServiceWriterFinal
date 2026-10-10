@@ -35,7 +35,7 @@ export interface DispatchVan {
 
 export interface DispatchJob {
   id: string;
-  source: "appointment" | "work_order";
+  source: "appointment" | "work_order" | "fleet_work_order";
   title: string;
   scheduled_date: string;
   scheduled_time: string;
@@ -158,6 +158,7 @@ export async function subscribeToDispatchChanges(onUpdate: () => void): Promise<
     .channel(`dispatch-updates:${context.workspaceId}`)
     .on("postgres_changes", { event: "*", schema: "public", table: "appointments", filter: `workspace_id=eq.${context.workspaceId}` }, onUpdate)
     .on("postgres_changes", { event: "*", schema: "public", table: "work_orders", filter: `workspace_id=eq.${context.workspaceId}` }, onUpdate)
+    .on("postgres_changes", { event: "*", schema: "public", table: "fleet_work_orders", filter: `workspace_id=eq.${context.workspaceId}` }, onUpdate)
     .on("postgres_changes", { event: "*", schema: "public", table: "technician_presence", filter: `workspace_id=eq.${context.workspaceId}` }, onUpdate)
     .subscribe();
 

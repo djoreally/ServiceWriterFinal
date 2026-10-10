@@ -34,6 +34,7 @@ import {
   sendTechnicianEtaEmail,
 
   updateTechJobDispatchStatus,
+  startTechAppointmentJob,
   uploadTechJobPhoto,
 } from "@/application/commands/tech-app.command";
 import { useTechJobEta } from "@/hooks/useTechJobEta";
@@ -251,7 +252,9 @@ export default function TechJobDetail() {
     void Promise.resolve().then(() => fetchData());
   }, [fetchData]);
 
-  // ⚡ Use RPC for status updates (creates audit trail in dispatch_events)
+  // Status updates go through the RPC (which writes the dispatch_events audit
+  // trail) — except starts, which use the canonical start endpoint. Fleet jobs
+  // stay on the RPC for every transition.
   const updateStatus = async (nextStatus: string, failureReason?: string) => {
     if (!job) return;
 
@@ -267,16 +270,19 @@ export default function TechJobDetail() {
 
     setProcessing(true);
 
-    const { error } = await updateTechJobDispatchStatus(
-      job.id,
-      nextStatus,
-      failureReason,
-      job.is_fleet
-    );
+    const isStart = (nextStatus === "in_progress" || nextStatus === "started") && !job.is_fleet;
+    const { error } = isStart
+      ? await startTechAppointmentJob(job.id)
+      : await updateTechJobDispatchStatus(
+          job.id,
+          nextStatus,
+          failureReason,
+          job.is_fleet
+        );
 
     if (error) {
-      console.error("[TechJobDetail] RPC error:", error);
-      toast.error("Failed to update status");
+      console.error("[TechJobDetail] status error:", error);
+      toast.error(error);
     } else {
       toast.success(`Status set to ${STATUS_LABELS[nextStatus] || nextStatus}`);
       setJob({ ...job, dispatch_status: nextStatus });

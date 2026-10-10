@@ -170,6 +170,7 @@ export async function startJob(appointment_id: string) {
   await apiClient.post(
     `/v1/appointments/${encodeURIComponent(appointment_id)}/start`,
     { selected_workspace_id: workspaceId },
+    { headers: { "Idempotency-Key": `tech-dispatch:${appointment_id}:in_progress` } },
   );
   await recordDispatchEvent({ workspaceId, appointmentId: appointment_id, technicianId: await currentTechnicianId(), eventType: "started", newStatus: "in_progress", notes: "Technician started work" });
   return { success: true };

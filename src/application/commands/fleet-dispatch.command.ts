@@ -48,18 +48,25 @@ export async function assignFleetWorkOrderWithOverride(input: {
     if (scoreErr instanceof Error && scoreErr.message.includes("Override reason")) throw scoreErr;
   }
 
-  await dispatchFleetWorkOrder(input.workOrderId, input.technicianId, input.vanId);
+  await dispatchFleetWorkOrder(input.workOrderId, input.technicianId, input.vanId, input.overrideReason ?? null);
 }
 
 /**
- * Fleet dispatch is intentionally outside the rebuilt Service Writer dispatch domain.
- * Keep this compatibility export so legacy Fleet screens compile, but do not route
- * Fleet work orders through the Service Writer appointment/repair-order dispatcher.
+ * Fleet dispatch: assigns a technician (and optional van) to a fleet work
+ * order through POST /v1/fleet/work-orders/:id/dispatch. The server persists
+ * the assignment and the status transition through the fleet lifecycle RPC
+ * and records a dispatch event — the client never writes the status directly.
  */
 export async function dispatchFleetWorkOrder(
-  _workOrderId: string,
-  _technicianId: string,
-  _vanId?: string | null,
+  workOrderId: string,
+  technicianId: string,
+  vanId?: string | null,
+  overrideReason?: string | null,
 ): Promise<void> {
-  throw new Error("Fleet dispatch is separated from Service Writer. Use the Fleet application for Fleet assignments.");
+  await getCurrentUserId();
+  await apiClient.post(`/v1/fleet/work-orders/${workOrderId}/dispatch`, {
+    technician_id: technicianId,
+    van_id: vanId ?? null,
+    override_reason: overrideReason ?? null,
+  });
 }

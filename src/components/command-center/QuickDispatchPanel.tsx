@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { assignDispatchJobRpc } from "@/application/queries/quick-dispatch.query";
+import { dispatchFleetWorkOrder } from "@/application/commands/fleet-dispatch.command";
 import { fetchActiveTechnicians } from "@/application/queries/command-center.query";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -56,14 +57,20 @@ export const QuickDispatchPanel = ({ job, onBack, onAssigned }: Props) => {
   const assign = useCallback(async (technician: TechnicianOption) => {
     setAssigning(technician.id);
     try {
-      const jobSource = job.source === "work_order" ? "work_order" : "appointment";
-      const { error } = await assignDispatchJobRpc({
-        jobSource,
-        jobId: job.id,
-        technicianId: technician.id,
-        notes: "Assigned from Service Writer Command Center",
-      });
-      if (error) throw error;
+      if (job.source === "fleet_work_order") {
+        // Fleet work orders dispatch through the fleet lifecycle, not the
+        // appointment/work-order assignment RPC.
+        await dispatchFleetWorkOrder(job.id, technician.id);
+      } else {
+        const jobSource = job.source === "work_order" ? "work_order" : "appointment";
+        const { error } = await assignDispatchJobRpc({
+          jobSource,
+          jobId: job.id,
+          technicianId: technician.id,
+          notes: "Assigned from Service Writer Command Center",
+        });
+        if (error) throw error;
+      }
       toast.success(`Assigned ${technician.name} to ${job.title}`);
       onAssigned();
     } catch (error) {
@@ -86,6 +93,7 @@ export const QuickDispatchPanel = ({ job, onBack, onAssigned }: Props) => {
               {job.customer_name || job.guest_name || "Customer"} · {job.scheduled_time?.slice(0, 5)} · {job.duration_minutes} min
             </p>
           </div>
+          {job.source === "fleet_work_order" && <Badge variant="outline">Fleet</Badge>}
           {job.source === "work_order" && <Badge variant="outline">RO</Badge>}
           {job.job_priority === "urgent" && <Badge variant="destructive">Urgent</Badge>}
         </div>

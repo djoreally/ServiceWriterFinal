@@ -99,6 +99,7 @@ export default function CommandCenter({ embedded = false }: CommandCenterProps) 
       return;
     }
     if (job.source === "appointment") navigate(`/appointments/${job.id}`);
+    else if (job.source === "fleet_work_order") navigate(`/fleet-os/work-orders/${job.id}`);
     else navigate("/services");
   };
 
@@ -158,7 +159,7 @@ export default function CommandCenter({ embedded = false }: CommandCenterProps) 
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-sm font-semibold">{job.scheduled_time?.slice(0, 5)}</span>
-                        <Badge variant="outline">{job.source === "work_order" ? "RO" : "Appointment"}</Badge>
+                        <Badge variant="outline">{job.source === "fleet_work_order" ? "Fleet" : job.source === "work_order" ? "RO" : "Appointment"}</Badge>
                         {job.job_priority === "urgent" ? <Badge variant="destructive">Urgent</Badge> : null}
                       </div>
                       <p className="mt-1 truncate font-semibold">{job.title}</p>

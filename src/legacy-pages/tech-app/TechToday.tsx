@@ -34,7 +34,7 @@ import {
   fetchTechnicianSession,
   type TechSessionJob,
 } from "@/application/queries/tech-app.query";
-import { updateTechJobDispatchStatus, sendTechnicianEtaEmail } from "@/application/commands/tech-app.command";
+import { updateTechJobDispatchStatus, startTechAppointmentJob, sendTechnicianEtaEmail } from "@/application/commands/tech-app.command";
 import { buildTechMissionBoard, getTechMissionEffectiveStatus } from "@/lib/tech-mission-board";
 import { readTechMissionBoardCache, saveTechMissionBoardCache, saveTechContextCache } from "@/lib/tech-offline-cache";
 import { buildTechDataQualityAlerts, type TechDataQualityAlert } from "@/lib/tech-data-quality";
@@ -168,15 +168,15 @@ export default function TechToday() {
 
     const today = format(new Date(), "yyyy-MM-dd");
     try {
-      // Mission Control is the retail appointment board. Fleet work orders have
-      // their own scheduler and remain isolated on the Fleet tab.
       const [session, inventoryData, notificationPrefs] = await Promise.all([
         fetchTechnicianSession(),
         fetchTechInventoryDataForCurrentUser(),
         fetchTechNotificationSettingsForCurrentUser(),
       ]);
 
-      const jobs = (session.jobs || []).filter((job) => job.job_source === "appointment").map(mapSessionJob);
+      // Mission Control shows retail appointments AND fleet work orders
+      // dispatched to this tech (job_source "fleet_work_order", is_fleet).
+      const jobs = (session.jobs || []).map(mapSessionJob);
       setAllJobs(jobs);
       setShift({ isOnShift: Boolean(session.is_on_shift), isOnBreak: Boolean(session.is_on_break) });
 
@@ -357,21 +357,25 @@ export default function TechToday() {
     }
   };
 
-  // START APPOINTMENT → same backend transition the appointment start button performs
-  // (update_dispatch_status → in_progress), guarded by the same idempotency lock.
+  // START APPOINTMENT → the canonical start endpoint (same one the
+  // appointment detail "Start Job" button uses), guarded by the server-side
+  // idempotency lock. Fleet jobs stay on the RPC path.
   const handleStartAppointment = async () => {
     if (!currentJob || actionPending) return;
     setActionPending("start");
     setActionError(null);
     try {
       if (!isStarted) {
-        const { error } = await updateTechJobDispatchStatus(
-          currentJob.id,
-          "in_progress",
-          undefined,
-          Boolean(currentJob.is_fleet),
-          { idempotencyKey: `tech_mission:${currentJob.id}:in_progress` },
-        );
+        const startOptions = { idempotencyKey: `tech_mission:${currentJob.id}:in_progress` };
+        const { error } = currentJob.is_fleet
+          ? await updateTechJobDispatchStatus(
+              currentJob.id,
+              "in_progress",
+              undefined,
+              true,
+              startOptions,
+            )
+          : await startTechAppointmentJob(currentJob.id, startOptions);
         if (error) {
           setActionError(error);
           toast.error(error);
@@ -431,13 +435,19 @@ export default function TechToday() {
       }
 
       const targetStatus = action === "arrived" ? "arrived" : "in_progress";
-      const { error } = await updateTechJobDispatchStatus(
-        currentJob.id,
-        targetStatus,
-        undefined,
-        Boolean(currentJob.is_fleet),
-        { idempotencyKey: `tech_mission:${currentJob.id}:${targetStatus}` },
-      );
+      // Starts route through the canonical start endpoint (non-fleet only);
+      // every other transition keeps the RPC path.
+      const { error } = targetStatus === "in_progress" && !currentJob.is_fleet
+        ? await startTechAppointmentJob(currentJob.id, {
+            idempotencyKey: `tech_mission:${currentJob.id}:${targetStatus}`,
+          })
+        : await updateTechJobDispatchStatus(
+            currentJob.id,
+            targetStatus,
+            undefined,
+            Boolean(currentJob.is_fleet),
+            { idempotencyKey: `tech_mission:${currentJob.id}:${targetStatus}` },
+          );
       trackTechJobTransition({
         job_id: currentJob.id,
         job_source: currentJob.is_fleet ? "fleet_work_order" : "appointment",

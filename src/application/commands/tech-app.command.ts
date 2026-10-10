@@ -154,19 +154,58 @@ const TRANSITION_ERROR_MESSAGES: Record<string, string> = {
 };
 
 function mapTransitionError(raw: string): string {
-  const code = Object.keys(TRANSITION_ERROR_MESSAGES).find((key) => raw.includes(key));
+  // RPCs raise SCREAMING_SNAKE codes (e.g. "INVALID_TRANSITION: ...") — match
+  // case-insensitively so the friendly mapping survives the trip to the client.
+  const lower = raw.toLowerCase();
+  const code = Object.keys(TRANSITION_ERROR_MESSAGES).find((key) => lower.includes(key));
   if (code) return TRANSITION_ERROR_MESSAGES[code];
-  if (raw.includes("checklist_incomplete")) {
-    const count = raw.match(/checklist_incomplete_(\d+)/)?.[1];
+  if (lower.includes("checklist_incomplete")) {
+    const count = lower.match(/checklist_incomplete_(\d+)/)?.[1];
     return `Required execution step${count === "1" ? "" : "s"} still open${count ? ` (${count})` : ""}. Finish them before completing.`;
   }
-  if (raw.includes("invalid_transition")) {
+  if (lower.includes("invalid_transition")) {
     return "That status change is not allowed from the job's current state.";
   }
-  if (raw.includes("ENFORCEMENT_ERROR")) {
-    return raw.replace(/^.*ENFORCEMENT_ERROR:\s*/, "");
+  if (lower.includes("enforcement_error")) {
+    return raw.replace(/^.*enforcement_error:\s*/i, "");
   }
   return raw;
+}
+
+/**
+ * Canonical Start Job for the tech app. Routes through
+ * POST /v1/appointments/:id/start — the same endpoint the appointment detail
+ * screen uses — which delegates the transition to start_appointment_job_v1
+ * (row-locked, confirm-on-start, idempotent). Do NOT start appointments via
+ * updateTechJobDispatchStatus: its RPC branch has different transition rules
+ * (it rejects requested -> in_progress) and is superseded for starts.
+ */
+export async function startTechAppointmentJob(
+  appointmentId: string,
+  options?: { idempotencyKey?: string },
+): Promise<{ error: string | null; alreadyStarted?: boolean; replayed?: boolean }> {
+  const authUserId = await getCurrentAuthUserId();
+  if (!authUserId) return { error: "You are signed out. Sign in and try again." };
+
+  // Stable key: repeated taps / offline replays resolve to one transition.
+  const idempotencyKey = options?.idempotencyKey ?? `tech_mission:${appointmentId}:in_progress`;
+
+  try {
+    const response = await apiClient.post<{
+      data: { already_started?: boolean; replayed?: boolean } | null;
+    }>(
+      `/v1/appointments/${encodeURIComponent(appointmentId)}/start`,
+      {},
+      { headers: { "Idempotency-Key": idempotencyKey } },
+    );
+    return {
+      error: null,
+      alreadyStarted: Boolean(response.data?.already_started),
+      replayed: Boolean(response.data?.replayed),
+    };
+  } catch (error) {
+    return { error: mapTransitionError(error instanceof Error ? error.message : "Could not start the appointment") };
+  }
 }
 
 /**
@@ -185,6 +224,20 @@ export async function updateTechJobDispatchStatus(
 ): Promise<{ error: string | null; replayed?: boolean }> {
   const authUserId = await getCurrentAuthUserId();
   if (!authUserId) return { error: "You are signed out. Sign in and try again." };
+
+  // DEPRECATED start branch — Start Job has ONE canonical path:
+  // startTechAppointmentJob above -> POST /v1/appointments/:id/start ->
+  // start_appointment_job_v1. The technician_transition_job_v1 RPC is NOT
+  // deleted (other transitions and callers still use it), but its start
+  // branch must not be reached from here: it rejects requested -> in_progress
+  // while the canonical policy confirms-on-start. Fleet jobs stay on the RPC
+  // (they live in fleet_work_orders, outside the appointments endpoint).
+  if (!isFleet && (nextStatus === "in_progress" || nextStatus === "started")) {
+    if (typeof console !== "undefined") {
+      console.warn("[tech-app] updateTechJobDispatchStatus start branch is deprecated — routing through the canonical start endpoint.");
+    }
+    return startTechAppointmentJob(jobId, { idempotencyKey: options?.idempotencyKey });
+  }
 
   const idempotencyKey = options?.idempotencyKey || buildTransitionIdempotencyKey({
     actorUserId: authUserId,

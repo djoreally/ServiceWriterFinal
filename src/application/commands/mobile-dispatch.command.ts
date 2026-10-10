@@ -24,13 +24,15 @@ export async function updateDispatchStatusRpc(appointmentId: string, status: str
       const payload = await apiClient.post<{ data?: unknown }>(
         `/v1/appointments/${encodeURIComponent(appointmentId)}/start`,
         { selected_workspace_id: workspaceId },
+        { headers: { "Idempotency-Key": `mobile-dispatch:${appointmentId}:in_progress` } },
       );
       return { data: payload.data ?? null, error: null };
     }
     if (status === "completed") {
       const payload = await apiClient.post<{ data?: unknown }>(
         `/v1/appointments/${encodeURIComponent(appointmentId)}/complete`,
-        { selected_workspace_id: workspaceId },
+        // The complete route requires workspace_id (not selected_workspace_id).
+        { workspace_id: workspaceId },
       );
       return { data: payload.data ?? null, error: null };
     }

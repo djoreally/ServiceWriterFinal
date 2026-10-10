@@ -11,7 +11,7 @@ import { buildCommandCenterBuckets } from "@/lib/command-center-filters";
 import { safeParseDate } from "@/lib/datetime";
 import { format } from "date-fns";
 
-export type OperationalJobSource = "appointment" | "work_order";
+export type OperationalJobSource = "appointment" | "work_order" | "fleet_work_order";
 
 export interface OperationalJobRow {
   job_id: string;
@@ -245,6 +245,70 @@ function workOrderJob(row: WorkOrderJobSource, assignmentByOrder: Map<string, st
   };
 }
 
+interface FleetWorkOrderJobSource {
+  id: string;
+  order_number: string | null;
+  status: string | null;
+  priority: string | null;
+  scheduled_date: string | null;
+  scheduled_time: string | null;
+  service_type: string | null;
+  description: string | null;
+  technician_notes: string | null;
+  total: number | null;
+  updated_at: string;
+  assigned_technician_id: string | null;
+  assigned_van_id: string | null;
+  fleet_clients: { company_name: string | null } | null;
+  fleet_vehicles: { year: number | null; make: string | null; model: string | null } | null;
+  fleet_locations: { name: string | null; address: string | null } | null;
+}
+
+function fleetWorkOrderJob(
+  row: FleetWorkOrderJobSource,
+  techNames: Map<string, string>,
+  workspaceId: string,
+): OperationalJobRow {
+  const client = row.fleet_clients;
+  const vehicle = row.fleet_vehicles;
+  const location = row.fleet_locations;
+  const assigned = row.assigned_technician_id ?? null;
+  return {
+    job_id: row.id,
+    user_id: workspaceId,
+    title: row.order_number ? `Fleet ${row.order_number}` : row.service_type || "Fleet work order",
+    scheduled_date: row.scheduled_date ?? "",
+    scheduled_time: row.scheduled_time ?? "",
+    status: row.status ?? "scheduled",
+    dispatch_status: assigned ? "assigned" : "unassigned",
+    canonical_state: row.status ?? "scheduled",
+    job_priority: row.priority ?? null,
+    estimated_duration_minutes: 60,
+    duration_minutes: 60,
+    assigned_technician_id: assigned,
+    assigned_technician_name: assigned ? techNames.get(assigned) ?? null : null,
+    assigned_van_id: row.assigned_van_id ?? null,
+    assigned_van_name: null,
+    assigned_at: null,
+    dispatch_notes: row.technician_notes ?? row.description ?? null,
+    guest_name: null,
+    guest_phone: null,
+    location_address: location?.address || location?.name || null,
+    location_lat: null,
+    location_lng: null,
+    estimated_cost: row.total == null ? null : Number(row.total),
+    source: "fleet_work_order",
+    customer_name: client?.company_name ?? null,
+    customer_phone: null,
+    vehicle_year: vehicle?.year ?? null,
+    vehicle_make: vehicle?.make ?? null,
+    vehicle_model: vehicle?.model ?? null,
+    service_catalog_name: row.service_type ?? null,
+    last_event_at: row.updated_at ?? null,
+    source_freshness_ms: freshnessMs(row.updated_at),
+  };
+}
+
 async function fetchCanonicalJobs(
   fromDate: string,
   toDate: string,
@@ -261,6 +325,8 @@ async function fetchCanonicalJobs(
         appointments: AppointmentJobSource[];
         work_orders: WorkOrderJobSource[];
         members: Array<{ user_id: string; profiles: { display_name: string } | Array<{ display_name: string }> | null }>;
+        fleet_work_orders?: FleetWorkOrderJobSource[];
+        technicians?: Array<{ id: string; name: string }>;
       } | null;
     }>("/v1/dispatch/operational-jobs", {
       query: { from: fromDate, to: toDate, selected_workspace_id: workspaceId },
@@ -276,6 +342,11 @@ async function fetchCanonicalJobs(
       if (name) profileNames.set(member.user_id, name);
     }
 
+    const techNames = new Map<string, string>();
+    for (const tech of payload.technicians ?? []) {
+      if (tech?.id && tech?.name) techNames.set(tech.id, tech.name);
+    }
+
     const assignmentByOrder = new Map<string, string>();
     for (const row of payload.work_orders ?? []) {
       const active = (row.work_order_assignments ?? []).find((assignment) => !assignment.unassigned_at);
@@ -285,6 +356,7 @@ async function fetchCanonicalJobs(
     const jobs = [
       ...(payload.appointments ?? []).map((row) => appointmentJob(row, profileNames, workspaceId)),
       ...(payload.work_orders ?? []).map((row) => workOrderJob(row, assignmentByOrder, profileNames, workspaceId)),
+      ...(payload.fleet_work_orders ?? []).map((row) => fleetWorkOrderJob(row, techNames, workspaceId)),
     ].sort((a, b) => `${a.scheduled_date}T${a.scheduled_time}`.localeCompare(`${b.scheduled_date}T${b.scheduled_time}`));
 
     return { data: jobs, error: null };

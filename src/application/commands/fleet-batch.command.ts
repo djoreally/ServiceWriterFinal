@@ -16,16 +16,24 @@ export interface BatchAssignPayload {
   status?: string;
 }
 
+export interface BatchAssignItemResult {
+  work_order_id: string;
+  ok: boolean;
+  error?: string;
+}
+
 /**
  * Batch assign technician and/or schedule date to multiple work orders.
+ * Each assignment runs through the validated fleet dispatch path; the
+ * response carries per-item results so partial failures are visible.
  */
 export async function batchAssignFleetWorkOrders(
   payload: BatchAssignPayload
-): Promise<{ success: number; failed: number }> {
+): Promise<{ success: number; failed: number; results?: BatchAssignItemResult[] }> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("Unauthorized");
 
-  const { data } = await apiClient.post<{ data: { success: number; failed: number } }>(
+  const { data } = await apiClient.post<{ data: { success: number; failed: number; results?: BatchAssignItemResult[] } }>(
     "/v1/fleet/work-orders/batch-assign",
     { payload },
   );
