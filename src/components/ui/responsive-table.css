@@ -1,0 +1,26 @@
+/* ResponsiveTable container queries — breakpoint belongs to the table, not the screen.
+   6 columns need 700px. Below that: cards. Same table in a desktop side panel gets cards too. */
+
+.responsive-table-container {
+  container-type: inline-size;
+  container-name: responsive-table;
+}
+
+.responsive-table-desktop {
+  display: none;
+}
+
+.responsive-table-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+@container responsive-table (min-width: 700px) {
+  .responsive-table-desktop {
+    display: block;
+  }
+  .responsive-table-cards {
+    display: none;
+  }
+}

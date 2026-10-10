@@ -7,6 +7,7 @@ import { Plus, FileText, Search, AlertCircle, TriangleAlert } from "lucide-react
 import { format, parseISO } from "date-fns";
 import { useAuth } from "@packages/auth";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
+import { ResponsiveTable, type ResponsiveColumn } from "@/components/ui/responsive-table";
 import {
   fetchInvoiceList,
   type InvoiceListRow,
@@ -123,6 +124,115 @@ export function InvoicesTab() {
   const pagedRows = usePageSlice(filteredRows, page, pageSize);
 
   const newInvoice = () => { setEditId(null); setOpen(true); };
+
+  // Column definitions ranked by use/identity/value for mobile.
+  // Priority 1 = stays on card. ID (priority 5) leaves first — nobody reads it on a phone.
+  const invoiceColumns: ResponsiveColumn<InvoiceListRow>[] = useMemo(() => [
+    {
+      key: "customer",
+      header: "Billed to",
+      priority: 1,
+      render: (r) => (
+        <>
+          <p className="font-medium truncate max-w-[220px]">{billToName(r)}</p>
+          <p className="text-xs text-muted-foreground capitalize">{r.bill_to_type}</p>
+        </>
+      ),
+      cardPrimary: (r) => billToName(r),
+    },
+    {
+      key: "balance",
+      header: "Balance",
+      priority: 2,
+      className: "text-right",
+      render: (r) => {
+        const balance = invoiceBalance(r);
+        const overdue = isInvoiceOverdue(r);
+        const owed = !SETTLED.has(r.status) && balance > 0.01;
+        return (
+          <span className={cn(
+            "font-mono tabular-nums whitespace-nowrap",
+            owed && (overdue ? "text-destructive font-semibold" : "text-amber-700 dark:text-amber-500 font-medium"),
+            !owed && "text-muted-foreground",
+          )}>
+            {owed ? formatCurrency(balance) : "—"}
+          </span>
+        );
+      },
+      // One slot for the amount: top right, tabular figures. No label needed.
+      cardAmount: (r) => {
+        const balance = invoiceBalance(r);
+        const owed = !SETTLED.has(r.status) && balance > 0.01;
+        return owed ? formatCurrency(balance) : "Paid";
+      },
+    },
+    {
+      key: "status",
+      header: "Status",
+      priority: 3,
+      render: (r) => (
+        <div className="flex items-center gap-1.5">
+          <InvoiceStatusPill status={r.status} />
+          {isInvoiceOverdue(r) && <OverduePill days={overdueDays(r)} />}
+        </div>
+      ),
+      cardMeta: (r) => [
+        <span key="s" className="flex items-center gap-1.5">
+          <InvoiceStatusPill status={r.status} />
+          {isInvoiceOverdue(r) && <OverduePill days={overdueDays(r)} />}
+        </span>,
+      ],
+    },
+    {
+      key: "due",
+      header: "Due",
+      priority: 4,
+      render: (r) => r.due_date ? (
+        <>
+          <p className="font-mono text-muted-foreground">{format(parseISO(r.due_date), "MMM d, yyyy")}</p>
+          {isInvoiceOverdue(r) && <p className="text-xs font-semibold text-destructive">Overdue {overdueDays(r)}d</p>}
+        </>
+      ) : (
+        <span className="text-muted-foreground">—</span>
+      ),
+      // Labeled: "Due Mar 4" not bare "Mar 4"
+      cardMeta: (r) => r.due_date ? [
+        <span key="d">Due {format(parseISO(r.due_date), "MMM d")}</span>,
+      ] : [],
+    },
+    {
+      key: "invoice",
+      header: "Invoice",
+      priority: 5,
+      render: (r) => (
+        <span className="font-mono text-sm font-semibold">{r.invoice_number}</span>
+      ),
+      // ID hides on card, reveals on expand
+      cardExpanded: (r) => (
+        <p className="text-sm">
+          <span className="text-muted-foreground">Invoice </span>
+          <span className="font-mono font-semibold">{r.invoice_number}</span>
+        </p>
+      ),
+    },
+    {
+      key: "total",
+      header: "Total",
+      priority: 6,
+      className: "text-right",
+      render: (r) => (
+        <span className="font-mono tabular-nums whitespace-nowrap">
+          {formatCurrency(Number(r.total))}
+        </span>
+      ),
+      cardExpanded: (r) => (
+        <p className="text-sm">
+          <span className="text-muted-foreground">Total </span>
+          <span className="font-mono tabular-nums">{formatCurrency(Number(r.total))}</span>
+        </p>
+      ),
+    },
+  ], [formatCurrency]);
 
   return (
     <div className="space-y-5">
@@ -280,33 +390,17 @@ export function InvoicesTab() {
             </Card>
           ) : (
             <>
-              {/* Desktop: ledger table. Mobile: cards below. */}
-              <Card className="hidden md:block overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b bg-muted/40 text-left">
-                      <th scope="col" className="px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Invoice</th>
-                      <th scope="col" className="px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Billed to</th>
-                      <th scope="col" className="px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Issued</th>
-                      <th scope="col" className="px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Due</th>
-                      <th scope="col" className="px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Status</th>
-                      <th scope="col" className="px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground text-right">Total</th>
-                      <th scope="col" className="px-4 py-3 text-xs font-medium uppercase tracking-wider text-muted-foreground text-right">Balance</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {pagedRows.map((r) => (
-                      <InvoiceTableRow key={r.id} row={r} onOpen={() => setViewId(r.id)} formatCurrency={formatCurrency} />
-                    ))}
-                  </tbody>
-                </table>
-              </Card>
-
-              <div className="md:hidden space-y-2">
-                {pagedRows.map((r) => (
-                  <InvoiceCard key={r.id} row={r} onOpen={() => setViewId(r.id)} formatCurrency={formatCurrency} />
-                ))}
-              </div>
+              <ResponsiveTable<InvoiceListRow>
+                columns={invoiceColumns}
+                rows={pagedRows}
+                rowKey={(r) => r.id}
+                onViewRecord={(r) => setViewId(r.id)}
+                emptyState={
+                  <p className="py-8 text-center text-sm text-muted-foreground">
+                    No invoices match.
+                  </p>
+                }
+              />
 
               <ListPagination
                 totalCount={filteredRows.length}
@@ -367,109 +461,6 @@ function KpiCard({
       <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
       <p className={cn("font-mono text-2xl font-semibold mt-1 tabular-nums", valueClassName)}>{value}</p>
       {sub && <p className="text-xs text-muted-foreground mt-1">{sub}</p>}
-    </button>
-  );
-}
-
-function InvoiceTableRow({
-  row: r,
-  onOpen,
-  formatCurrency,
-}: {
-  row: InvoiceListRow;
-  onOpen: () => void;
-  formatCurrency: (n: number) => string;
-}) {
-  const balance = invoiceBalance(r);
-  const overdue = isInvoiceOverdue(r);
-  const owed = !SETTLED.has(r.status) && balance > 0.01;
-  return (
-    <tr onClick={onOpen} className="cursor-pointer transition-colors hover:bg-muted/40">
-      <td className="px-4 py-3">
-        <span className="font-mono text-sm font-semibold">{r.invoice_number}</span>
-      </td>
-      <td className="px-4 py-3">
-        <p className="font-medium truncate max-w-[220px]">{billToName(r)}</p>
-        <p className="text-xs text-muted-foreground capitalize">{r.bill_to_type}</p>
-      </td>
-      <td className="px-4 py-3 font-mono text-muted-foreground whitespace-nowrap">
-        {format(parseISO(r.issue_date), "MMM d, yyyy")}
-      </td>
-      <td className="px-4 py-3 whitespace-nowrap">
-        {r.due_date ? (
-          <>
-            <p className="font-mono text-muted-foreground">{format(parseISO(r.due_date), "MMM d, yyyy")}</p>
-            {overdue && <p className="text-xs font-semibold text-destructive">Overdue {overdueDays(r)}d</p>}
-          </>
-        ) : (
-          <span className="text-muted-foreground">—</span>
-        )}
-      </td>
-      <td className="px-4 py-3">
-        <div className="flex items-center gap-1.5">
-          <InvoiceStatusPill status={r.status} />
-          {overdue && <OverduePill days={overdueDays(r)} />}
-        </div>
-      </td>
-      <td className="px-4 py-3 text-right font-mono tabular-nums whitespace-nowrap">
-        {formatCurrency(Number(r.total))}
-      </td>
-      <td className={cn(
-        "px-4 py-3 text-right font-mono tabular-nums whitespace-nowrap",
-        owed && (overdue ? "text-destructive font-semibold" : "text-amber-700 dark:text-amber-500 font-medium"),
-        !owed && "text-muted-foreground",
-      )}>
-        {owed ? formatCurrency(balance) : "—"}
-      </td>
-    </tr>
-  );
-}
-
-function InvoiceCard({
-  row: r,
-  onOpen,
-  formatCurrency,
-}: {
-  row: InvoiceListRow;
-  onOpen: () => void;
-  formatCurrency: (n: number) => string;
-}) {
-  const balance = invoiceBalance(r);
-  const overdue = isInvoiceOverdue(r);
-  const owed = !SETTLED.has(r.status) && balance > 0.01;
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="w-full text-left rounded-xl border bg-card p-4 space-y-2 active:bg-muted/40"
-    >
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-mono text-sm font-semibold">{r.invoice_number}</span>
-        <div className="flex items-center gap-1.5">
-          <InvoiceStatusPill status={r.status} />
-          {overdue && <OverduePill days={overdueDays(r)} />}
-        </div>
-      </div>
-      <p className="text-sm font-medium truncate">{billToName(r)}</p>
-      <p className="text-xs text-muted-foreground">
-        Issued {format(parseISO(r.issue_date), "MMM d, yyyy")}
-        {r.due_date && ` · Due ${format(parseISO(r.due_date), "MMM d, yyyy")}`}
-      </p>
-      <div className="flex items-baseline justify-between border-t pt-2">
-        <span className="text-xs uppercase tracking-wider text-muted-foreground">Total</span>
-        <span className="font-mono text-sm tabular-nums">{formatCurrency(Number(r.total))}</span>
-      </div>
-      {owed && (
-        <div className="flex items-baseline justify-between">
-          <span className="text-xs uppercase tracking-wider text-muted-foreground">Balance due</span>
-          <span className={cn(
-            "font-mono text-sm font-semibold tabular-nums",
-            overdue ? "text-destructive" : "text-amber-700 dark:text-amber-500",
-          )}>
-            {formatCurrency(balance)}
-          </span>
-        </div>
-      )}
     </button>
   );
 }
