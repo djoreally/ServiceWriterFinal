@@ -1,7 +1,6 @@
-import { CheckCircle2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { format, parse, addHours } from "date-fns";
+import { SuccessScreen } from "@/components/ui/success-state";
 import type { VehicleData } from "@/components/booking/VehicleEntry";
 import type { VehicleServiceSelection } from "@/hooks/useBookingState";
 
@@ -54,10 +53,67 @@ export function ConfirmationStep({ businessName, guestEmail, vehicles, vehicleSe
   };
 
   const emailNotice = confirmationEmailStatus === "queued"
-    ? <>A confirmation email is queued for delivery to {guestEmail}.</>
+    ? `A confirmation email is queued for delivery to ${guestEmail}.`
     : confirmationEmailStatus === "failed"
-      ? <>Your appointment is saved, but the confirmation email could not be sent. Please contact {businessName} if you need a copy.</>
-      : <>Your appointment is saved. The confirmation email is still being processed.</>;
+      ? `Your appointment is saved, but the confirmation email could not be sent. Contact ${businessName} if you need a copy.`
+      : "Your appointment is saved. The confirmation email is still being processed.";
 
-  return <div className="mx-auto max-w-lg text-center"><div className="mx-auto mb-6 w-fit rounded-md bg-success/20 p-6"><CheckCircle2 className="h-16 w-16 text-success" /></div><h1 className="mb-2 text-[30px] font-semibold leading-[1.2] tracking-[-0.01em]">{quoteRequired ? "Request received" : "Booking Confirmed!"}</h1><p className="mb-8 text-muted-foreground">{quoteRequired ? "Your preferred appointment time and detailing assessment were submitted for provider review. " : "Your appointment has been scheduled. "}{emailNotice}</p><Card><CardContent className="space-y-4 pt-6 text-left"><div className="space-y-3 rounded-lg bg-muted/50 p-4"><h3 className="font-semibold">Appointment Details</h3>{groupedDetails.map(({ vehicle, services, config }) => <div key={vehicle.id} className="rounded-md border bg-background p-3"><p className="font-medium">{vehicle.year} {vehicle.make} {vehicle.model}</p><p className="mt-1 text-sm"><span className="text-muted-foreground">Services:</span> {services.join(", ") || "None"}</p>{config.length > 0 && <div className="mt-2 space-y-1 text-xs text-muted-foreground">{config.map((item) => <p key={item}>{item}</p>)}</div>}</div>)}</div><p className="text-sm"><span className="text-muted-foreground">Date:</span> {selectedDate && format(selectedDate, "EEEE, MMMM d, yyyy")}</p><p className="text-sm"><span className="text-muted-foreground">Time:</span> {selectedTime}</p><p className="text-sm"><span className="text-muted-foreground">Location:</span> {eventLocation}</p><div className="flex items-center justify-between border-t pt-4"><span className="font-semibold">{quoteRequired ? "Starting estimate" : "Total"}</span><span className="text-xl font-bold text-primary">{formatCurrency(getGrandTotal())}</span></div>{quoteRequired && <p className="text-sm text-amber-700">The provider will review the condition and site details, then confirm the final scope and price before work begins.</p>}{paymentChoice === "pay_later" && <p className="text-center text-sm text-muted-foreground">Payment will be collected at the time of service</p>}</CardContent></Card>{calData && <div className="mt-6 space-y-3"><p className="text-sm font-medium text-muted-foreground">Add to your calendar</p><div className="flex flex-col justify-center gap-3 sm:flex-row"><Button variant="outline" className="border-[#4285F4] text-[#4285F4] hover:bg-[#4285F4]/10 hover:text-[#4285F4]" onClick={() => window.open(googleUrl!, "_blank")}>Google Calendar</Button><Button variant="outline" onClick={handleAppleCalendar}>Apple Calendar</Button></div></div>}</div>;
+  // Specifics are proof: vague "Booking confirmed!" feels like a maybe.
+  const whenStr = selectedDate ? format(selectedDate, "EEEE, MMMM d") : "";
+  const headline = quoteRequired
+    ? "Request received"
+    : `${vehicleInfo || "Appointment"} booked for ${whenStr} at ${selectedTime}`;
+  const detail = quoteRequired
+    ? `Your preferred time and detailing assessment were submitted for provider review. ${emailNotice}`
+    : `${emailNotice}${paymentChoice === "pay_later" ? " Payment will be collected at the time of service." : ""}`;
+
+  const actions: { label: string; variant: "outline"; onClick: () => void }[] = [];
+  if (calData && googleUrl) {
+    actions.push({
+      label: "Google Calendar",
+      variant: "outline",
+      onClick: () => window.open(googleUrl, "_blank"),
+    });
+  }
+  if (calData) {
+    actions.push({
+      label: "Apple Calendar",
+      variant: "outline",
+      onClick: handleAppleCalendar,
+    });
+  }
+
+  return (
+    <div className="mx-auto max-w-lg">
+      <SuccessScreen headline={headline} detail={detail} actions={actions} />
+      <Card className="mt-2">
+        <CardContent className="space-y-4 pt-6 text-left">
+          <div className="space-y-3 rounded-lg bg-muted/50 p-4">
+            <h3 className="font-semibold">Appointment Details</h3>
+            {groupedDetails.map(({ vehicle, services, config }) => (
+              <div key={vehicle.id} className="rounded-md border bg-background p-3">
+                <p className="font-medium">{vehicle.year} {vehicle.make} {vehicle.model}</p>
+                <p className="mt-1 text-sm"><span className="text-muted-foreground">Services:</span> {services.join(", ") || "None"}</p>
+                {config.length > 0 && (
+                  <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                    {config.map((item) => <p key={item}>{item}</p>)}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <p className="text-sm"><span className="text-muted-foreground">Date:</span> {selectedDate && format(selectedDate, "EEEE, MMMM d, yyyy")}</p>
+          <p className="text-sm"><span className="text-muted-foreground">Time:</span> {selectedTime}</p>
+          <p className="text-sm"><span className="text-muted-foreground">Location:</span> {eventLocation}</p>
+          <div className="flex items-center justify-between border-t pt-4">
+            <span className="font-semibold">{quoteRequired ? "Starting estimate" : "Total"}</span>
+            <span className="type-tabular text-xl font-bold text-primary">{formatCurrency(getGrandTotal())}</span>
+          </div>
+          {quoteRequired && (
+            <p className="text-sm text-amber-700">The provider will review the condition and site details, then confirm the final scope and price before work begins.</p>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
