@@ -30,6 +30,21 @@ import {
   subDays,
 } from "date-fns";
 import { getSemanticStatus } from "@/lib/semantic-status";
+import { WeekView, type WeekEvent } from "@/components/calendar/week-view";
+
+/** Tailwind palette -> hex for the week-view color stripe. */
+const PALETTE_HEX: Record<string, string> = {
+  blue: "#3b82f6",
+  cyan: "#06b6d4",
+  indigo: "#6366f1",
+  amber: "#f59e0b",
+  orange: "#f97316",
+  yellow: "#eab308",
+  emerald: "#10b981",
+  green: "#22c55e",
+  red: "#ef4444",
+  gray: "#6b7280",
+};
 
 export interface CalendarAppointment {
   id: string;
@@ -414,18 +429,44 @@ export const CalendarView = ({
     );
   };
 
-  const renderWeekView = () => (
-    <div className="overflow-hidden rounded-lg border border-border/70">
-      <div className="max-h-[600px] overflow-auto">
-        {/* Sticky day header */}
-        <div className="grid grid-cols-[64px_repeat(7,minmax(0,1fr))] border-b border-border/70 bg-background sticky top-0 z-10">
-          <div className="shrink-0" />
+  const renderWeekView = () => {
+    const ws = startOfWeek(currentDate, { weekStartsOn: 1 });
+    const toWeekEvent = (a: CalendarAppointment): WeekEvent => {
+      const [h, m] = a.scheduled_time.slice(0, 5).split(":").map(Number);
+      const start = new Date(`${a.scheduled_date}T00:00:00`);
+      start.setHours(Number.isFinite(h) ? h : 0, Number.isFinite(m) ? m : 0, 0, 0);
+      const end = new Date(start.getTime() + (a.duration_minutes || 60) * 60000);
+      const dot = getSemanticStatus("appointment", a.status).dotClass;
+      const palette = dot.match(/bg-([a-z]+)-500/)?.[1] ?? "gray";
+      return {
+        id: a.id,
+        title: a.title,
+        start,
+        end,
+        calendarColor: PALETTE_HEX[palette] ?? PALETTE_HEX.gray,
+      };
+    };
+    const weekEvents = days.flatMap((d) => getAppointmentsForDay(d)).map(toWeekEvent);
+
+    return (
+      <div className="overflow-hidden rounded-lg border border-border/70">
+        {/* Sticky day header — day names stay while hours scroll */}
+        <div
+          className="grid border-b border-border/70 bg-background"
+          style={{ gridTemplateColumns: "48px repeat(7, 1fr)" }}
+        >
+          <div />
           {days.map((day) => {
             const today = isToday(day);
             const isWorking = isWorkingDay(day);
             return (
-              <div key={day.toISOString()} className={cn("border-l border-border/60 px-2 py-2 text-center", !isWorking && "bg-muted/30")}>
-                <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{format(day, "EEE")}</div>
+              <div
+                key={day.toISOString()}
+                className={cn("border-l border-border/60 px-2 py-2 text-center", !isWorking && "bg-muted/30")}
+              >
+                <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  {format(day, "EEE")}
+                </div>
                 <div
                   className={cn(
                     "mx-auto mt-0.5 flex h-8 w-8 items-center justify-center rounded-full text-lg font-semibold",
@@ -438,59 +479,22 @@ export const CalendarView = ({
             );
           })}
         </div>
-        {timeSlots.map((time) => {
-          const isHour = time.endsWith(":00");
-          return (
-            <div
-              key={time}
-              className={cn("grid grid-cols-[64px_repeat(7,minmax(0,1fr))]", isHour ? "border-t border-border/70" : "border-t border-dashed border-border/40")}
-            >
-              <div className="flex items-start justify-end py-1.5 pr-2">
-                {isHour ? (
-                  <span className="font-mono text-xs text-muted-foreground">{time}</span>
-                ) : (
-                  <span className="mt-1.5 h-1 w-1 rounded-full bg-border" aria-hidden="true" />
-                )}
-              </div>
-              {days.map((day) => {
-                const slotAppointments = getAppointmentsForSlot(day, time);
-                const isWorking = isWorkingDay(day);
-                return (
-                  <div
-                    key={`${day.toISOString()}-${time}`}
-                    role="button"
-                    tabIndex={isWorking ? 0 : -1}
-                    aria-label={isWorking ? `Book appointment ${format(day, "EEE MMM d")} at ${time}` : `${format(day, "EEE")} ${time}, outside business hours`}
-                    aria-disabled={!isWorking}
-                    className={cn(
-                      "min-h-[44px] border-l border-border/60 p-1",
-                      isWorking ? "cursor-pointer hover:bg-white/[0.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary" : "cursor-not-allowed bg-muted/20",
-                      isToday(day) && "bg-primary/[0.04]",
-                    )}
-                    onClick={() => isWorking && onSlotClick(day, time)}
-                    onKeyDown={(e) => {
-                      if ((e.key === "Enter" || e.key === " ") && isWorking) {
-                        e.preventDefault();
-                        onSlotClick(day, time);
-                      }
-                    }}
-                    onDragOver={handleDragOver}
-                    onDrop={(e) => handleDrop(e, day, time)}
-                  >
-                    {slotAppointments.length > 0 && (
-                      <div className="space-y-1">
-                        {slotAppointments.map((a) => renderAppointmentBlock(a, true))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })}
+        <WeekView
+          weekStart={ws}
+          events={weekEvents}
+          onEventClick={(e) => {
+            const a = appointments.find((x) => x.id === e.id);
+            if (a) onAppointmentClick(a);
+          }}
+          onCreateEvent={(start) => onSlotClick(start, format(start, "HH:mm"))}
+          onMoveEvent={(e, newStart) =>
+            onDrop(e.id, format(newStart, "yyyy-MM-dd"), format(newStart, "HH:mm"))
+          }
+          className="h-[600px]"
+        />
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderSkeleton = () => (
     <div className="space-y-2" aria-busy="true" aria-label="Loading schedule">
