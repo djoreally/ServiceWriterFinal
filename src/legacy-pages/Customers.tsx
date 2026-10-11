@@ -20,14 +20,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   Plus,
   Search,
   SearchX,
@@ -55,6 +47,8 @@ import { createCustomer, updateCustomer, deleteCustomer } from "@/application/co
 import { fetchCustomerOverviewFromNextApi } from "@/application/queries/customers.query";
 import { useWorkspaceSelection } from "@/hooks/useWorkspaceSelection";
 import { ListPagination, usePageSlice, DEFAULT_PAGE_SIZE } from "@/components/ui/list-pagination";
+import { ResponsiveTable, type ResponsiveColumn } from "@/components/ui/responsive-table";
+import { useRowSelection } from "@/components/ui/row-selection";
 
 interface Customer {
   id: string;
@@ -375,6 +369,7 @@ const Customers = () => {
   useEffect(() => { void Promise.resolve().then(() => setPage(1)); }, [debouncedSearchQuery, pageSize]);
   const pagedCustomers = usePageSlice(filteredCustomers, page, pageSize);
 
+
   // Slim KPI strip data — derived from the same overview fetch, no extra queries.
   const totalVehicles = useMemo(
     () => Object.values(vehicleCounts).reduce((a, b) => a + b, 0),
@@ -390,6 +385,110 @@ const Customers = () => {
     lastServiceDates[customerId]
       ? formatDateLabel(lastServiceDates[customerId], "MMM dd, yyyy")
       : "—";
+
+  // Bulk selection: tri-state header, shift-range, live count, survives pagination.
+  const selection = useRowSelection<Customer>({
+    allRows: filteredCustomers,
+    rowKey: (c) => c.id,
+  });
+
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const handleBulkDelete = async () => {
+    const ids = [...selection.selectedKeys];
+    if (ids.length === 0 || bulkDeleting) return;
+    setBulkDeleting(true);
+    let deleted = 0;
+    for (const id of ids) {
+      try {
+        await deleteCustomer(id);
+        deleted++;
+      } catch {
+        // Continue with the rest; report the count that succeeded.
+      }
+    }
+    selection.clear();
+    setBulkDeleting(false);
+    fetchCustomers();
+    toast.success(`Deleted ${deleted} ${terms.customer.toLowerCase()}${deleted === 1 ? "" : "s"}`);
+  };
+
+  const customerColumns: ResponsiveColumn<Customer>[] = [
+    {
+      key: "customer",
+      header: terms.customer,
+      priority: 1,
+      pinned: true,
+      render: (c) => (
+        <div className="flex items-center gap-3">
+          <Avatar className="h-8 w-8">
+            <AvatarFallback className="bg-primary/10 text-sm text-primary">
+              {getInitials(c.name)}
+            </AvatarFallback>
+          </Avatar>
+          <div className="min-w-0">
+            <span className="block truncate text-sm font-medium text-foreground">{c.name}</span>
+            {c.email && (
+              <span className="block truncate" onClick={(e) => e.stopPropagation()}>
+                <ClickableEmail email={c.email} showIcon={false} className="text-sm font-normal" />
+              </span>
+            )}
+          </div>
+        </div>
+      ),
+      cardPrimary: (c) => c.name,
+      cardMeta: (c) => [
+        c.phone ? (
+          <span key="p" onClick={(e) => e.stopPropagation()}>
+            <ClickablePhone phone={c.phone} showIcon={false} className="font-mono text-sm" />
+          </span>
+        ) : null,
+        <Badge key="v" variant="outline" className="font-normal">{vehicleLabel(c.id)}</Badge>,
+        <span key="s" className="text-muted-foreground">
+          Last {terms.service.toLowerCase()}: {lastServiceLabel(c.id)}
+        </span>,
+      ],
+      cardExpanded: (c) => (
+        <div className="space-y-1 text-sm">
+          <p>
+            <span className="text-muted-foreground">ID </span>
+            <span className="font-mono">{c.id.slice(0, 8)}</span>
+          </p>
+          {c.address && <p>{c.address}</p>}
+          {c.notes && <p className="text-muted-foreground">{c.notes}</p>}
+        </div>
+      ),
+    },
+    {
+      key: "phone",
+      header: "Phone",
+      priority: 2,
+      render: (c) => (
+        <span onClick={(e) => e.stopPropagation()}>
+          {c.phone ? (
+            <ClickablePhone phone={c.phone} showIcon={false} className="font-mono text-sm text-foreground hover:text-primary" />
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          )}
+        </span>
+      ),
+    },
+    {
+      key: "vehicles",
+      header: `${terms.vehicle}s`,
+      priority: 3,
+      render: (c) => (
+        <Badge variant="outline" className="font-normal">{vehicleLabel(c.id)}</Badge>
+      ),
+    },
+    {
+      key: "last-service",
+      header: `Last ${terms.service}`,
+      priority: 4,
+      render: (c) => (
+        <span className="text-muted-foreground">{lastServiceLabel(c.id)}</span>
+      ),
+    },
+  ];
 
   const emptyState = (
     <CustomersEmptyState
@@ -516,192 +615,60 @@ const Customers = () => {
           </div>
         </div>
 
-        {/* Directory — one panel: desktop table, mobile cards */}
-        <Card density="compact" className="border-border/50">
-          <CardContent className="p-0">
-            <div className="hidden overflow-x-auto md:block">
-              <Table density="compact">
-                <TableHeader>
-                  <TableRow className="border-border/50">
-                    <TableHead className="text-xs font-medium uppercase tracking-wider">{terms.customer}</TableHead>
-                    <TableHead className="text-xs font-medium uppercase tracking-wider">Phone</TableHead>
-                    <TableHead className="text-xs font-medium uppercase tracking-wider">{terms.vehicle}s</TableHead>
-                    <TableHead className="text-xs font-medium uppercase tracking-wider">Last {terms.service}</TableHead>
-                    <TableHead className="w-12">
-                      <span className="sr-only">Actions</span>
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {customersLoading ? (
-                    Array.from({ length: 6 }).map((_, idx) => (
-                      <TableRow key={`skeleton-${idx}`} className="border-border/50">
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            <Skeleton className="h-8 w-8 rounded-full" />
-                            <div className="space-y-1.5">
-                              <Skeleton className="h-4 w-32" />
-                              <Skeleton className="h-3 w-24" />
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell><Skeleton className="h-4 w-28" /></TableCell>
-                        <TableCell><Skeleton className="h-6 w-20 rounded-full" /></TableCell>
-                        <TableCell><Skeleton className="h-4 w-24" /></TableCell>
-                        <TableCell><Skeleton className="h-8 w-8 rounded-md" /></TableCell>
-                      </TableRow>
-                    ))
-                  ) : customersError ? (
-                    <TableRow>
-                      <TableCell colSpan={5}>{errorState}</TableCell>
-                    </TableRow>
-                  ) : filteredCustomers.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={5}>{emptyState}</TableCell>
-                    </TableRow>
-                  ) : (
-                    pagedCustomers.map((customer) => (
-                      <TableRow
-                        key={customer.id}
-                        className="cursor-pointer border-border/50 transition-colors hover:bg-muted/40"
-                        onClick={() => navigate(`/customers/${customer.id}`)}
-                      >
-                        <TableCell>
-                          <div className="flex items-center gap-3">
-                            <Avatar className="h-8 w-8">
-                              <AvatarFallback className="bg-primary/10 text-sm text-primary">
-                                {getInitials(customer.name)}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div className="min-w-0">
-                              <button
-                                type="button"
-                                onClick={(e) => { e.stopPropagation(); navigate(`/customers/${customer.id}`); }}
-                                className="block max-w-full truncate text-left text-sm font-medium text-foreground hover:underline"
-                              >
-                                {customer.name}
-                              </button>
-                              {customer.email && (
-                                <span className="block truncate" onClick={(e) => e.stopPropagation()}>
-                                  <ClickableEmail email={customer.email} showIcon={false} className="text-sm font-normal" />
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell onClick={(e) => e.stopPropagation()}>
-                          {customer.phone ? (
-                            <ClickablePhone
-                              phone={customer.phone}
-                              showIcon={false}
-                              className="font-mono text-sm font-normal text-foreground hover:text-primary"
-                            />
-                          ) : (
-                            <span className="text-sm text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="font-normal">
-                            {vehicleLabel(customer.id)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {lastServiceLabel(customer.id)}
-                        </TableCell>
-                        <TableCell onClick={(e) => e.stopPropagation()}>
-                          <CustomerRowActions
-                            customer={customer}
-                            onView={(id) => navigate(`/customers/${id}`)}
-                            onEdit={openEditDialog}
-                            onDelete={handleDelete}
-                          />
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-
-            {/* Mobile: same data as stacked cards */}
-            <div className="space-y-2 p-3 md:hidden">
-              {customersLoading ? (
-                Array.from({ length: 4 }).map((_, idx) => (
-                  <div key={`m-skeleton-${idx}`} className="rounded-lg border border-border/50 p-4">
-                    <div className="flex items-center gap-3">
-                      <Skeleton className="h-10 w-10 rounded-full" />
-                      <div className="flex-1 space-y-1.5">
-                        <Skeleton className="h-4 w-2/3" />
-                        <Skeleton className="h-3 w-1/2" />
-                      </div>
-                    </div>
-                    <Skeleton className="mt-3 h-4 w-1/2" />
-                  </div>
-                ))
-              ) : customersError ? (
-                <div className="rounded-lg border border-border/50">{errorState}</div>
-              ) : filteredCustomers.length === 0 ? (
-                <div className="rounded-lg border border-border/50">{emptyState}</div>
-              ) : (
-                pagedCustomers.map((customer) => (
-                  <div
-                    key={customer.id}
-                    className="rounded-lg border border-border/50 p-4 transition-colors active:bg-muted/40"
-                    onClick={() => navigate(`/customers/${customer.id}`)}
+        {/* Directory — container-query table; cards below 700px */}
+        {customersLoading ? (
+          <Card className="border-border/50">
+            <CardContent className="space-y-2 p-4">
+              {Array.from({ length: 6 }).map((_, idx) => (
+                <div key={`skeleton-${idx}`} className="flex items-center gap-3">
+                  <Skeleton className="h-8 w-8 rounded-full" />
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-4 w-28" />
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        ) : customersError ? (
+          <Card className="border-border/50"><CardContent>{errorState}</CardContent></Card>
+        ) : (
+          <>
+            {selection.selectedCount > 0 && (
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-primary/30 bg-primary/5 px-4 py-2.5">
+                <p className="text-sm font-medium">
+                  {selection.selectedCount} selected
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button variant="ghost" size="sm" onClick={selection.clear}>
+                    Clear
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    disabled={bulkDeleting}
+                    onClick={() => void handleBulkDelete()}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex min-w-0 items-center gap-3">
-                        <Avatar className="h-10 w-10">
-                          <AvatarFallback className="bg-primary/10 text-sm text-primary">
-                            {getInitials(customer.name)}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div className="min-w-0">
-                          <button
-                            type="button"
-                            onClick={(e) => { e.stopPropagation(); navigate(`/customers/${customer.id}`); }}
-                            className="block max-w-full truncate text-left text-sm font-medium text-foreground"
-                          >
-                            {customer.name}
-                          </button>
-                          {customer.email && (
-                            <span className="block truncate" onClick={(e) => e.stopPropagation()}>
-                              <ClickableEmail email={customer.email} showIcon={false} className="text-sm font-normal" />
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <span onClick={(e) => e.stopPropagation()}>
-                        <CustomerRowActions
-                          customer={customer}
-                          onView={(id) => navigate(`/customers/${id}`)}
-                          onEdit={openEditDialog}
-                          onDelete={handleDelete}
-                        />
-                      </span>
-                    </div>
-                    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                      {customer.phone && (
-                        <span onClick={(e) => e.stopPropagation()}>
-                          <ClickablePhone
-                            phone={customer.phone}
-                            showIcon={false}
-                            className="font-mono text-sm font-normal text-foreground hover:text-primary"
-                          />
-                        </span>
-                      )}
-                      <Badge variant="outline" className="font-normal">
-                        {vehicleLabel(customer.id)}
-                      </Badge>
-                      <span className="text-xs text-muted-foreground">
-                        Last {terms.service.toLowerCase()}: {lastServiceLabel(customer.id)}
-                      </span>
-                    </div>
-                  </div>
-                ))
+                    {bulkDeleting ? "Deleting…" : `Delete ${selection.selectedCount}`}
+                  </Button>
+                </div>
+              </div>
+            )}
+            <ResponsiveTable<Customer>
+              columns={customerColumns}
+              rows={pagedCustomers}
+              rowKey={(c) => c.id}
+              density="compact"
+              selection={selection}
+              onViewRecord={(c) => navigate(`/customers/${c.id}`)}
+              rowActions={(c) => (
+                <CustomerRowActions
+                  customer={c}
+                  onView={(id) => navigate(`/customers/${id}`)}
+                  onEdit={openEditDialog}
+                  onDelete={handleDelete}
+                />
               )}
-            </div>
-
+              emptyState={emptyState}
+            />
             <ListPagination
               totalCount={filteredCustomers.length}
               page={page}
@@ -710,8 +677,8 @@ const Customers = () => {
               onPageSizeChange={setPageSize}
               itemLabel={`${terms.customer.toLowerCase()}s`}
             />
-          </CardContent>
-        </Card>
+          </>
+        )}
       </div>
       </PullToRefreshContainer>
 
