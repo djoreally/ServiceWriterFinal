@@ -15,6 +15,7 @@ import { MobileAppointmentCard } from './MobileAppointmentCard';
 import { DayCalendarView } from './DayCalendarView';
 import type { ScheduleResource } from '@/components/schedule/CurbeeScheduleBoard';
 import { Button } from '@/components/ui/button';
+import { SegmentedControl } from '@/components/ui/setting-controls';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -317,32 +318,18 @@ export const MobileAppointmentView = ({
         </div>
       </div>
 
-      {/* View Toggle */}
-      <div className="shrink-0 overflow-x-auto bg-card/20 p-2">
-        <div className="grid min-w-[18rem] grid-cols-3 gap-2 rounded-md border border-border/30 bg-muted/30 p-1">
-          <Button
-            variant={viewMode === 'list' ? 'default' : 'ghost'}
-            onClick={() => setViewMode('list')}
-            className="min-w-0 rounded-md px-2"
-          >
-            List
-          </Button>
-          <Button
-            variant={viewMode === 'calendar' ? 'default' : 'ghost'}
-            onClick={() => setViewMode('calendar')}
-            className="min-w-0 rounded-md px-2"
-          >
-            Day
-          </Button>
-          <Button
-            variant={viewMode === 'month' ? 'default' : 'ghost'}
-            onClick={() => setViewMode('month')}
-            className="min-w-0 rounded-md px-2"
-          >
-            <Calendar className="h-4 w-4 mr-1" />
-            Month
-          </Button>
-        </div>
+      {/* View Toggle — 3 exclusive options, one tap, always in view */}
+      <div className="shrink-0 bg-card/20 p-2">
+        <SegmentedControl
+          label="Appointment view"
+          value={viewMode}
+          onChange={setViewMode}
+          options={[
+            { value: "list", label: "List" },
+            { value: "calendar", label: "Day" },
+            { value: "month", label: "Month" },
+          ]}
+        />
       </div>
       
       {viewMode === 'list' && (
