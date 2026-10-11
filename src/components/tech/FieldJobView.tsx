@@ -12,18 +12,16 @@
  */
 
 import { errorMessage } from "@/lib/error-message";
-import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { CommitButton } from "@/components/ui/commit-button";
 import {
   Navigation,
   MapPin,
   Play,
   CheckCircle2,
   Clock,
-  Loader2,
   Phone,
   ChevronRight,
-  AlertTriangle,
   Wrench,
   Car,
 } from "lucide-react";
@@ -79,8 +77,6 @@ export function FieldJobView({
   onStatusChange,
   onNextJob,
 }: FieldJobViewProps) {
-  const [transitioning, setTransitioning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const { transitionToEnRoute, transitionToArrived, transitionToInProgress } =
     useRealTimeTechStatus(technician_id);
 
@@ -111,29 +107,27 @@ export function FieldJobView({
     }
   };
 
-  const doTransition = async () => {
-    if (transitioning) return;
-    setTransitioning(true);
-    setError(null);
-    try {
-      let location: { lat: number; lng: number } | undefined;
-      if (status === "assigned" || status === "en_route") {
-        try {
-          location = await getLocation();
-        } catch {
-          // Proceed without location — don't block the tech
-        }
+  /**
+   * CommitButton-compatible: throws on failure so the error renders on the
+   * button itself (tap to retry). The button disables instantly on tap —
+   * a slow network never fires two transitions.
+   */
+  const commitTransition = async (_idempotencyKey: string) => {
+    let location: { lat: number; lng: number } | undefined;
+    if (status === "assigned" || status === "en_route") {
+      try {
+        location = await getLocation();
+      } catch {
+        // Proceed without location — don't block the tech
       }
+    }
+    try {
       if (status === "assigned") await transitionToEnRoute(appointment.id, location);
       else if (status === "en_route") await transitionToArrived(appointment.id, location);
       else if (status === "arrived") await transitionToInProgress(appointment.id);
       onStatusChange?.();
     } catch (err: unknown) {
-      const msg = errorMessage(err, "Couldn't update status. Try again.");
-      setError(msg);
-      toast.error(msg);
-    } finally {
-      setTransitioning(false);
+      throw new Error(errorMessage(err, "Couldn't update status. Try again."));
     }
   };
 
@@ -234,24 +228,6 @@ export function FieldJobView({
           </div>
         )}
 
-        {/* Error — plain language, retry */}
-        {error && (
-          <div
-            role="alert"
-            className="flex items-start gap-3 rounded-xl border border-red-400/40 bg-red-500/10 p-4"
-          >
-            <AlertTriangle className="h-6 w-6 shrink-0 text-red-300" />
-            <div className="flex-1">
-              <p className="text-base font-medium text-red-100">{error}</p>
-              <button
-                onClick={doTransition}
-                className="mt-2 text-base font-semibold text-red-200 underline underline-offset-4"
-              >
-                Try again
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Secondary actions — call customer (thumb-reachable, not primary) */}
@@ -270,19 +246,14 @@ export function FieldJobView({
       {/* Primary action — bottom-anchored thumb zone, 72px minimum */}
       <div className="sticky bottom-0 border-t border-white/10 bg-black/80 px-5 py-4 backdrop-blur">
         {primaryAction && status !== "completed" ? (
-          <Button
-            onClick={doTransition}
-            disabled={transitioning}
+          <CommitButton
+            onCommit={commitTransition}
             className="h-[72px] w-full text-xl font-semibold"
             data-testid="field-job-primary-action"
           >
-            {transitioning ? (
-              <Loader2 className="mr-3 h-6 w-6 animate-spin" />
-            ) : (
-              <PrimaryIcon className="mr-3 h-6 w-6" />
-            )}
-            {transitioning ? "Working…" : primaryAction.label}
-          </Button>
+            <PrimaryIcon className="mr-3 h-6 w-6" />
+            {primaryAction.label}
+          </CommitButton>
         ) : (
           <Button
             onClick={onNextJob}

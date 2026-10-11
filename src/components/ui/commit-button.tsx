@@ -28,6 +28,8 @@ interface CommitButtonProps {
   size?: "default" | "sm" | "lg" | "icon";
   className?: string;
   disabled?: boolean;
+  /** Testing hook passthrough. */
+  "data-testid"?: string;
 }
 
 const SUCCESS_BEAT_MS = 1000;
@@ -40,6 +42,7 @@ export function CommitButton({
   size = "default",
   className,
   disabled = false,
+  "data-testid": testId,
 }: CommitButtonProps) {
   const [state, setState] = useState<CommitState>("idle");
   const [errorMsg, setErrorMsg] = useState<string>("");
@@ -90,6 +93,7 @@ export function CommitButton({
       size={size}
       disabled={disabled || state === "pending" || state === "success"}
       onClick={handleRetryTap}
+      data-testid={testId}
       className={cn(
         "min-w-[120px] min-h-[44px] relative",
         state === "error" && "min-w-[200px]",
