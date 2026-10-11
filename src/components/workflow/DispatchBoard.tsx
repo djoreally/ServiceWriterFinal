@@ -28,6 +28,7 @@ import {
   unassignAppointment,
 } from "@/application/commands";
 import { validateAssignment } from "@/lib/dispatch-guardrails";
+import { CommitButton } from "@/components/ui/commit-button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CalendarView, type CalendarAppointment } from "@/components/appointments/CalendarView";
@@ -587,8 +588,13 @@ export function DispatchBoard() {
 
   // ── Assign dialog ──────────────────────────────────────────────────────────
 
-  const handleAssignJob = async () => {
-    if (!selectedJob || !selectedTech) return;
+  /**
+   * CommitButton-compatible assign: throws on failure so the error renders
+   * on the button. Idempotency key accepted for future server support —
+   * the API has no dedupe endpoint yet.
+   */
+  const commitAssignJob = async (_idempotencyKey: string) => {
+    if (!selectedJob || !selectedTech) throw new Error("Pick a technician first.");
     setAssigning(true);
     try {
       // ── Guardrail: validate before assigning ──
@@ -601,9 +607,7 @@ export function DispatchBoard() {
       );
 
       if (!validation.valid) {
-        toast.error(validation.errors[0] || "Cannot assign job");
-        setAssigning(false);
-        return;
+        throw new Error(validation.errors[0] || "Cannot assign job");
       }
 
       if (validation.warnings.length > 0) {
@@ -612,18 +616,22 @@ export function DispatchBoard() {
 
       await assignTechnician(selectedJob.id, selectedTech, dispatchNotes || null);
       await sendTechnicianAssignmentEmail(selectedJob, selectedTech);
-
-      toast.success("Job assigned successfully");
-      setAssignDialogOpen(false);
-      setSelectedJob(null);
-      setSelectedTech("");
-      setDispatchNotes("");
-      fetchData();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to assign job");
     } finally {
       setAssigning(false);
     }
+  };
+
+  const handleAssignSuccess = () => {
+    const techName = technicians.find(t => t.id === selectedTech)?.name || "technician";
+    const jobLabel = selectedJob?.service_catalog?.name || selectedJob?.title || "Job";
+    toast.success(`Assigned to ${techName}`, {
+      description: `${jobLabel} — ${selectedJob ? formatTime(selectedJob.scheduled_time.substring(0, 5)) : ""}`,
+    });
+    setAssignDialogOpen(false);
+    setSelectedJob(null);
+    setSelectedTech("");
+    setDispatchNotes("");
+    fetchData();
   };
 
   const openAssignDialog = (job: Job) => {
@@ -1180,18 +1188,15 @@ export function DispatchBoard() {
                   Unassign
                 </Button>
               )}
-              <Button
-                onClick={handleAssignJob}
-                disabled={!selectedTech || assigning || unassigning}
+              <CommitButton
+                onCommit={commitAssignJob}
+                onSuccess={handleAssignSuccess}
+                disabled={!selectedTech || unassigning}
                 className="flex-1 gap-2"
               >
-                {assigning ? (
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
+                <Send className="h-4 w-4" />
                 Assign
-              </Button>
+              </CommitButton>
             </div>
           </div>
         </DialogContent>
