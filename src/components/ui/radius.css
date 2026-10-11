@@ -1,0 +1,56 @@
+/**
+ * Corners are a system.
+ *
+ * CONCENTRIC: same radius inside and out looks off — the inner bulges.
+ *   inner = outer - padding. 12 outside, 8 padding, 4 inside.
+ *
+ * SCALE: radius follows size. One scale, every element on it.
+ *   small 4 / medium 8 / large 16.
+ *   A chip and a modal don't share a corner.
+ *
+ * PILL IS A SHAPE, not a number. One line: chips, avatars, toggles.
+ *   Multi-line gets a real number — on a card the pill swallows content.
+ *
+ * BOTTOM SHEET: top corners round, bottom hits zero.
+ *   A corner means space beyond it. Touching an edge: no corner.
+ *
+ * SELECTION RING: drawn as its own box, 2px out. Inherit the radius
+ *   or the corners pinch. outer = inner + gap.
+ *
+ * IMAGES: edge-to-edge image in a rounded card — let the card clip it
+ *   (overflow hidden), square corners poke through otherwise.
+ *   Inset image: subtract the padding. Same concentric rule.
+ */
+
+:root {
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 16px;
+  --radius-pill: 9999px;
+}
+
+.radius-sm { border-radius: var(--radius-sm); }
+.radius-md { border-radius: var(--radius-md); }
+.radius-lg { border-radius: var(--radius-lg); }
+.radius-pill { border-radius: var(--radius-pill); }
+
+/* Concentric: inner = outer - padding */
+.radius-concentric-sm { border-radius: calc(var(--radius-md) - 4px); }
+.radius-concentric-md { border-radius: calc(var(--radius-lg) - 8px); }
+
+/* Bottom sheet: top rounds, bottom zero */
+.radius-sheet {
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+/* Selection ring: own box, 2px out, inherits radius */
+.ring-select {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Card that clips edge-to-edge images */
+.card-clip {
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+}
