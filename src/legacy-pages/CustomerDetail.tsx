@@ -15,6 +15,8 @@ import { useTerminology } from "@/contexts/TerminologyContext";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import ServiceInvoice from "@/components/ServiceInvoice";
 import { ClickablePhone, ClickableEmail } from "@/components/ui/clickable-contact";
+import { InlineEdit } from "@/components/ui/inline-edit";
+import { updateCustomer } from "@/application/commands";
 import { VehiclePartsManager } from "@/components/parts/VehiclePartsManager";
 
 interface Customer {
@@ -226,7 +228,22 @@ const CustomerDetail = () => {
               </Avatar>
               <div className="flex-1 space-y-4">
                 <div>
-                  <h2 className="text-2xl font-bold">{customer.name}</h2>
+                  <InlineEdit
+                    value={customer.name}
+                    label="Customer name"
+                    onSave={async (next) => {
+                      await updateCustomer(customer.id, {
+                        name: next,
+                        email: customer.email,
+                        phone: customer.phone,
+                        address: customer.address ?? null,
+                        notes: customer.notes ?? null,
+                      });
+                      fetchCustomerData();
+                    }}
+                    inputClassName="text-2xl font-bold"
+                    className="text-2xl font-bold"
+                  />
                   <p className="text-muted-foreground">
                     {terms.customer} since {format(new Date(customer.created_at), "MMMM yyyy")}
                   </p>
