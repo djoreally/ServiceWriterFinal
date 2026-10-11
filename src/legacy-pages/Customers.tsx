@@ -43,12 +43,12 @@ import { customerFieldMappings, vehicleFieldMappings } from "@/lib/importParser"
 import { useCustomerImport } from "@/hooks/useDataImport";
 import { formatDateLabel } from "@/lib/datetime";
 import { fetchCustomerOverview } from "@/application/queries";
-import { createCustomer, updateCustomer, deleteCustomer } from "@/application/commands";
+import { createCustomer, updateCustomer, deleteCustomer, restoreCustomer } from "@/application/commands";
 import { fetchCustomerOverviewFromNextApi } from "@/application/queries/customers.query";
 import { useWorkspaceSelection } from "@/hooks/useWorkspaceSelection";
 import { ListPagination, usePageSlice, DEFAULT_PAGE_SIZE } from "@/components/ui/list-pagination";
 import { ResponsiveTable, type ResponsiveColumn } from "@/components/ui/responsive-table";
-import { useRowSelection } from "@/components/ui/row-selection";
+import { useRowSelection, useUndo } from "@/components/ui/row-selection";
 
 interface Customer {
   id: string;
@@ -90,7 +90,7 @@ function CustomerRowActions({
   customer: Customer;
   onView: (id: string) => void;
   onEdit: (customer: Customer) => void;
-  onDelete: (id: string) => void;
+  onDelete: (id: string, name: string) => void;
 }) {
   return (
     <DropdownMenu>
@@ -110,7 +110,7 @@ function CustomerRowActions({
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
-          onClick={() => onDelete(customer.id)}
+          onClick={() => onDelete(customer.id, customer.name)}
           className="text-destructive focus:text-destructive"
         >
           <Trash2 className="mr-2 h-4 w-4" />
@@ -318,12 +318,25 @@ const Customers = () => {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this customer?")) return;
+  const handleDelete = async (id: string, name: string) => {
     try {
       await deleteCustomer(id);
-      toast.success("Customer deleted successfully");
       fetchCustomers();
+      runWithUndo({
+        count: 1,
+        label: `${name || terms.customer} deleted`,
+        run: () => {},
+        undo: () => {
+          void (async () => {
+            try {
+              await restoreCustomer(id);
+            } catch {
+              // Best effort; surface failures via refresh.
+            }
+            fetchCustomers();
+          })();
+        },
+      });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Failed to delete customer";
       toast.error(message);
@@ -393,15 +406,17 @@ const Customers = () => {
   });
 
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const { undoState, runWithUndo, dismiss: dismissUndo } = useUndo({ timeoutMs: 10_000 });
+
   const handleBulkDelete = async () => {
     const ids = [...selection.selectedKeys];
     if (ids.length === 0 || bulkDeleting) return;
     setBulkDeleting(true);
-    let deleted = 0;
+    const deletedIds: string[] = [];
     for (const id of ids) {
       try {
         await deleteCustomer(id);
-        deleted++;
+        deletedIds.push(id);
       } catch {
         // Continue with the rest; report the count that succeeded.
       }
@@ -409,7 +424,28 @@ const Customers = () => {
     selection.clear();
     setBulkDeleting(false);
     fetchCustomers();
-    toast.success(`Deleted ${deleted} ${terms.customer.toLowerCase()}${deleted === 1 ? "" : "s"}`);
+
+    if (deletedIds.length > 0) {
+      runWithUndo({
+        count: deletedIds.length,
+        label: `${deletedIds.length} ${terms.customer.toLowerCase()}${deletedIds.length === 1 ? "" : "s"} deleted`,
+        run: () => {},
+        undo: () => {
+          void (async () => {
+            for (const id of deletedIds) {
+              try {
+                await restoreCustomer(id);
+              } catch {
+                // Best effort; surface failures via refresh.
+              }
+            }
+            fetchCustomers();
+          })();
+        },
+      });
+    } else {
+      toast.error("Couldn't delete. Try again.");
+    }
   };
 
   const customerColumns: ResponsiveColumn<Customer>[] = [
@@ -695,6 +731,28 @@ const Customers = () => {
         fields={customerImportFields}
         onImport={importCustomers}
       />
+
+      {/* Undo banner — reversible beats careful. */}
+      {undoState && (
+        <div
+          role="status"
+          className="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 flex items-center gap-4 rounded-lg border bg-card px-4 py-3 shadow-lg"
+        >
+          <p className="text-sm font-medium">{undoState.label}</p>
+          <Button
+            size="sm"
+            onClick={() => {
+              undoState.onUndo();
+              dismissUndo();
+            }}
+          >
+            Undo
+          </Button>
+          <Button variant="ghost" size="sm" onClick={dismissUndo} aria-label="Dismiss">
+            ×
+          </Button>
+        </div>
+      )}
     </AppLayout>
   );
 };

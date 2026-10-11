@@ -351,6 +351,23 @@ crmRouter.delete("/v1/customers/:id", async (c) => {
   return json({ data });
 });
 
+crmRouter.post("/v1/customers/:id/restore", async (c) => {
+  const url = new URL(c.req.url);
+  const workspaceId = z.string().uuid().parse(url.searchParams.get("workspace_id"));
+  const id = customerIdFromParams(c.req.param("id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId, [...writeRoles]);
+  const { data, error } = await supabase
+    .from("customers")
+    .update({ status: "active", deleted_at: null } as never)
+    .eq("id", id)
+    .eq("workspace_id", workspaceId)
+    .eq("status", "archived")
+    .select("id,status")
+    .single();
+  if (error) throw error;
+  return json({ data });
+});
+
 // ---------------------------------------------------------------------------
 // GET /v1/customers/:id/summary
 // ---------------------------------------------------------------------------

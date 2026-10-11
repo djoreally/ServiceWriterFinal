@@ -89,3 +89,13 @@ export async function deleteCustomer(id: string): Promise<void> {
   });
   invalidateCustomerRelatedCaches(workspace_id);
 }
+
+export async function restoreCustomer(id: string): Promise<void> {
+  const workspace_id = requireSelectedWorkspaceId();
+  await apiClient.post<{ data: unknown }>(
+    `/v1/customers/${encodeURIComponent(id)}/restore`,
+    undefined,
+    { query: { workspace_id } }
+  );
+  invalidateCustomerRelatedCaches(workspace_id);
+}

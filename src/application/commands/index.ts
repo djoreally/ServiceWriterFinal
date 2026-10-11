@@ -84,6 +84,7 @@ export {
   createCustomerAndReturn,
   updateCustomer,
   deleteCustomer,
+  restoreCustomer,
   type CustomerWritePayload,
 } from './customers.command';
 
