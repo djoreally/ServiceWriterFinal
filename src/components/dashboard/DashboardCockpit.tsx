@@ -64,10 +64,10 @@ function Kpi({
 
   const inner = (
     <div className="p-4">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="type-label text-muted-foreground">{label}</p>
       <p
         className={cn(
-          'mt-1.5 font-mono text-[30px] font-semibold leading-none tabular-nums',
+          'type-xl type-semibold type-tabular mt-1.5 font-mono',
           accent && 'text-primary',
           attention && 'text-amber-500',
         )}
@@ -256,7 +256,7 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
     <div className="space-y-5">
       {/* Pulse — how's today going, in one sentence. The TopHeader owns the H1. */}
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <p className="type-label text-muted-foreground">
           Today · {todayLabel}
         </p>
         <p className="mt-1.5 max-w-2xl text-base text-foreground tabular-nums">
@@ -313,7 +313,7 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
 
       {/* Attention — what needs you right now, ranked. */}
       <section aria-labelledby="attention-heading">
-        <h2 id="attention-heading" className="text-2xl font-semibold tracking-tight">
+        <h2 id="attention-heading" className="type-lg type-semibold">
           Needs attention
         </h2>
         <Card className="mt-2 border-border/70 shadow-sm">
@@ -368,7 +368,7 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
 
       {/* Today's work — summary first, tap a row to drill down. */}
       <section aria-labelledby="today-heading">
-        <h2 id="today-heading" className="text-2xl font-semibold tracking-tight">
+        <h2 id="today-heading" className="type-lg type-semibold">
           Today&rsquo;s work
         </h2>
         <div className="mt-2 grid gap-4 xl:grid-cols-2">
