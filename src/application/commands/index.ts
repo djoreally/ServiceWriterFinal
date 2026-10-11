@@ -109,6 +109,7 @@ export {
   saveAppointment,
   tryAutoDispatchAppointment,
   updateAppointmentSchedule,
+  updateAppointmentDuration,
   updateAppointmentStatus,
   type SaveAppointmentOptions,
   type SaveAppointmentResult,

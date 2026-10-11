@@ -26,6 +26,7 @@ import {
   assignTechnician,
   assignVan as assignVanCmd,
   unassignAppointment,
+  updateAppointmentDuration,
 } from "@/application/commands";
 import { validateAssignment } from "@/lib/dispatch-guardrails";
 import { CommitButton } from "@/components/ui/commit-button";
@@ -1068,6 +1069,16 @@ export function DispatchBoard() {
               if (targetJob) openAssignDialog(targetJob);
             }}
             onDrop={() => toast.info("Use the timeline view to reassign technicians by drag-and-drop.")}
+            onResize={(appointmentId, durationMinutes) => {
+              void (async () => {
+                try {
+                  await updateAppointmentDuration(appointmentId, durationMinutes);
+                  toast.success(`Duration updated to ${durationMinutes} min`);
+                } catch (err) {
+                  toast.error(err instanceof Error ? err.message : "Couldn't update duration");
+                }
+              })();
+            }}
             onSlotClick={(date, time) => {
               toast.info(`Dispatch calendar slot selected: ${format(date, "MMM d, yyyy")} ${time}`);
             }}

@@ -66,6 +66,8 @@ interface CalendarViewProps {
   onAppointmentClick: (appointment: CalendarAppointment) => void;
   onDrop: (appointmentId: string, newDate: string, newTime: string) => void;
   onSlotClick: (date: Date, time: string) => void;
+  /** Resize an appointment's duration. Called with the new duration in minutes. */
+  onResize?: (appointmentId: string, durationMinutes: number) => void;
   businessHours: {
     opening_time: string;
     closing_time: string;
@@ -111,6 +113,7 @@ export const CalendarView = ({
   onAppointmentClick,
   onDrop,
   onSlotClick,
+  onResize,
   businessHours,
   isLoading = false,
   error = null,
@@ -489,6 +492,17 @@ export const CalendarView = ({
           onCreateEvent={(start) => onSlotClick(start, format(start, "HH:mm"))}
           onMoveEvent={(e, newStart) =>
             onDrop(e.id, format(newStart, "yyyy-MM-dd"), format(newStart, "HH:mm"))
+          }
+          onResizeEvent={
+            onResize
+              ? (e, newEnd) => {
+                  const durationMinutes = Math.max(
+                    15,
+                    Math.round((newEnd.getTime() - e.start.getTime()) / 60000)
+                  );
+                  onResize(e.id, durationMinutes);
+                }
+              : undefined
           }
           className="h-[600px]"
         />
