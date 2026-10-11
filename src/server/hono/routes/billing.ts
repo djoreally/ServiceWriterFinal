@@ -54,6 +54,7 @@ import {
 } from "@/server/payments/stripe-workspace-execution";
 import { createSupabaseAdminClient, createSupabaseAnonServerClient, supabaseFunctionsBaseUrl, supabasePublishableKey } from "@/lib/supabase";
 import { encryptPaymentCredential } from "@/server/payments/stripe-workspace-execution";
+import { logMutation } from "@/server/audit";
 
 export const billingRouter = new Hono();
 
@@ -439,6 +440,17 @@ billingRouter.post("/v1/payments", async (c) => {
     .single();
   if (error) throw error;
 
+  logMutation({
+    supabase: createSupabaseAdminClient(),
+    request,
+    workspaceId: body.workspace_id,
+    actorUserId: user.id,
+    action: "payment.created",
+    entityType: "payment",
+    entityId: data?.id ?? null,
+    after: data,
+  });
+
   if (data?.customer_id && (data.status === "succeeded" || data.status === "failed")) {
     const { data: customer } = await supabase
       .from("customers")
@@ -508,7 +520,13 @@ billingRouter.patch("/v1/payments/:id", async (c) => {
   const id = z.string().uuid().parse(c.req.param("id"));
   const body = patchPaymentSchema.parse(await request.json());
   const { workspace_id, ...patch } = body;
-  const { supabase } = await requireWorkspacePaymentsAddonAuth(c, workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"]);
+  const { supabase, user } = await requireWorkspacePaymentsAddonAuth(c, workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"]);
+
+  const { data: before } = await (supabase.from("payments") as any)
+    .select("*")
+    .eq("id", id)
+    .eq("workspace_id", workspace_id)
+    .maybeSingle();
 
   if (body.invoice_id) {
     const { data: invoice, error: invoiceError } = await supabase
@@ -537,6 +555,18 @@ billingRouter.patch("/v1/payments/:id", async (c) => {
     .select()
     .single();
   if (error) throw error;
+
+  logMutation({
+    supabase: createSupabaseAdminClient(),
+    request,
+    workspaceId: workspace_id,
+    actorUserId: user.id,
+    action: "payment.updated",
+    entityType: "payment",
+    entityId: id,
+    before,
+    after: data,
+  });
 
   if (data?.customer_id && ["succeeded", "failed", "refunded", "partially_refunded"].includes(data.status)) {
     const { data: customer } = await supabase
@@ -1485,6 +1515,16 @@ billingRouter.post("/v1/billing/expenses", async (c) => {
     eventType: "created",
     details: { status: expense.status, total_amount: expense.total_amount, vendor_name_raw: expense.vendor_name_raw },
   });
+  logMutation({
+    supabase: createSupabaseAdminClient(),
+    request: c.req.raw,
+    workspaceId,
+    actorUserId: user.id,
+    action: "expense.created",
+    entityType: "expense",
+    entityId: expense.id,
+    after: expense,
+  });
 
   return json({ data: expense }, { status: 201 });
 });
@@ -1498,6 +1538,11 @@ billingRouter.put("/v1/billing/expenses/:id", async (c) => {
   const id = z.string().uuid().parse(c.req.param("id"));
   const body = updateExpenseSchema.parse(await c.req.raw.json());
   const { line_items, ...header } = body;
+  const { data: before } = await (supabase.from("expenses") as any)
+    .select("*")
+    .eq("workspace_id", workspaceId)
+    .eq("id", id)
+    .maybeSingle();
   const { data: expense, error } = await (supabase.from("expenses") as any)
     .update(header)
     .eq("workspace_id", workspaceId)
@@ -1535,6 +1580,17 @@ billingRouter.put("/v1/billing/expenses/:id", async (c) => {
     eventType: "edited",
     details: { total_amount: expense.total_amount, vendor_name_raw: expense.vendor_name_raw, line_items_count: line_items?.length ?? null },
   });
+  logMutation({
+    supabase: createSupabaseAdminClient(),
+    request: c.req.raw,
+    workspaceId,
+    actorUserId: user.id,
+    action: "expense.updated",
+    entityType: "expense",
+    entityId: expense.id,
+    before,
+    after: expense,
+  });
   return json({ data: expense });
 });
 
@@ -1543,7 +1599,7 @@ billingRouter.post("/v1/billing/expenses/:id/approve", async (c) => {
   const id = z.string().uuid().parse(c.req.param("id"));
   const approvedAt = new Date().toISOString();
   const { data: current, error: readError } = await (supabase.from("expenses") as any)
-    .select("metadata")
+    .select("metadata,status")
     .eq("workspace_id", workspaceId)
     .eq("id", id)
     .single();
@@ -1564,6 +1620,17 @@ billingRouter.post("/v1/billing/expenses/:id/approve", async (c) => {
     eventType: "approved",
     details: { status: data.status, approved_at: approvedAt },
   });
+  logMutation({
+    supabase: createSupabaseAdminClient(),
+    request: c.req.raw,
+    workspaceId,
+    actorUserId: user.id,
+    action: "expense.approved",
+    entityType: "expense",
+    entityId: data.id,
+    before: { status: current?.status ?? null },
+    after: data,
+  });
   return json({ data });
 });
 
@@ -1576,7 +1643,7 @@ billingRouter.post("/v1/billing/expenses/:id/reject", async (c) => {
   const id = z.string().uuid().parse(c.req.param("id"));
   const body = rejectExpenseSchema.parse(await c.req.raw.json());
   const { data: current, error: readError } = await (supabase.from("expenses") as any)
-    .select("metadata")
+    .select("metadata,status")
     .eq("workspace_id", workspaceId)
     .eq("id", id)
     .single();
@@ -1602,6 +1669,17 @@ billingRouter.post("/v1/billing/expenses/:id/reject", async (c) => {
     eventType: "rejected",
     details: { reason: body.reason, status: data.status },
   });
+  logMutation({
+    supabase: createSupabaseAdminClient(),
+    request: c.req.raw,
+    workspaceId,
+    actorUserId: user.id,
+    action: "expense.rejected",
+    entityType: "expense",
+    entityId: data.id,
+    before: { status: current?.status ?? null },
+    after: data,
+  });
   return json({ data });
 });
 
@@ -1623,6 +1701,17 @@ billingRouter.post("/v1/billing/expenses/:id/soft-delete", async (c) => {
     actorName: actorDisplayName(user),
     eventType: "deleted",
     details: { deleted_at: deletedAt, vendor_name_raw: data.vendor_name_raw },
+  });
+  logMutation({
+    supabase: createSupabaseAdminClient(),
+    request: c.req.raw,
+    workspaceId,
+    actorUserId: user.id,
+    action: "expense.deleted",
+    entityType: "expense",
+    entityId: data.id,
+    before: { deleted_at: null },
+    after: data,
   });
   return json({ data });
 });

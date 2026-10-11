@@ -17,6 +17,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { ApiError, json, paginationSchema } from "@/server/api";
 import type { Database } from "@/integrations/supabase/types.production";
 import { requireAuth, requireWorkspaceAuth } from "@/server/hono/middleware/auth";
+import { createSupabaseAdminClient } from "@/lib/supabase";
+import { logMutation } from "@/server/audit";
 import { dispatchInvoiceTransition } from "@/server/messaging/invoice-events";
 import { LIFECYCLE_EVENT_KEYS as INVOICE_LIFECYCLE_EVENT_KEYS } from "@/server/messaging/lifecycle-events";
 import { sendLifecycleEmail } from "@/server/messaging/lifecycle-sender";
@@ -136,7 +138,7 @@ documentsRouter.get("/v1/invoices", async (c) => {
 
 documentsRouter.post("/v1/invoices", async (c) => {
   const body = invoiceSchema.parse(await c.req.json());
-  const { supabase } = await requireWorkspaceAuth(c, body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"]);
+  const { supabase, user } = await requireWorkspaceAuth(c, body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"]);
 
   const metadata = {
     notes: body.notes ?? null,
@@ -208,6 +210,16 @@ documentsRouter.post("/v1/invoices", async (c) => {
       console.error("[Lifecycle] invoice-created email enqueue failed", dispatchError);
     }
   }
+  logMutation({
+    supabase: createSupabaseAdminClient(),
+    request: c.req.raw,
+    workspaceId: body.workspace_id,
+    actorUserId: user.id,
+    action: "invoice.created",
+    entityType: "invoice",
+    entityId: id,
+    after: invoice,
+  });
   return json({ data: invoice }, { status: 201 });
 });
 
@@ -693,11 +705,11 @@ documentsRouter.patch("/v1/invoices/:id", async (c) => {
   const id = z.string().uuid().parse(c.req.param("id"));
   const body = patchInvoiceSchema.parse(await c.req.json());
   const normalizedStatus = canonicalStatus(body.status);
-  const { supabase } = await requireWorkspaceAuth(c, body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"]);
+  const { supabase, user } = await requireWorkspaceAuth(c, body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist"]);
 
   const { data: current, error: currentError } = await supabase
     .from("invoices")
-    .select("id,status,metadata")
+    .select("*")
     .eq("id", id)
     .eq("workspace_id", body.workspace_id)
     .single();
@@ -741,6 +753,17 @@ documentsRouter.patch("/v1/invoices/:id", async (c) => {
     const { data, error } = await supabase.from("invoices").select("*, customers(id,first_name,last_name,email)").eq("workspace_id", body.workspace_id).eq("id", id).single();
     if (error) throw error;
     await notifyInvoiceTransition(supabase, c.req.raw, data, current.status, body.workspace_id);
+    logMutation({
+      supabase: createSupabaseAdminClient(),
+      request: c.req.raw,
+      workspaceId: body.workspace_id,
+      actorUserId: user.id,
+      action: "invoice.updated",
+      entityType: "invoice",
+      entityId: id,
+      before: current,
+      after: data,
+    });
     return json({ data });
   }
 
@@ -752,13 +775,30 @@ documentsRouter.patch("/v1/invoices/:id", async (c) => {
     .single();
   if (error) throw error;
   await notifyInvoiceTransition(supabase, c.req.raw, data, current.status, body.workspace_id);
+  logMutation({
+    supabase: createSupabaseAdminClient(),
+    request: c.req.raw,
+    workspaceId: body.workspace_id,
+    actorUserId: user.id,
+    action: "invoice.updated",
+    entityType: "invoice",
+    entityId: id,
+    before: current,
+    after: data,
+  });
   return json({ data });
 });
 
 documentsRouter.delete("/v1/invoices/:id", async (c) => {
   const id = z.string().uuid().parse(c.req.param("id"));
   const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
-  const { supabase } = await requireWorkspaceAuth(c, workspaceId, ["owner", "admin", "manager"]);
+  const { supabase, user } = await requireWorkspaceAuth(c, workspaceId, ["owner", "admin", "manager"]);
+  const { data: before } = await supabase
+    .from("invoices")
+    .select("*")
+    .eq("id", id)
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
   const { data, error } = await supabase
     .from("invoices")
     .update({ status: "void" })
@@ -767,6 +807,17 @@ documentsRouter.delete("/v1/invoices/:id", async (c) => {
     .select()
     .single();
   if (error) throw error;
+  logMutation({
+    supabase: createSupabaseAdminClient(),
+    request: c.req.raw,
+    workspaceId,
+    actorUserId: user.id,
+    action: "invoice.voided",
+    entityType: "invoice",
+    entityId: id,
+    before,
+    after: data,
+  });
   return json({ data });
 });
 

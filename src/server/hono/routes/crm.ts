@@ -28,6 +28,7 @@ import {
 } from "@/server/api";
 import { requireAuth, requireWorkspaceAuth } from "@/server/hono/middleware/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase";
+import { logMutation } from "@/server/audit";
 
 export const crmRouter = new Hono();
 
@@ -270,6 +271,16 @@ crmRouter.post("/v1/customers", async (c) => {
     created_by: user.id,
   }).select().single();
   if (error) throw error;
+  logMutation({
+    supabase: createSupabaseAdminClient(),
+    request: c.req.raw,
+    workspaceId: workspace_id,
+    actorUserId: user.id,
+    action: "customer.created",
+    entityType: "customer",
+    entityId: data.id,
+    after: data,
+  });
   return json({ data }, { status: 201 });
 });
 
@@ -318,12 +329,18 @@ crmRouter.get("/v1/customers/:id", async (c) => {
 crmRouter.patch("/v1/customers/:id", async (c) => {
   const body = customerUpdateSchema.parse(await c.req.json());
   const id = customerIdFromParams(c.req.param("id"));
-  const { supabase } = await requireWorkspaceAuth(c, body.workspace_id, [...writeRoles]);
+  const { supabase, user } = await requireWorkspaceAuth(c, body.workspace_id, [...writeRoles]);
   const { workspace_id, address, ...customer } = body;
   const patch: Record<string, unknown> = { ...customer };
   if (Object.prototype.hasOwnProperty.call(body, "address")) {
     patch.address_line1 = address || null;
   }
+  const { data: before } = await supabase
+    .from("customers")
+    .select("*")
+    .eq("id", id)
+    .eq("workspace_id", workspace_id)
+    .maybeSingle();
   const { data, error } = await supabase
     .from("customers")
     .update(patch as never)
@@ -332,6 +349,17 @@ crmRouter.patch("/v1/customers/:id", async (c) => {
     .select()
     .single();
   if (error) throw error;
+  logMutation({
+    supabase: createSupabaseAdminClient(),
+    request: c.req.raw,
+    workspaceId: workspace_id,
+    actorUserId: user.id,
+    action: "customer.updated",
+    entityType: "customer",
+    entityId: id,
+    before,
+    after: data,
+  });
   return json({ data });
 });
 
@@ -339,7 +367,7 @@ crmRouter.delete("/v1/customers/:id", async (c) => {
   const url = new URL(c.req.url);
   const workspaceId = z.string().uuid().parse(url.searchParams.get("workspace_id"));
   const id = customerIdFromParams(c.req.param("id"));
-  const { supabase } = await requireWorkspaceAuth(c, workspaceId, [...writeRoles]);
+  const { supabase, user } = await requireWorkspaceAuth(c, workspaceId, [...writeRoles]);
   const { data, error } = await supabase
     .from("customers")
     .update({ status: "archived" } as never)
@@ -348,6 +376,17 @@ crmRouter.delete("/v1/customers/:id", async (c) => {
     .select("id,status")
     .single();
   if (error) throw error;
+  logMutation({
+    supabase: createSupabaseAdminClient(),
+    request: c.req.raw,
+    workspaceId,
+    actorUserId: user.id,
+    action: "customer.archived",
+    entityType: "customer",
+    entityId: id,
+    before: { status: "active" },
+    after: data,
+  });
   return json({ data });
 });
 
@@ -355,7 +394,7 @@ crmRouter.post("/v1/customers/:id/restore", async (c) => {
   const url = new URL(c.req.url);
   const workspaceId = z.string().uuid().parse(url.searchParams.get("workspace_id"));
   const id = customerIdFromParams(c.req.param("id"));
-  const { supabase } = await requireWorkspaceAuth(c, workspaceId, [...writeRoles]);
+  const { supabase, user } = await requireWorkspaceAuth(c, workspaceId, [...writeRoles]);
   const { data, error } = await supabase
     .from("customers")
     .update({ status: "active", deleted_at: null } as never)
@@ -365,6 +404,17 @@ crmRouter.post("/v1/customers/:id/restore", async (c) => {
     .select("id,status")
     .single();
   if (error) throw error;
+  logMutation({
+    supabase: createSupabaseAdminClient(),
+    request: c.req.raw,
+    workspaceId,
+    actorUserId: user.id,
+    action: "customer.restored",
+    entityType: "customer",
+    entityId: id,
+    before: { status: "archived" },
+    after: data,
+  });
   return json({ data });
 });
 

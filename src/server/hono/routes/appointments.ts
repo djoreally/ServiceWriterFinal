@@ -33,6 +33,7 @@ import { zonedDateTimeParts, zonedLocalDateTimeToUtc } from "@/server/scheduling
 import { syncCanonicalInvoiceToStripe } from "@/server/payments/stripe-invoice-sync";
 import { technicianJobUrl } from "@/server/messaging/lifecycle-action-urls";
 import { createSupabaseAdminClient, createSupabaseBrowserClient, createSupabaseRequestClient } from "@/lib/supabase";
+import { logMutation } from "@/server/audit";
 import { z } from "zod";
 
 export const appointmentsRouter = new Hono();
@@ -63,6 +64,17 @@ appointmentsRouter.post("/v1/appointments", async (c: Context) => {
   // bookAppointmentCore. Auth (membership + role list) stays on the route.
   const result = await bookAppointmentCore(supabase, body, { createdBy: user.id });
   if ("error" in result) return result.error;
+  const created = result.data as { id?: unknown; workspace_id?: unknown } | null;
+  logMutation({
+    supabase: createSupabaseAdminClient(),
+    request: c.req.raw,
+    workspaceId: body.workspace_id,
+    actorUserId: user.id,
+    action: "appointment.created",
+    entityType: "appointment",
+    entityId: typeof created?.id === "string" ? created.id : null,
+    after: created,
+  });
   // Google Calendar auto-sync (insert event). Never fails the booking:
   // failures are logged and recorded in the appointment's metadata.
   const createdId = (result.data as { id?: unknown } | null)?.id;
@@ -365,14 +377,42 @@ appointmentsRouter.patch("/v1/appointments/:id", async (c: Context) => {
   // Google Calendar auto-sync (patch event; the edge function deletes the
   // event when the status is cancelled/no_show). Never fails this update.
   await syncAppointmentToGoogleCalendar({ supabase, userId: user.id, appointmentId: id });
+  logMutation({
+    supabase: createSupabaseAdminClient(),
+    request: c.req.raw,
+    workspaceId: workspace_id,
+    actorUserId: user.id,
+    action: "appointment.updated",
+    entityType: "appointment",
+    entityId: id,
+    before: current,
+    after: data,
+  });
   return json({ data });
 });
 
 appointmentsRouter.delete("/v1/appointments/:id", async (c: Context) => {
   const id = z.string().uuid().parse(c.req.param("id")), workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
   const { supabase, user } = await requireWorkspaceAuth(c, workspaceId, ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher"]);
+  const { data: before } = await supabase
+    .from("appointments")
+    .select("id,status,starts_at,ends_at,customer_id")
+    .eq("id", id)
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
   const { data, error } = await supabase.from("appointments").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("id", id).eq("workspace_id", workspaceId).select("id,workspace_id,customer_id,starts_at,ends_at,status,notes,metadata,updated_at,customers(id,first_name,last_name,email),vehicles(id,year,make,model)").single();
   if (error) throw error;
+  logMutation({
+    supabase: createSupabaseAdminClient(),
+    request: c.req.raw,
+    workspaceId,
+    actorUserId: user.id,
+    action: "appointment.cancelled",
+    entityType: "appointment",
+    entityId: id,
+    before,
+    after: data,
+  });
   try {
     const { data: workspace } = await supabase.from("workspaces").select("name,timezone").eq("id", workspaceId).single();
     const metadata = data.metadata && typeof data.metadata === "object" && !Array.isArray(data.metadata) ? data.metadata as Record<string, unknown> : {};
@@ -410,6 +450,16 @@ appointmentsRouter.post("/v1/appointments/:id/complete", async (c: Context) => {
   const serviceRecordId = String(closeoutData.service_record_id ?? "");
   const invoiceId = String(closeoutData.invoice_id ?? "");
   const paymentId = String(closeoutData.payment_id ?? "");
+  logMutation({
+    supabase: createSupabaseAdminClient(),
+    request: c.req.raw,
+    workspaceId: workspace_id,
+    actorUserId: user.id,
+    action: "appointment.completed",
+    entityType: "appointment",
+    entityId: id,
+    after: { status: "completed", service_record_id: serviceRecordId || null, invoice_id: invoiceId || null, payment_id: paymentId || null },
+  });
   let stripeSync: Record<string, unknown> = { status: "skipped", reason: "payments_addon_inactive" };
   let actionUrl = new URL("/my-bookings", c.req.url).toString();
   const { data: billing, error: billingError } = await db.from("workspace_billing").select("payments_addon_active,subscription_status").eq("workspace_id", workspace_id).maybeSingle();
@@ -603,6 +653,16 @@ appointmentsRouter.post("/v1/appointments/:id/start", async (c: Context) => {
   // communication begins only when there is something actionable to send,
   // such as an inspection recommendation/approval request.
   const started = (result ?? {}) as { already_started?: boolean; replayed?: boolean; updated_at?: string };
+  logMutation({
+    supabase: createSupabaseAdminClient(),
+    request: c.req.raw,
+    workspaceId: workspace_id,
+    actorUserId: user.id,
+    action: "appointment.started",
+    entityType: "appointment",
+    entityId: id,
+    after: { status: "in_progress", already_started: Boolean(started.already_started), replayed: Boolean(started.replayed) },
+  });
   return json({
     data: {
       id,
@@ -675,6 +735,17 @@ appointmentsRouter.post("/v1/appointments/:id/technician-status", async (c: Cont
     .select("id,status,assigned_user_id,metadata,updated_at")
     .single();
   if (error) throw error;
+  logMutation({
+    supabase: createSupabaseAdminClient(),
+    request: c.req.raw,
+    workspaceId: workspace_id,
+    actorUserId: user.id,
+    action: "appointment.dispatch_status",
+    entityType: "appointment",
+    entityId: appointmentId,
+    before: { dispatch_status: metadata.dispatch_status ?? null },
+    after: { dispatch_status: body.status },
+  });
 
   // Only the field technician owns mutable presence. Office/dispatch users
   // may advance dispatch state without becoming the job's live technician.
