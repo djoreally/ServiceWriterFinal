@@ -166,6 +166,8 @@ interface SegmentedControlProps<T extends string> {
   options: { value: T; label: string }[];
   value: T;
   onChange: (value: T) => void;
+  /** Rendered right of the label — e.g. a ChangeDot. */
+  trailing?: ReactNode;
 }
 
 /**
@@ -177,10 +179,14 @@ export function SegmentedControl<T extends string>({
   options,
   value,
   onChange,
+  trailing,
 }: SegmentedControlProps<T>) {
   return (
     <div className="space-y-2">
-      <p className="text-sm font-medium">{label}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-medium">{label}</p>
+        {trailing}
+      </div>
       <div
         role="radiogroup"
         aria-label={label}

@@ -25,6 +25,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
 import { InstantSwitch } from "@/components/ui/setting-controls";
+import { SegmentedControl } from "@/components/ui/setting-controls";
+import { ChangeDot } from "@/components/ui/settings-system";
 import { Slider } from "@/components/ui/slider";
 import { LazyServiceAreaMap } from "@/components/settings/LazyServiceAreaMap";
 import { StripeConnectCard } from "@/components/settings/StripeConnectCard";
@@ -267,6 +269,8 @@ const Settings = () => {
   const [saveErrorMsg, setSaveErrorMsg] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const savedSignatureRef = useRef<string | null>(null);
+  /** Baseline profile as loaded — ChangeDots compare against this. */
+  const [loadedSnapshot, setLoadedSnapshot] = useState<BusinessProfile | null>(null);
   const [loadingStarterData, setLoadingStarterData] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [checkingSlug, setCheckingSlug] = useState(false);
@@ -363,6 +367,27 @@ const Settings = () => {
             weather_guard_settings: parseWeatherGuardSettings((data as Record<string, unknown>).weather_guard_settings),
             day_hours: (data as Record<string, unknown>).day_hours as Record<string, unknown> | null ?? null,
           });
+          // Baseline for ChangeDots: snapshot what the server returned.
+          setLoadedSnapshot({
+            ...data,
+            terminology,
+            date_format: data.date_format || "DD/MM/YYYY HH:mm",
+            timezone: data.timezone || "UTC",
+            currency: data.currency || "USD",
+            opening_time: data.opening_time || "08:00",
+            closing_time: data.closing_time || "17:00",
+            working_days: data.working_days || ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+            booking_slug: data.booking_slug || "",
+            website_url: data.website_url || "",
+            cover_image_url: (data as { cover_image_url?: string | null }).cover_image_url || "",
+            service_radius_miles: data.service_radius_miles || 25,
+            marketplace_opt_in: (data as { marketplace_opt_in?: boolean }).marketplace_opt_in ?? false,
+            service_address: data.service_address || "",
+            service_coordinates: (data.service_coordinates as { lat: number; lng: number } | null) || null,
+            weather_guard_enabled: (data as Record<string, unknown>).weather_guard_enabled as boolean ?? false,
+            weather_guard_settings: parseWeatherGuardSettings((data as Record<string, unknown>).weather_guard_settings),
+            day_hours: (data as Record<string, unknown>).day_hours as Record<string, unknown> | null ?? null,
+          } as BusinessProfile);
           const rawDayHours = (data as Record<string, unknown>).day_hours as Record<string, unknown> | null;
           const areaRules = rawDayHours && Array.isArray(rawDayHours.service_area_rules)
             ? (rawDayHours.service_area_rules as ServiceAreaRule[])
@@ -567,6 +592,7 @@ const Settings = () => {
       await refetchRegional();
       // Snapshot what was just written: any later edit flips the footer back to idle.
       savedSignatureRef.current = JSON.stringify(profileData);
+      setLoadedSnapshot({ ...profile, booking_slug: slugInput || profile.booking_slug });
       setSavedAt(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
       setSaveStatus("saved");
       toast.success(setupMode ? "Business settings saved. Opening dashboard…" : "Profile saved successfully");
@@ -592,6 +618,27 @@ const Settings = () => {
       ...prev,
       terminology: { ...prev.terminology, [key]: value },
     }));
+  };
+
+  /** ChangeDot support: compare a field against the loaded baseline. */
+  const isFieldDirty = (key: keyof BusinessProfile): boolean => {
+    const loaded = loadedSnapshot;
+    if (!loaded) return false;
+    return JSON.stringify(profile[key]) !== JSON.stringify(loaded[key]);
+  };
+  const resetField = (key: keyof BusinessProfile) => {
+    const loaded = loadedSnapshot;
+    if (!loaded) return;
+    setProfile(prev => ({ ...prev, [key]: loaded[key] }));
+  };
+  /** Cancel: revert the whole form to the loaded baseline. */
+  const cancelEdits = () => {
+    const loaded = loadedSnapshot;
+    if (!loaded) return;
+    setProfile({ ...loaded });
+    setSlugInput(loaded.booking_slug || "");
+    setSaveStatus("idle");
+    setSaveErrorMsg(null);
   };
 
   const serviceDisplayMode = profile.day_hours?.public_booking_service_display_mode === "category_first"
@@ -928,7 +975,10 @@ const Settings = () => {
             {/* Business Information */}
             <div className="grid gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="business_name">Business Name</Label>
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="business_name">Business Name</Label>
+                  <ChangeDot changed={isFieldDirty("business_name")} onReset={() => resetField("business_name")} />
+                </div>
                 <Input
                   id="business_name"
                   placeholder="Your Auto Shop Name"
@@ -938,7 +988,10 @@ const Settings = () => {
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="owner_name">Owner Name</Label>
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="owner_name">Owner Name</Label>
+                  <ChangeDot changed={isFieldDirty("owner_name")} onReset={() => resetField("owner_name")} />
+                </div>
                 <Input
                   id="owner_name"
                   placeholder="John Smith"
@@ -949,7 +1002,10 @@ const Settings = () => {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="grid gap-2">
-                  <Label htmlFor="email">Email</Label>
+                  <div className="flex items-center justify-between gap-2">
+                    <Label htmlFor="email">Email</Label>
+                    <ChangeDot changed={isFieldDirty("email")} onReset={() => resetField("email")} />
+                  </div>
                   <Input
                     id="email"
                     type="email"
@@ -959,7 +1015,10 @@ const Settings = () => {
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="phone">Phone</Label>
+                  <div className="flex items-center justify-between gap-2">
+                    <Label htmlFor="phone">Phone</Label>
+                    <ChangeDot changed={isFieldDirty("phone")} onReset={() => resetField("phone")} />
+                  </div>
                   <Input
                     id="phone"
                     type="tel"
@@ -971,7 +1030,10 @@ const Settings = () => {
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="address">Address</Label>
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="address">Address</Label>
+                  <ChangeDot changed={isFieldDirty("address")} onReset={() => resetField("address")} />
+                </div>
                 <Textarea
                   id="address"
                   placeholder="123 Main Street, City, State 12345"
@@ -981,7 +1043,10 @@ const Settings = () => {
               </div>
 
               <div className="grid gap-2">
-                <Label htmlFor="website_url">Website URL</Label>
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="website_url">Website URL</Label>
+                  <ChangeDot changed={isFieldDirty("website_url")} onReset={() => resetField("website_url")} />
+                </div>
                 <Input
                   id="website_url"
                   type="url"
@@ -1010,20 +1075,17 @@ const Settings = () => {
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="date_format">Date & Time Format</Label>
-                <Select
+                <SegmentedControl
+                  label="Date & Time Format"
                   value={profile.date_format}
-                  onValueChange={(value) => setProfile(prev => ({ ...prev, date_format: value }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select format" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="DD/MM/YYYY HH:mm">DD/MM/YYYY HH:MM (24h)</SelectItem>
-                    <SelectItem value="MM/DD/YYYY hh:mm A">MM/DD/YYYY HH:MM AM/PM</SelectItem>
-                    <SelectItem value="YYYY-MM-DD HH:mm">YYYY-MM-DD HH:MM (ISO)</SelectItem>
-                  </SelectContent>
-                </Select>
+                  onChange={(value) => setProfile(prev => ({ ...prev, date_format: value }))}
+                  trailing={<ChangeDot changed={isFieldDirty("date_format")} onReset={() => resetField("date_format")} />}
+                  options={[
+                    { value: "DD/MM/YYYY HH:mm", label: "DD/MM" },
+                    { value: "MM/DD/YYYY hh:mm A", label: "MM/DD" },
+                    { value: "YYYY-MM-DD HH:mm", label: "ISO" },
+                  ]}
+                />
                 <p className="text-xs text-muted-foreground">How dates appear throughout the app</p>
               </div>
               <div className="grid gap-2">
@@ -1745,14 +1807,19 @@ const Settings = () => {
                 </p>
               )}
             </div>
-            <Button onClick={() => void handleSave()} disabled={saving} className="shrink-0 gap-2">
-              {saving ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Save className="h-4 w-4" />
-              )}
-              {setupMode ? "Save & open dashboard" : "Save profile settings"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" onClick={cancelEdits} disabled={saving} className="shrink-0">
+                Cancel
+              </Button>
+              <Button onClick={() => void handleSave()} disabled={saving} className="shrink-0 gap-2">
+                {saving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+                {setupMode ? "Save & open dashboard" : "Save profile settings"}
+              </Button>
+            </div>
           </div>
         </div>
       </div>
