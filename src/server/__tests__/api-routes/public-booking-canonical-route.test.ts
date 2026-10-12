@@ -41,10 +41,24 @@ describe("canonical public booking API contract", () => {
     expect(submitSource).toContain("p_location_lng: finalCoords?.lng ?? null");
   });
 
+  it("does not stage a legacy location intent for the canonical flow", () => {
+    expect(commandSource).toMatch(/public_booking_upsert_customer[\s\S]*?p_address:\s*null/);
+  });
+
   it("does not rewrite the appointment location after canonical creation", () => {
     expect(submitSource).not.toContain("updatePayload.location_address");
     expect(submitSource).not.toContain("updatePayload.location_lat");
     expect(submitSource).not.toContain("updatePayload.location_lng");
+  });
+
+  it("preserves long generated-title compatibility by truncating instead of rejecting", () => {
+    expect(routeSource).toContain("value.slice(0, 500)");
+  });
+
+  it("treats malformed JSON as a 400 and RPC failures as non-2xx API errors", () => {
+    expect(routeSource).toContain('message: "Invalid JSON body"');
+    expect(routeSource).toContain("errorResponse(toError(error))");
+    expect(commandSource).toContain("error instanceof ApiClientError");
   });
 
   it("uses the server-safe anonymous Supabase client", () => {
