@@ -121,13 +121,17 @@ if (exists(honoApp)) {
 
 // REG-018 — Public booking tax must be server-owned and must win route
 // precedence over the legacy platform handler that proxies a retired Edge
-// Function. Keep the connected-account Stripe execution and manual fallback.
-const bookingTax = "src/server/hono/routes/public-booking-tax.ts";
-requireText(bookingTax, 'publicBookingTaxRouter.post("/v1/platform/public-booking/calculate-tax"', "native public booking tax route");
-requireText(bookingTax, "resolveStripeWorkspaceExecution", "workspace Stripe Tax execution");
-requireText(bookingTax, 'calculation_source: "workspace_manual_rate"', "manual tax fallback source");
-requireText(bookingTax, 'tax_code: "txcd_10103001"', "historical Stripe Tax service code");
-forbidText(bookingTax, "invokeEdgeFunction", "native tax may not proxy retired Edge Function");
+// Function. Route owns HTTP/workspace compatibility; shared service owns tax.
+const bookingTaxRoute = "src/server/hono/routes/public-booking-tax.ts";
+const bookingTaxService = "src/server/payments/public-booking-tax-calculation.ts";
+requireText(bookingTaxRoute, 'publicBookingTaxRouter.post("/v1/platform/public-booking/calculate-tax"', "native public booking tax route");
+requireText(bookingTaxRoute, "calculatePublicBookingTax", "tax route delegates to shared provider service");
+forbidText(bookingTaxRoute, "invokeEdgeFunction", "native tax route may not proxy retired Edge Function");
+requireText(bookingTaxService, "resolveStripeWorkspaceExecution", "workspace Stripe Tax execution");
+requireText(bookingTaxService, 'source: "workspace_manual_rate"', "manual tax fallback source");
+requireText(bookingTaxService, 'tax_code: "txcd_10103001"', "historical Stripe Tax service code");
+requireText(bookingTaxService, "bankersRound", "canonical tax rounding");
+forbidText(bookingTaxService, "invokeEdgeFunction", "shared tax service may not proxy retired Edge Function");
 if (exists(honoApp)) {
   const source = read(honoApp);
   const nativeTaxMount = source.indexOf('app.route("/", publicBookingTaxRouter)');
@@ -136,6 +140,32 @@ if (exists(honoApp)) {
     failures.push("native public booking tax router must be registered before platformRouter");
   }
 }
+
+// REG-019 — One pure transaction-pricing contract owns public-booking fee and
+// tax composition. Browser totals are never inputs to this domain calculator.
+const bookingFinanceCore = "src/domain/financials/public-booking-financials.ts";
+const bookingFinanceTests = "src/domain/financials/__tests__/public-booking-financials.test.ts";
+requireText(bookingFinanceCore, 'calculationVersion: "public_booking_financial_v1"', "public booking finance version");
+requireText(bookingFinanceCore, 'priceSource: "canonical_appointment_items"', "public booking item-price authority");
+requireText(bookingFinanceCore, 'input.paymentMode === "online_card"', "card surcharge payment-mode gate");
+requireText(bookingFinanceCore, "hasExactTax", "exact zero-tax provider result handling");
+requireFile(bookingFinanceTests, "public booking financial unit certification");
+requireText(bookingFinanceTests, "does not charge the card surcharge for pay-at-service", "pay-at-service surcharge regression");
+requireText(bookingFinanceTests, "respects an authoritative zero-tax provider result", "zero-tax provider regression");
+
+// REG-020 — Final financial snapshots must be derived from persisted booking
+// context, the shared tax service, and the pure finance core before any write.
+const bookingFinanceContext = "src/server/payments/public-booking-financial-context.ts";
+const bookingFinanceSnapshot = "src/server/payments/calculate-public-booking-financial-snapshot.ts";
+requireText(bookingFinanceContext, "appointment_items", "persisted appointment-item financial source");
+requireText(bookingFinanceContext, "itemIsBillable", "billable-line policy");
+requireText(bookingFinanceContext, "phone_coupon_overrides", "server-side phone coupon validation");
+requireText(bookingFinanceContext, "tax_location_incomplete", "Stripe Tax structured-location fail-closed gate");
+requireText(bookingFinanceSnapshot, "loadPublicBookingFinancialContext", "financial context orchestration");
+requireText(bookingFinanceSnapshot, "calculatePublicBookingTax", "shared tax orchestration");
+requireText(bookingFinanceSnapshot, "calculatePublicBookingFinancials", "pure finance orchestration");
+requireText(bookingFinanceSnapshot, 'source: "pre_tax_base"', "two-pass canonical taxable-base calculation");
+requireText(bookingFinanceSnapshot, "financial_calculation_unstable", "financial reconciliation invariant");
 
 // The regression lock itself must be wired into prebuild so Vercel/main cannot
 // produce a release artifact after one of these invariants disappears.
