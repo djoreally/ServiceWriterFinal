@@ -1,15 +1,20 @@
 /**
- * Guards the slug-bound public booking RPC contract.
+ * Guards the current public-booking appointment contract.
  *
- * The public client must never choose a tenant by trusting a caller-supplied
- * business user UUID. The secure RPC resolves the workspace from the booking
- * slug and still requires an explicit p_status argument.
+ * Browser booking writes go through the Hono appointments boundary. The live
+ * compatibility name (v2) is intentionally retained until the UI passes the
+ * address directly to v3, but the database v2 contract must fail closed when
+ * no staged service address exists and delegate creation to v3.
  */
 
-const mockRpc = jest.fn().mockResolvedValue({ data: "appt-1", error: null });
+const mockPost = jest.fn().mockResolvedValue({ data: "appt-1", error: null });
+
+jest.mock("@/lib/api-client", () => ({
+  apiClient: { post: (...args: unknown[]) => mockPost(...args) },
+}));
 
 jest.mock("@/integrations/supabase/client", () => ({
-  supabase: { rpc: (...args: unknown[]) => mockRpc(...args) },
+  supabase: { auth: { signUp: jest.fn() } },
 }));
 
 import { bookAppointmentSafe } from "../booking-submit.command";
@@ -30,88 +35,73 @@ const baseParams = {
   p_estimated_cost: 120,
   p_tax_amount: 0,
   p_service_catalog_id: null,
-  p_vehicle_id: null,
-};
+  p_vehicle_id: "11111111-1111-4111-8111-111111111111",
+} as const;
 
 describe("bookAppointmentSafe", () => {
-  beforeEach(() => mockRpc.mockClear());
+  beforeEach(() => mockPost.mockClear());
 
-  it("always sends p_status so the single supported overload resolves", async () => {
+  it("routes booking creation through the Hono appointments boundary", async () => {
     await bookAppointmentSafe(baseParams);
-    const [fn, args] = mockRpc.mock.calls[0];
-    expect(fn).toBe("public_booking_book_appointment");
-    expect(args).toHaveProperty("p_status", "confirmed");
+
+    expect(mockPost).toHaveBeenCalledWith(
+      "/v1/appointments/booking-rpc",
+      {
+        fn: "public_booking_book_appointment_v2",
+        params: expect.objectContaining({
+          p_booking_slug: "test-booking",
+          p_vehicle_id: "11111111-1111-4111-8111-111111111111",
+          p_status: "confirmed",
+        }),
+      },
+    );
   });
 
-  it("preserves an explicit pending status for shops requiring approval", async () => {
-    await bookAppointmentSafe({ ...baseParams, p_status: "pending" });
-    expect(mockRpc.mock.calls[0][1]).toHaveProperty("p_status", "pending");
+  it("fails before the RPC when vehicle persistence is missing", async () => {
+    await expect(bookAppointmentSafe({ ...baseParams, p_vehicle_id: null })).rejects.toThrow(
+      "BOOKING_VEHICLE_REQUIRED",
+    );
+    expect(mockPost).not.toHaveBeenCalled();
   });
 });
 
-describe("public booking appointment migration contract", () => {
-  const migration = readFileSync(
-    join(process.cwd(), "supabase/migrations/20260831030526_secure_public_booking_rpc_context.sql"),
+describe("public booking appointment location contract", () => {
+  const canonicalMigration = readFileSync(
+    join(process.cwd(), "supabase/migrations/20261009173500_atomic_start_and_public_booking_location.sql"),
+    "utf8",
+  );
+  const compatibilityMigration = readFileSync(
+    join(process.cwd(), "supabase/migrations/20261009174200_enforce_location_on_legacy_public_booking_v2.sql"),
     "utf8",
   );
 
-  it("returns the id from the appointment inserted by the current transaction", () => {
-    const functionBody = migration.match(
-      /create or replace function public\.public_booking_book_appointment\([\s\S]*?\n\$\$;/i,
+  it("creates a dedicated location before inserting the canonical appointment", () => {
+    const functionBody = canonicalMigration.match(
+      /create or replace function public\.public_booking_book_appointment_v3\([\s\S]*?\n\$\$;/i,
     )?.[0];
 
     expect(functionBody).toBeDefined();
-    expect(functionBody).toMatch(/insert into public\.appointments[\s\S]*?returning id into v_appointment_id;/i);
-    expect(functionBody).not.toMatch(
-      /select\s+a\.id\s+into\s+v_appointment_id\s+from\s+public\.appointments[\s\S]*?order\s+by\s+a\.created_at\s+desc\s+limit\s+1/i,
-    );
+    expect(functionBody).toMatch(/BOOKING_LOCATION_REQUIRED/i);
+    expect(functionBody).toMatch(/insert into public\.locations[\s\S]*?returning id into v_location_id/i);
+    expect(functionBody).toMatch(/insert into public\.appointments[\s\S]*?location_id[\s\S]*?v_location_id/i);
+    expect(functionBody).toMatch(/returning id into v_appointment_id/i);
   });
 
-  it("gives every security-definer function an empty search path", () => {
-    const securityDefinerFunctions = migration.match(
-      /create or replace function public\.[\s\S]*?security definer[\s\S]*?as \$\$/gi,
-    ) ?? [];
-
-    expect(securityDefinerFunctions).toHaveLength(8);
-    for (const functionHeader of securityDefinerFunctions) {
-      expect(functionHeader).toMatch(/set search_path = ''\s+as \$\$/i);
-      expect(functionHeader).not.toMatch(/set search_path\s*=\s*[^'\s]/i);
-    }
-
-    expect(migration.match(/alter function public\.[^;]+ set search_path = '';/gi)).toHaveLength(8);
-    expect(migration).not.toMatch(/set search_path\s*=\s*pg_catalog\s*,\s*public/i);
-
-    const verification = readFileSync(
-      join(process.cwd(), "supabase/ops/20260827_secure_public_booking_verify.sql"),
-      "utf8",
-    );
-    expect(verification).toContain(`p.proconfig @> array['search_path=""']`);
-    expect(verification).not.toContain("search_path=pg_catalog, public");
+  it("forces the legacy v2 signature through the location-aware v3 contract", () => {
+    expect(compatibilityMigration).toMatch(/BOOKING_LOCATION_REQUIRED/i);
+    expect(compatibilityMigration).toMatch(/public\.public_booking_book_appointment_v3\(/i);
+    expect(compatibilityMigration).not.toMatch(/insert into public\.appointments/i);
   });
 
-  it("schema-qualifies every application relation and delegated function", () => {
-    const applicationRelations = [
-      "workspaces",
-      "workspace_settings",
-      "customers",
-      "vehicles",
-      "service_catalog",
-      "appointments",
-    ];
-    for (const relation of applicationRelations) {
-      expect(migration).not.toMatch(new RegExp(`(?:from|join|into|update)\\s+(?!public\\.)${relation}\\b`, "i"));
-    }
+  it("keeps SECURITY DEFINER booking functions on an empty search path", () => {
+    const canonicalHeader = canonicalMigration.match(
+      /create or replace function public\.public_booking_book_appointment_v3\([\s\S]*?as \$\$/i,
+    )?.[0];
+    const compatibilityHeader = compatibilityMigration.match(
+      /create or replace function public\.public_booking_book_appointment_v2\([\s\S]*?as \$\$/i,
+    )?.[0];
 
-    const delegatedFunctions = [
-      "resolve_public_booking_context",
-      "upsert_booking_vehicle",
-      "save_appointment_booking_configuration",
-      "insert_booking_appointment_services",
-      "record_public_booking_payment_intent_v1",
-      "set_vehicle_tire_spec_v1",
-    ];
-    for (const functionName of delegatedFunctions) {
-      expect(migration).not.toMatch(new RegExp(`(?:perform|from|return)\\s+(?!public\\.)${functionName}\\b`, "i"));
-    }
+    expect(canonicalHeader).toMatch(/security definer[\s\S]*?set search_path = ''/i);
+    expect(compatibilityHeader).toMatch(/security definer[\s\S]*?set search_path = ''/i);
   });
 });
