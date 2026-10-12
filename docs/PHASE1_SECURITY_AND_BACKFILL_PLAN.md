@@ -94,12 +94,23 @@ These functions are expected to be public only after their argument validation, 
 
 Anonymous `SECURITY DEFINER` access is acceptable only when the function is intentionally part of the guest-booking boundary and validates every referenced workspace/customer/vehicle/appointment itself.
 
-### Legacy surfaces to revoke from anonymous/authenticated API access
+### Current compatibility contract
 
-Production currently exposes legacy or superseded functions that should not remain callable by browser roles once application call sites are confirmed migrated:
+The application currently calls `public_booking_book_appointment_v2` from `src/application/commands/booking-submit.command.ts`, and the server booking RPC allowlist also explicitly permits that name.
 
-- `public_booking_book_appointment_v2` — both overloads
-- `public_booking_update_appointment_context` — legacy mutation without customer email/phone binding
+The current migration chain hardens `public_booking_book_appointment_v2` by routing it into the appointment-location-aware `public_booking_book_appointment_v3` path. Therefore the `v2` name cannot be revoked until the application and server allowlist are migrated to the canonical function.
+
+Retirement order:
+
+1. move the application command to the canonical address-aware booking call
+2. update the server allowlist
+3. prove the canonical call passes booking contract tests
+4. verify no remaining code path depends on either `v2` overload
+5. only then revoke browser execution from the compatibility signatures
+
+### Legacy surface to revoke
+
+`public_booking_update_appointment_context` (without the customer email/phone binding) is still executable by browser roles and is superseded by `public_booking_update_appointment_context_v2`. After confirming there are no live call sites, revoke `anon` and `authenticated` execution from the legacy function.
 
 Already-revoked historical functions should remain revoked, including older `public_booking_insert_services`, booking profile, and other superseded versions.
 
@@ -147,8 +158,8 @@ Index cleanup is lower priority than contract and security correction, but dupli
 
 ## Phase 1 migration strategy
 
-1. verify frontend/server call sites use only the canonical RPC versions
-2. add a migration revoking browser execution from superseded booking RPCs
+1. migrate application/server call sites from compatibility booking RPCs to the canonical location-aware contract
+2. add a migration revoking browser execution from genuinely superseded booking RPCs
 3. harden `prevent_double_booking` search path
 4. add an idempotent Tier A location backfill for appointment-owned metadata only
 5. add a report/query for Tier B unresolved historical appointments
