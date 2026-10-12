@@ -119,6 +119,24 @@ if (exists(honoApp)) {
   }
 }
 
+// REG-018 — Public booking tax must be server-owned and must win route
+// precedence over the legacy platform handler that proxies a retired Edge
+// Function. Keep the connected-account Stripe execution and manual fallback.
+const bookingTax = "src/server/hono/routes/public-booking-tax.ts";
+requireText(bookingTax, 'publicBookingTaxRouter.post("/v1/platform/public-booking/calculate-tax"', "native public booking tax route");
+requireText(bookingTax, "resolveStripeWorkspaceExecution", "workspace Stripe Tax execution");
+requireText(bookingTax, 'calculation_source: "workspace_manual_rate"', "manual tax fallback source");
+requireText(bookingTax, 'tax_code: "txcd_10103001"', "historical Stripe Tax service code");
+forbidText(bookingTax, "invokeEdgeFunction", "native tax may not proxy retired Edge Function");
+if (exists(honoApp)) {
+  const source = read(honoApp);
+  const nativeTaxMount = source.indexOf('app.route("/", publicBookingTaxRouter)');
+  const platformMount = source.indexOf('app.route("/", platformRouter)');
+  if (nativeTaxMount < 0 || platformMount < 0 || nativeTaxMount > platformMount) {
+    failures.push("native public booking tax router must be registered before platformRouter");
+  }
+}
+
 // The regression lock itself must be wired into prebuild so Vercel/main cannot
 // produce a release artifact after one of these invariants disappears.
 requireText("package.json", "scripts/certify-regression-lock.mjs", "regression lock prebuild wiring");
