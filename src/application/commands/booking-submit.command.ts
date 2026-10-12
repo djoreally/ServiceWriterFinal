@@ -22,7 +22,6 @@ function bookingRpc<T = unknown>(fn: string, params: Record<string, unknown>) {
 }
 
 const vehiclePersistenceFailures = new Set<string>();
-const bookingLocations = new Map<string, string>();
 function bookingVehicleKey(slug: string, email: string) {
   return `${slug.trim().toLowerCase()}:${email.trim().toLowerCase()}`;
 }
@@ -71,11 +70,7 @@ export interface UpsertCustomerParams {
 }
 
 export async function upsertBookingCustomer(params: UpsertCustomerParams) {
-  const key = bookingVehicleKey(params.p_booking_slug, params.p_email);
-  vehiclePersistenceFailures.delete(key);
-  const address = optionalText(params.p_address);
-  if (address) bookingLocations.set(key, address);
-  else bookingLocations.delete(key);
+  vehiclePersistenceFailures.delete(bookingVehicleKey(params.p_booking_slug, params.p_email));
   return bookingRpc<string>("public_booking_upsert_customer", params as unknown as Record<string, unknown>);
 }
 
@@ -125,6 +120,9 @@ export interface BookAppointmentSafeParams {
   p_tax_amount: number;
   p_service_catalog_id: string | null;
   p_vehicle_id: string | null;
+  p_location_address: string;
+  p_location_lat: number | null;
+  p_location_lng: number | null;
   p_status?: "confirmed";
 }
 
@@ -137,23 +135,20 @@ export async function bookAppointmentSafe(params: BookAppointmentSafeParams) {
   if (!params.p_vehicle_id) {
     throw new Error("BOOKING_VEHICLE_REQUIRED");
   }
-  const locationAddress = bookingLocations.get(key);
-  if (!locationAddress) {
+  if (!optionalText(params.p_location_address)) {
     throw new Error("BOOKING_LOCATION_REQUIRED");
   }
 
-  const result = await apiClient.post<{ data: string | null; error: { message: string } | null }>(
+  return apiClient.post<{ data: string | null; error: { message: string } | null }>(
     "/v1/public-bookings/appointments",
     {
       ...params,
-      p_location_address: locationAddress,
-      p_location_lat: null,
-      p_location_lng: null,
+      p_location_address: params.p_location_address.trim(),
+      p_location_lat: params.p_location_lat,
+      p_location_lng: params.p_location_lng,
       p_status: params.p_status ?? "confirmed",
     },
   );
-  if (!result.error && result.data) bookingLocations.delete(key);
-  return result;
 }
 
 export async function assignVanByZip(userId: string, zipCode: string) {
