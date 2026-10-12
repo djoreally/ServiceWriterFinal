@@ -13,6 +13,10 @@ const commandSource = readFileSync(
   join(process.cwd(), "src/application/commands/booking-submit.command.ts"),
   "utf8",
 );
+const submitSource = readFileSync(
+  join(process.cwd(), "src/hooks/useBookingSubmit.ts"),
+  "utf8",
+);
 
 describe("canonical public booking API contract", () => {
   it("mounts the dedicated public booking Hono router", () => {
@@ -28,6 +32,19 @@ describe("canonical public booking API contract", () => {
     expect(routeSource).toContain('supabase.rpc("public_booking_book_appointment_v3"');
     expect(commandSource).toContain('"/v1/public-bookings/appointments"');
     expect(commandSource).not.toContain('bookingRpc<string>("public_booking_book_appointment_v2"');
+  });
+
+  it("passes location explicitly instead of hiding it between commands", () => {
+    expect(commandSource).not.toContain("bookingLocations");
+    expect(submitSource).toContain("p_location_address: fullAddress");
+    expect(submitSource).toContain("p_location_lat: finalCoords?.lat ?? null");
+    expect(submitSource).toContain("p_location_lng: finalCoords?.lng ?? null");
+  });
+
+  it("does not rewrite the appointment location after canonical creation", () => {
+    expect(submitSource).not.toContain("updatePayload.location_address");
+    expect(submitSource).not.toContain("updatePayload.location_lat");
+    expect(submitSource).not.toContain("updatePayload.location_lng");
   });
 
   it("uses the server-safe anonymous Supabase client", () => {
