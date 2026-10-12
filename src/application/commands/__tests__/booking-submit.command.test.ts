@@ -16,7 +16,7 @@ jest.mock("@/integrations/supabase/client", () => ({
   supabase: { auth: { signUp: jest.fn() } },
 }));
 
-import { bookAppointmentSafe, upsertBookingCustomer } from "../booking-submit.command";
+import { bookAppointmentSafe } from "../booking-submit.command";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -35,24 +35,15 @@ const baseParams = {
   p_tax_amount: 0,
   p_service_catalog_id: null,
   p_vehicle_id: "11111111-1111-4111-8111-111111111111",
+  p_location_address: "123 Test Street, Philadelphia, PA 19103",
+  p_location_lat: 39.9526,
+  p_location_lng: -75.1652,
 } as const;
-
-async function stageBookingAddress(email = baseParams.p_guest_email) {
-  await upsertBookingCustomer({
-    p_booking_slug: baseParams.p_booking_slug,
-    p_email: email,
-    p_name: baseParams.p_guest_name,
-    p_phone: baseParams.p_guest_phone,
-    p_address: "123 Test Street, Philadelphia, PA 19103",
-  });
-  mockPost.mockClear();
-}
 
 describe("bookAppointmentSafe", () => {
   beforeEach(() => mockPost.mockClear());
 
-  it("routes booking creation through the canonical Hono public-booking boundary", async () => {
-    await stageBookingAddress();
+  it("routes booking creation through the canonical Hono public-booking boundary with explicit location", async () => {
     await bookAppointmentSafe(baseParams);
 
     expect(mockPost).toHaveBeenCalledWith(
@@ -61,27 +52,24 @@ describe("bookAppointmentSafe", () => {
         p_booking_slug: "test-booking",
         p_vehicle_id: "11111111-1111-4111-8111-111111111111",
         p_location_address: "123 Test Street, Philadelphia, PA 19103",
-        p_location_lat: null,
-        p_location_lng: null,
+        p_location_lat: 39.9526,
+        p_location_lng: -75.1652,
         p_status: "confirmed",
       }),
     );
   });
 
   it("fails before the API when vehicle persistence is missing", async () => {
-    await stageBookingAddress("vehicle-missing@example.com");
-    await expect(bookAppointmentSafe({
-      ...baseParams,
-      p_guest_email: "vehicle-missing@example.com",
-      p_vehicle_id: null,
-    })).rejects.toThrow("BOOKING_VEHICLE_REQUIRED");
+    await expect(bookAppointmentSafe({ ...baseParams, p_vehicle_id: null })).rejects.toThrow(
+      "BOOKING_VEHICLE_REQUIRED",
+    );
     expect(mockPost).not.toHaveBeenCalled();
   });
 
   it("fails closed when the appointment has no explicit service location", async () => {
     await expect(bookAppointmentSafe({
       ...baseParams,
-      p_guest_email: "no-location@example.com",
+      p_location_address: "   ",
     })).rejects.toThrow("BOOKING_LOCATION_REQUIRED");
     expect(mockPost).not.toHaveBeenCalled();
   });
