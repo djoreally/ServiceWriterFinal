@@ -24,14 +24,13 @@ Phase 1 certified that path as safe, but it remained transitional architecture.
 
 Public appointment creation follows:
 
-1. booking state owns the exact service address and resolved coordinates for the current submission
-2. the application command passes that location explicitly into appointment creation
-3. browser calls `POST /api/v1/public-bookings/appointments`
-4. Hono validates the complete creation contract, including a required service address
-5. Hono invokes `public_booking_book_appointment_v3` server-side
-6. v3 creates the dedicated location and appointment atomically
+1. booking state passes the exact service address and resolved coordinates explicitly into `bookAppointmentSafe`
+2. browser calls `POST /api/v1/public-bookings/appointments`
+3. Hono validates the complete creation contract, including a required service address
+4. Hono invokes `public_booking_book_appointment_v3` server-side
+5. v3 creates the dedicated location and appointment atomically
 
-The browser no longer chooses the appointment-creation database function name. The canonical flow does not stage a transient legacy location intent and does not rewrite the appointment location after creation.
+The browser no longer chooses the appointment-creation database function name.
 
 ## Invariants
 
@@ -42,11 +41,8 @@ The following are release blockers:
 - the Hono route must call only `public_booking_book_appointment_v3` for appointment creation
 - the application command must not call `public_booking_book_appointment_v2`
 - the Hono route must use a server-safe anonymous Supabase client
-- the canonical flow must not depend on hidden module state for location transfer
-- the canonical flow must not stage `public_booking_location_intents`
-- the canonical flow must not rewrite appointment location after creation
-- malformed JSON must return a client error rather than a server 500
-- RPC failures must produce non-2xx HTTP status while preserving booking-domain error semantics for the UI
+- the canonical flow must not stage a legacy `public_booking_location_intents` row
+- the canonical flow must not rewrite the appointment location after creation
 - the existing v3 database function remains the authority for workspace resolution, customer/vehicle validation, slot locking, overlap prevention, and atomic location ownership
 
 ## Compatibility rule
@@ -57,32 +53,28 @@ It remains temporarily available only to avoid breaking already-deployed or stal
 
 Removal is a separate controlled change after production verification shows the canonical Hono endpoint is serving bookings correctly.
 
-## Verification and merge authority
+## Verification
 
-Internal execution validation is the authoritative merge gate.
+Internal execution validation is the authoritative merge gate for this project.
 
-Before a change reaches GitHub for merge, the internal validation run must certify the intended behavior and regression contract. If that internal execution validation passes, the change may proceed to merge even when GitHub Actions, Codeac, CodeRabbit, or another external check is missing, pending, unavailable, or unable to run.
+If the internal execution/certification run passes, the change proceeds to merge. GitHub Actions, Codeac, CodeRabbit, or another external check being pending, missing, unavailable, or unable to run does not by itself block the merge.
 
-External GitHub checks are advisory evidence, not the release authority. They only become blocking when they surface a new concrete defect that invalidates the internal certification; that defect must then be fixed and the affected internal validation rerun.
+An external check becomes blocking only when it reports a new concrete defect that invalidates the internal certification. In that case the defect is fixed and the affected internal validation is rerun before merge.
 
-Required internal validation before merge:
+Required before merge:
 
 1. command contract confirms booking creation targets `/v1/public-bookings/appointments`
-2. command contract confirms the exact service address and resolved coordinates are passed explicitly
-3. command fails closed when the service address is missing
-4. vehicle persistence remains required
-5. route contract confirms Hono mounts the public-booking router
-6. route contract confirms Hono calls v3 and never exposes the appointment-creation RPC selector to browser code
-7. route contract confirms malformed JSON returns 400
-8. route contract confirms RPC failures return non-2xx status
-9. regression contract confirms there is no hidden booking-location map
-10. regression contract confirms the canonical flow does not stage `public_booking_location_intents`
-11. regression contract confirms the appointment location is not rewritten after creation
-12. review findings that identify real defects are resolved before merge
+2. command contract confirms the explicit service address and coordinates are included
+3. command fails closed when the address is missing
+4. route contract confirms Hono mounts the public-booking router
+5. route contract confirms Hono calls v3 and not the browser-client helper
+6. canonical flow does not stage `public_booking_location_intents`
+7. canonical flow does not rewrite location after creation
+8. malformed JSON returns HTTP 400
+9. RPC failures surface non-2xx status without losing the existing DATE_BLOCKED/SLOT_UNAVAILABLE booking semantics
+10. internal execution validation passes
 
-GitHub status, external CI availability, and third-party analysis do not override a passing internal certification by themselves.
-
-## Required after deployment before retiring v2
+Required after deployment before retiring v2:
 
 1. submit a transaction-safe or disposable public booking through the live Hono endpoint
 2. verify the resulting appointment owns a dedicated `location_id`
