@@ -10,8 +10,9 @@ import type { Json } from "@/integrations/supabase/types.production";
 import type { AppointmentBookingConfiguration } from "@/lib/booking-configuration";
 
 /**
- * Whitelisted public-booking RPCs are proxied by the appointments domain.
- * The proxy returns the same { data, error } shape as supabase.rpc.
+ * Remaining whitelisted public-booking RPCs are proxied by the appointments
+ * domain. Canonical appointment creation has its own typed Hono endpoint and
+ * does not expose the underlying RPC name to browser code.
  */
 function bookingRpc<T = unknown>(fn: string, params: Record<string, unknown>) {
   return apiClient.post<{ data: T | null; error: { message: string } | null }>(
@@ -21,6 +22,7 @@ function bookingRpc<T = unknown>(fn: string, params: Record<string, unknown>) {
 }
 
 const vehiclePersistenceFailures = new Set<string>();
+const bookingLocations = new Map<string, string>();
 function bookingVehicleKey(slug: string, email: string) {
   return `${slug.trim().toLowerCase()}:${email.trim().toLowerCase()}`;
 }
@@ -69,7 +71,11 @@ export interface UpsertCustomerParams {
 }
 
 export async function upsertBookingCustomer(params: UpsertCustomerParams) {
-  vehiclePersistenceFailures.delete(bookingVehicleKey(params.p_booking_slug, params.p_email));
+  const key = bookingVehicleKey(params.p_booking_slug, params.p_email);
+  vehiclePersistenceFailures.delete(key);
+  const address = optionalText(params.p_address);
+  if (address) bookingLocations.set(key, address);
+  else bookingLocations.delete(key);
   return bookingRpc<string>("public_booking_upsert_customer", params as unknown as Record<string, unknown>);
 }
 
@@ -131,10 +137,23 @@ export async function bookAppointmentSafe(params: BookAppointmentSafeParams) {
   if (!params.p_vehicle_id) {
     throw new Error("BOOKING_VEHICLE_REQUIRED");
   }
-  return bookingRpc<string>("public_booking_book_appointment_v2", {
-    ...params,
-    p_status: params.p_status ?? "confirmed",
-  } as unknown as Record<string, unknown>);
+  const locationAddress = bookingLocations.get(key);
+  if (!locationAddress) {
+    throw new Error("BOOKING_LOCATION_REQUIRED");
+  }
+
+  const result = await apiClient.post<{ data: string | null; error: { message: string } | null }>(
+    "/v1/public-bookings/appointments",
+    {
+      ...params,
+      p_location_address: locationAddress,
+      p_location_lat: null,
+      p_location_lng: null,
+      p_status: params.p_status ?? "confirmed",
+    },
+  );
+  if (!result.error && result.data) bookingLocations.delete(key);
+  return result;
 }
 
 export async function assignVanByZip(userId: string, zipCode: string) {
