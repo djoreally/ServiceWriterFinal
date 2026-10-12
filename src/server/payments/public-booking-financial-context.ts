@@ -63,6 +63,22 @@ function finiteNonNegative(name: string, value: unknown): number {
   return number;
 }
 
+function percentage(name: string, value: unknown): number {
+  const number = finiteNonNegative(name, value);
+  if (number > 100) {
+    throw new ApiError(500, `${name} must be less than or equal to 100.`, "financial_configuration_invalid");
+  }
+  return number;
+}
+
+function feeType(name: string, value: unknown): "fixed" | "percentage" {
+  const type = text(value) || "fixed";
+  if (type !== "fixed" && type !== "percentage") {
+    throw new ApiError(500, `${name} is invalid.`, "financial_configuration_invalid");
+  }
+  return type;
+}
+
 function itemIsBillable(metadataValue: unknown): boolean {
   const metadata = record(metadataValue);
   return !(
@@ -90,13 +106,22 @@ function normalizePhoneDigits(value: unknown): string {
   return text(value).replace(/\D/g, "");
 }
 
+function configuredDate(name: string, value: unknown): Date | null {
+  if (value === null || value === undefined || value === "") return null;
+  const date = new Date(String(value));
+  if (!Number.isFinite(date.getTime())) {
+    throw new ApiError(500, `${name} is invalid.`, "discount_configuration_invalid");
+  }
+  return date;
+}
+
 function discountAmount(
   subtotal: number,
   discountType: string,
   configuredValue: number,
 ): number {
   if (discountType === "percentage") {
-    return bankersRound(subtotal * (configuredValue / 100), 2);
+    return bankersRound(subtotal * (percentage("discount.percentage", configuredValue) / 100), 2);
   }
   if (discountType === "fixed") {
     return bankersRound(Math.min(configuredValue, subtotal), 2);
@@ -114,20 +139,26 @@ function validateRegularCoupon(params: {
   const coupon = params.rows.find((row) => text(row.code).toLowerCase() === requested);
   if (!coupon) return null;
 
-  const validFrom = coupon.valid_from ? new Date(String(coupon.valid_from)) : null;
-  const validUntil = coupon.valid_until ? new Date(String(coupon.valid_until)) : null;
-  if (validFrom && Number.isFinite(validFrom.getTime()) && validFrom > params.now) {
+  const validFrom = configuredDate("coupon.valid_from", coupon.valid_from);
+  const validUntil = configuredDate("coupon.valid_until", coupon.valid_until);
+  if (validFrom && validFrom > params.now) {
     throw new ApiError(409, "This coupon is not yet valid.", "coupon_not_active");
   }
-  if (validUntil && Number.isFinite(validUntil.getTime()) && validUntil < params.now) {
+  if (validUntil && validUntil < params.now) {
     throw new ApiError(409, "This coupon has expired.", "coupon_expired");
   }
 
   const maxUses = coupon.max_uses === null || coupon.max_uses === undefined
     ? null
     : Number(coupon.max_uses);
+  if (maxUses !== null && (!Number.isInteger(maxUses) || maxUses < 0)) {
+    throw new ApiError(500, "coupon.max_uses is invalid.", "discount_configuration_invalid");
+  }
   const usedCount = finiteNonNegative("coupon.used_count", coupon.used_count);
-  if (maxUses !== null && Number.isFinite(maxUses) && usedCount >= maxUses) {
+  if (!Number.isInteger(usedCount)) {
+    throw new ApiError(500, "coupon.used_count is invalid.", "discount_configuration_invalid");
+  }
+  if (maxUses !== null && usedCount >= maxUses) {
     throw new ApiError(409, "This coupon has reached its usage limit.", "coupon_usage_exhausted");
   }
 
@@ -256,6 +287,9 @@ export async function loadPublicBookingFinancialContext(params: {
   if (appointment.source !== "public_booking") {
     throw new ApiError(409, "Appointment is not a public booking.", "booking_context_invalid");
   }
+  if (appointment.status === "cancelled" || appointment.status === "no_show") {
+    throw new ApiError(409, "Cancelled bookings cannot be financially finalized.", "booking_not_payable");
+  }
   if (!appointment.location_id) {
     throw new ApiError(409, "Booking service location is missing.", "booking_location_required");
   }
@@ -334,6 +368,26 @@ export async function loadPublicBookingFinancialContext(params: {
     }
   }
 
+  const taxProvider: "manual" | "stripe" = operationalSettings.tax_provider === "stripe" ? "stripe" : "manual";
+  const locationFields = {
+    line1: text(location.address_line1),
+    line2: text(location.address_line2),
+    city: text(location.city),
+    state: text(location.region),
+    postalCode: text(location.postal_code),
+    country: text(location.country_code).toUpperCase() || "US",
+  };
+  if (!locationFields.line1) {
+    throw new ApiError(409, "Booking service address is missing.", "booking_location_invalid");
+  }
+  if (taxProvider === "stripe" && (!locationFields.city || !locationFields.state || !locationFields.postalCode)) {
+    throw new ApiError(
+      409,
+      "Structured service location is required for Stripe Tax finalization.",
+      "tax_location_incomplete",
+    );
+  }
+
   return {
     workspaceId,
     appointmentId: String(appointment.id),
@@ -347,28 +401,21 @@ export async function loadPublicBookingFinancialContext(params: {
       waste_oil_fee_enabled: Boolean(settings.waste_oil_fee_enabled),
       waste_oil_fee: finiteNonNegative("workspace.waste_oil_fee", settings.waste_oil_fee),
       shop_fee_enabled: Boolean(settings.shop_fee_enabled),
-      shop_fee_type: text(settings.shop_fee_type) || "fixed",
+      shop_fee_type: feeType("workspace.shop_fee_type", settings.shop_fee_type),
       shop_fee_value: finiteNonNegative("workspace.shop_fee_value", settings.shop_fee_value),
       shop_fee_description: text(settings.shop_fee_description),
       surcharge_enabled: Boolean(settings.surcharge_enabled),
-      surcharge_type: text(settings.surcharge_type) || "fixed",
+      surcharge_type: feeType("workspace.surcharge_type", settings.surcharge_type),
       surcharge_value: finiteNonNegative("workspace.surcharge_value", settings.surcharge_value),
       surcharge_description: text(settings.surcharge_description),
     },
     tax: {
-      provider: operationalSettings.tax_provider === "stripe" ? "stripe" : "manual",
-      ratePercent: finiteNonNegative("workspace.tax_rate", settings.tax_rate),
+      provider: taxProvider,
+      ratePercent: percentage("workspace.tax_rate", settings.tax_rate),
       paymentProvider: text(settings.payment_provider) || null,
       operationalSettings,
       currencyCode: text(workspace.currency_code).toUpperCase() || "USD",
-      location: {
-        line1: text(location.address_line1),
-        line2: text(location.address_line2),
-        city: text(location.city),
-        state: text(location.region),
-        postalCode: text(location.postal_code),
-        country: text(location.country_code).toUpperCase() || "US",
-      },
+      location: locationFields,
     },
   };
 }
