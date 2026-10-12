@@ -3,15 +3,16 @@
  * operations performed during the public booking flow. Keeps useBookingSubmit
  * free of direct Supabase references.
  */
-import { apiClient } from "@/lib/api-client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import type { Json } from "@/integrations/supabase/types.production";
 import type { AppointmentBookingConfiguration } from "@/lib/booking-configuration";
 
 /**
- * Whitelisted public-booking RPCs are proxied by the appointments domain.
- * The proxy returns the same { data, error } shape as supabase.rpc.
+ * Remaining whitelisted public-booking RPCs are proxied by the appointments
+ * domain. Canonical appointment creation has its own typed Hono endpoint and
+ * does not expose the underlying RPC name to browser code.
  */
 function bookingRpc<T = unknown>(fn: string, params: Record<string, unknown>) {
   return apiClient.post<{ data: T | null; error: { message: string } | null }>(
@@ -70,7 +71,12 @@ export interface UpsertCustomerParams {
 
 export async function upsertBookingCustomer(params: UpsertCustomerParams) {
   vehiclePersistenceFailures.delete(bookingVehicleKey(params.p_booking_slug, params.p_email));
-  return bookingRpc<string>("public_booking_upsert_customer", params as unknown as Record<string, unknown>);
+  // Phase 2: appointment location is passed explicitly to canonical creation.
+  // Do not create a legacy public_booking_location_intents row for this flow.
+  return bookingRpc<string>("public_booking_upsert_customer", {
+    ...params,
+    p_address: null,
+  } as unknown as Record<string, unknown>);
 }
 
 // ---------------------------------------------------------------------------
@@ -119,6 +125,9 @@ export interface BookAppointmentSafeParams {
   p_tax_amount: number;
   p_service_catalog_id: string | null;
   p_vehicle_id: string | null;
+  p_location_address: string;
+  p_location_lat: number | null;
+  p_location_lng: number | null;
   p_status?: "confirmed";
 }
 
@@ -131,10 +140,36 @@ export async function bookAppointmentSafe(params: BookAppointmentSafeParams) {
   if (!params.p_vehicle_id) {
     throw new Error("BOOKING_VEHICLE_REQUIRED");
   }
-  return bookingRpc<string>("public_booking_book_appointment_v2", {
-    ...params,
-    p_status: params.p_status ?? "confirmed",
-  } as unknown as Record<string, unknown>);
+  if (!optionalText(params.p_location_address)) {
+    throw new Error("BOOKING_LOCATION_REQUIRED");
+  }
+
+  try {
+    return await apiClient.post<{
+      data: string | null;
+      error: { message: string; code?: string } | null;
+    }>(
+      "/v1/public-bookings/appointments",
+      {
+        ...params,
+        p_location_address: params.p_location_address.trim(),
+        p_location_lat: params.p_location_lat,
+        p_location_lng: params.p_location_lng,
+        p_status: params.p_status ?? "confirmed",
+      },
+    );
+  } catch (error) {
+    // The canonical Hono route now returns honest non-2xx statuses for RPC
+    // failures. Preserve the historical { data, error } command contract so
+    // useBookingSubmit can keep its specific DATE_BLOCKED/SLOT_UNAVAILABLE UI.
+    if (error instanceof ApiClientError) {
+      return {
+        data: null,
+        error: { message: error.message, code: error.code },
+      };
+    }
+    throw error;
+  }
 }
 
 export async function assignVanByZip(userId: string, zipCode: string) {

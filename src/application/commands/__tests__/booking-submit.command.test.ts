@@ -1,10 +1,9 @@
 /**
- * Guards the current public-booking appointment contract.
+ * Guards the canonical public-booking appointment contract.
  *
- * Browser booking writes go through the Hono appointments boundary. The live
- * compatibility name (v2) is intentionally retained until the UI passes the
- * address directly to v3, but the database v2 contract must fail closed when
- * no staged service address exists and delegate creation to v3.
+ * Browser booking creation goes through a typed Hono endpoint. The browser no
+ * longer selects the database appointment RPC name; Hono owns the v3 call and
+ * requires the service location in the creation payload.
  */
 
 const mockPost = jest.fn().mockResolvedValue({ data: "appt-1", error: null });
@@ -36,31 +35,42 @@ const baseParams = {
   p_tax_amount: 0,
   p_service_catalog_id: null,
   p_vehicle_id: "11111111-1111-4111-8111-111111111111",
+  p_location_address: "123 Test Street, Philadelphia, PA 19103",
+  p_location_lat: 39.9526,
+  p_location_lng: -75.1652,
 } as const;
 
 describe("bookAppointmentSafe", () => {
   beforeEach(() => mockPost.mockClear());
 
-  it("routes booking creation through the Hono appointments boundary", async () => {
+  it("routes booking creation through the canonical Hono public-booking boundary with explicit location", async () => {
     await bookAppointmentSafe(baseParams);
 
     expect(mockPost).toHaveBeenCalledWith(
-      "/v1/appointments/booking-rpc",
-      {
-        fn: "public_booking_book_appointment_v2",
-        params: expect.objectContaining({
-          p_booking_slug: "test-booking",
-          p_vehicle_id: "11111111-1111-4111-8111-111111111111",
-          p_status: "confirmed",
-        }),
-      },
+      "/v1/public-bookings/appointments",
+      expect.objectContaining({
+        p_booking_slug: "test-booking",
+        p_vehicle_id: "11111111-1111-4111-8111-111111111111",
+        p_location_address: "123 Test Street, Philadelphia, PA 19103",
+        p_location_lat: 39.9526,
+        p_location_lng: -75.1652,
+        p_status: "confirmed",
+      }),
     );
   });
 
-  it("fails before the RPC when vehicle persistence is missing", async () => {
+  it("fails before the API when vehicle persistence is missing", async () => {
     await expect(bookAppointmentSafe({ ...baseParams, p_vehicle_id: null })).rejects.toThrow(
       "BOOKING_VEHICLE_REQUIRED",
     );
+    expect(mockPost).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the appointment has no explicit service location", async () => {
+    await expect(bookAppointmentSafe({
+      ...baseParams,
+      p_location_address: "   ",
+    })).rejects.toThrow("BOOKING_LOCATION_REQUIRED");
     expect(mockPost).not.toHaveBeenCalled();
   });
 });
@@ -87,7 +97,7 @@ describe("public booking appointment location contract", () => {
     expect(functionBody).toMatch(/returning id into v_appointment_id/i);
   });
 
-  it("forces the legacy v2 signature through the location-aware v3 contract", () => {
+  it("keeps the legacy v2 compatibility function safe while older clients drain", () => {
     expect(compatibilityMigration).toMatch(/BOOKING_LOCATION_REQUIRED/i);
     expect(compatibilityMigration).toMatch(/public\.public_booking_book_appointment_v3\(/i);
     expect(compatibilityMigration).not.toMatch(/insert into public\.appointments/i);
