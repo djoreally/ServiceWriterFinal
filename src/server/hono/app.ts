@@ -58,7 +58,7 @@ export function createHonoApp(): Hono {
   app.post("/v1/billing/public-checkout", () => json({
     error: {
       code: "public_checkout_unavailable",
-      message: "Online payment checkout is not enabled right now. Please choose \"Pay at Time of Service\" to complete your booking.",
+      message: "Online Stripe/Square payment checkout is not enabled right now. Please choose \"Pay at Time of Service\" to complete your booking.",
     },
   }, { status: 503 }));
 
