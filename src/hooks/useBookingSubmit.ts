@@ -564,10 +564,12 @@ export function useBookingSubmit(deps: SubmitDeps) {
         }
       }
 
+      const finalCoords = customerCoords || geocodedCoords;
       let rewardDiscountCents = 0;
       let rewardReserved = false;
 
-      // Book appointment (atomic RPC)
+      // Book appointment through the canonical Hono boundary. The service
+      // location is explicit here and v3 owns it atomically at creation time.
       const { data: appointmentId, error: appointmentError } = await bookAppointmentSafe({
         p_booking_slug: slug || "",
         p_scheduled_date: format(selectedDate, "yyyy-MM-dd"),
@@ -583,6 +585,9 @@ export function useBookingSubmit(deps: SubmitDeps) {
         p_tax_amount: taxData?.tax_amount || 0,
         p_service_catalog_id: selectedPackage?.services[0]?.id || selectedServices[0]?.id || null,
         p_vehicle_id: vehicleIds[0] || null,
+        p_location_address: fullAddress,
+        p_location_lat: finalCoords?.lat ?? null,
+        p_location_lng: finalCoords?.lng ?? null,
         p_status: "confirmed",
       });
 
@@ -691,7 +696,8 @@ export function useBookingSubmit(deps: SubmitDeps) {
         }
       }
 
-      // Post-booking: link customer, assign through dispatch boundary, set location
+      // Post-booking: link customer metadata and dispatch notes only. Location
+      // was already persisted atomically by the canonical v3 create operation.
       const assignedVanId: string | null = null;
       if (appointmentId) {
         const updatePayload: Record<string, unknown> = {};
@@ -714,13 +720,6 @@ export function useBookingSubmit(deps: SubmitDeps) {
           } catch (e) {
             console.warn("Van auto-assignment failed:", e);
           }
-        }
-
-        if (fullAddress) updatePayload.location_address = fullAddress;
-        const finalCoords = customerCoords || geocodedCoords;
-        if (finalCoords) {
-          updatePayload.location_lat = finalCoords.lat;
-          updatePayload.location_lng = finalCoords.lng;
         }
 
         if (Object.keys(updatePayload).length > 0) {
