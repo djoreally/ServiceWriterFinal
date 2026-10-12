@@ -26,12 +26,20 @@ export interface PublicBookingTaxCalculationInput {
   description?: string;
 }
 
+export interface PublicBookingTaxBreakdownItem {
+  jurisdiction: string;
+  rate: number;
+  amountCents: number;
+  taxType: string;
+}
+
 export interface PublicBookingTaxCalculationResult {
   taxCents: number;
   source: "workspace_manual_rate" | "stripe_tax_connect" | "stripe_tax_direct";
   calculationId: string | null;
   ratePercent: number | null;
   fallback: boolean;
+  breakdown: PublicBookingTaxBreakdownItem[];
 }
 
 function requireIntegerCents(value: number): number {
@@ -59,12 +67,21 @@ function manualResult(
   ratePercent: number,
   fallback: boolean,
 ): PublicBookingTaxCalculationResult {
+  const taxCents = manualTaxCents(amountCents, ratePercent);
   return {
-    taxCents: manualTaxCents(amountCents, ratePercent),
+    taxCents,
     source: "workspace_manual_rate",
     calculationId: null,
     ratePercent,
     fallback,
+    breakdown: ratePercent > 0
+      ? [{
+          jurisdiction: "Configured Rate",
+          rate: ratePercent,
+          amountCents: taxCents,
+          taxType: "manual",
+        }]
+      : [],
   };
 }
 
@@ -130,11 +147,41 @@ export async function calculatePublicBookingTax(
     const result = calculation as unknown as {
       id?: string | null;
       tax_amount_exclusive?: number | null;
+      tax_breakdown?: Array<{
+        amount?: number | null;
+        tax_rate_details?: {
+          percentage_decimal?: string | null;
+          country?: string | null;
+          state?: string | null;
+          tax_type?: string | null;
+        } | null;
+        taxability_reason?: string | null;
+      }> | null;
     };
     const taxCents = Number(result.tax_amount_exclusive ?? 0);
     if (!Number.isFinite(taxCents) || taxCents < 0 || !Number.isInteger(taxCents)) {
       throw new Error("Stripe Tax returned an invalid tax amount");
     }
+
+    const breakdown: PublicBookingTaxBreakdownItem[] = (result.tax_breakdown ?? []).map((item) => {
+      const amount = Number(item.amount ?? 0);
+      const rate = item.tax_rate_details?.percentage_decimal
+        ? Number(item.tax_rate_details.percentage_decimal)
+        : 0;
+      if (!Number.isFinite(amount) || !Number.isInteger(amount) || amount < 0 || !Number.isFinite(rate) || rate < 0) {
+        throw new Error("Stripe Tax returned an invalid tax breakdown");
+      }
+      const jurisdiction = [
+        item.tax_rate_details?.state,
+        item.tax_rate_details?.country,
+      ].filter(Boolean).join(", ") || "Unknown";
+      return {
+        jurisdiction,
+        rate,
+        amountCents: amount,
+        taxType: item.tax_rate_details?.tax_type || item.taxability_reason || "taxable",
+      };
+    });
 
     return {
       taxCents,
@@ -142,6 +189,7 @@ export async function calculatePublicBookingTax(
       calculationId: result.id || null,
       ratePercent: null,
       fallback: false,
+      breakdown,
     };
   } catch (error) {
     console.warn("[public-booking-tax] provider calculation failed; using configured rate", {
