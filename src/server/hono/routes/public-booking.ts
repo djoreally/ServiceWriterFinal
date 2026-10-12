@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
-import { json } from "@/server/api";
+import { errorResponse, json, toError } from "@/server/api";
 import { createSupabaseAnonServerClient } from "@/lib/supabase";
 
 export const publicBookingRouter = new Hono();
@@ -11,7 +11,9 @@ const publicBookingAppointmentSchema = z.object({
   p_scheduled_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   p_scheduled_time: z.string().regex(/^\d{2}:\d{2}(?::\d{2})?$/),
   p_duration_minutes: z.number().int().min(1).max(1440),
-  p_title: z.string().max(500),
+  // v3 is the authority and truncates the stored title to 500 characters.
+  // Do not reject otherwise-valid multi-vehicle bookings at the HTTP boundary.
+  p_title: z.string(),
   p_guest_name: z.string().trim().min(1).max(160),
   p_guest_email: z.string().trim().email().max(320),
   p_guest_phone: z.string().trim().min(10).max(64),
@@ -27,16 +29,6 @@ const publicBookingAppointmentSchema = z.object({
   p_status: z.literal("confirmed").default("confirmed"),
 });
 
-function serializeRpcError(error: unknown) {
-  const value = error && typeof error === "object" ? error as Record<string, unknown> : {};
-  return {
-    message: typeof value.message === "string" ? value.message : "Public booking failed",
-    code: typeof value.code === "string" ? value.code : undefined,
-    details: typeof value.details === "string" ? value.details : undefined,
-    hint: typeof value.hint === "string" ? value.hint : undefined,
-  };
-}
-
 /**
  * Canonical public appointment creation boundary.
  *
@@ -46,7 +38,17 @@ function serializeRpcError(error: unknown) {
  * its service location atomically.
  */
 publicBookingRouter.post("/v1/public-bookings/appointments", async (c: Context) => {
-  const body = publicBookingAppointmentSchema.parse(await c.req.json());
+  let raw: unknown;
+  try {
+    raw = await c.req.json();
+  } catch {
+    return json(
+      { error: { code: "invalid_input", message: "Invalid JSON body" } },
+      { status: 400 },
+    );
+  }
+
+  const body = publicBookingAppointmentSchema.parse(raw);
   const supabase = createSupabaseAnonServerClient() as any;
 
   const { data, error } = await supabase.rpc("public_booking_book_appointment_v3", {
@@ -70,6 +72,6 @@ publicBookingRouter.post("/v1/public-bookings/appointments", async (c: Context) 
     p_status: body.p_status,
   });
 
-  if (error) return json({ data: null, error: serializeRpcError(error) });
+  if (error) return errorResponse(toError(error));
   return json({ data, error: null });
 });
