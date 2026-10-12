@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
 import { json } from "@/server/api";
-import { createSupabaseBrowserClient } from "@/lib/supabase";
+import { createSupabaseAnonServerClient } from "@/lib/supabase";
 
 export const publicBookingRouter = new Hono();
 
@@ -47,7 +47,7 @@ function serializeRpcError(error: unknown) {
  */
 publicBookingRouter.post("/v1/public-bookings/appointments", async (c: Context) => {
   const body = publicBookingAppointmentSchema.parse(await c.req.json());
-  const supabase = createSupabaseBrowserClient() as any;
+  const supabase = createSupabaseAnonServerClient() as any;
 
   const { data, error } = await supabase.rpc("public_booking_book_appointment_v3", {
     p_booking_slug: body.p_booking_slug,
