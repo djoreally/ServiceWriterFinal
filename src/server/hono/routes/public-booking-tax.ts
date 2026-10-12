@@ -15,14 +15,23 @@ const addressSchema = z.object({
 });
 
 const taxPreviewSchema = z.object({
-  booking_slug: z.string().trim().min(1).max(160),
+  booking_slug: z.string().trim().min(1).max(160).optional(),
   amount: z.number().int().positive().max(100_000_000),
   currency: z.string().trim().length(3).optional(),
   customer_address: addressSchema,
   product_description: z.string().trim().max(500).optional(),
-  // Legacy callers may still send user_id. It is deliberately ignored for
-  // workspace resolution; booking_slug is the only public tenant selector.
-  user_id: z.string().optional(),
+  // Temporary compatibility hint for the currently deployed booking page.
+  // It is accepted only when it resolves to exactly one active public-booking
+  // workspace. New callers must send booking_slug.
+  user_id: z.string().uuid().optional(),
+}).superRefine((value, ctx) => {
+  if (!value.booking_slug && !value.user_id) {
+    ctx.addIssue({
+      code: "custom",
+      message: "booking_slug is required",
+      path: ["booking_slug"],
+    });
+  }
 });
 
 function record(value: unknown): Record<string, unknown> {
@@ -83,16 +92,41 @@ publicBookingTaxRouter.post("/v1/platform/public-booking/calculate-tax", async (
   const body = taxPreviewSchema.parse(raw);
 
   const db = createSupabaseAdminClient();
-  const { data: settings, error: settingsError } = await db
+
+  let settingsQuery = db
     .from("workspace_settings")
     .select("workspace_id,booking_enabled,tax_rate,payment_provider,operational_settings")
-    .eq("booking_slug", body.booking_slug)
-    .eq("booking_enabled", true)
-    .maybeSingle();
+    .eq("booking_enabled", true);
+
+  if (body.booking_slug) {
+    settingsQuery = settingsQuery.eq("booking_slug", body.booking_slug);
+  } else {
+    const { data: workspaces, error: ownedWorkspaceError } = await db
+      .from("workspaces")
+      .select("id")
+      .eq("created_by", body.user_id!)
+      .eq("is_active", true);
+    if (ownedWorkspaceError) throw ownedWorkspaceError;
+    const workspaceIds = (workspaces ?? []).map((workspace) => workspace.id);
+    if (workspaceIds.length === 0) {
+      throw new ApiError(404, "Public booking context not found.", "booking_context_invalid");
+    }
+    settingsQuery = settingsQuery.in("workspace_id", workspaceIds);
+  }
+
+  const { data: settingsRows, error: settingsError } = await settingsQuery.limit(2);
   if (settingsError) throw settingsError;
-  if (!settings) {
+  if (!settingsRows || settingsRows.length === 0) {
     throw new ApiError(404, "Public booking context not found.", "booking_context_invalid");
   }
+  if (settingsRows.length !== 1) {
+    throw new ApiError(
+      409,
+      "Booking slug is required for this account.",
+      "booking_context_ambiguous",
+    );
+  }
+  const settings = settingsRows[0];
 
   const workspaceId = String(settings.workspace_id);
   const { data: workspace, error: workspaceError } = await db
@@ -183,13 +217,16 @@ publicBookingTaxRouter.post("/v1/platform/public-booking/calculate-tax", async (
       error: null,
     });
   } catch (error) {
-    const reason = error instanceof Error ? error.message : "Stripe Tax unavailable";
+    console.warn("[public-booking-tax] Stripe Tax unavailable; using configured rate", {
+      workspaceId,
+      message: error instanceof Error ? error.message : "unknown Stripe Tax error",
+    });
     return json({
       data: manualTaxResult({
         amount: body.amount,
         currency,
         rate: configuredRate,
-        fallbackReason: reason,
+        fallbackReason: "Stripe Tax unavailable - using configured rate",
       }),
       error: null,
     });
