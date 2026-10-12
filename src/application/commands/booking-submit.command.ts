@@ -3,7 +3,7 @@
  * operations performed during the public booking flow. Keeps useBookingSubmit
  * free of direct Supabase references.
  */
-import { apiClient } from "@/lib/api-client";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 import { supabase } from "@/integrations/supabase/client";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import type { Json } from "@/integrations/supabase/types.production";
@@ -71,7 +71,12 @@ export interface UpsertCustomerParams {
 
 export async function upsertBookingCustomer(params: UpsertCustomerParams) {
   vehiclePersistenceFailures.delete(bookingVehicleKey(params.p_booking_slug, params.p_email));
-  return bookingRpc<string>("public_booking_upsert_customer", params as unknown as Record<string, unknown>);
+  // Phase 2: appointment location is passed explicitly to canonical creation.
+  // Do not create a legacy public_booking_location_intents row for this flow.
+  return bookingRpc<string>("public_booking_upsert_customer", {
+    ...params,
+    p_address: null,
+  } as unknown as Record<string, unknown>);
 }
 
 // ---------------------------------------------------------------------------
@@ -139,16 +144,32 @@ export async function bookAppointmentSafe(params: BookAppointmentSafeParams) {
     throw new Error("BOOKING_LOCATION_REQUIRED");
   }
 
-  return apiClient.post<{ data: string | null; error: { message: string } | null }>(
-    "/v1/public-bookings/appointments",
-    {
-      ...params,
-      p_location_address: params.p_location_address.trim(),
-      p_location_lat: params.p_location_lat,
-      p_location_lng: params.p_location_lng,
-      p_status: params.p_status ?? "confirmed",
-    },
-  );
+  try {
+    return await apiClient.post<{
+      data: string | null;
+      error: { message: string; code?: string } | null;
+    }>(
+      "/v1/public-bookings/appointments",
+      {
+        ...params,
+        p_location_address: params.p_location_address.trim(),
+        p_location_lat: params.p_location_lat,
+        p_location_lng: params.p_location_lng,
+        p_status: params.p_status ?? "confirmed",
+      },
+    );
+  } catch (error) {
+    // The canonical Hono route now returns honest non-2xx statuses for RPC
+    // failures. Preserve the historical { data, error } command contract so
+    // useBookingSubmit can keep its specific DATE_BLOCKED/SLOT_UNAVAILABLE UI.
+    if (error instanceof ApiClientError) {
+      return {
+        data: null,
+        error: { message: error.message, code: error.code },
+      };
+    }
+    throw error;
+  }
 }
 
 export async function assignVanByZip(userId: string, zipCode: string) {
