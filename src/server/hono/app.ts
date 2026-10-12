@@ -26,6 +26,7 @@ import { documentsRouter } from "./routes/documents";
 import { messagingRouter } from "./routes/messaging";
 import { platformRouter } from "./routes/platform";
 import { publicBookingRouter } from "./routes/public-booking";
+import { publicBookingTaxRouter } from "./routes/public-booking-tax";
 import { vehiclesRouter } from "./routes/vehicles";
 import { workOrdersRouter } from "./routes/work-orders";
 
@@ -68,6 +69,9 @@ export function createHonoApp(): Hono {
   // `/v1/appointments/:id` on the router serves `/api/v1/appointments/:id`.
   // ---------------------------------------------------------------------------
   app.route("/", publicBookingRouter);
+  // REG-018: native tax must be registered before platformRouter, whose legacy
+  // calculate-tax handler still points to a retired Edge Function.
+  app.route("/", publicBookingTaxRouter);
   app.route("/", appointmentsRouter);
   app.route("/", billingRouter);
   app.route("/", catalogRouter);
