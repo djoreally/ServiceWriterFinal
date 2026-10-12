@@ -11,9 +11,9 @@ const publicBookingAppointmentSchema = z.object({
   p_scheduled_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   p_scheduled_time: z.string().regex(/^\d{2}:\d{2}(?::\d{2})?$/),
   p_duration_minutes: z.number().int().min(1).max(1440),
-  // v3 is the authority and truncates the stored title to 500 characters.
-  // Do not reject otherwise-valid multi-vehicle bookings at the HTTP boundary.
-  p_title: z.string(),
+  // v3 historically accepts long generated titles and stores only the first
+  // 500 characters. Preserve that behavior instead of rejecting the booking.
+  p_title: z.string().transform((value) => value.slice(0, 500)),
   p_guest_name: z.string().trim().min(1).max(160),
   p_guest_email: z.string().trim().email().max(320),
   p_guest_phone: z.string().trim().min(10).max(64),
