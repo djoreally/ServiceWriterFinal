@@ -446,6 +446,7 @@ export const AppointmentDetail = ({
   const address = resolvedAddress || appointment.customer?.address || null;
   const humanNotes = cleanHumanNotes(appointment.notes || appointment.description);
   const estimatedCost = servicesTotal || appointment.estimated_cost || 0;
+  const hasUnpricedCatalogBooking = Boolean(appointment.service_catalog_id) && estimatedCost <= 0;
   const taxAmount = appointment.tax_amount || 0;
 
   const financials = computeFinancialSummary({
@@ -730,6 +731,11 @@ export const AppointmentDetail = ({
                   <span className="text-sm text-muted-foreground">Services</span>
                   <span className="font-mono text-[14px]">{formatCurrency(estimatedCost)}</span>
                 </div>
+                {hasUnpricedCatalogBooking && (
+                  <p role="alert" className="text-sm font-medium text-destructive">
+                    Service pricing is not reconciled. The amount shown is not a verified balance; do not collect payment until the appointment services and catalog price are reconciled.
+                  </p>
+                )}
                 {wasteOilFee > 0 && (
                   <div className="flex items-baseline justify-between gap-4">
                     <span className="text-sm text-muted-foreground">Waste oil disposal fee</span>
