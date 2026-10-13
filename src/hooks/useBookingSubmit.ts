@@ -797,9 +797,11 @@ export function useBookingSubmit(deps: SubmitDeps) {
 
         if (serviceItems.length > 0) {
           try {
-            await insertBookingAppointmentServices(appointmentId, slug || "", validationResult.data.email, validationResult.data.phone || "", serviceItems as BookingServiceItem[]);
+            const { error: serviceWriteError } = await insertBookingAppointmentServices(appointmentId, slug || "", validationResult.data.email, validationResult.data.phone || "", serviceItems as BookingServiceItem[]);
+            if (serviceWriteError) throw new Error(`Could not save selected appointment services: ${serviceWriteError.message}`);
           } catch (err) {
-            console.warn("[Booking] Failed to create appointment_services:", err);
+            console.error("[Booking] Failed to persist selected appointment services:", err);
+            throw err;
           }
         }
       }
