@@ -224,11 +224,7 @@ export const AppointmentDetail = ({
       setReviewRequestSent(false);
     }
 
-    let address = data.location_address || data.customer?.address || null;
-    if (!address && data.guest_email) {
-      const { data: matchedCustomer } = await fetchCustomerAddressByGuestEmail(data.guest_email, queryUserId);
-      address = matchedCustomer?.address || null;
-    }
+    let address = data.location_address || null;
     setResolvedAddress(address);
 
     const { data: payments } = await fetchSucceededPayments(id);
@@ -443,7 +439,7 @@ export const AppointmentDetail = ({
   const customerName = appointment.guest_name || appointment.customer?.name || "Customer";
   const customerEmail = appointment.customer?.email || appointment.guest_email || null;
   const customerPhone = appointment.customer?.phone || appointment.guest_phone || null;
-  const address = resolvedAddress || appointment.customer?.address || null;
+  const address = resolvedAddress || null;
   const humanNotes = cleanHumanNotes(appointment.notes || appointment.description);
   const estimatedCost = servicesTotal || appointment.estimated_cost || 0;
   const hasUnpricedCatalogBooking = Boolean(appointment.service_catalog_id) && estimatedCost <= 0;
@@ -859,7 +855,7 @@ export const AppointmentDetail = ({
             </Card>
 
             {(resolvedAddress || appointment.customer?.address) && (
-              <LocationPreview address={resolvedAddress || appointment.customer?.address || ""} />
+              <LocationPreview address={resolvedAddress || ""} />
             )}
 
             <AppointmentSyncCard appointmentId={appointment.id} />
