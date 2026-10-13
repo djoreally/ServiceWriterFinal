@@ -442,7 +442,12 @@ export const AppointmentDetail = ({
   const address = resolvedAddress || null;
   const humanNotes = cleanHumanNotes(appointment.notes || appointment.description);
   const estimatedCost = servicesTotal || appointment.estimated_cost || 0;
-  const hasUnpricedCatalogBooking = Boolean(appointment.service_catalog_id) && estimatedCost <= 0;
+  const bookedVehicles = (appointment as { booking_configuration?: { vehicles?: Array<{ services?: Array<{ price?: number; quantity?: number }> }> } }).booking_configuration?.vehicles;
+  const bookedServiceTotal = Array.isArray(bookedVehicles)
+    ? bookedVehicles.reduce((sum, vehicle) => sum + (vehicle.services ?? []).reduce((vehicleSum, service) => vehicleSum + (Number(service.price) || 0) * (Number(service.quantity) || 1), 0), 0)
+    : 0;
+  const hasUnpricedCatalogBooking = (Boolean(appointment.service_catalog_id) && estimatedCost <= 0)
+    || (bookedServiceTotal > 0 && estimatedCost < bookedServiceTotal);
   const taxAmount = appointment.tax_amount || 0;
 
   const financials = computeFinancialSummary({
