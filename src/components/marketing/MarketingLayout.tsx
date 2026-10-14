@@ -1,22 +1,35 @@
 import { ReactNode, useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Menu, Wrench, X } from "lucide-react";
+import {
+  PRIMARY,
+  PRIMARY_CONTAINER,
+  SURFACE,
+  SURFACE_DIM,
+  hardShadow,
+  hardShadowLg,
+  hankenStack,
+  interStack,
+  monoStack,
+  neoBtn,
+} from "./marketingTheme";
+
+export {
+  PRIMARY,
+  PRIMARY_CONTAINER,
+  SURFACE,
+  SURFACE_DIM,
+  hardShadow,
+  hardShadowLg,
+  hankenStack,
+  interStack,
+  monoStack,
+  neoBtn,
+} from "./marketingTheme";
 
 const FONT_LINKS = [
   "https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;700;800;900&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap",
 ];
-
-export const PRIMARY = "#596400";
-export const PRIMARY_CONTAINER = "#e5ff00";
-export const SURFACE = "#fbf9f8";
-export const SURFACE_DIM = "#dbdad9";
-
-export const neoBtn = "inline-flex items-center gap-2 border-[4px] border-black uppercase font-bold px-6 py-3 transition-all duration-75 active:translate-x-[2px] active:translate-y-[2px] active:shadow-none";
-export const hardShadow = { boxShadow: "4px 4px 0px #000000" };
-export const hardShadowLg = { boxShadow: "8px 8px 0px #000000" };
-export const hankenStack = { fontFamily: "'Hanken Grotesk', sans-serif" };
-export const interStack = { fontFamily: "'Inter', sans-serif" };
-export const monoStack = { fontFamily: "'JetBrains Mono', monospace" };
 
 const NATIVE_PUBLIC_ROUTES = new Set(["/tire", "/detailers"]);
 
