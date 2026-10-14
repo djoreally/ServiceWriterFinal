@@ -258,6 +258,28 @@ export default function ServerHomepage() {
           </p>
         </section>
 
+        {/* See the workspace */}
+        <section className="mb-24 md:mb-32">
+          <SectionHeading eyebrow="See it" title="See the workspace." />
+          <p className="text-lg text-neutral-600 leading-relaxed mb-7 max-w-3xl">
+            Screenshots from the real workspace. Customer details blurred.
+          </p>
+          <div className="grid md:grid-cols-3 gap-5">
+            <figure className="border-[4px] border-black bg-white p-3" style={hardShadow}>
+              <img src="/homepage-dashboard-redacted.png" alt="Service Writer dashboard showing the day at a glance" className="w-full" loading="lazy" />
+              <figcaption className="text-sm font-semibold mt-3">The dashboard. The day at a glance.</figcaption>
+            </figure>
+            <figure className="border-[4px] border-black bg-white p-3" style={hardShadow}>
+              <img src="/homepage-job-detail-redacted.png" alt="Service Writer job detail with vehicle specs and service details" className="w-full" loading="lazy" />
+              <figcaption className="text-sm font-semibold mt-3">The job. Specs, services, and closeout in one place.</figcaption>
+            </figure>
+            <figure className="border-[4px] border-black bg-white p-3" style={hardShadow}>
+              <img src="/homepage-schedule-redacted.png" alt="Service Writer calendar showing the month of appointments" className="w-full" loading="lazy" />
+              <figcaption className="text-sm font-semibold mt-3">The calendar. The week laid out.</figcaption>
+            </figure>
+          </div>
+        </section>
+
         {/* What is free */}
         <section id="free" className="mb-24 md:mb-32">
           <SectionHeading eyebrow="Free / $0" title="What is free." />

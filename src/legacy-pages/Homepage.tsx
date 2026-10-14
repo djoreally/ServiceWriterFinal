@@ -44,6 +44,16 @@ export default function Homepage() {
       <p className="mt-7 text-center text-lg font-bold" style={hankenStack}>Book → Estimate → Schedule → Job → Invoice</p>
     </section>
 
+    <section className="mb-24 md:mb-32">
+      <SectionHeading eyebrow="See it" title="See the workspace." />
+      <p className="text-lg text-neutral-600 leading-relaxed mb-7 max-w-3xl">Screenshots from the real workspace. Customer details blurred.</p>
+      <div className="grid md:grid-cols-3 gap-5">
+        <figure className="border-[4px] border-black bg-white p-3" style={hardShadow}><img src="/homepage-dashboard-redacted.png" alt="Service Writer dashboard showing the day at a glance" className="w-full" loading="lazy" /><figcaption className="text-sm font-semibold mt-3">The dashboard. The day at a glance.</figcaption></figure>
+        <figure className="border-[4px] border-black bg-white p-3" style={hardShadow}><img src="/homepage-job-detail-redacted.png" alt="Service Writer job detail with vehicle specs and service details" className="w-full" loading="lazy" /><figcaption className="text-sm font-semibold mt-3">The job. Specs, services, and closeout in one place.</figcaption></figure>
+        <figure className="border-[4px] border-black bg-white p-3" style={hardShadow}><img src="/homepage-schedule-redacted.png" alt="Service Writer calendar showing the month of appointments" className="w-full" loading="lazy" /><figcaption className="text-sm font-semibold mt-3">The calendar. The week laid out.</figcaption></figure>
+      </div>
+    </section>
+
     <section id="free" className="mb-24 md:mb-32">
       <SectionHeading eyebrow="Free / $0" title="What is free." />
       <div className="border-[4px] border-black bg-white p-6 md:p-9 text-black" style={hardShadowLg}><p className="text-lg text-neutral-600 leading-relaxed mb-7">The core runs the everyday job. No customer limits. No vehicle limits. No appointment limits.</p><div className="grid sm:grid-cols-2 gap-x-5 gap-y-3">{FREE_CORE.map(item => <div key={item} className="flex gap-2 items-start"><Check className="w-5 h-5 shrink-0 mt-0.5" style={{ color: PRIMARY }} strokeWidth={3} /><span className="text-sm font-semibold">{item}</span></div>)}</div><p className="mt-7 text-sm font-semibold" style={{ color: "#333" }}>{FREE_SOLO_NOTE}</p></div>
