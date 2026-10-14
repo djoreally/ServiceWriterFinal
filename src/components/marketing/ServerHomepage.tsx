@@ -9,6 +9,10 @@
  * Server-safe by construction: no react-router, no hooks, no `document`.
  * Links are plain anchors. The mobile menu is a static stacked link row
  * instead of the SPA's JS hamburger — no client JS is needed for this page.
+ *
+ * Design: light backgrounds only. No dark blocks, no black heading bars,
+ * no product image. The old page showed a dark phone mockup with fake
+ * customer initials and fake dollar amounts. That image is gone.
  */
 
 import {
@@ -26,11 +30,13 @@ import {
 import {
   FLOW,
   FREE_CORE,
+  FREE_SOLO_NOTE,
   HOMEPAGE_AUDIENCE_LINE,
   HOMEPAGE_HEADLINE,
+  HOMEPAGE_PROOF_DETAIL,
   HOMEPAGE_PROOF_LINE,
   HOMEPAGE_SUBHEAD,
-  VALUE_ADD,
+  PAID_TIERS,
 } from "@/legacy-pages/homepageContent";
 
 const NAV_LINKS = [
@@ -113,7 +119,7 @@ function ServerFooter() {
             </span>
           </div>
           <p style={{ color: "#5e5e5e" }}>
-            One operating system for independent automotive service businesses, tire operators,
+            Shop software for mobile oil change operators, independent shops, tire operators,
             detailers, mobile teams, and fleet providers.
           </p>
         </div>
@@ -164,6 +170,22 @@ function ServerFooter() {
   );
 }
 
+function SectionHeading({ eyebrow, title }: { eyebrow: string; title: string }) {
+  return (
+    <div className="mb-9">
+      <span className="uppercase text-xs tracking-widest" style={{ ...monoStack, color: PRIMARY }}>
+        {eyebrow}
+      </span>
+      <h2
+        className="text-4xl md:text-6xl font-black mt-3"
+        style={{ ...hankenStack, letterSpacing: "-0.04em", lineHeight: 1.04 }}
+      >
+        {title}
+      </h2>
+    </div>
+  );
+}
+
 export default function ServerHomepage() {
   return (
     <div
@@ -177,13 +199,14 @@ export default function ServerHomepage() {
     >
       <ServerNav />
       <main className="flex-1 max-w-[1200px] mx-auto px-6 py-16 w-full">
+        {/* Hero */}
         <header className="max-w-5xl mx-auto text-center pt-8 md:pt-16 mb-24 md:mb-32">
           <div
             className="inline-flex items-center gap-2 border-[3px] border-black bg-white px-4 py-2 mb-7"
             style={hardShadow}
           >
             <span className="uppercase text-[10px] tracking-widest" style={{ ...monoStack, color: PRIMARY }}>
-              Service Writer / Free Operational Core
+              Service Writer
             </span>
           </div>
           <h1
@@ -199,45 +222,24 @@ export default function ServerHomepage() {
             {HOMEPAGE_SUBHEAD}
           </p>
           <div className="flex flex-col sm:flex-row justify-center gap-3">
-            <a href="/signup" className={neoBtn} style={{ backgroundColor: PRIMARY_CONTAINER, ...hardShadow }}>
-              Start free <span aria-hidden="true">→</span>
+            <a href="/contact" className={neoBtn} style={{ backgroundColor: PRIMARY_CONTAINER, ...hardShadow }}>
+              Get started <span aria-hidden="true">→</span>
             </a>
-            <a href="#free-core" className={neoBtn} style={{ backgroundColor: "#fff", ...hardShadow }}>
+            <a href="#free" className={neoBtn} style={{ backgroundColor: "#fff", ...hardShadow }}>
               See what&apos;s free
             </a>
           </div>
-          <p className="mt-5 text-xs uppercase tracking-wider" style={{ ...monoStack, color: "#666" }}>
-            Start operating first. Add growth tools when they create value.
-          </p>
-          <p className="mt-3 text-sm font-semibold" style={{ color: "#333" }}>
+          <p className="mt-8 text-sm font-semibold" style={{ color: "#333" }}>
             {HOMEPAGE_PROOF_LINE}
           </p>
-          <figure className="mt-10 mx-auto max-w-sm border-[4px] border-black bg-white p-3" style={hardShadowLg}>
-            {/* Preview image: a delivered redesign mockup, not a live production
-                screenshot. Production dashboard requires login to capture. */}
-            <img
-              src="/homepage-jobs-preview.png"
-              alt="Preview of the Service Writer jobs workspace"
-              className="w-full h-auto block"
-              width={780}
-              height={1800}
-            />
-            <figcaption className="mt-2 text-xs uppercase tracking-wider" style={{ ...monoStack, color: "#666" }}>
-              Preview of the workspace
-            </figcaption>
-          </figure>
+          <p className="mt-2 text-base max-w-xl mx-auto" style={{ color: "#4b4b4b", lineHeight: 1.55 }}>
+            {HOMEPAGE_PROOF_DETAIL}
+          </p>
         </header>
 
+        {/* How a job runs */}
         <section className="mb-24 md:mb-32">
-          <div className="flex items-center gap-4 mb-9">
-            <h2
-              className="uppercase tracking-widest bg-black px-5 py-2 text-xl md:text-2xl font-black"
-              style={{ ...hankenStack, color: "#fff" }}
-            >
-              One complete job
-            </h2>
-            <div className="h-[4px] flex-grow bg-black" />
-          </div>
+          <SectionHeading eyebrow="How it works" title="One job, start to finish." />
           <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-4">
             {FLOW.map(([number, title, copy]) => (
               <article key={number} className="border-[4px] border-black bg-white p-5 text-black" style={hardShadow}>
@@ -251,32 +253,18 @@ export default function ServerHomepage() {
               </article>
             ))}
           </div>
-          <div
-            className="mt-7 border-[4px] border-black p-5 md:p-7 text-center"
-            style={{ backgroundColor: PRIMARY_CONTAINER, ...hardShadow }}
-          >
-            <p className="font-black text-xl md:text-3xl" style={hankenStack}>
-              Customer → Vehicle → Estimate → Approval → Schedule → Job → Invoice → Payment → History
-            </p>
-          </div>
+          <p className="mt-7 text-center text-lg font-bold" style={hankenStack}>
+            Book → Estimate → Schedule → Job → Invoice
+          </p>
         </section>
 
-        <section id="free-core" className="mb-24 md:mb-32 grid lg:grid-cols-2 gap-7 items-stretch">
+        {/* What is free */}
+        <section id="free" className="mb-24 md:mb-32">
+          <SectionHeading eyebrow="Free / $0" title="What is free." />
           <div className="border-[4px] border-black bg-white p-6 md:p-9 text-black" style={hardShadowLg}>
-            <div className="flex items-center gap-3 mb-3">
-              <span className="uppercase text-xs tracking-widest" style={{ ...monoStack, color: PRIMARY }}>
-                Free / $0 workspace
-              </span>
-            </div>
-            <h2
-              className="text-4xl md:text-6xl font-black mb-5"
-              style={{ ...hankenStack, letterSpacing: "-0.04em", lineHeight: 1 }}
-            >
-              The operational core is free.
-            </h2>
             <p className="text-lg text-neutral-600 leading-relaxed mb-7">
-              If a feature is required to complete the everyday service workflow, it belongs in the
-              foundation — not behind an artificial seat, customer, vehicle, or repair-order limit.
+              The core runs the everyday job. No customer limits. No vehicle limits.
+              No appointment limits.
             </p>
             <div className="grid sm:grid-cols-2 gap-x-5 gap-y-3">
               {FREE_CORE.map((item) => (
@@ -288,81 +276,49 @@ export default function ServerHomepage() {
                 </div>
               ))}
             </div>
-          </div>
-          <div
-            className="border-[4px] border-black p-6 md:p-9"
-            style={{ backgroundColor: PRIMARY_CONTAINER, ...hardShadowLg }}
-          >
-            <div className="flex items-center gap-3 mb-3">
-              <span className="uppercase text-xs tracking-widest" style={monoStack}>
-                Value-add expansion
-              </span>
-            </div>
-            <h2
-              className="text-4xl md:text-6xl font-black mb-5"
-              style={{ ...hankenStack, letterSpacing: "-0.04em", lineHeight: 1 }}
-            >
-              Pay when Service Writer creates more value.
-            </h2>
-            <p className="text-lg leading-relaxed mb-7">
-              Growth products monetize additional revenue, meaningful automation, advanced operations,
-              or third-party infrastructure — not access to your own business data.
+            <p className="mt-7 text-sm font-semibold" style={{ color: "#333" }}>
+              {FREE_SOLO_NOTE}
             </p>
-            <div className="space-y-3">
-              {VALUE_ADD.map((item) => (
-                <div key={item} className="flex gap-2 items-start border-b-2 border-black/15 pb-3">
-                  <span className="shrink-0 mt-0.5 font-black">→</span>
-                  <span className="text-sm font-semibold">{item}</span>
-                </div>
-              ))}
-            </div>
           </div>
         </section>
 
-        <section className="mb-24 md:mb-32 text-black">
-          <div className="max-w-3xl mb-9">
-            <span className="uppercase text-xs tracking-widest" style={{ ...monoStack, color: PRIMARY }}>
-              Built for the operator
-            </span>
-            <h2
-              className="text-4xl md:text-6xl font-black mt-3"
-              style={{ ...hankenStack, letterSpacing: "-0.04em", lineHeight: 1.04 }}
-            >
-              No data hostage traps.
-            </h2>
-            <p className="text-lg text-neutral-600 leading-relaxed mt-4">{HOMEPAGE_AUDIENCE_LINE}</p>
-          </div>
+        {/* What costs money */}
+        <section className="mb-24 md:mb-32">
+          <SectionHeading eyebrow="Paid plans" title="What costs money." />
+          <p className="text-lg text-neutral-600 leading-relaxed mb-7 max-w-3xl">
+            Pay when you need more than the core. Prices match the pricing page.
+          </p>
           <div className="grid md:grid-cols-3 gap-5">
-            <div className="bg-white border-[4px] border-black p-8" style={hardShadowLg}>
-              <h3 className="text-2xl font-black mb-3" style={hankenStack}>
-                Unlimited operation
-              </h3>
-              <p className="text-neutral-600 leading-relaxed">
-                Customers, vehicles, technicians, advisors, admins, and ordinary service records are
-                not artificial upgrade triggers.
-              </p>
-            </div>
-            <div className="bg-white border-[4px] border-black p-8" style={hardShadowLg}>
-              <h3 className="text-2xl font-black mb-3" style={hankenStack}>
-                Transparent hard costs
-              </h3>
-              <p className="text-neutral-600 leading-relaxed">
-                When carriers, data providers, or payment networks create real usage costs, those
-                costs can be passed through clearly or bundled into the product using them.
-              </p>
-            </div>
-            <div className="bg-white border-[4px] border-black p-8" style={hardShadowLg}>
-              <h3 className="text-2xl font-black mb-3" style={hankenStack}>
-                Trigger moments, not walls
-              </h3>
-              <p className="text-neutral-600 leading-relaxed">
-                An overdue invoice can offer automated collections. A vehicle due for service can
-                offer re-engagement. The core workflow keeps moving either way.
-              </p>
-            </div>
+            {PAID_TIERS.map((tier) => (
+              <div key={tier.name} className="border-[4px] border-black bg-white p-6 md:p-8" style={hardShadowLg}>
+                <h3 className="text-2xl font-black mb-1" style={hankenStack}>
+                  {tier.name}
+                </h3>
+                <p className="text-lg font-bold mb-4" style={{ color: PRIMARY }}>
+                  {tier.price}
+                </p>
+                <p className="text-neutral-600 leading-relaxed">{tier.includes}</p>
+              </div>
+            ))}
           </div>
         </section>
 
+        {/* Proof */}
+        <section className="mb-24 md:mb-32">
+          <SectionHeading eyebrow="Proof" title="Built by one shop. Running one shop." />
+          <div className="max-w-3xl">
+            <p className="text-lg leading-relaxed" style={{ color: "#4b4b4b", lineHeight: 1.6 }}>
+              Service Writer was built by the owner of MOMS Mobile Oil Change, and that shop
+              runs on it. There is one shop on it so far. That is the whole story.
+              No made-up customer counts. No fake reviews.
+            </p>
+            <p className="text-lg leading-relaxed mt-4" style={{ color: "#4b4b4b", lineHeight: 1.6 }}>
+              {HOMEPAGE_AUDIENCE_LINE}
+            </p>
+          </div>
+        </section>
+
+        {/* Closing CTA */}
         <section
           className="border-[4px] border-black p-8 md:p-14 text-center mb-8"
           style={{ backgroundColor: PRIMARY_CONTAINER, ...hardShadowLg }}
@@ -374,12 +330,11 @@ export default function ServerHomepage() {
             Run the business. Then grow it.
           </h2>
           <p className="max-w-2xl mx-auto mb-8 text-lg leading-relaxed">
-            Create your workspace, configure your services and labor, add or import customers, and
-            run your first live job without deciding whether basic shop operations are worth another
-            monthly software bill.
+            Signup is not self-serve yet. Contact us and we will set up your workspace.
+            Then add your services and run your first live job.
           </p>
-          <a href="/signup" className={neoBtn} style={{ backgroundColor: "#fff", ...hardShadow }}>
-            Create your free workspace <span aria-hidden="true">→</span>
+          <a href="/contact" className={neoBtn} style={{ backgroundColor: "#fff", ...hardShadow }}>
+            Contact us <span aria-hidden="true">→</span>
           </a>
         </section>
       </main>

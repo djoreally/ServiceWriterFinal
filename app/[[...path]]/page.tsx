@@ -34,7 +34,7 @@ export async function generateMetadata({
     title: HOMEPAGE_TITLE,
     description: HOMEPAGE_DESCRIPTION,
     openGraph: {
-      title: "Service Writer | Running your shop shouldn't be the premium feature.",
+      title: "Service Writer | Run the whole job. From booking to paid.",
       description: HOMEPAGE_DESCRIPTION,
     },
   };
