@@ -473,6 +473,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
 
       // Create vehicles
       const vehicleIds: string[] = [];
+      const persistedVehicleIdsByClientId: Record<string, string> = {};
       for (const vehicle of vehicles) {
         if (!vehicle.year || !vehicle.make || !vehicle.model) continue;
         try {
@@ -493,6 +494,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
           });
           if (!vehicleError && vehicleId) {
             vehicleIds.push(vehicleId);
+            persistedVehicleIdsByClientId[vehicle.id] = vehicleId;
             // Tire vertical: persist the confirmed wheel/tire size (OE or override)
             // so the appointment carries the tire spec, not oil data.
             if (vehicle.tireSize) {
@@ -514,7 +516,9 @@ export function useBookingSubmit(deps: SubmitDeps) {
 
 
       const validVehicles = vehicles.filter((vehicle) => vehicle.year && vehicle.make && vehicle.model);
-      const persistedVehicleIdsByClientId = Object.fromEntries(validVehicles.map((vehicle, index) => [vehicle.id, vehicleIds[index] || null]));
+      if (vehicleIds.length !== validVehicles.length) {
+        throw new Error("BOOKING_VEHICLE_PERSISTENCE_FAILED: all selected vehicles must be saved before appointment creation");
+      }
 
       // Build description with a stable vehicle-to-service grouping for staff notifications.
       const serviceNames = validVehicles.map((vehicle) => {
@@ -796,10 +800,14 @@ export function useBookingSubmit(deps: SubmitDeps) {
         }
 
         if (serviceItems.length > 0) {
-          try {
-            await insertBookingAppointmentServices(appointmentId, slug || "", validationResult.data.email, validationResult.data.phone || "", serviceItems as BookingServiceItem[]);
-          } catch (err) {
-            console.warn("[Booking] Failed to create appointment_services:", err);
+          const serviceSave = await insertBookingAppointmentServices(
+            appointmentId, slug || "", validationResult.data.email,
+            validationResult.data.phone || "", serviceItems as BookingServiceItem[],
+          );
+          if (serviceSave.error || serviceSave.data !== serviceItems.length) {
+            throw new Error(
+              "BOOKING_SERVICES_NOT_PERSISTED: appointment was created but its service lines were not verified. Contact the business; do not submit again.",
+            );
           }
         }
       }
