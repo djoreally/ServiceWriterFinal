@@ -1,9 +1,9 @@
 /**
- * useBookingSubmit
+ * Public booking submission.
  *
- * Public booking has one durable write boundary: commitPublicBooking().
- * Everything after that call is a side effect and must never determine whether
- * the booking exists.
+ * Browser responsibilities stop at validation + request evidence. Durable
+ * customer/vehicle/appointment/location/items/payment/financial writes are
+ * owned by POST /v1/public-bookings/commit.
  */
 import { useCallback } from "react";
 import { format } from "date-fns";
@@ -12,10 +12,8 @@ import { resolveBookingSource } from "@/lib/attribution";
 import { normalizePhoneToE164 } from "@/lib/phone";
 import { bookingSchema, getFirstError } from "@/lib/validation";
 import { parseCheckoutError } from "@/components/booking/checkoutErrors.utils";
-import type { CheckoutErrorType } from "@/components/booking/CheckoutErrors";
 import type { BookingAction, BookingState } from "@/hooks/useBookingState";
 import type { Dollars } from "@/lib/money";
-import { dollarsToCents, toDollars } from "@/lib/financialMath";
 import { vehicleMeetsBookingRequirements } from "@/lib/booking-requirements";
 import type { BookingRequirement } from "@/lib/service-category-policy";
 import type { VehicleData } from "@/components/booking/VehicleEntry";
@@ -26,14 +24,7 @@ import {
   type PublicBookingCommitService,
   type PublicBookingPaymentChoice,
 } from "@/application/commands/public-booking-commit.command";
-import {
-  signUpBookingUser,
-  createCustomerAccount,
-  reserveBookingReward,
-  applyBookingReward,
-  redeemBookingReward,
-  cancelBookingReward,
-} from "@/application/commands/booking-submit.command";
+import { signUpBookingUser, createCustomerAccount } from "@/application/commands/booking-submit.command";
 import { reserveOilForBooking, reserveServicePartsForBooking } from "@/application/commands/booking-inventory.command";
 import { autoDispatchPublicBooking } from "@/application/commands";
 import { requestAppointmentProviderSync } from "@/application/commands/provider-sync.command";
@@ -75,12 +66,9 @@ export interface SubmitDeps {
   storageKey: string;
   bookingRequirements: BookingRequirement[];
   getVehicleBookingRequirements?: (vehicle: VehicleData) => BookingRequirement[];
-  getOilPriceAdjustment: () => Dollars;
   getOilPriceBreakdown: () => { extraQuarts: number; pricePerQuart: Dollars; total: Dollars };
   getTotalDuration: () => number;
-  getPreTaxTotal: () => Dollars;
   getGrandTotal: () => Dollars;
-  getDetailingAdjustment: () => number;
   fetchBookedSlots: (date: Date) => Promise<void>;
   isWeatherBlocked?: (slotTime: string, slotDurationMinutes?: number) => { blocked: boolean; reasons: string[] };
   weatherGuardContext?: {
@@ -115,7 +103,7 @@ function clearIdempotencyKey(storageKey: string) {
   try {
     sessionStorage.removeItem(`${storageKey}:commit-idempotency`);
   } catch {
-    // private browsing/storage failures are non-fatal after a committed booking
+    // storage cleanup is non-critical after a committed booking
   }
 }
 
@@ -135,12 +123,14 @@ function buildServiceItems(
         client_vehicle_id: vehicle.id,
         service_catalog_id: service.id || null,
         name: service.name,
-        price: "price" in service ? service.price : service.default_price,
+        price: "default_price" in service ? service.default_price : service.price,
         quantity: "quantity" in service ? service.quantity || 1 : 1,
         is_prepaid: paymentChoice === "pay_now",
       });
     }
 
+    // Request evidence only. public_booking_insert_services_v7 independently
+    // validates capacity and resolves the configured server per-quart price.
     const capacity = Number.parseFloat(String(vehicle.oilCapacity ?? ""));
     if (Number.isFinite(capacity) && capacity > 5 && pricePerQuart > 0) {
       items.push({
@@ -184,6 +174,11 @@ function buildServiceItems(
   return items;
 }
 
+function canonicalTotalCents(snapshot: Record<string, unknown> | null | undefined, fallbackDollars: number): number {
+  const cents = Number(snapshot?.totalCents);
+  return Number.isInteger(cents) && cents >= 0 ? cents : Math.round(fallbackDollars * 100);
+}
+
 export function useBookingSubmit(deps: SubmitDeps) {
   const {
     business,
@@ -195,7 +190,6 @@ export function useBookingSubmit(deps: SubmitDeps) {
     getVehicleBookingRequirements,
     getOilPriceBreakdown,
     getTotalDuration,
-    getPreTaxTotal,
     getGrandTotal,
     fetchBookedSlots,
     isWeatherBlocked,
@@ -205,11 +199,11 @@ export function useBookingSubmit(deps: SubmitDeps) {
   const {
     customerAddress, addressLine2, city, state, zipCode,
     customerCoords, bookingContextId,
-    vehicles, selectedServices, selectedPackage, vehicleServiceSelections,
+    vehicles, vehicleServiceSelections,
     selectedDate, selectedTime,
     guestName, guestEmail, guestPhone, notes,
     paymentChoice, transactionalSmsConsent, marketingSmsConsent, marketingEmailConsent,
-    lastSubmissionTime, submissionCount, taxData, selectedRewardInstanceId,
+    lastSubmissionTime, submissionCount, taxData, selectedRewardInstanceId, appliedCoupon,
   } = bookingState;
 
   const validateVehicleRequirements = useCallback((): boolean => {
@@ -283,7 +277,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
     }
 
     const fullAddress = [customerAddress, addressLine2, city, state, zipCode].filter(Boolean).join(", ").trim();
-    if (!fullAddress) {
+    if (!customerAddress.trim() || !fullAddress) {
       toast.error("Please enter the service address.");
       return;
     }
@@ -292,11 +286,6 @@ export function useBookingSubmit(deps: SubmitDeps) {
     const serviceItems = buildServiceItems(vehicles, vehicleServiceSelections, choice, oilBreakdown.pricePerQuart);
     if (!serviceItems.length) {
       toast.error("Please select at least one service.");
-      return;
-    }
-
-    if (choice === "pay_now" && selectedRewardInstanceId) {
-      toast.error("Please choose Pay at Service when using a reward so the discount is applied before payment.");
       return;
     }
 
@@ -330,10 +319,11 @@ export function useBookingSubmit(deps: SubmitDeps) {
         matches: filterMatches,
       });
 
+      const clientGrandTotal = Number(getGrandTotal() ?? 0);
       if (choice === "pay_now") {
         trackCheckoutStarted({
           organization_id: business.user_id,
-          amount_cents: Math.round((getGrandTotal() ?? 0) * 100),
+          amount_cents: Math.round(clientGrandTotal * 100),
           currency: (business.currency ?? "usd").toLowerCase(),
           provider: "stripe",
           service_count: serviceItems.filter((item) => item.service_catalog_id).length,
@@ -349,11 +339,13 @@ export function useBookingSubmit(deps: SubmitDeps) {
         title: serviceSummary || "Online booking",
         description,
         notes: notes.trim() || null,
-        estimated_cost: getGrandTotal(),
-        tax_amount: taxData?.tax_amount || 0,
-        tax_rate: taxData?.tax_breakdown?.[0]?.rate || 0,
+        client_estimated_cost: clientGrandTotal,
+        client_tax_amount: taxData?.tax_amount || 0,
+        client_tax_rate: taxData?.tax_breakdown?.[0]?.rate || 0,
         currency: business.currency || "USD",
         payment_choice: choice,
+        coupon_code: appliedCoupon?.code || null,
+        reward_instance_id: selectedRewardInstanceId || null,
         guest: {
           name: contact.data.name,
           email: contact.data.email,
@@ -361,6 +353,12 @@ export function useBookingSubmit(deps: SubmitDeps) {
         },
         location: {
           address: fullAddress,
+          line1: customerAddress.trim(),
+          line2: addressLine2.trim() || null,
+          city: city.trim(),
+          state: state.trim(),
+          postal_code: zipCode.trim(),
+          country: "US",
           lat: customerCoords?.lat ?? null,
           lng: customerCoords?.lng ?? null,
         },
@@ -383,55 +381,19 @@ export function useBookingSubmit(deps: SubmitDeps) {
 
       const appointmentId = result.appointment_id;
       const paymentId = result.payment_id;
+      const canonicalAmountCents = canonicalTotalCents(result.financial_snapshot, clientGrandTotal);
 
       trackAppointmentCreated({
         appointment_id: appointmentId,
         organization_id: business.user_id,
         source: resolveBookingSource(),
         service_count: serviceItems.filter((item) => item.service_catalog_id).length,
-        amount_cents: Math.round((getGrandTotal() ?? 0) * 100),
+        amount_cents: canonicalAmountCents,
         payment_choice: choice,
         status: "confirmed",
         vehicle_count: vehicles.length,
       });
 
-      // Reward is a post-commit financial adjustment for pay-at-service only.
-      if (choice === "pay_later" && selectedRewardInstanceId) {
-        try {
-          const reserved = await reserveBookingReward({
-            rewardInstanceId: selectedRewardInstanceId,
-            appointmentId,
-            providerId: business.user_id,
-            customerEmail: contact.data.email,
-            idempotencyKey: `booking:${appointmentId}:reward:${selectedRewardInstanceId}:reserve`,
-            reservationMinutes: 30,
-          });
-          if (reserved.status === "reserved") {
-            await applyBookingReward({
-              rewardInstanceId: selectedRewardInstanceId,
-              appointmentId,
-              paymentRecordId: paymentId,
-              subtotalCents: dollarsToCents(toDollars(getPreTaxTotal())),
-              taxCents: taxData ? dollarsToCents(toDollars(taxData.tax_amount)) : 0,
-              idempotencyKey: `booking:${appointmentId}:reward:${selectedRewardInstanceId}:apply`,
-            });
-            await redeemBookingReward({
-              rewardInstanceId: selectedRewardInstanceId,
-              appointmentId,
-              paymentRecordId: paymentId,
-              idempotencyKey: `booking:${appointmentId}:reward:${selectedRewardInstanceId}:redeem`,
-            });
-          } else {
-            toast.warning("The reward could not be applied. The appointment is still confirmed.");
-          }
-        } catch (error) {
-          console.warn("[Booking] reward adjustment failed", error);
-          cancelBookingReward({ rewardInstanceId: selectedRewardInstanceId, reason: "booking_reward_adjustment_failed" }).catch(() => {});
-          toast.warning("The reward could not be applied. The appointment is still confirmed.");
-        }
-      }
-
-      // Non-critical operational side effects. None may invalidate the booking.
       if (zipCode) {
         autoDispatchPublicBooking({
           businessUserId: business.user_id,
@@ -454,7 +416,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
         const selection = vehicleServiceSelections[vehicle.id];
         const catalogIds = (selection?.package?.services ?? selection?.services ?? [])
           .map((service) => service.id)
-          .filter(Boolean);
+          .filter((id): id is string => Boolean(id));
         if (catalogIds.length) {
           reserveServicePartsForBooking({
             appointmentId,
@@ -469,7 +431,11 @@ export function useBookingSubmit(deps: SubmitDeps) {
       requestAppointmentProviderSync({
         appointmentId,
         paymentRecordId: paymentId,
-        syncMode: "payment_pending",
+        syncMode: result.payment_status === "succeeded"
+          ? "payment_succeeded"
+          : result.financial_state === "canonical"
+            ? "payment_pending"
+            : "appointment_created",
         guestEmail: contact.data.email,
       }).catch((error) => console.warn("[Booking] provider sync failed", error));
 
@@ -512,20 +478,22 @@ export function useBookingSubmit(deps: SubmitDeps) {
       clearIdempotencyKey(storageKey);
       dispatch({ type: "RECORD_SUBMISSION" });
 
+      if (result.financial_state === "failed" && result.financial_error) {
+        toast.warning(result.financial_error);
+      }
+
       if (choice === "pay_now" && result.checkout_url) {
-        window.location.assign(result.checkout_url);
+        if (typeof window !== "undefined") window.location.assign(result.checkout_url);
         return;
       }
 
-      if (choice === "pay_now" && result.checkout_error) {
-        toast.warning(result.checkout_error);
-      }
+      if (choice === "pay_now" && result.checkout_error) toast.warning(result.checkout_error);
       dispatch({ type: "BOOKING_SUCCESS" });
     } catch (error) {
       console.error("[Booking] commit failed", { idempotencyKey, error });
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes("SLOT_UNAVAILABLE")) {
-        toast.error("This time slot was just booked. Please select another time.");
+        toast.error("This time slot was just booked. Please select a different time.");
         fetchBookedSlots(selectedDate).catch(() => {});
         dispatch({ type: "SET_STEP", step: 4 });
         return;
@@ -544,14 +512,17 @@ export function useBookingSubmit(deps: SubmitDeps) {
     business, slug, selectedDate, selectedTime, submissionCount, lastSubmissionTime,
     validateVehicleRequirements, isWeatherBlocked, getTotalDuration, enforceWeatherGuard,
     guestName, guestEmail, guestPhone, customerAddress, addressLine2, city, state, zipCode,
-    getOilPriceBreakdown, vehicles, vehicleServiceSelections, selectedRewardInstanceId,
-    storageKey, notes, getGrandTotal, taxData, customerCoords, getPreTaxTotal, zipCode,
-    transactionalSmsConsent, marketingSmsConsent, marketingEmailConsent, bookingContextId,
+    getOilPriceBreakdown, vehicles, vehicleServiceSelections, selectedRewardInstanceId, appliedCoupon,
+    storageKey, notes, getGrandTotal, taxData, customerCoords, bookingContextId,
+    transactionalSmsConsent, marketingSmsConsent, marketingEmailConsent,
     fetchBookedSlots, dispatch,
   ]);
 
   const handlePayNow = useCallback(() => submitBooking("pay_now"), [submitBooking]);
-  const handleSubmit = useCallback(() => submitBooking(paymentChoice === "pay_now" ? "pay_now" : "pay_later"), [submitBooking, paymentChoice]);
+  const handleSubmit = useCallback(
+    () => submitBooking(paymentChoice === "pay_now" ? "pay_now" : "pay_later"),
+    [submitBooking, paymentChoice],
+  );
 
   const handleCreateAccount = useCallback(async (data: { email: string; password: string; name: string; phone?: string }) => {
     if (!business) throw new Error("Business not loaded");
