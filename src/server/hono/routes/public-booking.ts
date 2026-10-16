@@ -27,8 +27,6 @@ const vehicleSchema = z.object({
 const serviceSchema = z.object({
   client_vehicle_id: z.string().trim().min(1).max(160),
   service_catalog_id: z.string().uuid().nullable(),
-  // name/price are useful request evidence, but canonical catalog/dynamic
-  // pricing is resolved in the database before financial finalization.
   name: z.string().trim().min(1).max(250),
   price: z.number().finite().nonnegative(),
   quantity: z.number().finite().positive().max(20),
@@ -50,6 +48,7 @@ const commitSchema = z.object({
   currency: z.string().trim().length(3),
   payment_choice: z.enum(["pay_later", "pay_now"]),
   coupon_code: z.string().trim().max(128).nullable().optional(),
+  reward_instance_id: z.string().uuid().nullable().optional(),
   guest: z.object({
     name: z.string().trim().min(1).max(160),
     email: z.string().trim().email().max(320),
@@ -121,9 +120,7 @@ async function createStripeCheckout(
   if (settings.payment_provider !== "stripe") throw new Error("BOOKING_PAYMENT_PROVIDER_NOT_STRIPE");
 
   const paymentMetadata = record(payment.metadata);
-  if (paymentMetadata.financial_state !== "canonical") {
-    throw new Error("BOOKING_FINANCIALS_NOT_FINALIZED");
-  }
+  if (paymentMetadata.financial_state !== "canonical") throw new Error("BOOKING_FINANCIALS_NOT_FINALIZED");
   const financialSnapshot = record(paymentMetadata.financial_snapshot);
   const cardFeeCents = Math.max(0, Math.round(finiteNumber(financialSnapshot.surchargeCents)));
 
@@ -185,18 +182,12 @@ function financialFailureMessage(error: unknown): string {
   if (/coupon/i.test(message)) {
     return "Your appointment is confirmed, but the selected discount could not be finalized. The appointment remains unpaid so the business can review it safely.";
   }
+  if (/reward/i.test(message)) {
+    return "Your appointment is confirmed, but the selected reward could not be finalized. The appointment remains unpaid so the business can review it safely.";
+  }
   return "Your appointment is confirmed, but pricing could not be finalized. The appointment remains unpaid and needs review before payment.";
 }
 
-/**
- * The only browser-facing public booking mutation boundary.
- *
- * 1. PostgreSQL atomically commits booking facts and a provisional pending
- *    ledger row.
- * 2. Server finance derives the canonical amount from persisted items and
- *    atomically finalizes payment + appointment financial state.
- * 3. Only then may an external provider Checkout session be created.
- */
 publicBookingRouter.post("/v1/public-bookings/commit", async (c) => {
   let raw: unknown;
   try {
@@ -216,15 +207,20 @@ publicBookingRouter.post("/v1/public-bookings/commit", async (c) => {
   }
 
   let financialSnapshot: Record<string, unknown> | null = null;
+  let finalizedPaymentStatus: "pending" | "succeeded" = "pending";
   try {
     const finalized = await finalizePublicBookingFinancials({
       bookingSlug: body.booking_slug,
       appointmentId: committed.appointment_id,
       paymentId: committed.payment_id,
+      businessUserId: committed.business_user_id,
+      customerEmail: body.guest.email,
       paymentChoice: body.payment_choice,
       couponCode: body.coupon_code ?? null,
+      rewardInstanceId: body.reward_instance_id ?? null,
     });
     financialSnapshot = finalized.snapshot as unknown as Record<string, unknown>;
+    finalizedPaymentStatus = finalized.paymentStatus;
   } catch (financialError) {
     console.error("[public-booking] booking committed but financial finalization failed", {
       appointmentId: committed.appointment_id,
@@ -244,14 +240,14 @@ publicBookingRouter.post("/v1/public-bookings/commit", async (c) => {
     });
   }
 
-  if (body.payment_choice === "pay_later") {
+  if (body.payment_choice === "pay_later" || finalizedPaymentStatus === "succeeded") {
     return json({
       data: {
         ...committed,
         financial_state: "canonical",
         financial_snapshot: financialSnapshot,
         checkout_url: null,
-        payment_status: "pending",
+        payment_status: finalizedPaymentStatus,
       },
       error: null,
     });
