@@ -21,6 +21,7 @@ export interface PublicBookingCommitService {
   client_vehicle_id: string;
   service_catalog_id: string | null;
   name: string;
+  /** Diagnostic only. Canonical catalog/dynamic price is resolved server-side. */
   price: number;
   quantity: number;
   is_prepaid: boolean;
@@ -35,11 +36,13 @@ export interface PublicBookingCommitRequest {
   title: string;
   description: string;
   notes: string | null;
-  estimated_cost: number;
-  tax_amount: number;
-  tax_rate: number;
+  /** Browser totals are evidence/debug values only; never financial authority. */
+  client_estimated_cost: number;
+  client_tax_amount: number;
+  client_tax_rate: number;
   currency: string;
   payment_choice: PublicBookingPaymentChoice;
+  coupon_code?: string | null;
   guest: {
     name: string;
     email: string;
@@ -47,6 +50,12 @@ export interface PublicBookingCommitRequest {
   };
   location: {
     address: string;
+    line1: string;
+    line2: string | null;
+    city: string;
+    state: string;
+    postal_code: string;
+    country: string;
     lat: number | null;
     lng: number | null;
   };
@@ -65,6 +74,9 @@ export interface PublicBookingCommitResult {
   vehicle_ids?: Record<string, string>;
   item_count?: number;
   idempotent?: boolean;
+  financial_state: "canonical" | "pending" | "failed";
+  financial_snapshot?: Record<string, unknown>;
+  financial_error?: string;
   checkout_url: string | null;
   checkout_session_id?: string;
   card_fee_cents?: number;
