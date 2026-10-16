@@ -26,6 +26,7 @@ import { documentsRouter } from "./routes/documents";
 import { messagingRouter } from "./routes/messaging";
 import { platformRouter } from "./routes/platform";
 import { publicBookingRouter } from "./routes/public-booking";
+import { publicBookingTaxRouter } from "./routes/public-booking-tax";
 import { vehiclesRouter } from "./routes/vehicles";
 import { workOrdersRouter } from "./routes/work-orders";
 
@@ -50,12 +51,11 @@ export function createHonoApp(): Hono {
   // CORS preflight: mirror the headers the original `json()` helper sets.
   app.options("*", () => new Response(null, { status: 204, headers: corsHeaders() }));
 
-  // ---------------------------------------------------------------------------
-  // Domain routers. Each router registers paths relative to `/api` (the
-  // basePath above); `app.route("/", router)` merges them unchanged, so
-  // `/v1/appointments/:id` on the router serves `/api/v1/appointments/:id`.
-  // ---------------------------------------------------------------------------
+  // Public booking routes are mounted before the broad platform router so the
+  // native tax preview owns /v1/platform/public-booking/calculate-tax instead
+  // of the legacy missing-edge-function proxy with the same path.
   app.route("/", publicBookingRouter);
+  app.route("/", publicBookingTaxRouter);
   app.route("/", appointmentsRouter);
   app.route("/", billingRouter);
   app.route("/", catalogRouter);
