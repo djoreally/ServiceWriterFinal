@@ -3,6 +3,7 @@ import { z } from "zod";
 import { errorResponse, json, toError } from "@/server/api";
 import { createSupabaseAdminClient, createSupabaseAnonServerClient } from "@/lib/supabase";
 import { resolveStripeWorkspaceExecution } from "@/server/payments/stripe-workspace-execution";
+import { finalizePublicBookingFinancials } from "@/server/payments/finalize-public-booking-financials";
 
 export const publicBookingRouter = new Hono();
 
@@ -26,6 +27,8 @@ const vehicleSchema = z.object({
 const serviceSchema = z.object({
   client_vehicle_id: z.string().trim().min(1).max(160),
   service_catalog_id: z.string().uuid().nullable(),
+  // name/price are useful request evidence, but canonical catalog/dynamic
+  // pricing is resolved in the database before financial finalization.
   name: z.string().trim().min(1).max(250),
   price: z.number().finite().nonnegative(),
   quantity: z.number().finite().positive().max(20),
@@ -41,11 +44,12 @@ const commitSchema = z.object({
   title: z.string().max(500),
   description: z.string().max(5000),
   notes: z.string().max(5000).nullable(),
-  estimated_cost: z.number().finite().nonnegative(),
-  tax_amount: z.number().finite().nonnegative(),
-  tax_rate: z.number().finite().nonnegative().max(100),
+  client_estimated_cost: z.number().finite().nonnegative(),
+  client_tax_amount: z.number().finite().nonnegative(),
+  client_tax_rate: z.number().finite().nonnegative().max(100),
   currency: z.string().trim().length(3),
   payment_choice: z.enum(["pay_later", "pay_now"]),
+  coupon_code: z.string().trim().max(128).nullable().optional(),
   guest: z.object({
     name: z.string().trim().min(1).max(160),
     email: z.string().trim().email().max(320),
@@ -53,6 +57,12 @@ const commitSchema = z.object({
   }),
   location: z.object({
     address: z.string().trim().min(1).max(1000),
+    line1: z.string().trim().min(1).max(500),
+    line2: z.string().trim().max(500).nullable(),
+    city: z.string().trim().max(160),
+    state: z.string().trim().max(160),
+    postal_code: z.string().trim().max(32),
+    country: z.string().trim().length(2).default("US"),
     lat: nullableNumber,
     lng: nullableNumber,
   }),
@@ -71,16 +81,17 @@ type CommitResult = {
   customer_id?: string;
   vehicle_ids?: Record<string, string>;
   item_count?: number;
+  financial_state?: string;
   idempotent?: boolean;
 };
 
-function object(value: unknown): Record<string, unknown> {
+function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
 }
 
-function asNumber(value: unknown): number {
+function finiteNumber(value: unknown): number {
   const n = typeof value === "number" ? value : Number(value);
   return Number.isFinite(n) ? n : 0;
 }
@@ -94,13 +105,13 @@ async function createStripeCheckout(
   const [{ data: payment, error: paymentError }, { data: settings, error: settingsError }] = await Promise.all([
     admin
       .from("payments")
-      .select("id,workspace_id,customer_id,status,amount,currency_code,metadata")
+      .select("id,workspace_id,status,amount,currency_code,metadata")
       .eq("workspace_id", committed.workspace_id)
       .eq("id", committed.payment_id)
       .single(),
     admin
       .from("workspace_settings")
-      .select("payment_provider,surcharge_enabled,surcharge_type,surcharge_value,surcharge_description,operational_settings")
+      .select("payment_provider,operational_settings")
       .eq("workspace_id", committed.workspace_id)
       .single(),
   ]);
@@ -109,18 +120,17 @@ async function createStripeCheckout(
   if (payment.status !== "pending") throw new Error("BOOKING_PAYMENT_NOT_PENDING");
   if (settings.payment_provider !== "stripe") throw new Error("BOOKING_PAYMENT_PROVIDER_NOT_STRIPE");
 
+  const paymentMetadata = record(payment.metadata);
+  if (paymentMetadata.financial_state !== "canonical") {
+    throw new Error("BOOKING_FINANCIALS_NOT_FINALIZED");
+  }
+  const financialSnapshot = record(paymentMetadata.financial_snapshot);
+  const cardFeeCents = Math.max(0, Math.round(finiteNumber(financialSnapshot.surchargeCents)));
+
   const execution = resolveStripeWorkspaceExecution(settings.operational_settings);
   const currency = String(payment.currency_code || body.currency || "USD").toLowerCase();
-  const baseCents = Math.round(asNumber(payment.amount) * 100);
-  if (baseCents < 1) throw new Error("BOOKING_PAYMENT_AMOUNT_INVALID");
-
-  let cardFeeCents = 0;
-  if (settings.surcharge_enabled) {
-    const value = Math.max(asNumber(settings.surcharge_value), 0);
-    cardFeeCents = settings.surcharge_type === "fixed"
-      ? Math.round(value * 100)
-      : Math.round(baseCents * (value / 100));
-  }
+  const totalCents = Math.round(finiteNumber(payment.amount) * 100);
+  if (totalCents < 1) throw new Error("BOOKING_PAYMENT_AMOUNT_INVALID");
 
   const metadata = {
     workspace_id: committed.workspace_id,
@@ -130,43 +140,31 @@ async function createStripeCheckout(
     service_writer_booking: "true",
   };
   const origin = new URL(request.url).origin;
-  const lineItems = [
-    {
-      price_data: {
-        currency,
-        product_data: { name: "Service appointment" },
-        unit_amount: baseCents,
-      },
-      quantity: 1,
-    },
-    ...(cardFeeCents > 0 ? [{
-      price_data: {
-        currency,
-        product_data: { name: settings.surcharge_description || "Card Processing Fee" },
-        unit_amount: cardFeeCents,
-      },
-      quantity: 1,
-    }] : []),
-  ];
 
   const session = await execution.stripe.checkout.sessions.create({
     mode: "payment",
     customer_email: body.guest.email,
-    line_items: lineItems,
+    line_items: [{
+      price_data: {
+        currency,
+        product_data: { name: "Service appointment" },
+        unit_amount: totalCents,
+      },
+      quantity: 1,
+    }],
     metadata,
     payment_intent_data: { metadata },
     success_url: `${origin}/booking-success?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${origin}/book/${encodeURIComponent(body.booking_slug)}?payment=cancelled&appointment_id=${encodeURIComponent(committed.appointment_id)}`,
-  }, execution.requestOptions(`public-booking:${committed.payment_id}`));
+  }, execution.requestOptions(`public-booking:${committed.payment_id}:${totalCents}`));
   if (!session.url) throw new Error("STRIPE_CHECKOUT_URL_MISSING");
 
-  const existingMetadata = object(payment.metadata);
   const { error: updateError } = await admin
     .from("payments")
     .update({
       provider: "stripe",
       metadata: {
-        ...existingMetadata,
+        ...paymentMetadata,
         payment_type: "pay_now",
         stripe_account_id: execution.accountId,
         stripe_checkout_session_id: session.id,
@@ -182,13 +180,22 @@ async function createStripeCheckout(
   return { url: session.url, session_id: session.id, card_fee_cents: cardFeeCents };
 }
 
+function financialFailureMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/coupon/i.test(message)) {
+    return "Your appointment is confirmed, but the selected discount could not be finalized. The appointment remains unpaid so the business can review it safely.";
+  }
+  return "Your appointment is confirmed, but pricing could not be finalized. The appointment remains unpaid and needs review before payment.";
+}
+
 /**
- * The only browser-facing public booking write boundary.
+ * The only browser-facing public booking mutation boundary.
  *
- * The database RPC commits every durable booking fact atomically. For pay-now,
- * Checkout is created only after that commit and points back to the existing
- * payment row. A provider failure cannot create a partial booking or duplicate
- * appointment; the committed booking simply remains unpaid.
+ * 1. PostgreSQL atomically commits booking facts and a provisional pending
+ *    ledger row.
+ * 2. Server finance derives the canonical amount from persisted items and
+ *    atomically finalizes payment + appointment financial state.
+ * 3. Only then may an external provider Checkout session be created.
  */
 publicBookingRouter.post("/v1/public-bookings/commit", async (c) => {
   let raw: unknown;
@@ -208,8 +215,46 @@ publicBookingRouter.post("/v1/public-bookings/commit", async (c) => {
     return json({ error: { code: "booking_commit_invalid", message: "Booking commit returned an incomplete result" } }, { status: 500 });
   }
 
+  let financialSnapshot: Record<string, unknown> | null = null;
+  try {
+    const finalized = await finalizePublicBookingFinancials({
+      bookingSlug: body.booking_slug,
+      appointmentId: committed.appointment_id,
+      paymentId: committed.payment_id,
+      paymentChoice: body.payment_choice,
+      couponCode: body.coupon_code ?? null,
+    });
+    financialSnapshot = finalized.snapshot as unknown as Record<string, unknown>;
+  } catch (financialError) {
+    console.error("[public-booking] booking committed but financial finalization failed", {
+      appointmentId: committed.appointment_id,
+      paymentId: committed.payment_id,
+      error: financialError instanceof Error ? financialError.message : String(financialError),
+    });
+    return json({
+      data: {
+        ...committed,
+        financial_state: "failed",
+        financial_error: financialFailureMessage(financialError),
+        financial_snapshot: null,
+        checkout_url: null,
+        payment_status: "pending",
+      },
+      error: null,
+    });
+  }
+
   if (body.payment_choice === "pay_later") {
-    return json({ data: { ...committed, checkout_url: null, payment_status: "pending" }, error: null });
+    return json({
+      data: {
+        ...committed,
+        financial_state: "canonical",
+        financial_snapshot: financialSnapshot,
+        checkout_url: null,
+        payment_status: "pending",
+      },
+      error: null,
+    });
   }
 
   try {
@@ -217,6 +262,8 @@ publicBookingRouter.post("/v1/public-bookings/commit", async (c) => {
     return json({
       data: {
         ...committed,
+        financial_state: "canonical",
+        financial_snapshot: financialSnapshot,
         checkout_url: checkout.url,
         checkout_session_id: checkout.session_id,
         card_fee_cents: checkout.card_fee_cents,
@@ -225,7 +272,7 @@ publicBookingRouter.post("/v1/public-bookings/commit", async (c) => {
       error: null,
     });
   } catch (checkoutError) {
-    console.error("[public-booking] booking committed but checkout creation failed", {
+    console.error("[public-booking] booking finalized but checkout creation failed", {
       appointmentId: committed.appointment_id,
       paymentId: committed.payment_id,
       error: checkoutError instanceof Error ? checkoutError.message : String(checkoutError),
@@ -233,6 +280,8 @@ publicBookingRouter.post("/v1/public-bookings/commit", async (c) => {
     return json({
       data: {
         ...committed,
+        financial_state: "canonical",
+        financial_snapshot: financialSnapshot,
         checkout_url: null,
         payment_status: "pending",
         checkout_error: "Online payment could not be started. Your appointment is confirmed and remains unpaid.",
