@@ -43,6 +43,7 @@ export interface PublicBookingCommitRequest {
   currency: string;
   payment_choice: PublicBookingPaymentChoice;
   coupon_code?: string | null;
+  reward_instance_id?: string | null;
   guest: {
     name: string;
     email: string;
@@ -75,12 +76,12 @@ export interface PublicBookingCommitResult {
   item_count?: number;
   idempotent?: boolean;
   financial_state: "canonical" | "pending" | "failed";
-  financial_snapshot?: Record<string, unknown>;
+  financial_snapshot?: Record<string, unknown> | null;
   financial_error?: string;
   checkout_url: string | null;
   checkout_session_id?: string;
   card_fee_cents?: number;
-  payment_status: "pending";
+  payment_status: "pending" | "succeeded";
   checkout_error?: string;
 }
 
