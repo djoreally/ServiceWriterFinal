@@ -772,18 +772,24 @@ export function useBookingSubmit(deps: SubmitDeps) {
           return selection.package ? selection.package.services.map((service) => ({ vehicle_id: vehicleId, service_catalog_id: service.id || null, name: service.name, price: service.price, quantity: service.quantity || 1, is_prepaid: paymentChoice === "pay_now" })) : selection.services.map((service) => ({ vehicle_id: vehicleId, service_catalog_id: service.id, name: service.name, price: service.default_price, quantity: 1, is_prepaid: paymentChoice === "pay_now" }));
         });
 
-        // Auto-add additional oil quarts line item based on vehicle oil capacity.
-        // Itemized so the customer sees N qt × $price (no opaque fractional total).
+        // Itemize extra oil for EACH vehicle rather than attaching the entire
+        // booking's oil adjustment to the first vehicle.
         const oilBreakdownItem = getOilPriceBreakdown();
-        if (oilBreakdownItem.extraQuarts > 0 && oilBreakdownItem.pricePerQuart > 0) {
+        const includedQuarts = 5;
+        if (oilBreakdownItem.pricePerQuart > 0) {
+          for (const vehicle of vehicles) {
+            const capacity = Number.parseFloat(String(vehicle.oilCapacity ?? ""));
+            if (!Number.isFinite(capacity) || capacity <= includedQuarts) continue;
+            const extraQuarts = capacity - includedQuarts;
             serviceItems.push({
-              vehicle_id: persistedVehicleIdsByClientId[vehicles.find((vehicle) => vehicle.oilCapacitySource === "db" || vehicle.oilCapacitySource === "ai" || vehicle.oilCapacitySource === "manual")?.id || ""] || null,
+              vehicle_id: persistedVehicleIdsByClientId[vehicle.id] ?? null,
               service_catalog_id: null,
               name: "Additional Oil Quart",
-            price: oilBreakdownItem.pricePerQuart,
-            quantity: oilBreakdownItem.extraQuarts,
-            is_prepaid: paymentChoice === "pay_now",
-          });
+              price: oilBreakdownItem.pricePerQuart,
+              quantity: extraQuarts,
+              is_prepaid: paymentChoice === "pay_now",
+            });
+          }
         }
         for (const vehicle of vehicles) {
           if (!vehicle.tireInventoryItemId || !vehicle.tireInventoryName || !vehicle.tireUnitPrice) continue;
@@ -799,7 +805,9 @@ export function useBookingSubmit(deps: SubmitDeps) {
           try {
             await insertBookingAppointmentServices(appointmentId, slug || "", validationResult.data.email, validationResult.data.phone || "", serviceItems as BookingServiceItem[]);
           } catch (err) {
-            console.warn("[Booking] Failed to create appointment_services:", err);
+            // The appointment may already exist. Never claim booking success
+            // or initiate payment when its billable services were not saved.
+            throw new Error(`Appointment ${appointmentId} was created, but its services could not be saved. Contact the business with this appointment reference; do not submit another booking.`, { cause: err });
           }
         }
       }
