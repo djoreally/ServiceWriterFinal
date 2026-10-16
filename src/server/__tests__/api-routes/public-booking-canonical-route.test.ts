@@ -9,60 +9,75 @@ const appSource = readFileSync(
   join(process.cwd(), "src/server/hono/app.ts"),
   "utf8",
 );
-const commandSource = readFileSync(
-  join(process.cwd(), "src/application/commands/booking-submit.command.ts"),
-  "utf8",
-);
 const submitSource = readFileSync(
   join(process.cwd(), "src/hooks/useBookingSubmit.ts"),
   "utf8",
 );
+const commitCommandSource = readFileSync(
+  join(process.cwd(), "src/application/commands/public-booking-commit.command.ts"),
+  "utf8",
+);
+const migrationSource = readFileSync(
+  join(process.cwd(), "supabase/migrations/20261016090000_public_booking_commit_v1.sql"),
+  "utf8",
+);
 
-describe("canonical public booking API contract", () => {
+describe("canonical public booking transaction contract", () => {
   it("mounts the dedicated public booking Hono router", () => {
     expect(appSource).toContain('import { publicBookingRouter } from "./routes/public-booking"');
     expect(appSource).toContain('app.route("/", publicBookingRouter)');
   });
 
-  it("requires an appointment-owned service address at the Hono boundary", () => {
-    expect(routeSource).toMatch(/p_location_address:\s*z\.string\(\)\.trim\(\)\.min\(1\)\.max\(1000\)/);
+  it("has exactly one browser-facing booking commit endpoint", () => {
+    expect(routeSource).toContain('publicBookingRouter.post("/v1/public-bookings/commit"');
+    expect(routeSource).not.toContain('/v1/public-bookings/appointments"');
+    expect(commitCommandSource).toContain('"/v1/public-bookings/commit"');
   });
 
-  it("keeps the database RPC name server-side and calls only v3 for appointment creation", () => {
-    expect(routeSource).toContain('supabase.rpc("public_booking_book_appointment_v3"');
-    expect(commandSource).toContain('"/v1/public-bookings/appointments"');
-    expect(commandSource).not.toContain('bookingRpc<string>("public_booking_book_appointment_v2"');
+  it("calls one database booking commit RPC from the server boundary", () => {
+    expect(routeSource).toContain('supabase.rpc("public_booking_commit_v1"');
+    expect(routeSource).not.toContain('supabase.rpc("public_booking_book_appointment_v3"');
+    expect(routeSource).not.toContain("public_booking_insert_services_v7");
   });
 
-  it("passes location explicitly instead of hiding it between commands", () => {
-    expect(commandSource).not.toContain("bookingLocations");
-    expect(submitSource).toContain("p_location_address: fullAddress");
-    expect(submitSource).toContain("p_location_lat: finalCoords?.lat ?? null");
-    expect(submitSource).toContain("p_location_lng: finalCoords?.lng ?? null");
+  it("removes browser orchestration of booking persistence", () => {
+    expect(submitSource).toContain("commitPublicBooking(");
+    expect(submitSource).not.toContain("upsertBookingCustomer(");
+    expect(submitSource).not.toContain("upsertBookingVehicle(");
+    expect(submitSource).not.toContain("bookAppointmentSafe(");
+    expect(submitSource).not.toContain("insertBookingAppointmentServices(");
+    expect(submitSource).not.toContain("insertBookingPaymentRecord(");
   });
 
-  it("does not stage a legacy location intent for the canonical flow", () => {
-    expect(commandSource).toMatch(/public_booking_upsert_customer[\s\S]*?p_address:\s*null/);
+  it("requires a durable idempotency key and stores it on the appointment", () => {
+    expect(routeSource).toMatch(/idempotency_key:\s*z\.string\(\)\.trim\(\)\.min\(1\)\.max\(128\)/);
+    expect(migrationSource).toContain("booking_idempotency_key");
+    expect(migrationSource).toContain("pg_advisory_xact_lock");
   });
 
-  it("does not rewrite the appointment location after canonical creation", () => {
-    expect(submitSource).not.toContain("updatePayload.location_address");
-    expect(submitSource).not.toContain("updatePayload.location_lat");
-    expect(submitSource).not.toContain("updatePayload.location_lng");
+  it("keeps appointment location and service items inside the same transaction", () => {
+    expect(migrationSource).toContain("public.public_booking_book_appointment_v3(");
+    expect(migrationSource).toContain("public.public_booking_insert_services_v7(");
+    expect(migrationSource).toContain("public.public_booking_record_payment_intent_v3(");
+    expect(migrationSource).toContain("BOOKING_ITEMS_REQUIRED");
+    expect(migrationSource).toContain("BOOKING_PAYMENT_INTENT_FAILED");
   });
 
-  it("preserves long generated-title compatibility by truncating instead of rejecting", () => {
-    expect(routeSource).toContain("value.slice(0, 500)");
+  it("creates pay-now checkout against the committed payment row", () => {
+    expect(routeSource).toContain("payment_id: committed.payment_id");
+    expect(routeSource).toContain("appointment_id: committed.appointment_id");
+    expect(routeSource).toContain("booking_idempotency_key: body.idempotency_key");
+    expect(routeSource).toContain("checkout.sessions.create");
   });
 
-  it("treats malformed JSON as a 400 and RPC failures as non-2xx API errors", () => {
-    expect(routeSource).toContain('message: "Invalid JSON body"');
-    expect(routeSource).toContain("errorResponse(toError(error))");
-    expect(commandSource).toContain("error instanceof ApiClientError");
+  it("does not delegate public checkout to legacy edge functions", () => {
+    expect(routeSource).not.toContain("create-booking-payment");
+    expect(routeSource).not.toContain("create-square-payment");
+    expect(routeSource).not.toContain("proxyEdgeFunction");
   });
 
-  it("uses the server-safe anonymous Supabase client", () => {
-    expect(routeSource).toContain("createSupabaseAnonServerClient");
-    expect(routeSource).not.toContain("createSupabaseBrowserClient");
+  it("keeps provider checkout failure distinct from booking failure", () => {
+    expect(routeSource).toContain("booking committed but checkout creation failed");
+    expect(routeSource).toContain("Your appointment is confirmed and remains unpaid.");
   });
 });
