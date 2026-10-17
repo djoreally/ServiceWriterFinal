@@ -55,6 +55,11 @@ export const LocationPreview = ({ address, className }: LocationPreviewProps) =>
 
   // Geocode the appointment address.
   useEffect(() => {
+    let cancelled = false;
+    setCoordinates(null);
+    setRouteInfo(null);
+    setError(null);
+    setIsLoading(Boolean(address));
     const lookup = async () => {
       if (!address) {
         setIsLoading(false);
@@ -63,20 +68,23 @@ export const LocationPreview = ({ address, className }: LocationPreviewProps) =>
 
       try {
         const result = await geocodeAddress(address, { limit: 1 });
+        if (cancelled) return;
         if (result) {
           setCoordinates({ lat: result.lat, lng: result.lng });
         } else {
           setError('Location not found');
         }
       } catch (err) {
+        if (cancelled) return;
         console.error('Geocoding error:', err);
         setError('Could not load map');
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
 
-    lookup();
+    void lookup();
+    return () => { cancelled = true; };
   }, [address]);
 
   // Compute driving distance/time from base → appointment.

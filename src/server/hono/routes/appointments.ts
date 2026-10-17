@@ -2629,6 +2629,17 @@ appointmentsRouter.get("/v1/appointments/:id/services", async (c: Context) => {
     .order("created_at", { ascending: true });
   if (itemsError) throw itemsError;
 
+  // Never return an empty service list for a missing or foreign-workspace appointment.
+  // The caller must not be able to probe catalog records through an arbitrary ID.
+  const { data: ownedAppointment, error: ownershipError } = await db
+    .from("appointments")
+    .select("id,metadata")
+    .eq("workspace_id", workspaceId)
+    .eq("id", id)
+    .maybeSingle();
+  if (ownershipError) throw ownershipError;
+  if (!ownedAppointment) throw new ApiError(404, "Appointment not found", "appointment_not_found");
+
   let catalogService: unknown = null;
   let appointmentMetadata: Record<string, unknown> | null = null;
   if ((items ?? []).length === 0) {
