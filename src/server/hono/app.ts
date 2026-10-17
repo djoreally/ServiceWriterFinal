@@ -17,7 +17,7 @@
  *   `json()` helper sets, so preflight behavior is unchanged.
  */
 import { Hono } from "hono";
-import { corsHeaders, errorResponse, toError } from "@/server/api";
+import { corsHeaders, errorResponse, json, toError } from "@/server/api";
 import { appointmentsRouter } from "./routes/appointments";
 import { billingRouter } from "./routes/billing";
 import { catalogRouter } from "./routes/catalog";
@@ -49,6 +49,18 @@ export function createHonoApp(): Hono {
 
   // CORS preflight: mirror the headers the original `json()` helper sets.
   app.options("*", () => new Response(null, { status: 204, headers: corsHeaders() }));
+
+  // REG-017 containment: public Pay Now previously proxied to Supabase Edge
+  // Functions that do not exist in production. Fail closed before billingRouter
+  // is mounted so a customer is never sent into a phantom checkout path. This
+  // guard is temporary until the canonical appointment-hold -> Stripe Checkout
+  // -> webhook reconciliation flow is certified and replaces it.
+  app.post("/v1/billing/public-checkout", () => json({
+    error: {
+      code: "public_checkout_unavailable",
+      message: "Online Stripe/Square payment checkout is not enabled right now. Please choose \"Pay at Time of Service\" to complete your booking.",
+    },
+  }, { status: 503 }));
 
   // ---------------------------------------------------------------------------
   // Domain routers. Each router registers paths relative to `/api` (the
