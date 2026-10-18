@@ -6,7 +6,19 @@ import { createSupabaseAnonServerClient } from "@/lib/supabase";
 
 export const publicBookingRouter = new Hono();
 
+const publicBookingServiceItemSchema = z.object({
+  vehicle_id: z.string().uuid(),
+  service_catalog_id: z.string().uuid().nullable(),
+  name: z.string().trim().min(1).max(250),
+  price: z.number().finite().nonnegative(),
+  quantity: z.number().finite().positive().max(20),
+  is_prepaid: z.boolean(),
+});
+
 const publicBookingAppointmentSchema = z.object({
+  p_submission_key: z.string().uuid(),
+  p_services: z.array(publicBookingServiceItemSchema).min(1).max(25),
+  p_configuration: z.record(z.string(), z.unknown()),
   p_booking_slug: z.string().trim().min(1).max(160),
   p_scheduled_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   p_scheduled_time: z.string().regex(/^\d{2}:\d{2}(?::\d{2})?$/),
@@ -35,7 +47,8 @@ const publicBookingAppointmentSchema = z.object({
  * Browser code submits a typed booking contract to Hono. The database RPC name
  * is an implementation detail owned here, not a browser-selectable command.
  * The location is mandatory at creation time so every public appointment owns
- * its service location atomically.
+ * its location, configuration and billable service lines atomically.
+ * The submission UUID enforces retry safety at the database boundary.
  */
 publicBookingRouter.post("/v1/public-bookings/appointments", async (c: Context) => {
   let raw: unknown;
@@ -51,7 +64,10 @@ publicBookingRouter.post("/v1/public-bookings/appointments", async (c: Context) 
   const body = publicBookingAppointmentSchema.parse(raw);
   const supabase = createSupabaseAnonServerClient() as any;
 
-  const { data, error } = await supabase.rpc("public_booking_book_appointment_v3", {
+  const { data, error } = await supabase.rpc("public_booking_commit_v1", {
+    p_submission_key: body.p_submission_key,
+    p_services: body.p_services,
+    p_configuration: body.p_configuration,
     p_booking_slug: body.p_booking_slug,
     p_scheduled_date: body.p_scheduled_date,
     p_scheduled_time: body.p_scheduled_time,
