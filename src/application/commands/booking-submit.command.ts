@@ -293,7 +293,10 @@ export async function insertBookingPaymentRecord(record: BookingPaymentRecordInp
     p_customer_name: record.customer_name,
   });
   if (error) throw error;
-  return { data: data ? { id: data as string } : null, error: null as null };
+  if (!data || typeof data !== "string") {
+    throw new Error("BOOKING_PAYMENT_ID_MISSING");
+  }
+  return { data: { id: data }, error: null as null };
 }
 
 
