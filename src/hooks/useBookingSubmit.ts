@@ -572,9 +572,10 @@ export function useBookingSubmit(deps: SubmitDeps) {
 
       // Build exact vehicle identity and all service lines BEFORE creating the
       // appointment. The database recalculates authoritative item pricing.
+      const rawBookingConfiguration = buildAppointmentBookingConfiguration(vehicles, vehicleServiceSelections);
       const atomicBookingConfiguration = {
-        ...buildAppointmentBookingConfiguration(vehicles, vehicleServiceSelections),
-        vehicles: buildAppointmentBookingConfiguration(vehicles, vehicleServiceSelections).vehicles.map((configuredVehicle) => {
+        ...rawBookingConfiguration,
+        vehicles: rawBookingConfiguration.vehicles.map((configuredVehicle) => {
           const persistedVehicleId = persistedVehicleIdsByClientId[configuredVehicle.clientVehicleId];
           if (!persistedVehicleId) throw new Error("BOOKING_VEHICLE_PERSISTENCE_FAILED");
           return { ...configuredVehicle, persistedVehicleId };
@@ -648,7 +649,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
       sessionStorage.setItem(submissionStorageKey, submissionKey);
 
       // Book appointment through the canonical Hono boundary. The service
-      // location is explicit here and v3 owns it atomically at creation time.
+      // location and service lines are atomically committed by the server.
       const { data: appointmentId, error: appointmentError } = await bookAppointmentSafe({
         p_submission_key: submissionKey,
         p_services: serviceItems,
