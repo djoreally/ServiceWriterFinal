@@ -473,6 +473,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
 
       // Create vehicles
       const vehicleIds: string[] = [];
+      const persistedVehicleIdsByClientId: Record<string, string> = {};
       for (const vehicle of vehicles) {
         if (!vehicle.year || !vehicle.make || !vehicle.model) continue;
         try {
@@ -493,6 +494,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
           });
           if (!vehicleError && vehicleId) {
             vehicleIds.push(vehicleId);
+            persistedVehicleIdsByClientId[vehicle.id] = vehicleId;
             // Tire vertical: persist the confirmed wheel/tire size (OE or override)
             // so the appointment carries the tire spec, not oil data.
             if (vehicle.tireSize) {
@@ -514,7 +516,9 @@ export function useBookingSubmit(deps: SubmitDeps) {
 
 
       const validVehicles = vehicles.filter((vehicle) => vehicle.year && vehicle.make && vehicle.model);
-      const persistedVehicleIdsByClientId = Object.fromEntries(validVehicles.map((vehicle, index) => [vehicle.id, vehicleIds[index] || null]));
+      if (vehicleIds.length !== validVehicles.length) {
+        throw new Error("BOOKING_VEHICLE_PERSISTENCE_FAILED: all selected vehicles must be saved before booking.");
+      }
 
       // Build description with a stable vehicle-to-service grouping for staff notifications.
       const serviceNames = validVehicles.map((vehicle) => {
@@ -568,9 +572,89 @@ export function useBookingSubmit(deps: SubmitDeps) {
       let rewardDiscountCents = 0;
       let rewardReserved = false;
 
+      // Build exact vehicle identity and all service lines BEFORE creating the
+      // appointment. The database recalculates authoritative item pricing.
+      const atomicBookingConfiguration = {
+        ...buildAppointmentBookingConfiguration(vehicles, vehicleServiceSelections),
+        vehicles: buildAppointmentBookingConfiguration(vehicles, vehicleServiceSelections).vehicles.map((configuredVehicle) => {
+          const persistedVehicleId = persistedVehicleIdsByClientId[configuredVehicle.clientVehicleId];
+          if (!persistedVehicleId) throw new Error("BOOKING_VEHICLE_PERSISTENCE_FAILED");
+          return { ...configuredVehicle, persistedVehicleId };
+        }),
+      };
+      const serviceItems: BookingServiceItem[] = Object.entries(vehicleServiceSelections)
+        .flatMap(([clientVehicleId, selection]) => {
+          const vehicleId = persistedVehicleIdsByClientId[clientVehicleId];
+          if (!vehicleId) throw new Error("BOOKING_SERVICE_VEHICLE_REQUIRED");
+          return selection.package
+            ? selection.package.services.map((service) => ({
+              vehicle_id: vehicleId, service_catalog_id: service.id || null,
+              name: service.name, price: service.price, quantity: service.quantity || 1, is_prepaid: false,
+            }))
+            : selection.services.map((service) => ({
+              vehicle_id: vehicleId, service_catalog_id: service.id,
+              name: service.name, price: service.default_price, quantity: 1, is_prepaid: false,
+            }));
+        });
+      // The server's v7 price authority recomputes actual extra-quart quantity
+      // using the recorded vehicle spec. No cross-vehicle aggregation or
+      // unassigned oil charges; its accepted name is "Additional Oil Quarts".
+      const oilBreakdownItem = getOilPriceBreakdown();
+      if (oilBreakdownItem.extraQuarts > 0 && oilBreakdownItem.pricePerQuart > 0) {
+        for (const vehicle of validVehicles) {
+          const selected = vehicleServiceSelections[vehicle.id];
+          const selectedNames = selected?.package
+            ? selected.package.services.map((service) => service.name)
+            : (selected?.services || []).map((service) => service.name);
+          if (!selectedNames.some((name) => /oil|lube/i.test(name))) continue;
+          const capacityText = String(vehicle.oilCapacity ?? "");
+          const parsedCapacity = Number.parseFloat(capacityText.match(/[0-9]+(?:\.[0-9]+)?/)?.[0] ?? "");
+          const capacityQuarts = /gal/i.test(capacityText) ? parsedCapacity * 4 : parsedCapacity;
+          if (!Number.isFinite(capacityQuarts) || capacityQuarts <= 5) continue;
+          serviceItems.push({
+            vehicle_id: persistedVehicleIdsByClientId[vehicle.id],
+            service_catalog_id: null, name: "Additional Oil Quarts",
+            price: oilBreakdownItem.pricePerQuart,
+            quantity: Math.ceil(capacityQuarts - 5),
+            is_prepaid: false,
+          });
+        }
+      }
+      for (const vehicle of validVehicles) {
+        const vehicleId = persistedVehicleIdsByClientId[vehicle.id];
+        if (vehicle.tireInventoryItemId && vehicle.tireInventoryName && vehicle.tireUnitPrice) {
+          serviceItems.push({
+            vehicle_id: vehicleId, service_catalog_id: null,
+            name: `Tire — ${vehicle.tireInventoryName}${vehicle.tireInventorySku ? ` (${vehicle.tireInventorySku})` : ""}`,
+            price: vehicle.tireUnitPrice, quantity: getRequestedTireQuantity(vehicle), is_prepaid: false,
+          });
+        }
+        if (vehicle.detailingVehicleSize && vehicle.detailingCondition) {
+          const adjustment = Math.max(0, vehicle.detailingFlatFee || 0)
+            + Math.max(0, (vehicle.detailingPriceMultiplier || 1) - 1)
+              * (vehicleServiceSelections[vehicle.id]?.services || []).reduce((sum, service) => sum + service.default_price, 0);
+          if (adjustment > 0) serviceItems.push({
+            vehicle_id: vehicleId, service_catalog_id: null,
+            name: "Vehicle size & condition adjustment", price: adjustment, quantity: 1, is_prepaid: false,
+          });
+        }
+      }
+      if (serviceItems.length < 1 || serviceItems.length > 25) {
+        throw new Error("BOOKING_ITEMS_REQUIRED: invalid service item count");
+      }
+
+      // This UUID survives a failed post-commit side effect or a page refresh.
+      // If storage is unavailable, do not risk submitting an unprotected retry.
+      const submissionStorageKey = `${storageKey}:submission-id`;
+      const submissionKey = sessionStorage.getItem(submissionStorageKey) || crypto.randomUUID();
+      sessionStorage.setItem(submissionStorageKey, submissionKey);
+
       // Book appointment through the canonical Hono boundary. The service
       // location is explicit here and v3 owns it atomically at creation time.
       const { data: appointmentId, error: appointmentError } = await bookAppointmentSafe({
+        p_submission_key: submissionKey,
+        p_services: serviceItems,
+        p_configuration: atomicBookingConfiguration,
         p_booking_slug: slug || "",
         p_scheduled_date: format(selectedDate, "yyyy-MM-dd"),
         p_scheduled_time: selectedTime,
@@ -591,20 +675,16 @@ export function useBookingSubmit(deps: SubmitDeps) {
         p_status: "confirmed",
       });
 
+      // Config and services were committed inside the appointment transaction.
+      // Tire reservation is a separate operational side effect.
       if (appointmentId && !appointmentError) {
-        const { error: configurationError } = await saveAppointmentBookingConfiguration(
-          appointmentId,
-          slug || "",
-          validationResult.data.email,
-          validationResult.data.phone || "",
-          buildAppointmentBookingConfiguration(vehicles, vehicleServiceSelections),
-        );
-        if (configurationError) throw new Error(`Could not save vehicle service configuration: ${configurationError.message}`);
-        for (const configuredVehicle of buildAppointmentBookingConfiguration(vehicles, vehicleServiceSelections).vehicles) {
+        for (const configuredVehicle of atomicBookingConfiguration.vehicles) {
           const tire = configuredVehicle.tire;
           if (!tire?.inventoryItemId) continue;
-          const { error: reserveError } = await reserveTireInventoryForAppointment(appointmentId,business.user_id,tire.inventoryItemId,tire.frontQuantity+tire.rearQuantity);
-          if (reserveError) throw new Error(`Selected tire inventory is no longer available: ${reserveError.message}`);
+          const { error: reserveError } = await reserveTireInventoryForAppointment(
+            appointmentId, business.user_id, tire.inventoryItemId, tire.frontQuantity + tire.rearQuantity,
+          );
+          if (reserveError) throw new Error(`Tire inventory reservation requires staff review: ${reserveError.message}`);
         }
       }
 
@@ -765,45 +845,6 @@ export function useBookingSubmit(deps: SubmitDeps) {
         }
       }
 
-      // Create appointment_services line items
-      if (appointmentId) {
-        const serviceItems = Object.entries(vehicleServiceSelections).flatMap(([clientVehicleId, selection]) => {
-          const vehicleId = persistedVehicleIdsByClientId[clientVehicleId] ?? null;
-          return selection.package ? selection.package.services.map((service) => ({ vehicle_id: vehicleId, service_catalog_id: service.id || null, name: service.name, price: service.price, quantity: service.quantity || 1, is_prepaid: paymentChoice === "pay_now" })) : selection.services.map((service) => ({ vehicle_id: vehicleId, service_catalog_id: service.id, name: service.name, price: service.default_price, quantity: 1, is_prepaid: paymentChoice === "pay_now" }));
-        });
-
-        // Auto-add additional oil quarts line item based on vehicle oil capacity.
-        // Itemized so the customer sees N qt × $price (no opaque fractional total).
-        const oilBreakdownItem = getOilPriceBreakdown();
-        if (oilBreakdownItem.extraQuarts > 0 && oilBreakdownItem.pricePerQuart > 0) {
-            serviceItems.push({
-              vehicle_id: persistedVehicleIdsByClientId[vehicles.find((vehicle) => vehicle.oilCapacitySource === "db" || vehicle.oilCapacitySource === "ai" || vehicle.oilCapacitySource === "manual")?.id || ""] || null,
-              service_catalog_id: null,
-              name: "Additional Oil Quart",
-            price: oilBreakdownItem.pricePerQuart,
-            quantity: oilBreakdownItem.extraQuarts,
-            is_prepaid: paymentChoice === "pay_now",
-          });
-        }
-        for (const vehicle of vehicles) {
-          if (!vehicle.tireInventoryItemId || !vehicle.tireInventoryName || !vehicle.tireUnitPrice) continue;
-          serviceItems.push({ vehicle_id: persistedVehicleIdsByClientId[vehicle.id] || null, service_catalog_id:null, name:`Tire — ${vehicle.tireInventoryName}${vehicle.tireInventorySku?` (${vehicle.tireInventorySku})`:""}`, price:vehicle.tireUnitPrice, quantity:getRequestedTireQuantity(vehicle), is_prepaid:paymentChoice==="pay_now" });
-        }
-        for (const vehicle of validVehicles) {
-          if (!vehicle.detailingVehicleSize || !vehicle.detailingCondition) continue;
-          const adjustment = Math.max(0, vehicle.detailingFlatFee || 0) + Math.max(0, (vehicle.detailingPriceMultiplier || 1) - 1) * (vehicleServiceSelections[vehicle.id]?.services || []).reduce((sum, service) => sum + service.default_price, 0);
-          if (adjustment > 0) serviceItems.push({ vehicle_id: persistedVehicleIdsByClientId[vehicle.id] || null, service_catalog_id:null, name:"Vehicle size & condition adjustment", price:adjustment, quantity:1, is_prepaid:paymentChoice==="pay_now" });
-        }
-
-        if (serviceItems.length > 0) {
-          try {
-            await insertBookingAppointmentServices(appointmentId, slug || "", validationResult.data.email, validationResult.data.phone || "", serviceItems as BookingServiceItem[]);
-          } catch (err) {
-            console.warn("[Booking] Failed to create appointment_services:", err);
-          }
-        }
-      }
-
       // Create payment record for pay-later
       if (paymentChoice === "pay_later" && appointmentId) {
         try {
@@ -852,15 +893,10 @@ export function useBookingSubmit(deps: SubmitDeps) {
           }).catch((syncError) => {
             console.warn("[Booking] Provider sync failed:", syncError);
           });
-        } catch {
-          // Don't fail booking if payment record creation fails
-          requestAppointmentProviderSync({
-            appointmentId,
-            syncMode: "appointment_created",
-            guestEmail: validationResult.data.email,
-          }).catch((syncError) => {
-            console.warn("[Booking] Provider sync fallback failed:", syncError);
-          });
+        } catch (paymentError) {
+          // No success screen or confirmation for a booking whose payment
+          // record cannot be reconciled. Retrying uses the same appointment.
+          throw new Error("BOOKING_PAYMENT_RECORD_NOT_RECONCILED: contact the business with the booking reference; do not create another appointment.", { cause: paymentError });
         }
       } else if (appointmentId) {
         requestAppointmentProviderSync({
@@ -916,6 +952,7 @@ export function useBookingSubmit(deps: SubmitDeps) {
       // Clear persisted draft (both session + local for backward compat)
       try {
         sessionStorage.removeItem(storageKey);
+        sessionStorage.removeItem(submissionStorageKey);
         localStorage.removeItem(storageKey);
       } catch {
         // Best-effort cleanup; storage may be unavailable in private browsing.
