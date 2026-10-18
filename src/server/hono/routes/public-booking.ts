@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
 import { errorResponse, json, toError } from "@/server/api";
-import { createSupabaseAnonServerClient } from "@/lib/supabase";
+import { createSupabaseAdminClient } from "@/lib/supabase";
 
 export const publicBookingRouter = new Hono();
 
@@ -62,7 +62,7 @@ publicBookingRouter.post("/v1/public-bookings/appointments", async (c: Context) 
   }
 
   const body = publicBookingAppointmentSchema.parse(raw);
-  const supabase = createSupabaseAnonServerClient() as any;
+  const supabase = createSupabaseAdminClient() as any;
 
   const { data, error } = await supabase.rpc("public_booking_commit_v1", {
     p_submission_key: body.p_submission_key,
