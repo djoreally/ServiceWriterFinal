@@ -17,7 +17,6 @@ import {
   setVehicleTireSpec,
   bookAppointmentSafe,
   updateBookingAppointment,
-  insertBookingAppointmentServices,
   insertBookingPaymentRecord,
   signUpBookingUser,
   createCustomerAccount,
@@ -26,7 +25,6 @@ import {
   redeemBookingReward,
   cancelBookingReward,
   type BookingServiceItem,
-  saveAppointmentBookingConfiguration,
   reserveTireInventoryForAppointment,
 } from "@/application/commands/booking-submit.command";
 import { buildAppointmentBookingConfiguration } from "@/lib/booking-configuration";
