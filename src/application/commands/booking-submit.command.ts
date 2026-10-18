@@ -111,6 +111,11 @@ export async function upsertBookingVehicle(params: UpsertBookingVehicleParams) {
 // ---------------------------------------------------------------------------
 
 export interface BookAppointmentSafeParams {
+  /** UUID persisted across retries of the same public submission. */
+  p_submission_key: string;
+  /** All billable lines are committed together with the appointment. */
+  p_services: BookingServiceItem[];
+  p_configuration: AppointmentBookingConfiguration;
   p_booking_slug: string;
   p_scheduled_date: string;
   p_scheduled_time: string;
