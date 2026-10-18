@@ -125,8 +125,8 @@ $$;
 REVOKE ALL ON FUNCTION public.public_booking_commit_v1(
   uuid,text,date,time without time zone,integer,text,text,text,text,text,text,
   numeric,numeric,uuid,uuid,text,numeric,numeric,text,jsonb,jsonb
-) FROM PUBLIC;
+) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.public_booking_commit_v1(
   uuid,text,date,time without time zone,integer,text,text,text,text,text,text,
   numeric,numeric,uuid,uuid,text,numeric,numeric,text,jsonb,jsonb
-) TO anon, authenticated;
+) TO service_role;
