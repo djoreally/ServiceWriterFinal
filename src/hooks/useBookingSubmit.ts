@@ -674,6 +674,10 @@ export function useBookingSubmit(deps: SubmitDeps) {
         p_status: "confirmed",
       });
 
+      if (!appointmentId && !appointmentError) {
+        throw new Error("BOOKING_APPOINTMENT_NOT_PERSISTED");
+      }
+
       // Config and services were committed inside the appointment transaction.
       // Tire reservation is a separate operational side effect.
       if (appointmentId && !appointmentError) {
