@@ -26,7 +26,7 @@ const baseParams = {
     vehicle_id: "11111111-1111-4111-8111-111111111111",
     service_catalog_id: null, name: "Oil change", price: 120, quantity: 1, is_prepaid: false,
   }],
-  p_configuration: { schemaVersion: 2, capturedAt: "2026-10-18T00:00:00Z", vehicles: [] },
+  p_configuration: { schemaVersion: 2 as const, capturedAt: "2026-10-18T00:00:00Z", vehicles: [] },
   p_booking_slug: "test-booking",
   p_scheduled_date: "2026-09-01",
   p_scheduled_time: "10:00",
