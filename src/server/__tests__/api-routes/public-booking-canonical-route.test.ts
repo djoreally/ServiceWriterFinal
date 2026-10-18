@@ -84,8 +84,10 @@ describe("canonical public booking API contract", () => {
     expect(commandSource).toContain("error instanceof ApiClientError");
   });
 
-  it("uses the server-safe anonymous Supabase client", () => {
-    expect(routeSource).toContain("createSupabaseAnonServerClient");
+  it("keeps the privileged commit RPC server-side", () => {
+    expect(routeSource).toContain("createSupabaseAdminClient");
+    expect(atomicMigration).toContain("FROM PUBLIC, anon, authenticated");
+    expect(atomicMigration).toContain("TO service_role");
     expect(routeSource).not.toContain("createSupabaseBrowserClient");
   });
 });
