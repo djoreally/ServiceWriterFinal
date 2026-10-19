@@ -1399,8 +1399,10 @@ billingRouter.post("/v1/billing/public-checkout", async (c) => {
 
 billingRouter.get("/v1/billing/checkout-catalog", async (c) => {
   const businessUserId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("business_user_id") ?? "");
-  const anon = createSupabaseAnonServerClient();
-  const { data, error } = await (anon.rpc as any)("get_public_service_catalog", {
+  // Public catalog is read through the server-held privileged client; never grant
+  // anonymous EXECUTE on the legacy RPC just to make checkout work.
+  const admin = createSupabaseAdminClient();
+  const { data, error } = await (admin.rpc as any)("get_public_service_catalog", {
     business_user_id: businessUserId,
   });
   if (error) throw error;
