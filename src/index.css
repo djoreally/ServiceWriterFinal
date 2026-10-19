@@ -1,9 +1,11 @@
 /* =========================================
    GLOBAL THEME TOKENS
    Apple-style dark/light foundation
+
+   Fonts are self-hosted via @fontsource-variable/inter (imported in
+   app/layout.tsx) — no render-blocking external stylesheet requests.
    ========================================= */
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 @import './components/ui/typography.css';
 @import './components/ui/radius.css';
 
@@ -45,7 +47,9 @@
     --input: 220 9% 92%;
     --ring: 211 100% 52%;
 
-    --radius: 0.625rem;
+    /* Legacy alias of --radius-lg (16px). The canonical radius scale lives in
+       components/ui/radius.css — do not define --radius-sm/md/lg here. */
+    --radius: 16px;
 
     --success: 135 62% 37%;             /* semantic green for successful/assigned states */
     --warning: 36 100% 52%;             /* #ff9f0a */
@@ -55,27 +59,59 @@
     --intent-danger: var(--destructive);
     --intent-info: 205 80% 40%;
 
-    /* Surface system (raw values for non-tailwind use) */
-    --surface: #ffffff;
-    --surface-2: #f0f2f5;
+    /* Attention foreground — WCAG-AA numeric emphasis (KPIs, needs-attention) */
+    --attention-fg: 32 95% 44%;         /* amber-600 equivalent on light */
+
+    /* Data-visualization palette — the only allowed non-semantic categorical hues */
+    --chart-1: 211 100% 52%;
+    --chart-2: 174 62% 40%;
+    --chart-3: 262 68% 58%;
+    --chart-4: 36 95% 48%;
+    --chart-5: 3 90% 58%;
+    --chart-trend-up: 135 62% 37%;
+    --chart-trend-down: 3 100% 61%;
+
+    /* Overlay elevation scale — chrome and portals own these bands only */
+    --z-base: 0;
+    --z-sticky: 40;
+    --z-dropdown: 50;
+    --z-overlay: 50;
+    --z-modal: 60;
+    --z-toast: 70;
+    --z-max: 80;
+
+    /* Motion */
+    --motion-fast: 150ms;
+    --motion-base: 200ms;
+    --motion-slow: 300ms;
+    --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+    --ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
+
+    /* Surface system — aliased to the semantic tokens above (canonical
+       equivalents, within rounding). Remaining raw values are deprecated;
+       prefer hsl(var(--token)) utilities. */
+    --surface: hsl(var(--card));
+    --surface-2: hsl(var(--secondary));
     --surface-3: #e7ebf0;
     --surface-elevated: rgba(255, 255, 255, 0.82);
 
-    /* Border system (raw values) */
+    /* Border system (raw values — deprecated, use border-border / border-strong utility) */
     --border-raw: rgba(17, 17, 17, 0.08);
     --border-strong: rgba(17, 17, 17, 0.16);
 
-    /* Text system (raw values) */
+    /* Text system (raw values — deprecated, use text-foreground / text-muted-foreground) */
     --text-primary: #0f1720;
     --text-secondary: #364152;
     --text-muted: #52606d;
     --text-inverse: #ffffff;
 
-    /* Accent system (raw values) */
-    --accent-blue: #0a84ff;
+    /* Accent system — aliased to semantic tokens (canonical equivalents within
+       rounding). Decorative hues (pink/purple/yellow/gray) remain for marketing
+       surfaces only. */
+    --accent-blue: hsl(var(--primary));
     --accent-gray: #666666;
-    --accent-red: #ff453a;
-    --accent-orange: #ff9f0a;
+    --accent-red: hsl(var(--destructive));
+    --accent-orange: hsl(var(--warning));
     --accent-pink: #ff375f;
     --accent-purple: #bf5af2;
     --accent-yellow: #ffd60a;
@@ -93,10 +129,6 @@
     --shadow-btn: 0 4px 14px rgba(10, 132, 255, 0.3);
 
     --ring-glow: 0 0 0 3px rgba(10, 132, 255, 0.22);
-    --radius-sm: 6px;
-    --radius-md: 10px;
-    --radius-lg: 10px;
-    --radius-xl: 12px;
     --space-1: 0.25rem;
     --space-2: 0.5rem;
     --space-3: 0.75rem;
@@ -113,9 +145,9 @@
     --container-max: 1280px;
     --nav-height: 72px;
 
-    /* Typography */
-    --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    --font-display: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    /* Typography — Inter Variable is self-hosted via @fontsource-variable/inter */
+    --font-sans: 'Inter Variable', Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-display: 'Inter Variable', Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 
     /* Hero / stage */
     --hero-bg: radial-gradient(circle at top center, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0) 40%), linear-gradient(180deg, #fbfbfc 0%, #f1f2f5 100%);
@@ -222,9 +254,37 @@
     --success: 135 62% 51%;
     --warning: 36 100% 52%;
 
-    /* Surface system */
-    --surface: #0b0b0f;
-    --surface-2: #111318;
+    /* Attention foreground — WCAG-AA numeric emphasis */
+    --attention-fg: 43 96% 56%;         /* amber-400 equivalent on dark */
+
+    /* Data-visualization palette (dark) */
+    --chart-1: 211 100% 60%;
+    --chart-2: 174 60% 55%;
+    --chart-3: 262 80% 70%;
+    --chart-4: 36 95% 55%;
+    --chart-5: 3 95% 66%;
+    --chart-trend-up: 135 62% 51%;
+    --chart-trend-down: 3 100% 61%;
+
+    /* Overlay elevation scale */
+    --z-base: 0;
+    --z-sticky: 40;
+    --z-dropdown: 50;
+    --z-overlay: 50;
+    --z-modal: 60;
+    --z-toast: 70;
+    --z-max: 80;
+
+    /* Motion */
+    --motion-fast: 150ms;
+    --motion-base: 200ms;
+    --motion-slow: 300ms;
+    --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+    --ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
+
+    /* Surface system — aliased to semantic tokens (canonical equivalents) */
+    --surface: hsl(var(--card));
+    --surface-2: hsl(var(--secondary));
     --surface-3: #171a20;
     --surface-elevated: rgba(17, 19, 24, 0.82);
 
@@ -238,18 +298,19 @@
     --text-muted: #b8c0cc;
     --text-inverse: #050505;
 
-    /* Accent system */
-    --accent-blue: #0a84ff;
+    /* Accent system — aliased to semantic tokens (canonical equivalents within
+       rounding). Decorative hues remain for marketing surfaces only. */
+    --accent-blue: hsl(var(--primary));
     --accent-gray: #666666;
-    --accent-red: #ff453a;
-    --accent-orange: #ff9f0a;
+    --accent-red: hsl(var(--destructive));
+    --accent-orange: hsl(var(--warning));
     --accent-pink: #ff375f;
     --accent-purple: #bf5af2;
     --accent-yellow: #ffd60a;
 
     /* State */
     --info: #64d2ff;
-    --danger: #ff453a;
+    --danger: hsl(var(--destructive));
 
     /* UI effects */
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);

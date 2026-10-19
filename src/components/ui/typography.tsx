@@ -34,7 +34,7 @@ const sizeClass: Record<TextSize, string> = {
 const colorClass: Record<TextColor, string> = {
   primary: "type-primary",
   secondary: "type-secondary",
-  muted: "type-mut-soft",
+  muted: "type-muted-soft",
 };
 
 const weightClass: Record<TextWeight, string> = {

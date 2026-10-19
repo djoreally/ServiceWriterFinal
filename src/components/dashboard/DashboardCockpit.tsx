@@ -69,7 +69,7 @@ function Kpi({
         className={cn(
           'type-xl type-semibold type-tabular mt-1.5 font-mono',
           accent && 'text-primary',
-          attention && 'text-amber-500',
+          attention && 'text-attention-fg',
         )}
       >
         {value}
@@ -483,7 +483,7 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
                   <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Today vs yesterday</p>
                   <p className={cn(
                     'mt-1.5 font-mono text-lg font-semibold tabular-nums',
-                    revenueTrend >= 0 ? 'text-emerald-500' : 'text-amber-500',
+                    revenueTrend >= 0 ? 'text-chart-trend-up' : 'text-chart-trend-down',
                   )}>
                     {revenueTrend >= 0 ? '+' : ''}{revenueTrend.toFixed(1)}%
                   </p>

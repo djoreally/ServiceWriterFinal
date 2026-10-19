@@ -1,0 +1,12 @@
+{
+  "recordedAt": "2026-10-19",
+  "phase": "Phase 1 — token foundations",
+  "meaning": "Legacy design-token bypass counts across src/**/*.tsx. check-frontend-ui-contract.mjs fails the build when any count EXCEEDS these numbers; counts may only stay flat or go down. Re-record deliberately per refactor phase with --update.",
+  "metrics": {
+    "directLightDarkClasses": 230,
+    "inlineStyles": 280,
+    "arbitraryValueClasses": 1558,
+    "gradientFiles": 8,
+    "pastedHexColors": 202
+  }
+}

@@ -22,10 +22,19 @@
  *   Inset image: subtract the padding. Same concentric rule.
  */
 
+/**
+ * SINGLE SOURCE OF TRUTH for corner radius.
+ * The index.css :root block must not redefine --radius-sm/md/lg — Tailwind's
+ * rounded-* utilities map to these variables via tailwind.config.ts.
+ * Scale doubles with container size (concentric doctrine: radius follows size).
+ */
 :root {
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
+  --radius-3xl: 40px;
   --radius-pill: 9999px;
 }
 
