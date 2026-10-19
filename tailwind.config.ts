@@ -17,6 +17,18 @@ export default {
       gridTemplateColumns: {
         "week-7": "48px repeat(7, 1fr)",
       },
+      // Motion doctrine: interactive state changes stay <=180ms on the
+      // standard curve; 'fast' for micro-states, 'slow' reserved for sheet-level
+      // transforms. Reduced-motion users get ~0ms via the global CSS guard.
+      transitionDuration: {
+        fast: "120ms",
+        normal: "180ms",
+        slow: "240ms",
+      },
+      transitionTimingFunction: {
+        standard: "cubic-bezier(0.2, 0, 0, 1)",
+        emphasized: "cubic-bezier(0.3, 0, 0.2, 1)",
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
