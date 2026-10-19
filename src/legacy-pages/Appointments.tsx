@@ -2,7 +2,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
-import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useRealtimeWorkflow } from "@/hooks/useRealtimeWorkflow";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { MobileAppointmentView } from "@/components/appointments/MobileAppointmentView";
@@ -48,7 +47,6 @@ type AppointmentDraft = Partial<Appointment> & Record<string, unknown>;
 const AppointmentsPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const isMobile = useMediaQuery("(max-width: 768px)");
   const [userId, setUserId] = useState<string | undefined>();
   const [viewMode, setViewMode] = useState<"list" | "calendar" | "month">("list");
   const [sourceFilter, setSourceFilter] = useState<"all" | "upcoming">("all");
@@ -503,88 +501,90 @@ const AppointmentsPage = () => {
 
   // Unified view for both mobile and desktop - uses the same component with List/Calendar toggle
   return (
-    <AppLayout title={isMobile ? undefined : "Appointments"}>
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <WorkflowStatusIndicator isConnected={isConnected} />
-          {pendingOutboxCount > 0 && (
-            <>
-              <Badge variant="secondary">{pendingOutboxCount} pending sync</Badge>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleRetryPendingSync}
-                disabled={syncingOutbox}
-              >
-                {syncingOutbox ? "Retrying..." : "Retry sync"}
-              </Button>
-            </>
-          )}
-          {deadLetterCount > 0 && (
-            <>
-              <Badge variant="destructive">{deadLetterCount} dead-letter</Badge>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleRetryDeadLetter}
-                disabled={resolvingDeadLetter}
-              >
-                Retry dead-letter
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={handleDiscardDeadLetter}
-                disabled={resolvingDeadLetter}
-              >
-                Discard
-              </Button>
-            </>
-          )}
-        </div>
-        {appointmentsLoading && appointments.length > 0 && (
-          <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-        )}
-        <Button
-          size="sm"
-          variant="outline"
-          className="gap-2"
-          onClick={handleExportAppointments}
-          disabled={appointmentsLoading}
-        >
-          <Download className="h-4 w-4" />
-          Export appointments
-        </Button>
-      </div>
-
+    <AppLayout title="Appointments">
       {/* Top-level tabs: Appointments vs Dispatch Board */}
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "appointments" | "dispatch")} className="mb-4">
-        <TabsList>
-          <TabsTrigger value="appointments" className="gap-2">
-            <Calendar className="h-4 w-4" />
-            Appointments
-          </TabsTrigger>
-          <TabsTrigger value="dispatch" className="gap-2">
-            <LayoutGrid className="h-4 w-4" />
-            Dispatch Board
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="appointments" className="mt-4">
-          {/* Source Filter Tabs */}
-          <Tabs value={sourceFilter} onValueChange={(v) => setSourceFilter(v as "all" | "upcoming")} className="mb-4">
-            <TabsList className="flex w-full justify-start gap-2">
-              <TabsTrigger value="upcoming" className="gap-2">
+        {/* One toolbar: view switcher + source filter left, sync status + export right. */}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <TabsList>
+              <TabsTrigger value="appointments" className="gap-2">
                 <Calendar className="h-4 w-4" />
-                Upcoming (7d)
+                Appointments
               </TabsTrigger>
-              <TabsTrigger value="all" className="gap-2 ml-auto">
-                <Calendar className="h-4 w-4" />
-                All Appointments
+              <TabsTrigger value="dispatch" className="gap-2">
+                <LayoutGrid className="h-4 w-4" />
+                Dispatch Board
               </TabsTrigger>
             </TabsList>
-          </Tabs>
+            {activeTab === "appointments" && (
+              <Tabs value={sourceFilter} onValueChange={(v) => setSourceFilter(v as "all" | "upcoming")}>
+                <TabsList>
+                  <TabsTrigger value="upcoming" className="gap-2">
+                    <Calendar className="h-4 w-4" />
+                    Upcoming (7d)
+                  </TabsTrigger>
+                  <TabsTrigger value="all" className="gap-2">
+                    <Calendar className="h-4 w-4" />
+                    All Appointments
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <WorkflowStatusIndicator isConnected={isConnected} />
+            {pendingOutboxCount > 0 && (
+              <>
+                <Badge variant="secondary">{pendingOutboxCount} pending sync</Badge>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleRetryPendingSync}
+                  disabled={syncingOutbox}
+                >
+                  {syncingOutbox ? "Retrying..." : "Retry sync"}
+                </Button>
+              </>
+            )}
+            {deadLetterCount > 0 && (
+              <>
+                <Badge variant="destructive">{deadLetterCount} dead-letter</Badge>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleRetryDeadLetter}
+                  disabled={resolvingDeadLetter}
+                >
+                  Retry dead-letter
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={handleDiscardDeadLetter}
+                  disabled={resolvingDeadLetter}
+                >
+                  Discard
+                </Button>
+              </>
+            )}
+            {appointmentsLoading && appointments.length > 0 && (
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-2"
+              onClick={handleExportAppointments}
+              disabled={appointmentsLoading}
+            >
+              <Download className="h-4 w-4" />
+              Export appointments
+            </Button>
+          </div>
+        </div>
 
+        <TabsContent value="appointments" className="mt-4">
           {appointmentsError ? (
             <div className="py-4 text-center bg-destructive/10 text-destructive rounded p-4 border border-destructive/20">
               {appointmentsError}

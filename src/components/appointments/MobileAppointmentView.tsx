@@ -9,7 +9,7 @@ const groupBy = <T,>(arr: T[], key: keyof T): Record<string, T[]> =>
     (acc[group] = acc[group] || []).push(item);
     return acc;
   }, {} as Record<string, T[]>);
-import { Plus, ChevronLeft, ChevronRight, Search, Calendar } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 
 import { MobileAppointmentCard } from './MobileAppointmentCard';
 import { DayCalendarView } from './DayCalendarView';
@@ -307,29 +307,23 @@ export const MobileAppointmentView = ({
 
   return (
     <div className="h-full flex flex-col bg-background">
-      {/* Main Header */}
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border/50 bg-card/20 p-3 backdrop-blur-sm sm:p-4">
-        <h1 className="min-w-0 truncate text-xl font-bold sm:text-2xl">Appointments</h1>
-        <div className="flex items-center gap-2">
-            <Button size="icon" variant="ghost" aria-label="Search appointments"><Search className="w-5 h-5"/></Button>
-            <Button size="icon" onClick={() => onAddAppointment()} className="rounded-md" aria-label="Add appointment">
-              <Plus />
-            </Button>
+      {/* View toggle + add — the page H1 lives in the app TopHeader; no duplicate header here. */}
+      <div className="flex shrink-0 items-center gap-2 bg-card/20 p-2">
+        <div className="min-w-0 flex-1">
+          <SegmentedControl
+            label="Appointment view"
+            value={viewMode}
+            onChange={setViewMode}
+            options={[
+              { value: "list", label: "List" },
+              { value: "calendar", label: "Day" },
+              { value: "month", label: "Month" },
+            ]}
+          />
         </div>
-      </div>
-
-      {/* View Toggle — 3 exclusive options, one tap, always in view */}
-      <div className="shrink-0 bg-card/20 p-2">
-        <SegmentedControl
-          label="Appointment view"
-          value={viewMode}
-          onChange={setViewMode}
-          options={[
-            { value: "list", label: "List" },
-            { value: "calendar", label: "Day" },
-            { value: "month", label: "Month" },
-          ]}
-        />
+        <Button size="icon" onClick={() => onAddAppointment()} className="shrink-0 rounded-md" aria-label="Add appointment">
+          <Plus />
+        </Button>
       </div>
       
       {viewMode === 'list' && (
