@@ -114,6 +114,28 @@ export async function fetchCustomerAddressByGuestEmail(_email: string, _userId: 
   return { data: null, error: null };
 }
 
+export interface AppointmentFinancialSnapshot {
+  total: number;
+  balance_due: number;
+  amount_paid: number;
+  subtotal: number;
+  tax: number;
+  discount: number;
+  lines: Array<{ description: string; quantity: number; unit_price: number; metadata?: Record<string, unknown> }>;
+  integrity: { subtotal_matches_lines: boolean; total_matches_header: boolean };
+}
+
+/** Persisted invoice is the sole price authority. Never rebuild charges from live settings. */
+export async function fetchAppointmentFinancialSnapshot(appointmentId: string): Promise<AppointmentFinancialSnapshot | null> {
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("No active workspace is available.");
+  const response = await apiClient.get<{ data: AppointmentFinancialSnapshot | null }>(
+    `/v1/appointments/${encodeURIComponent(appointmentId)}/financials`,
+    { query: { selected_workspace_id: context.workspaceId } },
+  );
+  return response.data ?? null;
+}
+
 export async function fetchSucceededPayments(appointmentId: string) {
   const response = await apiClient.get<{ data: unknown[] }>(
     `/v1/appointments/${encodeURIComponent(appointmentId)}/payments`,

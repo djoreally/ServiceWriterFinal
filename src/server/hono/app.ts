@@ -17,7 +17,7 @@
  *   `json()` helper sets, so preflight behavior is unchanged.
  */
 import { Hono } from "hono";
-import { corsHeaders, errorResponse, toError } from "@/server/api";
+import { corsHeaders, errorResponse, json, toError } from "@/server/api";
 import { appointmentsRouter } from "./routes/appointments";
 import { billingRouter } from "./routes/billing";
 import { catalogRouter } from "./routes/catalog";
@@ -26,6 +26,7 @@ import { documentsRouter } from "./routes/documents";
 import { messagingRouter } from "./routes/messaging";
 import { platformRouter } from "./routes/platform";
 import { publicBookingRouter } from "./routes/public-booking";
+import { publicBookingTaxRouter } from "./routes/public-booking-tax";
 import { vehiclesRouter } from "./routes/vehicles";
 import { workOrdersRouter } from "./routes/work-orders";
 
@@ -50,12 +51,23 @@ export function createHonoApp(): Hono {
   // CORS preflight: mirror the headers the original `json()` helper sets.
   app.options("*", () => new Response(null, { status: 204, headers: corsHeaders() }));
 
+  // Until checkout receives a certified appointment/payment/webhook state
+  // machine, fail closed instead of proxying to missing Edge Functions.
+  app.post("/v1/billing/public-checkout", () => json({
+    error: {
+      code: "public_checkout_unavailable",
+      message: "Online payment is temporarily unavailable. Please use Pay at Time of Service.",
+    },
+  }, { status: 503 }));
+
+
   // ---------------------------------------------------------------------------
   // Domain routers. Each router registers paths relative to `/api` (the
   // basePath above); `app.route("/", router)` merges them unchanged, so
   // `/v1/appointments/:id` on the router serves `/api/v1/appointments/:id`.
   // ---------------------------------------------------------------------------
   app.route("/", publicBookingRouter);
+  app.route("/", publicBookingTaxRouter);
   app.route("/", appointmentsRouter);
   app.route("/", billingRouter);
   app.route("/", catalogRouter);

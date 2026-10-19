@@ -18,7 +18,27 @@ const submitSource = readFileSync(
   "utf8",
 );
 
+const atomicMigration = readFileSync(
+  join(process.cwd(), "supabase/migrations/20261018142500_public_booking_atomic_commit_v1.sql"),
+  "utf8",
+);
+
 describe("canonical public booking API contract", () => {
+  it("commits configuration and every service in the same SQL transaction", () => {
+    expect(atomicMigration).toContain("pg_advisory_xact_lock");
+    expect(atomicMigration).toContain("public.public_booking_book_appointment_v3(");
+    expect(atomicMigration).toContain("public.public_booking_save_configuration_v2(");
+    expect(atomicMigration).toContain("public.public_booking_insert_services_v7(");
+    expect(atomicMigration).toContain("BOOKING_SERVICE_COUNT_MISMATCH");
+    expect(atomicMigration).toContain("BOOKING_IDEMPOTENCY_CONFLICT");
+    expect(atomicMigration).toContain("PRIMARY KEY (workspace_id, submission_key)");
+    expect(submitSource).toContain("p_submission_key: submissionKey");
+    expect(submitSource).toContain("p_services: serviceItems");
+    expect(submitSource).not.toContain("await insertBookingAppointmentServices(");
+    expect(submitSource).toContain('name: "Additional Oil Quarts"');
+    expect(submitSource).toContain("BOOKING_PAYMENT_RECORD_NOT_RECONCILED");
+  });
+
   it("mounts the dedicated public booking Hono router", () => {
     expect(appSource).toContain('import { publicBookingRouter } from "./routes/public-booking"');
     expect(appSource).toContain('app.route("/", publicBookingRouter)');
@@ -28,8 +48,11 @@ describe("canonical public booking API contract", () => {
     expect(routeSource).toMatch(/p_location_address:\s*z\.string\(\)\.trim\(\)\.min\(1\)\.max\(1000\)/);
   });
 
-  it("keeps the database RPC name server-side and calls only v3 for appointment creation", () => {
-    expect(routeSource).toContain('supabase.rpc("public_booking_book_appointment_v3"');
+  it("routes the complete public booking through one idempotent database transaction", () => {
+    expect(routeSource).toContain('supabase.rpc("public_booking_commit_v1"');
+    expect(routeSource).toContain('p_submission_key: body.p_submission_key');
+    expect(routeSource).toContain('p_services: body.p_services');
+    expect(routeSource).toContain('p_configuration: body.p_configuration');
     expect(commandSource).toContain('"/v1/public-bookings/appointments"');
     expect(commandSource).not.toContain('bookingRpc<string>("public_booking_book_appointment_v2"');
   });
@@ -61,8 +84,10 @@ describe("canonical public booking API contract", () => {
     expect(commandSource).toContain("error instanceof ApiClientError");
   });
 
-  it("uses the server-safe anonymous Supabase client", () => {
-    expect(routeSource).toContain("createSupabaseAnonServerClient");
+  it("keeps the privileged commit RPC server-side", () => {
+    expect(routeSource).toContain("createSupabaseAdminClient");
+    expect(atomicMigration).toContain("FROM PUBLIC, anon, authenticated");
+    expect(atomicMigration).toContain("TO service_role");
     expect(routeSource).not.toContain("createSupabaseBrowserClient");
   });
 });

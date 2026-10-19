@@ -21,6 +21,12 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const baseParams = {
+  p_submission_key: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  p_services: [{
+    vehicle_id: "11111111-1111-4111-8111-111111111111",
+    service_catalog_id: null, name: "Oil change", price: 120, quantity: 1, is_prepaid: false,
+  }],
+  p_configuration: { schemaVersion: 2 as const, capturedAt: "2026-10-18T00:00:00Z", vehicles: [] },
   p_booking_slug: "test-booking",
   p_scheduled_date: "2026-09-01",
   p_scheduled_time: "10:00",
@@ -38,7 +44,7 @@ const baseParams = {
   p_location_address: "123 Test Street, Philadelphia, PA 19103",
   p_location_lat: 39.9526,
   p_location_lng: -75.1652,
-} as const;
+};
 
 describe("bookAppointmentSafe", () => {
   beforeEach(() => mockPost.mockClear());
@@ -50,6 +56,8 @@ describe("bookAppointmentSafe", () => {
       "/v1/public-bookings/appointments",
       expect.objectContaining({
         p_booking_slug: "test-booking",
+        p_submission_key: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        p_services: expect.arrayContaining([expect.objectContaining({ name: "Oil change" })]),
         p_vehicle_id: "11111111-1111-4111-8111-111111111111",
         p_location_address: "123 Test Street, Philadelphia, PA 19103",
         p_location_lat: 39.9526,
