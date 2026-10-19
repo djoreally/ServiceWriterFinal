@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { addDays } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -227,6 +228,33 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
     ? ((data.revenueToday - data.revenueTodayPrev) / data.revenueTodayPrev) * 100
     : 0;
 
+  // Next 7 days lookahead — same cockpit payload (upcomingNext7), previously
+  // fetched but never rendered. Seven stable day buckets starting tomorrow,
+  // client-side grouping only; no additional requests.
+  const next7DayKeys: string[] = (() => {
+    const keyFormat = new Intl.DateTimeFormat('en-CA', { timeZone });
+    return Array.from({ length: 7 }, (_, index) => keyFormat.format(addDays(new Date(), index + 1)));
+  })();
+  const dayLoad = new Map<string, { jobs: number; estimated: number }>(
+    next7DayKeys.map((key) => [key, { jobs: 0, estimated: 0 }]),
+  );
+  for (const appointment of data.upcomingNext7) {
+    const bucket = dayLoad.get(appointment.scheduled_date);
+    if (bucket) {
+      bucket.jobs += 1;
+      bucket.estimated += appointment.estimated_cost ?? 0;
+    }
+  }
+
+  const unconfirmedUpcoming = data.upcomingNext7.filter((appointment) => {
+    const status = appointment.status.toLowerCase();
+    return status === 'pending' || status === 'unconfirmed';
+  });
+  const unconfirmedEstimated = unconfirmedUpcoming.reduce(
+    (sum, appointment) => sum + (appointment.estimated_cost ?? 0),
+    0,
+  );
+
   // Attention queue, ranked: money at risk first.
   const attentionItems = data.unpaidInvoices > 0
     ? [
@@ -240,6 +268,16 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
         },
       ]
     : [];
+  if (unconfirmedUpcoming.length > 0) {
+    attentionItems.push({
+      id: 'unconfirmed-upcoming',
+      severity: 'warning' as const,
+      title: `${unconfirmedUpcoming.length} unconfirmed upcoming ${pluralize(unconfirmedUpcoming.length, 'appointment')}`,
+      detail: `next 7 days${unconfirmedEstimated > 0 ? ` · ${formatCurrency(unconfirmedEstimated)} estimated` : ''}`,
+      to: '/appointments',
+      actionLabel: 'Review schedule',
+    });
+  }
 
   const pulseSegments = [
     `${data.appointmentsToday} ${pluralize(data.appointmentsToday, 'appointment')} today`,
@@ -310,6 +348,47 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
           attention={data.unpaidInvoices > 0}
         />
       </div>
+
+      {/* Next 7 days — the week ahead, from the same cockpit payload. */}
+      <section aria-labelledby="next7-heading">
+        <h2 id="next7-heading" className="type-lg type-semibold">
+          Next 7 days
+        </h2>
+        <Card className="mt-2 border-border/70 shadow-sm">
+          <CardContent className="grid grid-cols-7 gap-1 p-2 sm:gap-2 sm:p-3">
+            {next7DayKeys.map((key) => {
+              const bucket = dayLoad.get(key) ?? { jobs: 0, estimated: 0 };
+              // Noon pin keeps weekday/day rendering stable around DST shifts.
+              const day = new Date(`${key}T12:00:00`);
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => navigate('/appointments')}
+                  className="flex flex-col items-center gap-0.5 rounded-md border border-transparent px-1 py-2 text-center transition-colors hover:border-border hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                >
+                  <span className="type-label text-muted-foreground">
+                    {day.toLocaleDateString('en-US', { weekday: 'short' })}
+                  </span>
+                  <span className="text-base font-semibold tabular-nums">{day.getDate()}</span>
+                  <span
+                    className={
+                      bucket.jobs > 0
+                        ? 'text-sm font-semibold tabular-nums leading-tight'
+                        : 'text-sm tabular-nums leading-tight text-muted-foreground/50'
+                    }
+                  >
+                    {bucket.jobs > 0 ? bucket.jobs : '—'}
+                  </span>
+                  <span className="type-label hidden font-mono text-muted-foreground tabular-nums sm:block">
+                    {bucket.estimated > 0 ? formatCurrency(bucket.estimated) : ''}
+                  </span>
+                </button>
+              );
+            })}
+          </CardContent>
+        </Card>
+      </section>
 
       {/* Attention — what needs you right now, ranked. */}
       <section aria-labelledby="attention-heading">
