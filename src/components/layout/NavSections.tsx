@@ -28,7 +28,7 @@ function createNavItemRenderer({ pathname, onNavigate }: RendererOptions) {
           <CollapsibleTrigger className={cn(
             "group flex w-full items-center justify-between rounded-md px-3 py-2.5 text-left text-sm font-medium transition-colors",
             active || childHasActive
-              ? "bg-[hsl(var(--primary-container))] text-[hsl(var(--on-primary-container))]"
+              ? "bg-primary-container text-on-primary-container"
               : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
           )}>
             <span className="truncate">{item.label}</span>
@@ -51,7 +51,7 @@ function createNavItemRenderer({ pathname, onNavigate }: RendererOptions) {
           "block rounded-md font-medium transition-colors",
           nested ? "px-3 py-2 text-xs" : "px-3 py-2 text-sm",
           active
-            ? "bg-[hsl(var(--primary-container))] text-[hsl(var(--on-primary-container))]"
+            ? "bg-primary-container text-on-primary-container"
             : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
         )}
       >

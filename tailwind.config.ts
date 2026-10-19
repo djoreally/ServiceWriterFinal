@@ -14,10 +14,9 @@ export default {
       },
     },
     extend: {
-    gridTemplateColumns: {
-      "week-7": "48px repeat(7, 1fr)",
-    },
-
+      gridTemplateColumns: {
+        "week-7": "48px repeat(7, 1fr)",
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
@@ -28,6 +27,9 @@ export default {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",
         },
+        "primary-container": "hsl(var(--primary-container))",
+        "primary-container-soft": "hsl(var(--primary-container-soft))",
+        "on-primary-container": "hsl(var(--on-primary-container))",
         secondary: {
           DEFAULT: "hsl(var(--secondary))",
           foreground: "hsl(var(--secondary-foreground))",

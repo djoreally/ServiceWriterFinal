@@ -8,9 +8,9 @@ const buttonVariants = cva("inline-flex min-w-0 items-center justify-center gap-
     variant: {
       default: "bg-primary text-primary-foreground shadow-sm hover:bg-[hsl(var(--primary-hover))] active:bg-[hsl(var(--primary-pressed))]",
       destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90 active:bg-destructive/80",
-      outline: "border border-input bg-background hover:border-primary/30 hover:bg-[hsl(var(--primary-container-soft))] hover:text-[hsl(var(--on-primary-container))]",
-      secondary: "bg-secondary text-secondary-foreground hover:bg-[hsl(var(--primary-container))] hover:text-[hsl(var(--on-primary-container))]",
-      ghost: "hover:bg-[hsl(var(--primary-container))] hover:text-[hsl(var(--on-primary-container))]",
+      outline: "border border-input bg-background hover:border-primary/30 hover:bg-primary-container-soft hover:text-on-primary-container",
+      secondary: "bg-secondary text-secondary-foreground hover:bg-primary-container hover:text-on-primary-container",
+      ghost: "hover:bg-primary-container hover:text-on-primary-container",
       link: "text-[hsl(var(--action-text))] underline-offset-4 hover:text-[hsl(var(--primary-hover))] hover:underline",
     },
     size: {

@@ -838,7 +838,7 @@ const Settings = () => {
                             aria-current={isActive ? "page" : undefined}
                             className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
                               isActive
-                                ? "bg-[hsl(var(--primary-container))] font-semibold text-[hsl(var(--on-primary-container))]"
+                                ? "bg-primary-container font-semibold text-on-primary-container"
                                 : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
                             }`}
                           >
