@@ -14,6 +14,10 @@ export default {
       },
     },
     extend: {
+    gridTemplateColumns: {
+      "week-7": "48px repeat(7, 1fr)",
+    },
+
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",

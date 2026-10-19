@@ -107,7 +107,7 @@ function walkTsx(dir) {
  * prop-driven sizes, computed templates, token references, spreads — are the
  * legitimate use of the style prop and are not counted.
  */
-const DYNAMIC_STYLE_SIGNALS = ["${", "var(", "calc(", "...", "hsl("];
+const DYNAMIC_STYLE_SIGNALS = ["${", "var(", "calc(", "...", "hsl(", "??", "?", " as "];
 const isDynamicStyleBody = (body) => {
   if (DYNAMIC_STYLE_SIGNALS.some((signal) => body.includes(signal))) return true;
   if (/^\s*[A-Za-z_$][\w$]*\s*$/.test(body)) return true; // shorthand: { height }

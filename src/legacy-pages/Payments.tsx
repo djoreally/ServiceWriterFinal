@@ -121,6 +121,9 @@ const Payments = () => {
   const pendingAmount = payments.filter((p) => p.status === "pending").reduce((sum, p) => sum + p.amount, 0);
   const successfulCount = payments.filter((p) => p.status === "succeeded").length;
   const failedCount = payments.filter((p) => p.status === "failed").length;
+  // Money truth: refunded amounts were mapped (payments.query) but never
+  // rendered. Surface total refunded + per-row net so the ledger reconciles.
+  const refundedAmount = payments.reduce((sum, p) => sum + Math.max(0, p.refund_amount || 0), 0);
 
   const getStatusBadge = (status: string) => {
     if (status === "succeeded") return <Badge className="bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400">Succeeded</Badge>;
@@ -203,6 +206,7 @@ const Payments = () => {
       { header: "Subtotal", value: (payment) => centsToDollars(toCents(payment.subtotal || 0)) },
       { header: "Tax", value: (payment) => centsToDollars(toCents(payment.tax_amount || 0)) },
       { header: "Amount", value: (payment) => centsToDollars(toCents(payment.amount || 0)) },
+      { header: "Refunded", value: (payment) => centsToDollars(toCents(Math.max(0, payment.refund_amount || 0))) },
       { header: "Currency", value: (payment) => payment.currency || "" },
       { header: "Status", value: (payment) => payment.status || "" },
     ], filteredPayments);
@@ -265,7 +269,7 @@ const Payments = () => {
                 <Card><CardContent className="p-6"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Total Received</p><p className="text-2xl font-bold">{formatCentsAsCurrency(totalReceived, settings.currency)}</p></div><DollarSign className="h-6 w-6" /></div></CardContent></Card>
                 <Card><CardContent className="p-6"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Pending</p><p className="text-2xl font-bold text-amber-600">{formatCentsAsCurrency(pendingAmount, settings.currency)}</p></div><Clock className="h-6 w-6 text-amber-600" /></div></CardContent></Card>
                 <Card><CardContent className="p-6"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Successful</p><p className="text-2xl font-bold">{successfulCount}</p></div><CheckCircle2 className="h-6 w-6" /></div></CardContent></Card>
-                <Card><CardContent className="p-6"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Failed</p><p className="text-2xl font-bold text-red-600">{failedCount}</p></div><XCircle className="h-6 w-6 text-red-600" /></div></CardContent></Card>
+                <Card><CardContent className="p-6"><div className="flex items-center justify-between"><div><p className="text-sm text-muted-foreground">Refunded</p><p className="text-2xl font-bold">{formatCentsAsCurrency(refundedAmount, settings.currency)}</p><p className="text-xs text-muted-foreground">{failedCount > 0 ? `${failedCount} failed` : "No failures"}</p></div><RotateCcw className="h-6 w-6" /></div></CardContent></Card>
               </div>
             )}
 
@@ -296,7 +300,19 @@ const Payments = () => {
                               <TableCell><Badge variant="outline" className="capitalize">{payment.payment_type.replace(/_/g, " ")}</Badge></TableCell>
                               <TableCell>{formatCentsAsCurrency(payment.subtotal ?? (payment.amount - (payment.tax_amount || 0)), payment.currency)}</TableCell>
                               <TableCell>{(payment.tax_amount || 0) > 0 ? formatCentsAsCurrency(payment.tax_amount || 0, payment.currency) : "—"}</TableCell>
-                              <TableCell className="font-medium">{formatCentsAsCurrency(payment.amount, payment.currency)}</TableCell>
+                              <TableCell className="font-medium">
+                                {(() => {
+                                  const refunded = Math.max(0, payment.refund_amount || 0);
+                                  return refunded > 0 ? (
+                                    <>
+                                      <span className="line-through decoration-muted-foreground/60 text-muted-foreground">{formatCentsAsCurrency(payment.amount, payment.currency)}</span>
+                                      <span className="block font-mono text-sm tabular-nums">{formatCentsAsCurrency(payment.amount - refunded, payment.currency)} net</span>
+                                    </>
+                                  ) : (
+                                    formatCentsAsCurrency(payment.amount, payment.currency)
+                                  );
+                                })()}
+                              </TableCell>
                               <TableCell>{getStatusBadge(payment.status || "pending")}</TableCell>
                               <TableCell className="font-mono text-xs text-muted-foreground">{payment.stripe_payment_intent_id?.slice(-8).toUpperCase() || "—"}</TableCell>
                               <TableCell>

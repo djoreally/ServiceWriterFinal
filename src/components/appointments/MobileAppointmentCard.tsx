@@ -71,10 +71,9 @@ export const MobileAppointmentCard = memo(function MobileAppointmentCard({ appoi
     <Card
       className={cn("backdrop-blur-sm hover:border-primary/40 transition-all cursor-pointer", statusStyle.surfaceClass)}
       onClick={handleCardOpen}
-      style={{ touchAction: "manipulation" }}
       aria-label={`${serviceTitle}. Double tap to open appointment details.`}
     >
-      <CardContent className="p-4">
+      <CardContent className="touch-manipulation p-4">
         <div className="flex min-w-0 gap-3 sm:gap-4">
           <div className="min-w-0 flex-1 flex flex-col">
             <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">

@@ -105,9 +105,9 @@ export function AppointmentStatusTimeline({
               <div
                 className={cn(
                   "absolute top-3 left-1/2 right-0 h-0.5 -z-0",
+                  "w-full",
                   rank > STATUS_RANK[step.key] ? "bg-primary" : "bg-border",
                 )}
-                style={{ width: "100%" }}
                 aria-hidden
               />
             )}
