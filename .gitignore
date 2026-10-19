@@ -10,3 +10,5 @@ eslint-src.json
 .env
 .env.*
 !.env.example
+
+playwright-visual/
