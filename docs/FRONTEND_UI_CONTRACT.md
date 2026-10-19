@@ -33,6 +33,6 @@ A frontend change fails review when it introduces a second color/radius/spacing 
 
 ## Ratchet (refactor program, 2026-10-19 →)
 
-Legacy token bypasses are real but bounded and shrinking. `check-frontend-ui-contract.mjs` tracks counts in `scripts/frontend-ui-ratchet-baseline.json` — raw `text-white`/`bg-white`-style classes, inline `style={{}}`, arbitrary `-[...]` values, `bg-gradient` files, and pasted hex colors across `src/**/*.tsx`. Every change must keep those counts at or below the recorded numbers. Lower the baseline only deliberately, at the end of a refactor phase, with `--update`.
+Legacy token bypasses are real but bounded and shrinking. `check-frontend-ui-contract.mjs` tracks counts in `scripts/frontend-ui-ratchet-baseline.json` — raw `text-white`/`bg-white`-style classes, **static** inline `style={{}}` (runtime-dynamic values such as prop-driven sizes are legitimate and not counted), arbitrary `-[...]` values, `bg-gradient` files, and pasted hex colors across `src/**/*.tsx`. Every change must keep those counts at or below the recorded numbers. Lower the baseline only deliberately, at the end of a refactor phase, with `--update`.
 
 Marketing/public pages may intentionally use a separate campaign art direction. This contract governs the authenticated operating product.

@@ -101,6 +101,21 @@ function walkTsx(dir) {
   return files;
 }
 
+/**
+ * Inline style is ONLY a violation when it hardcodes static styling (the
+ * design-token bypass the ratchet exists to stop). Runtime-dynamic values —
+ * prop-driven sizes, computed templates, token references, spreads — are the
+ * legitimate use of the style prop and are not counted.
+ */
+const DYNAMIC_STYLE_SIGNALS = ["${", "var(", "calc(", "...", "hsl("];
+const isDynamicStyleBody = (body) => {
+  if (DYNAMIC_STYLE_SIGNALS.some((signal) => body.includes(signal))) return true;
+  if (/^\s*[A-Za-z_$][\w$]*\s*$/.test(body)) return true; // shorthand: { height }
+  if (/[A-Za-z_$][\w$]*(\.|\()/.test(body)) return true;  // member access or call: foo.bar / fn(
+  if (/:\s*[A-Za-z_$][\w$]*\s*[,}]/.test(body)) return true; // value from identifier: { height: bar }
+  return false;
+};
+
 function countMetrics() {
   const files = walkTsx(path.join(root, "src"));
   const metrics = {
@@ -113,7 +128,8 @@ function countMetrics() {
   for (const file of files) {
     const content = fs.readFileSync(file, "utf8");
     metrics.directLightDarkClasses += (content.match(/\b(?:text|bg)-(?:white|black)\b/g) || []).length;
-    metrics.inlineStyles += (content.match(/style=\{\{/g) || []).length;
+    const styleBodies = content.match(/style=\{\{([\s\S]*?)\}\}/g) || [];
+    metrics.inlineStyles += styleBodies.filter((block) => !isDynamicStyleBody(block)).length;
     metrics.arbitraryValueClasses += (content.match(/[a-z:-]+-\[[^\]]+\]/g) || []).length;
     metrics.pastedHexColors += (content.match(/#[0-9a-fA-F]{6}\b/g) || []).length;
     if (content.includes("bg-gradient")) metrics.gradientFiles += 1;

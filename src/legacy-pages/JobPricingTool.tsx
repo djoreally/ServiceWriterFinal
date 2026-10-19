@@ -93,7 +93,7 @@ export default function JobPricingTool() {
           <Calculator className="h-6 w-6 text-primary" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Job Pricing</h1>
+          <h2 className="text-2xl font-bold text-foreground">Job Pricing</h2>
           <p className="text-sm text-muted-foreground">
             Turn market labor hours and part costs into your own price using your labor rate and markup.
           </p>

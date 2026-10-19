@@ -1,10 +1,8 @@
 import { useState } from "react";
 import { Bell, History, X } from "lucide-react";
 
-import { useToast } from "@/hooks/use-toast";
 import { clearToastHistory, useToastHistory } from "@/lib/toast-history";
 import { Button } from "@/components/ui/button";
-import { Toast, ToastClose, ToastDescription, ToastProvider, ToastTitle, ToastViewport } from "@/components/ui/toast";
 
 const renderToastText = (value: unknown) => {
   if (value == null || typeof value === "boolean") return null;
@@ -12,26 +10,21 @@ const renderToastText = (value: unknown) => {
   return "Notification";
 };
 
+/**
+ * Toast history chip + drawer.
+ *
+ * This component intentionally no longer RENDERS toasts: the single visual
+ * toast system is the mounted sonner <Toaster /> (see App.tsx / (app)/layout).
+ * What remains here is the audit trail of recent notifications — bottom-left
+ * status corner, inside the toast z-band, clear of sidebar and bottom-nav
+ * chrome (overlay governance, contract rule 15).
+ */
 export function Toaster() {
-  const { toasts } = useToast();
   const history = useToastHistory();
   const [historyOpen, setHistoryOpen] = useState(false);
 
   return (
-    <ToastProvider>
-      {toasts.map(function ({ id, title, description, action, ...props }) {
-        return (
-          <Toast key={id} {...props}>
-            <div className="grid gap-1">
-              {title && <ToastTitle>{title}</ToastTitle>}
-              {description && <ToastDescription>{description}</ToastDescription>}
-            </div>
-            {action}
-            <ToastClose />
-          </Toast>
-        );
-      })}
-
+    <>
       {history.length > 0 && (
         <div className="fixed bottom-above-mobile-nav left-4 z-toast lg:bottom-4 lg:left-sidebar-offset">
           <Button
@@ -81,7 +74,6 @@ export function Toaster() {
           </div>
         </aside>
       )}
-      <ToastViewport />
-    </ToastProvider>
+    </>
   );
 }

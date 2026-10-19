@@ -39,7 +39,7 @@ const KnowledgeBaseCategory = () => {
         <div className={`p-2 rounded-lg ${category.color}`}>
           <Icon className="h-5 w-5" />
         </div>
-        <h1 className="text-2xl font-bold">{category.label}</h1>
+        <h2 className="text-2xl font-bold">{category.label}</h2>
         <Badge variant="secondary">{articles.length}</Badge>
       </div>
 

@@ -212,7 +212,7 @@ const CustomerDetail = () => {
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div className="flex-1">
-            <h1 className="text-3xl font-bold">{terms.customer} Details</h1>
+            <h2 className="text-3xl font-bold">{terms.customer} Details</h2>
             <p className="text-muted-foreground">View complete {terms.customer.toLowerCase()} profile and history</p>
           </div>
         </div>

@@ -458,7 +458,7 @@ export default function Availability() {
 
   if (loading) {
     return (
-      <AppLayout>
+      <AppLayout title="Availability">
         <div className="flex items-center justify-center h-64">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
         </div>
@@ -467,12 +467,12 @@ export default function Availability() {
   }
 
   return (
-    <AppLayout>
+    <AppLayout title="Availability">
       <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Availability & Policies</h1>
+            <h2 className="text-2xl font-bold text-foreground">Availability &amp; Policies</h2>
             <p className="text-muted-foreground">Complete control over scheduling, booking rules, and policies.</p>
           </div>
           <div className="flex gap-2">

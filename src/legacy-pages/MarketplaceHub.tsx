@@ -113,7 +113,7 @@ export default function MarketplaceHub() {
           <Store className="h-6 w-6 text-primary" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Marketplace</h1>
+          <h2 className="text-2xl font-bold text-foreground">Marketplace</h2>
           <p className="text-sm text-muted-foreground">
             Manage how customers find, book, and review your business.
           </p>

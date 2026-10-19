@@ -10,6 +10,7 @@ import { WorkflowStatusIndicator } from "@/components/workflow/WorkflowStatusInd
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ErrorState } from "@/components/ui/states";
 import { Appointment, Customer, Vehicle, ServiceCatalogItem, BusinessHours } from "@/shared/types";
 import type { ScheduleResource } from "@/components/schedule/CurbeeScheduleBoard";
 import type { AppointmentFormState, CustomerFormData, VehicleFormData } from "@/shared/types/forms";
@@ -586,9 +587,7 @@ const AppointmentsPage = () => {
 
         <TabsContent value="appointments" className="mt-4">
           {appointmentsError ? (
-            <div className="py-4 text-center bg-destructive/10 text-destructive rounded p-4 border border-destructive/20">
-              {appointmentsError}
-            </div>
+            <ErrorState title="Appointments couldn't be loaded" description={appointmentsError} />
           ) : appointmentsLoading && appointments.length === 0 ? (
             <TableSkeleton rows={7} columns={5} />
           ) : (
