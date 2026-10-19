@@ -123,7 +123,7 @@ export function WeekView({
     <div className={cn("flex flex-col", className)}>
       {allDayEvents.length > 0 && (
         <div className="shrink-0 border-b">
-          <div className="grid" style={{ gridTemplateColumns: "48px repeat(7, 1fr)" }}>
+          <div className="grid grid-cols-week-7">
             <div className="px-1 py-1 text-[10px] text-muted-foreground">All day</div>
             {weekDays.map((day, i) => (
               <div key={i} className="px-1 py-1 space-y-1 border-l">
@@ -150,7 +150,7 @@ export function WeekView({
       )}
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto relative">
-        <div className="grid" style={{ gridTemplateColumns: "48px repeat(7, 1fr)" }}>
+        <div className="grid grid-cols-week-7">
           <div className="relative" style={{ height: 24 * HOUR_PX }}>
             {Array.from({ length: 24 }, (_, h) => (
               <div

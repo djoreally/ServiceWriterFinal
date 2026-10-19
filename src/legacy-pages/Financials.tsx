@@ -509,7 +509,7 @@ const Financials: React.FC = () => {
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-black tracking-tight">Financial Overview</h1>
+            <h2 className="text-3xl font-black tracking-tight">Financial Overview</h2>
             <p className="text-muted-foreground mt-1">
               Track collected cash, outstanding balances, and customer lifetime value.
             </p>

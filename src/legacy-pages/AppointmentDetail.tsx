@@ -421,7 +421,7 @@ export const AppointmentDetail = ({
     return (
       <AppointmentDetailLayout embedded={embedded}>
         <div className="mx-auto max-w-md space-y-4 px-4 py-12 text-center">
-          <h1 className="text-[30px] font-semibold leading-[1.2] tracking-tight">Appointment unavailable</h1>
+          <h2 className="text-[30px] font-semibold leading-[1.2] tracking-tight">Appointment unavailable</h2>
           <p className="text-base text-muted-foreground">{error ?? "This appointment could not be found."}</p>
           <div className="flex flex-col gap-3 pt-2">
             <Button onClick={() => fetchAppointment()} className="min-h-[56px] text-base">
@@ -483,9 +483,9 @@ export const AppointmentDetail = ({
             <div className="min-w-0">
               <Eyebrow>{stageEyebrow}</Eyebrow>
               <div className="mt-1 flex flex-wrap items-center gap-3">
-                <h1 className="text-[30px] font-semibold leading-[1.2] tracking-tight">
+                <h2 className="text-[30px] font-semibold leading-[1.2] tracking-tight">
                   Appointment <span className="font-mono">{appointment.id.slice(0, 8).toUpperCase()}</span>
-                </h1>
+                </h2>
                 <Badge className={cn("capitalize", statusStyle.className)}>
                   {getStatusIcon(appointment.status)}
                   <span className="ml-1">{statusStyle.label}</span>

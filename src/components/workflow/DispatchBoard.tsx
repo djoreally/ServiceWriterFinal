@@ -117,6 +117,11 @@ function timeToPercent(timeStr: string): number {
   return Math.max(0, Math.min(100, (totalMinutes / rangeMinutes) * 100));
 }
 
+/** Utilization view: total booked estimate minutes on this lane. Display-only. */
+function laneUtilizedMinutes(jobs: Job[]): number {
+  return jobs.reduce((sum, job) => sum + (job.estimated_duration_minutes || 60), 0);
+}
+
 function durationToPercent(minutes: number): number {
   const rangeMinutes = (TIMELINE_END - TIMELINE_START) * 60;
   return Math.max(2, (minutes / rangeMinutes) * 100);
@@ -280,6 +285,7 @@ interface TimelineLane {
   jobs: Job[];
   noTech?: boolean;
   acceptDrop?: boolean; // whether this lane can receive drops
+  utilizedMinutes?: number; // booked estimate minutes vs the 12h window
 }
 
 function TimelineGrid({
@@ -359,6 +365,24 @@ function TimelineGrid({
                 </p>
                 {lane.sublabel && (
                   <p className="text-xs text-muted-foreground truncate" title={lane.sublabel}>{lane.sublabel}</p>
+                )}
+                {/* Utilization strip — booked estimate minutes vs the 08:00–20:00 window. */}
+                {lane.utilizedMinutes !== undefined && (
+                  <div className="mt-1 flex items-center gap-1.5" title={`${lane.utilizedMinutes} of ${(TIMELINE_END - TIMELINE_START) * 60} min booked`}>
+                    <span className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
+                      <span
+                        className={cn(
+                          'block h-full rounded-full',
+                          lane.utilizedMinutes >= (TIMELINE_END - TIMELINE_START) * 60 ? 'bg-chart-5' : 'bg-chart-1',
+                        )}
+                        style={{ width: `${Math.min(100, Math.round((lane.utilizedMinutes / ((TIMELINE_END - TIMELINE_START) * 60)) * 100))}%` }}
+                        aria-hidden="true"
+                      />
+                    </span>
+                    <span className="type-label shrink-0 tabular-nums text-muted-foreground">
+                      {Math.round((lane.utilizedMinutes / ((TIMELINE_END - TIMELINE_START) * 60)) * 100)}%
+                    </span>
+                  </div>
                 )}
               </div>
             </div>
@@ -786,6 +810,7 @@ export function DispatchBoard() {
           sublabel: techName ? `${techName} • ${vanJobs.length} job${vanJobs.length !== 1 ? "s" : ""}` : `${vanJobs.length} job${vanJobs.length !== 1 ? "s" : ""}`,
           dotColor: van.status === "active" ? "bg-emerald-500" : "bg-muted-foreground",
           jobs: vanJobs,
+          utilizedMinutes: laneUtilizedMinutes(vanJobs),
           acceptDrop: true,
         });
       });
@@ -800,6 +825,7 @@ export function DispatchBoard() {
           sublabel: `${statusConfig.label} • ${techJobs.length} job${techJobs.length !== 1 ? "s" : ""}`,
           dotColor: statusConfig.color,
           jobs: techJobs,
+          utilizedMinutes: laneUtilizedMinutes(techJobs),
           acceptDrop: true,
         });
       });

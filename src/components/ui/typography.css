@@ -46,7 +46,8 @@
 /* Color utilities — three, not ten. */
 .type-primary { color: var(--type-primary); }
 .type-secondary { color: var(--type-secondary); opacity: 0.85; }
-.type-mut-soft { color: var(--type-secondary); opacity: 0.65; }
+/* .type-mut-soft is the misspelled legacy name; kept as an alias until removed in refactor Phase 6. */
+.type-muted-soft, .type-mut-soft { color: var(--type-secondary); opacity: 0.65; }
 
 /* Weight utilities — two, not five. */
 .type-regular { font-weight: var(--type-regular); }

@@ -16,6 +16,10 @@ This is the canonical frontend styling contract for the authenticated Service Wr
 10. **Theme is personal.** Theme preference is scoped to the authenticated user. New users default to the operating-system preference.
 11. **Text and data are the focal point.** Authenticated operational UI does not use decorative icons beside field names, card titles, navigation labels, or ordinary actions. Icons are reserved for meaning that text alone does not express efficiently: directional trends, disclosure/chevrons, status, warnings, and universally understood utility controls.
 12. **Frontend is replaceable.** Business rules and data access do not belong in styling primitives. A future frontend can be replaced without changing the canonical backend contracts.
+13. **One radius scale.** `src/components/ui/radius.css` is the single source of truth (4/8/16/24/32/40, concentric). Tailwind `rounded-*` maps to it via `tailwind.config.ts`. No other file may define `--radius-sm/md/lg`; one-off `rounded-[Nx]` values are defects, not exceptions.
+14. **Data visualization is tokenized.** Charts, sparklines, and deltas use the `--chart-*` categorical palette and `--chart-trend-up/down`. Series colors must never be pasted hex. Numeric emphasis (KPIs, needs-attention) uses `text-attention-fg` — WCAG AA on both themes — never ad-hoc amber/red text.
+15. **Overlays own z-bands.** Chrome and portals use only the `--z-*` bands (sticky/dropdown/overlay/modal/toast). Bottom-left is status, bottom-right is actions; floating elements must never cover navigation or focus targets.
+16. **Motion is a token.** Durations and easings come from `--motion-*` / `--ease-*`. `prefers-reduced-motion` disables non-essential animation. Fonts are self-hosted; no render-blocking external font requests.
 
 ## Canonical primitives
 
@@ -25,6 +29,10 @@ This is the canonical frontend styling contract for the authenticated Service Wr
 
 ## Review gate
 
-A frontend change fails review when it introduces a second color/radius/spacing language, decorative operational gradients, hidden form labels, duplicate navigation destinations, non-semantic status colors, global cross-user theme persistence, or a new one-off primitive where a canonical primitive already exists.
+A frontend change fails review when it introduces a second color/radius/spacing language, decorative operational gradients, hidden form labels, duplicate navigation destinations, non-semantic status colors, global cross-user theme persistence, a redefined radius token, pasted-hex chart colors, ad-hoc attention numerals, out-of-band z-indexes, one-off animation timings, or a new one-off primitive where a canonical primitive already exists.
+
+## Ratchet (refactor program, 2026-10-19 →)
+
+Legacy token bypasses are real but bounded and shrinking. `check-frontend-ui-contract.mjs` tracks counts in `scripts/frontend-ui-ratchet-baseline.json` — raw `text-white`/`bg-white`-style classes, **static** inline `style={{}}` (runtime-dynamic values such as prop-driven sizes are legitimate and not counted), arbitrary `-[...]` values, `bg-gradient` files, and pasted hex colors across `src/**/*.tsx`. Every change must keep those counts at or below the recorded numbers. Lower the baseline only deliberately, at the end of a refactor phase, with `--update`.
 
 Marketing/public pages may intentionally use a separate campaign art direction. This contract governs the authenticated operating product.

@@ -109,7 +109,7 @@ export default function InvitationCenter() {
   return <AppLayout title="Invitations">
     <div className="mx-auto max-w-5xl space-y-5">
       <header className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div><p className="text-sm font-medium text-primary">Access management</p><h1 className="text-2xl font-semibold tracking-tight">Invite people to {workspaceName}</h1><p className="text-sm text-muted-foreground">Send role-scoped access without exposing workspace data across tenants.</p></div>
+        <div><p className="text-sm font-medium text-primary">Access management</p><h2 className="text-2xl font-semibold tracking-tight">Invite people to {workspaceName}</h2><p className="text-sm text-muted-foreground">Send role-scoped access without exposing workspace data across tenants.</p></div>
         <div className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-xs text-muted-foreground"><ShieldCheck className="h-4 w-4 text-emerald-600" /> Workspace protected by RLS</div>
       </header>
       {memberships.length > 1 && <div className="max-w-full"><Label htmlFor="workspace-select">Workspace</Label><select id="workspace-select" value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)} className="mt-2 h-10 w-full rounded-md border bg-background px-3 text-sm sm:max-w-md">{memberships.map((item) => <option key={item.workspace_id} value={item.workspace_id}>{item.workspaces?.name ?? item.workspace_id}</option>)}</select></div>}

@@ -1,4 +1,6 @@
 import type { Metadata, Viewport } from "next";
+// Self-hosted Inter Variable — no render-blocking external font stylesheet.
+import "@fontsource-variable/inter";
 import "../src/index.css";
 import "../src/material-color-system.css";
 import ClientOnlyShell from "../src/ClientOnlyShell";

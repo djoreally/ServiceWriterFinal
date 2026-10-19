@@ -114,7 +114,7 @@ export default function FieldCompanion() {
         <section className="space-y-2">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight">Field Companion</h1>
+              <h2 className="text-2xl font-semibold tracking-tight">Field Companion</h2>
               <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
                 Download the approved Service Writer technician companion for active guidance and assigned-work telemetry. Packages are distributed privately and do not require an app-store listing.
               </p>

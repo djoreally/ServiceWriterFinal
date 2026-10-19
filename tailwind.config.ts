@@ -14,6 +14,21 @@ export default {
       },
     },
     extend: {
+      gridTemplateColumns: {
+        "week-7": "48px repeat(7, 1fr)",
+      },
+      // Motion doctrine: interactive state changes stay <=180ms on the
+      // standard curve; 'fast' for micro-states, 'slow' reserved for sheet-level
+      // transforms. Reduced-motion users get ~0ms via the global CSS guard.
+      transitionDuration: {
+        fast: "120ms",
+        normal: "180ms",
+        slow: "240ms",
+      },
+      transitionTimingFunction: {
+        standard: "cubic-bezier(0.2, 0, 0, 1)",
+        emphasized: "cubic-bezier(0.3, 0, 0.2, 1)",
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
@@ -24,6 +39,9 @@ export default {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",
         },
+        "primary-container": "hsl(var(--primary-container))",
+        "primary-container-soft": "hsl(var(--primary-container-soft))",
+        "on-primary-container": "hsl(var(--on-primary-container))",
         secondary: {
           DEFAULT: "hsl(var(--secondary))",
           foreground: "hsl(var(--secondary-foreground))",
@@ -124,6 +142,20 @@ export default {
         },
         success: "hsl(var(--success))",
         warning: "hsl(var(--warning))",
+        // Attention values (KPIs, "needs attention") — WCAG AA on both themes.
+        attention: {
+          fg: "hsl(var(--attention-fg))",
+        },
+        // Data-visualization palette — the ONLY non-semantic categorical hues.
+        chart: {
+          1: "hsl(var(--chart-1))",
+          2: "hsl(var(--chart-2))",
+          3: "hsl(var(--chart-3))",
+          4: "hsl(var(--chart-4))",
+          5: "hsl(var(--chart-5))",
+          "trend-up": "hsl(var(--chart-trend-up))",
+          "trend-down": "hsl(var(--chart-trend-down))",
+        },
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",
           foreground: "hsl(var(--sidebar-foreground))",
@@ -135,14 +167,36 @@ export default {
           ring: "hsl(var(--sidebar-ring))",
         },
       },
+      inset: {
+        // Named chrome offsets — replaces ad-hoc calc() arbitrary values.
+        "sidebar-offset": "calc(15rem + 1rem)", // w-60 sidebar + gap, lg chrome
+        "above-mobile-nav": "calc(var(--mobile-nav-height) + 0.75rem)",
+        "above-mobile-nav-drawer": "calc(var(--mobile-nav-height) + 3.5rem)",
+      },
+      zIndex: {
+        // Overlay governance: chrome and portals own these bands only (rule 15).
+        base: "var(--z-base)",
+        sticky: "var(--z-sticky)",
+        dropdown: "var(--z-dropdown)",
+        overlay: "var(--z-overlay)",
+        modal: "var(--z-modal)",
+        toast: "var(--z-toast)",
+        max: "var(--z-max)",
+      },
       borderRadius: {
-        lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 4px)",
+        // Canonical geometry comes from radius.css (single source of truth).
+        // rounded = sm (4), then 8 / 16 / 24 / 32 / 40 as containers grow.
+        sm: "var(--radius-sm)",
+        DEFAULT: "var(--radius-sm)",
+        md: "var(--radius-md)",
+        lg: "var(--radius-lg)",
+        xl: "var(--radius-xl)",
+        "2xl": "var(--radius-2xl)",
+        "3xl": "var(--radius-3xl)",
       },
       fontFamily: {
-        sans: ["Inter", "ui-sans-serif", "system-ui", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"],
-        display: ["Inter", "ui-sans-serif", "system-ui", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"],
+        sans: ["Inter Variable", "Inter", "ui-sans-serif", "system-ui", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"],
+        display: ["Inter Variable", "Inter", "ui-sans-serif", "system-ui", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"],
       },
       keyframes: {
         "accordion-down": {

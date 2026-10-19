@@ -109,7 +109,7 @@ export default function CommandCenter({ embedded = false }: CommandCenterProps) 
         <div>
           <div className="flex items-center gap-2">
             <Radio className="h-5 w-5 text-primary" />
-            <h1 className="text-xl font-bold">Dispatch</h1>
+            <h2 className="text-xl font-bold">Dispatch</h2>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">Appointments and repair orders in one Service Writer command center.</p>
         </div>

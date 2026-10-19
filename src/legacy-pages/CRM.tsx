@@ -117,7 +117,7 @@ export default function CRM() {
         <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-sm font-medium text-primary">Customer relationships</p>
-            <h1 className="text-2xl font-bold tracking-tight">CRM Dashboard</h1>
+            <h2 className="text-2xl font-bold tracking-tight">CRM Dashboard</h2>
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
               Marketing, loyalty, and customer follow-up stay separate from the daily Operations workspace.
             </p>

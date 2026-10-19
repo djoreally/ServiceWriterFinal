@@ -1,26 +1,19 @@
-import { useState } from "react";
 import { useAuth } from "@packages/auth";
-import { Sidebar } from "./Sidebar";
-import { TopHeader } from "./TopHeader";
-import { MobileNav } from "./MobileNav";
-import { BottomNavBar } from "./BottomNavBar";
-import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { SessionExpiryWarning } from "@/components/security/SessionExpiryWarning";
-import { GlobalCommandPalette } from "./GlobalCommandPalette";
-import { PageContainer } from "./PagePrimitives";
 import { Skeleton } from "@/components/ui/skeleton";
-import { WorkspaceIdentityBanner } from "./WorkspaceIdentityBanner";
+import { AppShell } from "./AppShell";
 
 interface AppLayoutProps {
   children: React.ReactNode;
   title?: string;
 }
 
+/**
+ * Backwards-compatible workspace layout: keeps the historical loading skeleton,
+ * then delegates ALL chrome to AppShell (single navigation/header/overlay
+ * implementation shared with the Fleet OS variant).
+ */
 export const AppLayout = ({ children, title = "Dashboard" }: AppLayoutProps) => {
   const { loading } = useAuth();
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const isMobile = useMediaQuery("(max-width: 767px)");
-  const showHamburgerMenu = useMediaQuery("(max-width: 1023px)");
 
   if (loading) {
     return (
@@ -58,26 +51,5 @@ export const AppLayout = ({ children, title = "Dashboard" }: AppLayoutProps) => 
     );
   }
 
-  return (
-    <div className="flex min-h-screen w-full max-w-full overflow-x-hidden bg-background lg:h-screen lg:overflow-hidden" data-app-shell>
-      <SessionExpiryWarning />
-      <GlobalCommandPalette />
-      {!showHamburgerMenu && <Sidebar />}
-      {showHamburgerMenu && <MobileNav open={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} />}
-
-      <div className="flex min-h-screen min-w-0 w-full max-w-full flex-1 flex-col lg:min-h-0">
-        <TopHeader
-          title={title}
-          onMenuClick={() => setMobileMenuOpen(true)}
-          showMenuButton={showHamburgerMenu}
-        />
-        <WorkspaceIdentityBanner />
-        <main className="safe-bottom-content min-w-0 w-full max-w-full flex-1 overflow-x-hidden px-4 py-4 sm:px-5 md:py-5 lg:overflow-y-auto lg:px-6 lg:pb-safe" data-app-main>
-          <PageContainer>{children}</PageContainer>
-        </main>
-      </div>
-
-      {isMobile && <BottomNavBar />}
-    </div>
-  );
+  return <AppShell title={title} variant="workspace">{children}</AppShell>;
 };

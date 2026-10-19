@@ -1,192 +1,54 @@
-import { useState, useEffect, ReactNode } from "react";
+/**
+ * Backwards-compatible adapter over the SINGLE toast system.
+ *
+ * The canonical notification API is the sonner facade (`@/components/ui/sonner`):
+ * one renderer, one history store, dedupe built in. This module keeps the
+ * historical shadcn `use-toast` call shape (`toast({ title, description,
+ * variant: "destructive" })`) working for legacy call sites while routing every
+ * notification through the canonical system. The old radix rendering store is
+ * gone — new code should import `toast` from `@/components/ui/sonner`.
+ */
+import { toast as sonnerToast } from "@/components/ui/sonner";
+import { addToastHistoryItem, clearToastHistory, getToastHistory, useToastHistory } from "@/lib/toast-history";
 
-import type { ToastActionElement, ToastProps } from "@/components/ui/toast";
-import { addToastHistoryItem, clearToastHistory, getToastHistory } from "@/lib/toast-history";
+export { addToastHistoryItem, clearToastHistory, getToastHistory, useToastHistory };
 
-const TOAST_LIMIT = 1;
-const TOAST_REMOVE_DELAY = 1000000;
+type LegacyVariant = "default" | "destructive" | null | undefined;
 
-type ToasterToast = ToastProps & {
-  id: string;
-  title?: ReactNode;
-  description?: ReactNode;
-  action?: ToastActionElement;
+type LegacyToastOptions = {
+  title?: unknown;
+  description?: unknown;
+  variant?: LegacyVariant;
+  action?: unknown;
+  duration?: number;
+  dedupeKey?: string;
 };
 
-const actionTypes = {
-  ADD_TOAST: "ADD_TOAST",
-  UPDATE_TOAST: "UPDATE_TOAST",
-  DISMISS_TOAST: "DISMISS_TOAST",
-  REMOVE_TOAST: "REMOVE_TOAST",
-} as const;
+const toMessage = (value: unknown, fallback: string) =>
+  typeof value === "string" ? value : value != null ? String(value) : fallback;
 
-let count = 0;
-
-function genId() {
-  count = (count + 1) % Number.MAX_SAFE_INTEGER;
-  return count.toString();
+/**
+ * Legacy shadcn call shape. Maps to the canonical facade:
+ *   variant: "destructive" → error toast; anything else → default toast.
+ * Returns the facade's toast handle.
+ */
+export function toast({ title, description, variant, dedupeKey }: LegacyToastOptions) {
+  const message = toMessage(title, "Notification");
+  const body = typeof description === "string" ? description : undefined;
+  const options = { description: body, dedupeKey };
+  if (variant === "destructive") return sonnerToast.error(message, options);
+  return sonnerToast(message, options);
 }
 
-type ActionType = typeof actionTypes;
-
-type Action =
-  | {
-      type: ActionType["ADD_TOAST"];
-      toast: ToasterToast;
-    }
-  | {
-      type: ActionType["UPDATE_TOAST"];
-      toast: Partial<ToasterToast>;
-    }
-  | {
-      type: ActionType["DISMISS_TOAST"];
-      toastId?: ToasterToast["id"];
-    }
-  | {
-      type: ActionType["REMOVE_TOAST"];
-      toastId?: ToasterToast["id"];
-    };
-
-interface State {
-  toasts: ToasterToast[];
-}
-
-const toastTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
-
-const addToRemoveQueue = (toastId: string) => {
-  if (toastTimeouts.has(toastId)) {
-    return;
-  }
-
-  const timeout = setTimeout(() => {
-    toastTimeouts.delete(toastId);
-    dispatch({
-      type: "REMOVE_TOAST",
-      toastId: toastId,
-    });
-  }, TOAST_REMOVE_DELAY);
-
-  toastTimeouts.set(toastId, timeout);
-};
-
-export const reducer = (state: State, action: Action): State => {
-  switch (action.type) {
-    case "ADD_TOAST":
-      return {
-        ...state,
-        toasts: [action.toast, ...state.toasts].slice(0, TOAST_LIMIT),
-      };
-
-    case "UPDATE_TOAST":
-      return {
-        ...state,
-        toasts: state.toasts.map((t) => (t.id === action.toast.id ? { ...t, ...action.toast } : t)),
-      };
-
-    case "DISMISS_TOAST": {
-      const { toastId } = action;
-
-      // ! Side effects ! - This could be extracted into a dismissToast() action,
-      // but I'll keep it here for simplicity
-      if (toastId) {
-        addToRemoveQueue(toastId);
-      } else {
-        state.toasts.forEach((toast) => {
-          addToRemoveQueue(toast.id);
-        });
-      }
-
-      return {
-        ...state,
-        toasts: state.toasts.map((t) =>
-          t.id === toastId || toastId === undefined
-            ? {
-                ...t,
-                open: false,
-              }
-            : t,
-        ),
-      };
-    }
-    case "REMOVE_TOAST":
-      if (action.toastId === undefined) {
-        return {
-          ...state,
-          toasts: [],
-        };
-      }
-      return {
-        ...state,
-        toasts: state.toasts.filter((t) => t.id !== action.toastId),
-      };
-  }
-};
-
-const listeners: Array<(state: State) => void> = [];
-
-let memoryState: State = { toasts: [] };
-
-function dispatch(action: Action) {
-  memoryState = reducer(memoryState, action);
-  listeners.forEach((listener) => {
-    listener(memoryState);
-  });
-}
-
-type Toast = Omit<ToasterToast, "id">;
-
-function toast({ ...props }: Toast) {
-  const id = genId();
-
-  const update = (props: ToasterToast) =>
-    dispatch({
-      type: "UPDATE_TOAST",
-      toast: { ...props, id },
-    });
-  const dismiss = () => dispatch({ type: "DISMISS_TOAST", toastId: id });
-
-  const toastRecord = {
-    ...props,
-    id,
-    open: true,
-    onOpenChange: (open: boolean) => {
-      if (!open) dismiss();
-    },
-  };
-
-  addToastHistoryItem({ id, title: props.title, description: props.description });
-
-  dispatch({
-    type: "ADD_TOAST",
-    toast: toastRecord,
-  });
-
+/**
+ * Legacy hook shape. `toasts` is always empty: rendering is owned by the
+ * mounted sonner <Toaster /> (single visual system) and `ui/toaster.tsx` now
+ * contributes only the history chip.
+ */
+export function useToast() {
   return {
-    id: id,
-    dismiss,
-    update,
-  };
-}
-
-function useToast() {
-  const [state, setState] = useState<State>(memoryState);
-
-  useEffect(() => {
-    listeners.push(setState);
-    return () => {
-      const index = listeners.indexOf(setState);
-      if (index > -1) {
-        listeners.splice(index, 1);
-      }
-    };
-  }, [state]);
-
-  return {
-    ...state,
+    toasts: [] as never[],
     toast,
-    dismiss: (toastId?: string) => dispatch({ type: "DISMISS_TOAST", toastId }),
-    clearHistory: clearToastHistory,
+    dismiss: sonnerToast.dismiss,
   };
 }
-
-export { useToast, toast, getToastHistory, clearToastHistory };
