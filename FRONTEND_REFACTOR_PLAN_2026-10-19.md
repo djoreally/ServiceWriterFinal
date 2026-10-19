@@ -172,3 +172,19 @@ Each wave ships independently behind screenshot review. Redesigns use **existing
 ---
 
 *Prepared from the 2026-10-19 verified audit baseline. First recommended action: approve Phase 0 and let the safety net land before any pixel moves.*
+
+---
+
+## Execution log — completed 2026-10-19 (same-day execution)
+
+| Phase | Commit | Outcome |
+|---|---|---|
+| 0 Safety net | `9450f5e` | Regression baseline (40 lint / 121 jest) + `verify-frontend-delta.mjs` + visual capture net + npm-only install fix |
+| 1 Token foundations | `0757875` | One radius scale, self-hosted Inter, chart/attention/z tokens, contract v2 + ratchet pinned |
+| 2 Chrome | `25ef8f4` `b7374fb` `9f8af02` | Discoverable command palette, AppShell single chrome entry (7 nav components → 1), Appointments 4-layer header → one toolbar, duplicate H1s eliminated |
+| 3 Primitives & states | `c4ddf4f` | One toast renderer (sonner facade; use-toast is now an adapter), LoadingState/ErrorState/OfflineState kit, LazyChart frame, one H1 per page across 13 pages |
+| 4 Redesign waves | `753ebc3` `bfb8f6b` `7e7b0d6` | Dashboard Next-7-days strip + unconfirmed-appointment attention items; payments refund money-truth (row nets, KPI, CSV); dispatch lane utilization; settings scope tokens (`primary-container` first-class) |
+| 5 Motion & QA | `43ef975` | Motion tokens (120/180/240ms + Material curves); reduced-motion guard; visual harness verified (public+auth, light/dark, 3 viewports) |
+| 6 Close | `3d31a4a` | 5 dead page files removed (−658 LOC); final ratchet re-record: arbitrary classes 1558→1531, static inline styles 280→63 |
+
+**Every gate green at every slice:** tsc, all 7 prebuild contracts, lint 40/40 (+0), jest 121/121 (+0). No backend, no database, no routing changes; every visible change is composition of existing data.
