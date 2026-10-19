@@ -20,6 +20,9 @@ type QuickResult = {
   path: string;
 };
 
+/** Presentation-only event: chrome (TopHeader search) asks the palette to open. */
+export const OPEN_COMMAND_PALETTE_EVENT = "servicewriter:open-command-palette";
+
 const PAGE_SHORTCUTS: QuickResult[] = [
   { id: "page-dashboard", label: "Dashboard", path: "/dashboard" },
   { id: "page-customers", label: "Customers", path: "/customers" },
@@ -50,6 +53,13 @@ export function GlobalCommandPalette() {
 
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
+  }, []);
+
+  // TopHeader's search affordance opens the palette without owning its state.
+  useEffect(() => {
+    const openFromChrome = () => setOpen(true);
+    window.addEventListener(OPEN_COMMAND_PALETTE_EVENT, openFromChrome);
+    return () => window.removeEventListener(OPEN_COMMAND_PALETTE_EVENT, openFromChrome);
   }, []);
 
   useEffect(() => {

@@ -33,7 +33,7 @@ export function Toaster() {
       })}
 
       {history.length > 0 && (
-        <div className="fixed bottom-4 left-4 z-[100]">
+        <div className="fixed bottom-above-mobile-nav left-4 z-toast lg:bottom-4 lg:left-sidebar-offset">
           <Button
             type="button"
             size="sm"
@@ -53,7 +53,7 @@ export function Toaster() {
       {historyOpen && (
         <aside
           id="toast-history-drawer"
-          className="fixed bottom-16 left-4 z-[100] w-[min(24rem,calc(100vw-2rem))] rounded-lg border bg-card p-4 shadow-xl"
+          className="fixed bottom-above-mobile-nav-drawer left-4 z-toast w-[min(24rem,calc(100vw-2rem))] rounded-lg border bg-card p-4 shadow-xl lg:bottom-16 lg:left-sidebar-offset"
           aria-label="Toast history"
         >
           <div className="mb-3 flex items-center justify-between gap-2">

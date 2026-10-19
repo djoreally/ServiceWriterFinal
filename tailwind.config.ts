@@ -149,6 +149,22 @@ export default {
           ring: "hsl(var(--sidebar-ring))",
         },
       },
+      inset: {
+        // Named chrome offsets — replaces ad-hoc calc() arbitrary values.
+        "sidebar-offset": "calc(15rem + 1rem)", // w-60 sidebar + gap, lg chrome
+        "above-mobile-nav": "calc(var(--mobile-nav-height) + 0.75rem)",
+        "above-mobile-nav-drawer": "calc(var(--mobile-nav-height) + 3.5rem)",
+      },
+      zIndex: {
+        // Overlay governance: chrome and portals own these bands only (rule 15).
+        base: "var(--z-base)",
+        sticky: "var(--z-sticky)",
+        dropdown: "var(--z-dropdown)",
+        overlay: "var(--z-overlay)",
+        modal: "var(--z-modal)",
+        toast: "var(--z-toast)",
+        max: "var(--z-max)",
+      },
       borderRadius: {
         // Canonical geometry comes from radius.css (single source of truth).
         // rounded = sm (4), then 8 / 16 / 24 / 32 / 40 as containers grow.

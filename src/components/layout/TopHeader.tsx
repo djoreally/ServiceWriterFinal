@@ -1,7 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { signOut } from "@/application/commands/signout.command";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -16,6 +15,11 @@ import { useAuth, useRBAC } from "@packages/auth";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { NotificationBell } from "@/components/notifications";
 import { useWorkspaceSelection } from "@/hooks/useWorkspaceSelection";
+import { OPEN_COMMAND_PALETTE_EVENT } from "./GlobalCommandPalette";
+
+const openCommandPalette = () => {
+  window.dispatchEvent(new CustomEvent(OPEN_COMMAND_PALETTE_EVENT));
+};
 
 interface TopHeaderProps {
   title: string;
@@ -53,10 +57,32 @@ export const TopHeader = ({ title, onMenuClick, showMenuButton = true }: TopHead
         </div>
 
         <div className="flex min-w-0 shrink-0 items-center gap-1 sm:gap-2 md:gap-4">
-          <div className="relative hidden items-center md:flex">
-            <Search className="absolute left-3 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Search VIN, Name, Plate..." className="w-64 border-0 bg-muted/50 pl-9" />
-          </div>
+          {/* Search opens the command palette — this is an affordance, not a dead input. */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 shrink-0 md:hidden"
+            onClick={openCommandPalette}
+            aria-label="Search — opens command palette"
+          >
+            <Search className="h-5 w-5" />
+          </Button>
+          <button
+            type="button"
+            onClick={openCommandPalette}
+            aria-label="Search — opens command palette"
+            className="relative hidden h-10 w-64 items-center rounded-md border-0 bg-muted/50 pl-9 pr-3 text-sm text-muted-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:flex"
+          >
+            <Search className="absolute left-3 h-4 w-4" aria-hidden="true" />
+            <span className="flex-1 truncate text-left">Search VIN, Name, Plate…</span>
+            <kbd
+              className="pointer-events-none ml-2 inline-flex h-5 shrink-0 select-none items-center gap-1 rounded border bg-background px-1.5 font-mono text-xs font-medium text-muted-foreground"
+              suppressHydrationWarning
+            >
+              {typeof navigator !== "undefined" && /mac/i.test(navigator.platform) ? "⌘K" : "Ctrl K"}
+            </kbd>
+          </button>
 
           {user && (memberships.length > 0 || workspacesLoading || workspacesError) && (
             <DropdownMenu>
