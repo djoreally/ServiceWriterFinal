@@ -475,13 +475,10 @@ const Customers = () => {
       cardMeta: (c) => [
         c.phone ? (
           <span key="p" onClick={(e) => e.stopPropagation()}>
-            <ClickablePhone phone={c.phone} showIcon={false} className="font-mono text-sm" />
+            <ClickablePhone phone={c.phone} showIcon={false} className="text-sm font-medium text-action" />
           </span>
         ) : null,
-        <Badge key="v" variant="outline" className="font-normal">{vehicleLabel(c.id)}</Badge>,
-        <span key="s" className="text-muted-foreground">
-          Last {terms.service.toLowerCase()}: {lastServiceLabel(c.id)}
-        </span>,
+        <span key="v" className="text-xs text-muted-foreground">{vehicleLabel(c.id)}</span>,
       ],
       cardExpanded: (c) => (
         <div className="space-y-1 text-sm">
