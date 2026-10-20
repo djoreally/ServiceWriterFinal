@@ -48,6 +48,7 @@ import { fetchCustomerOverviewFromNextApi } from "@/application/queries/customer
 import { useWorkspaceSelection } from "@/hooks/useWorkspaceSelection";
 import { ListPagination, usePageSlice, DEFAULT_PAGE_SIZE } from "@/components/ui/list-pagination";
 import { ResponsiveTable, type ResponsiveColumn } from "@/components/ui/responsive-table";
+import "./customers-directory.css";
 import { useRowSelection, useUndo } from "@/components/ui/row-selection";
 
 interface Customer {
@@ -686,6 +687,7 @@ const Customers = () => {
               </div>
             )}
             <ResponsiveTable<Customer>
+              className="customers-directory"
               columns={customerColumns}
               rows={pagedCustomers}
               rowKey={(c) => c.id}
