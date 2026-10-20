@@ -797,9 +797,13 @@ export function useBookingSubmit(deps: SubmitDeps) {
 
         if (serviceItems.length > 0) {
           try {
-            await insertBookingAppointmentServices(appointmentId, slug || "", validationResult.data.email, validationResult.data.phone || "", serviceItems as BookingServiceItem[]);
+            const result = await insertBookingAppointmentServices(appointmentId, slug || "", validationResult.data.email, validationResult.data.phone || "", serviceItems as BookingServiceItem[]);
+            if (result && typeof result === "object" && "error" in result && result.error) {
+              throw result.error;
+            }
           } catch (err) {
-            console.warn("[Booking] Failed to create appointment_services:", err);
+            console.error("[Booking] Appointment created but service persistence failed:", { appointmentId, error: err });
+            throw new Error("BOOKING_SERVICES_NOT_SAVED: Your appointment was created, but its services could not be saved. Please contact the business with your appointment reference; do not submit another booking.");
           }
         }
       }
