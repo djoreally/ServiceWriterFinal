@@ -222,7 +222,7 @@ export default function ServerHomepage() {
             {HOMEPAGE_SUBHEAD}
           </p>
           <div className="flex flex-col sm:flex-row justify-center gap-3">
-            <a href="/contact" className={neoBtn} style={{ backgroundColor: PRIMARY_CONTAINER, ...hardShadow }}>
+            <a href="/signup" className={neoBtn} style={{ backgroundColor: PRIMARY_CONTAINER, ...hardShadow }}>
               Get started <span aria-hidden="true">→</span>
             </a>
             <a href="#free" className={neoBtn} style={{ backgroundColor: "#fff", ...hardShadow }}>
@@ -352,11 +352,11 @@ export default function ServerHomepage() {
             Run the business. Then grow it.
           </h2>
           <p className="max-w-2xl mx-auto mb-8 text-lg leading-relaxed">
-            Signup is not self-serve yet. Contact us and we will set up your workspace.
+            Sign up in minutes and set up your own workspace — no sales call required.
             Then add your services and run your first live job.
           </p>
-          <a href="/contact" className={neoBtn} style={{ backgroundColor: "#fff", ...hardShadow }}>
-            Contact us <span aria-hidden="true">→</span>
+          <a href="/signup" className={neoBtn} style={{ backgroundColor: "#fff", ...hardShadow }}>
+            Create your account <span aria-hidden="true">→</span>
           </a>
         </section>
       </main>
