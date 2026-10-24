@@ -111,6 +111,11 @@ export async function upsertBookingVehicle(params: UpsertBookingVehicleParams) {
 // ---------------------------------------------------------------------------
 
 export interface BookAppointmentSafeParams {
+  /** UUID persisted across retries of the same public submission. */
+  p_submission_key: string;
+  /** All billable lines are committed together with the appointment. */
+  p_services: BookingServiceItem[];
+  p_configuration: AppointmentBookingConfiguration;
   p_booking_slug: string;
   p_scheduled_date: string;
   p_scheduled_time: string;
@@ -288,7 +293,10 @@ export async function insertBookingPaymentRecord(record: BookingPaymentRecordInp
     p_customer_name: record.customer_name,
   });
   if (error) throw error;
-  return { data: data ? { id: data as string } : null, error: null as null };
+  if (!data || typeof data !== "string") {
+    throw new Error("BOOKING_PAYMENT_ID_MISSING");
+  }
+  return { data: { id: data }, error: null as null };
 }
 
 

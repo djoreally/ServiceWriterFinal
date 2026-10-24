@@ -1,11 +1,12 @@
 import { errorMessage } from "@/lib/error-message";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sendReviewRequest } from "@/application/commands/review-request.command";
-import { computeFinancialSummary } from "@/lib/financialMath";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   getCurrentAuthUser,
   fetchAppointmentWithRelations,
+  fetchAppointmentFinancialSnapshot,
+  type AppointmentFinancialSnapshot,
   fetchCustomerAddressByGuestEmail,
   fetchSucceededPayments,
   fetchAppointmentFeeSettings,
@@ -156,6 +157,8 @@ export const AppointmentDetail = ({
   const [completeDialogOpen, setCompleteDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("services");
   const [servicesTotal, setServicesTotal] = useState(0);
+  const [invoiceFinancials, setInvoiceFinancials] = useState<AppointmentFinancialSnapshot | null>(null);
+  const [financialsError, setFinancialsError] = useState(false);
   const [resolvedAddress, setResolvedAddress] = useState<string | null>(null);
   const [isPrepaid, setIsPrepaid] = useState(false);
   const [reviewRequestLoading, setReviewRequestLoading] = useState(false);
@@ -230,6 +233,16 @@ export const AppointmentDetail = ({
       address = matchedCustomer?.address || null;
     }
     setResolvedAddress(address);
+
+    // Always read persisted invoice lines; never infer charges from current fee settings.
+    try {
+      const snapshot = await fetchAppointmentFinancialSnapshot(id);
+      setInvoiceFinancials(snapshot);
+      setFinancialsError(!snapshot || !snapshot.integrity.subtotal_matches_lines || !snapshot.integrity.total_matches_header);
+    } catch {
+      setInvoiceFinancials(null);
+      setFinancialsError(true);
+    }
 
     const { data: payments } = await fetchSucceededPayments(id);
     setIsPrepaid(Boolean(payments?.length));
@@ -445,18 +458,15 @@ export const AppointmentDetail = ({
   const customerPhone = appointment.customer?.phone || appointment.guest_phone || null;
   const address = resolvedAddress || appointment.customer?.address || null;
   const humanNotes = cleanHumanNotes(appointment.notes || appointment.description);
-  const estimatedCost = servicesTotal || appointment.estimated_cost || 0;
-  const taxAmount = appointment.tax_amount || 0;
-
-  const financials = computeFinancialSummary({
-    subtotal: estimatedCost,
-    feeSettings: feeSettings
-      ? { ...feeSettings, waste_oil_fee_enabled: feeSettings.waste_oil_fee_enabled && showsFluids }
-      : undefined,
-    taxAmount,
-  });
-  const { wasteOilFee, shopFee, surcharge } = financials;
-  const totalDue = financials.total;
+  const estimatedCost = invoiceFinancials
+    ? invoiceFinancials.lines.filter((line) => !line.metadata?.fee_key).reduce((sum, line) => sum + Number(line.quantity) * Number(line.unit_price), 0)
+    : servicesTotal || appointment.estimated_cost || 0;
+  const taxAmount = invoiceFinancials?.tax ?? 0;
+  const feeLines = invoiceFinancials?.lines.filter((line) => Boolean(line.metadata?.fee_key)) ?? [];
+  const wasteOilFee = feeLines.filter((line) => line.metadata?.fee_key === "waste_oil_fee").reduce((sum, line) => sum + Number(line.quantity) * Number(line.unit_price), 0);
+  const shopFee = feeLines.filter((line) => line.metadata?.fee_key === "shop_fee").reduce((sum, line) => sum + Number(line.quantity) * Number(line.unit_price), 0);
+  const surcharge = feeLines.filter((line) => line.metadata?.fee_key === "surcharge").reduce((sum, line) => sum + Number(line.quantity) * Number(line.unit_price), 0);
+  const totalDue = invoiceFinancials?.balance_due ?? 0;
   const isEditable = appointment.status !== "completed" && appointment.status !== "cancelled";
   const canReactivate = appointment.status === "cancelled" || appointment.status === "no_show";
 
@@ -686,9 +696,9 @@ export const AppointmentDetail = ({
                     customerEmail={customerEmail}
                     customerName={customerName}
                     isPrepaid={isPrepaid}
-                    estimatedTotal={totalDue}
+                    estimatedTotal={invoiceFinancials?.total ?? 0}
                     taxAmount={taxAmount}
-                    subtotal={estimatedCost + wasteOilFee + shopFee + surcharge}
+                    subtotal={invoiceFinancials?.subtotal ?? 0}
                     taxRate={feeSettings?.tax_rate || undefined}
                   />
                 </TabsContent>
@@ -754,6 +764,7 @@ export const AppointmentDetail = ({
                     <span className="font-mono text-[14px]">{formatCurrency(taxAmount)}</span>
                   </div>
                 )}
+                {financialsError && <p role="alert" className="text-sm font-semibold text-destructive">Invoice total could not be verified. Do not collect payment until reconciled.</p>}
                 <Separator />
                 <div className="flex items-end justify-between gap-4 pt-1">
                   <div>
@@ -762,7 +773,7 @@ export const AppointmentDetail = ({
                       {isPrepaid ? "Paid in full" : "Collect after the job"}
                     </p>
                   </div>
-                  <p className="font-mono text-[30px] font-semibold leading-none text-primary">{formatCurrency(totalDue)}</p>
+                  <p className="font-mono text-[30px] font-semibold leading-none text-primary">{financialsError ? "—" : formatCurrency(totalDue)}</p>
                 </div>
               </CardContent>
             </Card>

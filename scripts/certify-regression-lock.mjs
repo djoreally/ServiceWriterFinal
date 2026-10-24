@@ -103,6 +103,35 @@ for (const project of ["desktop-chromium", "tablet-chromium", "mobile-chromium"]
   requireText(pwConfig, `name: "${project}"`, `Playwright ${project} coverage`);
 }
 
+// REG-017/018/019 — Core public booking integrity stays server-owned.
+const honoApp = "src/server/hono/app.ts";
+const bookingRoute = "src/server/hono/routes/public-booking.ts";
+const bookingSubmit = "src/hooks/useBookingSubmit.ts";
+const bookingAtomicMigration = "supabase/migrations/20261018142500_public_booking_atomic_commit_v1.sql";
+const bookingTax = "src/server/hono/routes/public-booking-tax.ts";
+requireText(bookingRoute, 'supabase.rpc("public_booking_commit_v1"', "atomic booking RPC");
+requireText(bookingRoute, "p_submission_key: body.p_submission_key", "idempotency key");
+requireText(bookingRoute, "createSupabaseAdminClient", "server-only booking commit credentials");
+requireText(bookingSubmit, "p_services: serviceItems", "atomic service payload");
+requireText(bookingSubmit, "BOOKING_PAYMENT_RECORD_NOT_RECONCILED", "no silent payment failure");
+forbidText(bookingSubmit, "await insertBookingAppointmentServices(", "no split service writes");
+requireText(bookingAtomicMigration, "pg_advisory_xact_lock", "serialized retry submission");
+requireText(bookingAtomicMigration, "BOOKING_SERVICE_COUNT_MISMATCH", "transactional all-lines guard");
+requireText(bookingAtomicMigration, "TO service_role", "server-only commit privilege");
+requireText(honoApp, 'app.post("/v1/billing/public-checkout"', "public Pay Now fail-closed guard");
+requireText(honoApp, 'code: "public_checkout_unavailable"', "public Pay Now stable error code");
+requireText(bookingTax, 'publicBookingTaxRouter.post("/v1/platform/public-booking/calculate-tax"', "native tax preview");
+requireText(bookingTax, "resolveStripeWorkspaceExecution", "configured Stripe tax execution");
+if (exists(honoApp)) {
+  const source = read(honoApp);
+  const guard = source.indexOf('app.post("/v1/billing/public-checkout"');
+  const billing = source.indexOf('app.route("/", billingRouter)');
+  const tax = source.indexOf('app.route("/", publicBookingTaxRouter)');
+  const platform = source.indexOf('app.route("/", platformRouter)');
+  if (guard < 0 || billing < 0 || guard > billing) failures.push("public Pay Now containment must precede billing");
+  if (tax < 0 || platform < 0 || tax > platform) failures.push("native public tax route must precede platform");
+}
+
 // The regression lock itself must be wired into prebuild so Vercel/main cannot
 // produce a release artifact after one of these invariants disappears.
 requireText("package.json", "scripts/certify-regression-lock.mjs", "regression lock prebuild wiring");

@@ -10,8 +10,6 @@ import { saveTireServicePricingRule } from "../tire-pricing.command";
 import { fetchTireServicePricingRules } from "../../queries/tire-pricing.query";
 import {
   bookAppointmentSafe,
-  insertBookingAppointmentServices,
-  saveAppointmentBookingConfiguration,
   updateBookingAppointment,
 } from "../booking-submit.command";
 import {
@@ -104,14 +102,36 @@ describe("coverage-critical persistence contracts", () => {
     expect(calculateTireServiceTotal(rule, 1)).toBe(50);
   });
 
-  it("preserves vehicle-scoped booking persistence payloads", async () => {
-    await bookAppointmentSafe({ p_booking_slug: "provider-booking", p_scheduled_date: "2026-08-20", p_scheduled_time: "10:00", p_duration_minutes: 90, p_title: "Two vehicles", p_guest_name: "Customer", p_guest_email: "customer@example.com", p_guest_phone: null, p_description: "Vehicle 1 oil; Vehicle 2 tires", p_notes: null, p_estimated_cost: 300, p_tax_amount: 24, p_service_catalog_id: null, p_vehicle_id: null });
-    expect(rpc).toHaveBeenCalledWith("public_booking_book_appointment", expect.objectContaining({ p_status: "confirmed", p_vehicle_id: null }));
-    const configuration = { version: 1, vehicles: [{ clientVehicleId: "vehicle-1", services: [{ id: "oil", name: "Oil", price: 90, quantity: 1 }] }, { clientVehicleId: "vehicle-2", services: [{ id: "tires", name: "Tires", price: 210, quantity: 4 }] }] } as never;
-    await saveAppointmentBookingConfiguration("appointment-1", "provider-booking", configuration);
-    expect(rpc).toHaveBeenCalledWith("public_booking_save_configuration", expect.objectContaining({ p_appointment_id: "appointment-1", p_configuration: configuration }));
-    await insertBookingAppointmentServices("appointment-1", "provider-booking", [{ vehicle_id: "persisted-1", service_catalog_id: "oil", name: "Oil", price: 90, quantity: 1, is_prepaid: false }, { vehicle_id: "persisted-2", service_catalog_id: "tires", name: "Tire", price: 210, quantity: 4, is_prepaid: false }]);
-    expect(rpc).toHaveBeenCalledWith("public_booking_insert_services", expect.objectContaining({ p_services: expect.arrayContaining([expect.objectContaining({ vehicle_id: "persisted-2", quantity: 4 })]) }));
+  it("persists each vehicle service under the atomic Hono booking contract", async () => {
+    apiPost.mockResolvedValue({ data: "appointment-1", error: null });
+    await bookAppointmentSafe({
+      p_submission_key: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      p_booking_slug: "provider-booking", p_scheduled_date: "2026-11-20",
+      p_scheduled_time: "10:00", p_duration_minutes: 90, p_title: "Two vehicles",
+      p_guest_name: "Customer", p_guest_email: "customer@example.com",
+      p_guest_phone: "+12155551234", p_description: "Vehicle 1 oil; Vehicle 2 tires",
+      p_notes: null, p_estimated_cost: 300, p_tax_amount: 0,
+      p_service_catalog_id: null, p_vehicle_id: "11111111-1111-4111-8111-111111111111",
+      p_location_address: "123 Test Street, Philadelphia, PA 19103",
+      p_location_lat: null, p_location_lng: null,
+      p_configuration: {
+        schemaVersion: 2, capturedAt: "2026-10-18T00:00:00Z",
+        vehicles: [],
+      },
+      p_services: [
+        { vehicle_id: "11111111-1111-4111-8111-111111111111", service_catalog_id: null, name: "Oil", price: 90, quantity: 1, is_prepaid: false },
+        { vehicle_id: "22222222-2222-4222-8222-222222222222", service_catalog_id: null, name: "Tire", price: 210, quantity: 4, is_prepaid: false },
+      ],
+    });
+    expect(apiPost).toHaveBeenCalledWith(
+      "/v1/public-bookings/appointments",
+      expect.objectContaining({
+        p_submission_key: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        p_services: expect.arrayContaining([
+          expect.objectContaining({ vehicle_id: "22222222-2222-4222-8222-222222222222", quantity: 4 }),
+        ]),
+      }),
+    );
   });
 
   it("covers appointment update persistence and notification payloads", async () => {
