@@ -103,6 +103,22 @@ for (const project of ["desktop-chromium", "tablet-chromium", "mobile-chromium"]
   requireText(pwConfig, `name: "${project}"`, `Playwright ${project} coverage`);
 }
 
+// REG-017 — Pay Now must fail closed while the canonical payment state machine
+// is under reconstruction. The guard must be registered on the Hono app before
+// billingRouter is mounted, so the dead legacy Edge Function proxy is unreachable.
+const honoApp = "src/server/hono/app.ts";
+requireText(honoApp, 'app.post("/v1/billing/public-checkout"', "public checkout containment route");
+requireText(honoApp, 'code: "public_checkout_unavailable"', "public checkout honest error code");
+requireText(honoApp, '{ status: 503 }', "public checkout fail-closed status");
+if (exists(honoApp)) {
+  const source = read(honoApp);
+  const guard = source.indexOf('app.post("/v1/billing/public-checkout"');
+  const billingMount = source.indexOf('app.route("/", billingRouter)');
+  if (guard < 0 || billingMount < 0 || guard > billingMount) {
+    failures.push("public checkout containment must be registered before billingRouter");
+  }
+}
+
 // The regression lock itself must be wired into prebuild so Vercel/main cannot
 // produce a release artifact after one of these invariants disappears.
 requireText("package.json", "scripts/certify-regression-lock.mjs", "regression lock prebuild wiring");
