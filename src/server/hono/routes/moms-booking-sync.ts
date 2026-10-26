@@ -15,26 +15,28 @@ const payloadSchema = z.object({
     email: z.string().trim().email().max(320),
     phone: z.string().trim().min(10).max(64),
   }),
-  vehicle: z.object({
-    year: z.number().int().min(1900).max(2100),
-    make: z.string().trim().min(1).max(100),
-    model: z.string().trim().min(1).max(100),
-    engine: z.string().trim().max(100).nullable().optional(),
-    vin: z.string().trim().max(32).nullable().optional(),
-    oilType: z.string().trim().max(100).nullable().optional(),
-    oilCapacityQuarts: z.number().positive().max(100).nullable().optional(),
-  }),
+  jobs: z.array(z.object({
+    vehicle: z.object({
+      year: z.number().int().min(1900).max(2100),
+      make: z.string().trim().min(1).max(100),
+      model: z.string().trim().min(1).max(100),
+      engine: z.string().trim().max(100).nullable().optional(),
+      vin: z.string().trim().max(32).nullable().optional(),
+      oilType: z.string().trim().max(100).nullable().optional(),
+      oilCapacityQuarts: z.number().positive().max(100).nullable().optional(),
+    }),
+    service: z.object({
+      name: z.string().trim().min(1).max(200),
+      priceCents: z.number().int().nonnegative(),
+      durationMinutes: z.number().int().min(1).max(1440),
+    }),
+  })).min(1).max(10),
   address: z.object({
     line1: z.string().trim().min(1).max(200),
     line2: z.string().trim().max(200).nullable().optional(),
     city: z.string().trim().min(1).max(100),
     state: z.string().trim().min(2).max(50),
     postalCode: z.string().trim().min(3).max(20),
-  }),
-  service: z.object({
-    name: z.string().trim().min(1).max(200),
-    priceCents: z.number().int().nonnegative(),
-    durationMinutes: z.number().int().min(1).max(1440),
   }),
   totalCents: z.number().int().nonnegative(),
   notes: z.string().max(2000).nullable().optional(),
@@ -124,6 +126,7 @@ momsBookingSyncRouter.post("/v1/integrations/moms/bookings", async (c: Context) 
     let customerId = event.customer_id as string | null;
     let vehicleId = event.vehicle_id as string | null;
     let appointmentId = event.appointment_id as string | null;
+    const vehicleIds: string[] = [];
 
     const customerResult = await admin.rpc("public_booking_upsert_customer", {
       p_booking_slug: bookingSlug,
@@ -136,27 +139,30 @@ momsBookingSyncRouter.post("/v1/integrations/moms/bookings", async (c: Context) 
     customerId = customerId ?? idFrom(customerResult.data);
     if (!customerId) throw new Error("customer_upsert_missing_id");
 
-    if (!vehicleId) {
+    for (const job of payload.jobs) {
       const vehicleResult = await admin.rpc("public_booking_upsert_vehicle", {
         p_booking_slug: bookingSlug,
         p_customer_email: payload.customer.email,
         p_customer_phone: payload.customer.phone,
-        p_year: payload.vehicle.year,
-        p_make: payload.vehicle.make,
-        p_model: payload.vehicle.model,
+        p_year: job.vehicle.year,
+        p_make: job.vehicle.make,
+        p_model: job.vehicle.model,
         p_license_plate: null,
-        p_vin: payload.vehicle.vin ?? null,
+        p_vin: job.vehicle.vin ?? null,
         p_mileage: null,
-        p_oil_type: payload.vehicle.oilType ?? null,
-        p_oil_capacity: payload.vehicle.oilCapacityQuarts == null ? null : String(payload.vehicle.oilCapacityQuarts),
+        p_oil_type: job.vehicle.oilType ?? null,
+        p_oil_capacity: job.vehicle.oilCapacityQuarts == null ? null : String(job.vehicle.oilCapacityQuarts),
         p_image_url: null,
-        p_engine: payload.vehicle.engine ?? null,
+        p_engine: job.vehicle.engine ?? null,
       });
       if (vehicleResult.error) throw new Error(`vehicle_upsert_failed: ${vehicleResult.error.message}`);
-      vehicleId = idFrom(vehicleResult.data);
-      if (!vehicleId) throw new Error("vehicle_upsert_missing_id");
-      await admin.from("moms_booking_sync_events").update({ customer_id: customerId, vehicle_id: vehicleId, updated_at: new Date().toISOString() }).eq("source_booking_id", payload.sourceBookingId);
+      const resolvedVehicleId = idFrom(vehicleResult.data);
+      if (!resolvedVehicleId) throw new Error("vehicle_upsert_missing_id");
+      vehicleIds.push(resolvedVehicleId);
     }
+    vehicleId = vehicleIds[0] ?? vehicleId;
+    if (!vehicleId) throw new Error("vehicle_upsert_missing_primary_id");
+    await admin.from("moms_booking_sync_events").update({ customer_id: customerId, vehicle_id: vehicleId, updated_at: new Date().toISOString() }).eq("source_booking_id", payload.sourceBookingId);
 
     if (!appointmentId) {
       const existingAppointment = await admin.from("appointments").select("id").eq("workspace_id", "250c258f-fad6-46e1-86de-3de41a7d4e1a").ilike("notes", `%${sourceMarker}%`).limit(1).maybeSingle();
@@ -170,12 +176,12 @@ momsBookingSyncRouter.post("/v1/integrations/moms/bookings", async (c: Context) 
         p_booking_slug: bookingSlug,
         p_scheduled_date: local.date,
         p_scheduled_time: local.time,
-        p_duration_minutes: payload.service.durationMinutes,
-        p_title: `${payload.service.name} — ${payload.vehicle.year} ${payload.vehicle.make} ${payload.vehicle.model}`,
+        p_duration_minutes: payload.jobs.reduce((sum, job) => sum + job.service.durationMinutes, 0),
+        p_title: `${payload.jobs[0].service.name} — ${payload.jobs[0].vehicle.year} ${payload.jobs[0].vehicle.make} ${payload.jobs[0].vehicle.model}`,
         p_guest_name: `${payload.customer.firstName} ${payload.customer.lastName}`,
         p_guest_email: payload.customer.email,
         p_guest_phone: payload.customer.phone,
-        p_description: `${payload.service.name} for ${payload.vehicle.year} ${payload.vehicle.make} ${payload.vehicle.model}`,
+        p_description: payload.jobs.map((job) => `${job.service.name} for ${job.vehicle.year} ${job.vehicle.make} ${job.vehicle.model}`).join("; "),
         p_notes: [sourceMarker, payload.notes].filter(Boolean).join("\n"),
         p_estimated_cost: payload.totalCents / 100,
         p_tax_amount: 0,
@@ -199,14 +205,14 @@ momsBookingSyncRouter.post("/v1/integrations/moms/bookings", async (c: Context) 
         p_appointment_id: appointmentId,
         p_customer_email: payload.customer.email,
         p_customer_phone: payload.customer.phone,
-        p_services: [{
-          vehicle_id: vehicleId,
+        p_services: payload.jobs.map((job, index) => ({
+          vehicle_id: vehicleIds[index],
           service_catalog_id: null,
-          name: payload.service.name,
-          price: payload.service.priceCents / 100,
+          name: job.service.name,
+          price: job.service.priceCents / 100,
           quantity: 1,
           is_prepaid: false,
-        }],
+        })),
       });
       if (serviceResult.error) throw new Error(`service_lines_failed: ${serviceResult.error.message}`);
       const linesSaved = await admin.from("moms_booking_sync_events").update({ service_lines_synced: true, updated_at: new Date().toISOString() }).eq("source_booking_id", payload.sourceBookingId);
