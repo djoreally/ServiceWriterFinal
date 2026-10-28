@@ -2142,23 +2142,79 @@ appointmentsRouter.post("/v1/inspections/service-inspections/perform", async (c:
   if (!workspaceId) throw new ApiError(400, "Inspection must be associated with an appointment, service record, or vehicle.", "bad_request");
   await requireWorkspaceAuth(c, workspaceId, ["owner", "admin", "manager", "service_advisor", "technician", "dispatcher", "receptionist"]);
 
-  const { data: inspection, error: inspectionError } = await db.from("service_inspections").insert({
-    workspace_id: workspaceId,
-    user_id: user.id,
-    service_id: service_id ?? null,
-    vehicle_id,
-    appointment_id,
-    template_id,
-    template_name,
-    inspector_name: inspector_name ?? null,
-    notes: notes ?? null,
-    status: "completed",
-  }).select().single();
-  if (inspectionError) throw inspectionError;
+  // Idempotent re-save: the DB allows only ONE completed inspection per
+  // (workspace, appointment, template, vehicle). If one already exists,
+  // update it in place and replace its results below instead of failing
+  // the save with a unique violation.
+  const findCompletedInspection = async () => {
+    const { data: existing } = await db
+      .from("service_inspections")
+      .select("id")
+      .eq("workspace_id", workspaceId)
+      .eq("appointment_id", appointment_id)
+      .eq("template_id", template_id)
+      .eq("vehicle_id", vehicle_id)
+      .eq("status", "completed")
+      .maybeSingle();
+    return (existing as { id: string } | null) ?? null;
+  };
+
+  let inspectionId: string | null = null;
+  let updatedExisting = false;
+
+  const adoptExistingInspection = async (existingId: string) => {
+    const { error: updateError } = await db.from("service_inspections").update({
+      user_id: user.id,
+      service_id: service_id ?? null,
+      template_name,
+      inspector_name: inspector_name ?? null,
+      notes: notes ?? null,
+    }).eq("id", existingId);
+    if (updateError) throw updateError;
+    // Replace the previous save's children so the re-save is authoritative.
+    const { error: deleteRecommendationsError } = await db.from("service_recommendations").delete().eq("inspection_id", existingId);
+    if (deleteRecommendationsError) throw deleteRecommendationsError;
+    const { error: deleteResultsError } = await db.from("inspection_results").delete().eq("inspection_id", existingId);
+    if (deleteResultsError) throw deleteResultsError;
+    inspectionId = existingId;
+    updatedExisting = true;
+  };
+
+  const existingInspection = await findCompletedInspection();
+  if (existingInspection) {
+    await adoptExistingInspection(existingInspection.id);
+  } else {
+    const { data: inspection, error: inspectionError } = await db.from("service_inspections").insert({
+      workspace_id: workspaceId,
+      user_id: user.id,
+      service_id: service_id ?? null,
+      vehicle_id,
+      appointment_id,
+      template_id,
+      template_name,
+      inspector_name: inspector_name ?? null,
+      notes: notes ?? null,
+      status: "completed",
+    }).select().single();
+    if (inspectionError) {
+      // Lost a race with a concurrent save of the same inspection: adopt
+      // the row that won instead of surfacing the unique violation.
+      if ((inspectionError as { code?: string }).code === "23505") {
+        const winner = await findCompletedInspection();
+        if (!winner) throw inspectionError;
+        await adoptExistingInspection(winner.id);
+      } else {
+        throw inspectionError;
+      }
+    } else {
+      inspectionId = (inspection as { id: string }).id;
+    }
+  }
+  if (!inspectionId) throw new ApiError(500, "Inspection save did not produce a record.", "internal_error");
 
   const resultRecords = results.map((result) => ({
     workspace_id: workspaceId,
-    inspection_id: (inspection as { id: string }).id,
+    inspection_id: inspectionId,
     item_name: result.item_name,
     item_category: result.item_category ?? null,
     status: result.status,
@@ -2177,7 +2233,7 @@ appointmentsRouter.post("/v1/inspections/service-inspections/perform", async (c:
       workspace_id: workspaceId,
       appointment_id,
       vehicle_id,
-      inspection_id: (inspection as { id: string }).id,
+      inspection_id: inspectionId,
       inspection_result_id: inserted[i].id,
       service_catalog_id: original.service_catalog_id ?? null,
       description: original.item_name,
@@ -2188,7 +2244,7 @@ appointmentsRouter.post("/v1/inspections/service-inspections/perform", async (c:
     if (recommendationError) throw recommendationError;
   }
 
-  return json({ data: { id: (inspection as { id: string }).id } });
+  return json({ data: { id: inspectionId, updated: updatedExisting } });
 });
 
 // ---------------------------------------------------------------------------

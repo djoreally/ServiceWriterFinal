@@ -122,7 +122,7 @@ export function InspectionPerformer({ serviceId, vehicleId, appointmentId, onCom
       onComplete?.();
     } catch (error) {
       console.error("Save error:", error);
-      toast.error("Failed to save inspection");
+      toast.error(error instanceof Error && error.message ? `Failed to save inspection: ${error.message}` : "Failed to save inspection");
     } finally {
       setSaving(false);
     }
