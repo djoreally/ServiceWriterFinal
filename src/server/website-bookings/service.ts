@@ -176,7 +176,19 @@ async function resolveBooking(
       overlaps: [],
     };
   }
-  if (!booking.vehicle) {
+  if (!booking.service) {
+    return {
+      blocked_reason: "The website booking has no service recorded, so no appointment can be created for it.",
+      warnings,
+      customer_match: { kind: "new", customer_id: null, label: "New customer" },
+      service_match: { catalog_id: null, name: booking.service },
+      geocode: null,
+      scheduled: scheduledOut,
+      duplicate_candidates: [],
+      overlaps: [],
+    };
+  }
+  if (!booking.vehicle || !booking.vehicle.year || !booking.vehicle.make || !booking.vehicle.model) {
     return {
       blocked_reason: "The website booking has no vehicle recorded, so no appointment can be created for it.",
       warnings,
