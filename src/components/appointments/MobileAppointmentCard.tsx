@@ -8,6 +8,7 @@ import { User, Car, Clock, DollarSign, CheckCircle, MoreVertical, Bot } from "lu
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { formatMoney } from "@/lib/financialMath";
 import { computeAppointmentTotal } from "@/lib/appointmentTotal";
+import { websiteQuoteTotal } from "@/lib/price-lock";
 import { useFeeSettings } from "@/hooks/useFeeSettings";
 import { getAppointmentStatusStyle } from "./statusStyles";
 import { formatTimeLabel } from "@/lib/datetime";
@@ -32,7 +33,11 @@ interface MobileAppointmentCardProps {
 
 export const MobileAppointmentCard = memo(function MobileAppointmentCard({ appointment, onClick, onComplete, onStatusChange }: MobileAppointmentCardProps) {
   const { feeSettings } = useFeeSettings();
-  const totalDue = computeAppointmentTotal(appointment, feeSettings);
+  // Website quote lock: a locked appointment displays its stored website
+  // quote exactly — the fee-loaded helper total must never inflate it
+  // (see @/lib/price-lock). Unlocked appointments are unchanged.
+  const lockedQuote = websiteQuoteTotal(appointment);
+  const totalDue = lockedQuote ?? computeAppointmentTotal(appointment, feeSettings);
   const appointmentVehicles = Array.isArray((appointment as Appointment & { vehicles?: Appointment['vehicle'][] }).vehicles)
     ? ((appointment as Appointment & { vehicles?: Appointment['vehicle'][] }).vehicles ?? []).filter(Boolean)
     : appointment.vehicle ? [appointment.vehicle] : [];

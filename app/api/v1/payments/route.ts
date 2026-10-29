@@ -1,5 +1,11 @@
 import { errorResponse, json, paginationSchema, requireWorkspacePaymentsAddon } from "@/server/api";
 import { dispatchPaymentLifecycle, LIFECYCLE_EVENT_KEYS } from "@/server/messaging/quote-payment-events";
+import {
+  amountsEqualToCent,
+  lockedAmountMismatch,
+  PRICE_LOCK_AMOUNT_MISMATCH_STATUS,
+  resolveLockedQuoteExpectation,
+} from "@/server/payments/locked-quote";
 import { z } from "zod";
 
 const paymentStatusSchema = z.enum(["pending", "succeeded", "failed", "refunded", "partially_refunded"]);
@@ -75,6 +81,17 @@ export async function POST(request: Request) {
       }
     }
 
+    // Website quote lock: a payment against a locked appointment may only
+    // ever be for the remaining locked balance (quote − amount already paid
+    // on the appointment's invoice), resolved from the DB — never the
+    // client-computed amount. A mismatch is rejected, not clamped, so the
+    // discrepancy is visible to staff instead of silently under- or
+    // over-collecting (see @/server/payments/locked-quote).
+    const expectation = appointmentId
+      ? await resolveLockedQuoteExpectation(supabase, body.workspace_id, appointmentId)
+      : { locked: false as const };
+
+    let pendingDuplicate: Record<string, unknown> | null = null;
     if (body.status === "pending" && appointmentId && !body.provider_payment_id) {
       let duplicateQuery = (supabase.from("payments") as any)
         .select("*")
@@ -85,9 +102,27 @@ export async function POST(request: Request) {
       if (paymentType) duplicateQuery = duplicateQuery.eq("metadata->>payment_type", paymentType);
       const { data: duplicate, error: duplicateError } = await duplicateQuery.maybeSingle();
       if (duplicateError) throw duplicateError;
-      if (duplicate?.id) {
-        return json({ data: duplicate, reused: true });
+      if (duplicate?.id) pendingDuplicate = duplicate as Record<string, unknown>;
+    }
+
+    if (expectation.locked) {
+      if (pendingDuplicate) {
+        // Reuse keeps working when the existing pending payment is already
+        // at the correct locked amount (e.g. created by the closeout RPC);
+        // a pending payment at any other amount is itself the discrepancy
+        // and is rejected rather than reused.
+        if (amountsEqualToCent(Number(pendingDuplicate.amount ?? NaN), expectation.expectedAmount)) {
+          return json({ data: pendingDuplicate, reused: true });
+        }
+        const mismatch = lockedAmountMismatch(expectation, Number(pendingDuplicate.amount ?? NaN))!;
+        return json({ error: mismatch }, { status: PRICE_LOCK_AMOUNT_MISMATCH_STATUS });
       }
+      const mismatch = lockedAmountMismatch(expectation, body.amount);
+      if (mismatch) {
+        return json({ error: mismatch }, { status: PRICE_LOCK_AMOUNT_MISMATCH_STATUS });
+      }
+    } else if (pendingDuplicate) {
+      return json({ data: pendingDuplicate, reused: true });
     }
 
     const paidAt = body.status === "succeeded" && !body.paid_at ? new Date().toISOString() : body.paid_at ?? null;

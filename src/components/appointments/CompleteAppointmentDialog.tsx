@@ -18,6 +18,8 @@ import { useFeeSettings } from "@/hooks/useFeeSettings";
 import { fetchVehicleSpecifications } from "@/application/queries/vehicle-specifications.query";
 import { updateVehicleOilType } from "@/application/commands/vehicles.command";
 import { createAppointmentPaymentRecord, sendAppointmentPaymentLink } from "@/application/commands/appointment-payments.command";
+import { isWebsiteQuoteLocked, websiteQuoteAmountDue } from "@/lib/price-lock";
+import { fetchAppointmentPayments } from "@/application/queries/appointment-payments.query";
 import { ManualPaymentDialog } from "@/components/payments/ManualPaymentDialog";
 import { PaymentLinkDialog } from "@/components/payments/PaymentLinkDialog";
 import { dollarsToCents, toCents, toDollars } from "@/lib/financialMath";
@@ -62,6 +64,10 @@ export function CompleteAppointmentDialog({
   const [manualPaymentOpen, setManualPaymentOpen] = useState(false);
   const [paymentLinkUrl, setPaymentLinkUrl] = useState<string | null>(null);
   const [paymentLinkOpen, setPaymentLinkOpen] = useState(false);
+  // For a website-quote-locked appointment, the amount already collected
+  // (succeeded payment records for this appointment) is loaded from the DB
+  // so the closeout collects exactly quote − paid, never a fee-loaded total.
+  const [lockedAmountPaid, setLockedAmountPaid] = useState(0);
 
   // Pre-populate VIN, oil quarts, and current oil type from vehicle data
   useEffect(() => {
@@ -96,6 +102,33 @@ export function CompleteAppointmentDialog({
       setOilOptions(unique);
     })();
   }, [appointment?.vehicle?.year, appointment?.vehicle?.make, appointment?.vehicle?.model, open, appointment?.vehicle]);
+
+  // Load what has already been collected for a locked appointment whenever
+  // the dialog opens. The appointment's lock state comes from the same
+  // fields the detail page uses: `source` + the raw metadata carried on
+  // `intake_responses` (see @/lib/price-lock and AppointmentDetail).
+  useEffect(() => {
+    if (!open || !appointment || !isWebsiteQuoteLocked(appointment)) {
+      void Promise.resolve().then(() => setLockedAmountPaid(0));
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const rows = await fetchAppointmentPayments(appointment.id);
+        if (cancelled) return;
+        const paidCents = rows
+          .filter((row) => row.status === "succeeded")
+          .reduce((sum, row) => sum + Number(row.amount || 0), 0);
+        setLockedAmountPaid(paidCents / 100);
+      } catch {
+        if (!cancelled) setLockedAmountPaid(0);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, appointment]);
 
   const handleComplete = async () => {
     if (!appointment) return;
@@ -182,9 +215,16 @@ export function CompleteAppointmentDialog({
   const hasVin = !!appointment.vehicle?.vin;
   const vehicleOilType = appointment.vehicle?.oil_type;
   const vehicleOilCapacity = appointment.vehicle?.oil_capacity;
-  const finalTotal = computeAppointmentTotal(appointment, feeSettings);
-  const taxAmount = Number(appointment.tax_amount ?? 0);
-  const subtotal = Math.max(finalTotal - taxAmount, 0);
+  // Website quote lock: for a locked appointment the amount to collect is
+  // the stored website quote minus what has already been paid, floored at
+  // 0 — no workspace fee settings (waste fee, surcharge) or tax are applied
+  // on top of the quote (see @/lib/price-lock). Unlocked appointments keep
+  // the fee-loaded helper total unchanged.
+  const priceLocked = isWebsiteQuoteLocked(appointment);
+  const lockedAmountDue = priceLocked ? websiteQuoteAmountDue(appointment, lockedAmountPaid) : null;
+  const finalTotal = lockedAmountDue ?? computeAppointmentTotal(appointment, feeSettings);
+  const taxAmount = priceLocked ? 0 : Number(appointment.tax_amount ?? 0);
+  const subtotal = priceLocked ? finalTotal : Math.max(finalTotal - taxAmount, 0);
 
   const resetAndClose = (nextOpen: boolean) => {
     if (!nextOpen) {
@@ -196,6 +236,9 @@ export function CompleteAppointmentDialog({
 
   const createCloseoutPayment = async () => {
     if (closeoutPayment) return closeoutPayment;
+    // A locked appointment whose quote is already fully collected has no
+    // balance to create a payment for.
+    if (priceLocked && finalTotal <= 0) return null;
 
     setCloseoutProcessing(true);
     try {
@@ -206,8 +249,11 @@ export function CompleteAppointmentDialog({
         appointmentId: appointment.id,
         amountCents,
         subtotalCents,
-        taxCents: taxCents > 0 ? taxCents : null,
-        taxRate: feeSettings?.tax_rate ?? null,
+        // Locked quotes carry no separate tax or fee rate: the quote is
+        // the total, so the payment record is created tax-free at the due
+        // amount. (The server independently enforces this amount.)
+        taxCents: priceLocked ? null : taxCents > 0 ? taxCents : null,
+        taxRate: priceLocked ? null : feeSettings?.tax_rate ?? null,
         customerEmail: appointment.customer?.email ?? appointment.guest_email ?? null,
         customerName,
       });
@@ -260,7 +306,7 @@ export function CompleteAppointmentDialog({
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">Total:</span>
-              <span className="font-medium">{formatCurrency(computeAppointmentTotal(appointment, feeSettings))}</span>
+              <span className="font-medium">{formatCurrency(finalTotal)}</span>
             </div>
           </div>
 
@@ -519,14 +565,16 @@ export function CompleteAppointmentDialog({
                 <span className="font-bold text-lg">{formatCurrency(finalTotal)}</span>
               </div>
               <p className="text-xs text-muted-foreground pt-1">
-                Cash collection is available without an email address. A payment link requires one.
+                {priceLocked && finalTotal <= 0
+                  ? "The locked website quote has already been paid in full — there is no balance to collect."
+                  : "Cash collection is available without an email address. A payment link requires one."}
               </p>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
               <Button
                 className="h-auto min-h-24 justify-start gap-3 p-4 text-left"
-                disabled={closeoutProcessing}
+                disabled={closeoutProcessing || (priceLocked && finalTotal <= 0)}
                 onClick={async () => {
                   try {
                     const payment = await createCloseoutPayment();
@@ -542,7 +590,7 @@ export function CompleteAppointmentDialog({
               <Button
                 variant="outline"
                 className="h-auto min-h-24 justify-start gap-3 p-4 text-left"
-                disabled={closeoutProcessing || !(appointment.customer?.email || appointment.guest_email)}
+                disabled={closeoutProcessing || (priceLocked && finalTotal <= 0) || !(appointment.customer?.email || appointment.guest_email)}
                 onClick={async () => {
                   try {
                     const payment = await createCloseoutPayment();
@@ -571,8 +619,12 @@ export function CompleteAppointmentDialog({
               disabled={closeoutProcessing}
               onClick={async () => {
                 try {
-                  await createCloseoutPayment();
-                  toast.success("Balance due saved for follow-up");
+                  const payment = await createCloseoutPayment();
+                  if (priceLocked && !payment && !closeoutPayment) {
+                    toast.success("Locked website quote already paid in full");
+                  } else {
+                    toast.success("Balance due saved for follow-up");
+                  }
                   resetAndClose(false);
                 } catch (error) {
                   toast.error(error instanceof Error ? error.message : "Unable to save balance due");
