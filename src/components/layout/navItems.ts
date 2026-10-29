@@ -40,6 +40,7 @@ const buildAllGroups = (terms: Terms): NavGroup[] => [
   ]},
   { label: "Appointments", items: [
     { path: "/appointments", label: "Appointments & Schedule" },
+    { path: "/website-bookings", label: "Website Bookings" },
     { path: "/availability", label: "Availability" },
     { path: "/quotes", label: terms.quote + "s & Approvals" },
     { path: "/services", label: "Work Orders & History" },
