@@ -27,6 +27,7 @@ import { messagingRouter } from "./routes/messaging";
 import { platformRouter } from "./routes/platform";
 import { publicBookingRouter } from "./routes/public-booking";
 import { vehiclesRouter } from "./routes/vehicles";
+import { websiteBookingsRouter } from "./routes/website-bookings";
 import { workOrdersRouter } from "./routes/work-orders";
 
 export function createHonoApp(): Hono {
@@ -64,6 +65,7 @@ export function createHonoApp(): Hono {
   app.route("/", messagingRouter);
   app.route("/", platformRouter);
   app.route("/", vehiclesRouter);
+  app.route("/", websiteBookingsRouter);
   app.route("/", workOrdersRouter);
 
   return app;
