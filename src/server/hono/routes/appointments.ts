@@ -33,6 +33,7 @@ import { zonedDateTimeParts, zonedLocalDateTimeToUtc } from "@/server/scheduling
 import { syncCanonicalInvoiceToStripe } from "@/server/payments/stripe-invoice-sync";
 import { technicianJobUrl } from "@/server/messaging/lifecycle-action-urls";
 import { createSupabaseAdminClient, createSupabaseBrowserClient, createSupabaseRequestClient } from "@/lib/supabase";
+import { isWebsiteQuoteLocked } from "@/lib/price-lock";
 import { logMutation } from "@/server/audit";
 import { z } from "zod";
 
@@ -346,7 +347,7 @@ appointmentsRouter.get("/v1/appointments/:id{[0-9a-fA-F-]{36}}", async (c: Conte
 appointmentsRouter.patch("/v1/appointments/:id", async (c: Context) => {
   const id = z.string().uuid().parse(c.req.param("id")), body = patchSchema.parse(await c.req.json()), { workspace_id } = body;
   const { supabase, user } = await requireWorkspaceAuth(c, workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher"]);
-  const [{ data: current, error: currentError }, { data: workspace, error: workspaceError }] = await Promise.all([supabase.from("appointments").select("id,workspace_id,customer_id,vehicle_id,location_id,starts_at,ends_at,status,assigned_user_id,metadata").eq("id", id).eq("workspace_id", workspace_id).single(), supabase.from("workspaces").select("name,timezone").eq("id", workspace_id).single()]);
+  const [{ data: current, error: currentError }, { data: workspace, error: workspaceError }] = await Promise.all([supabase.from("appointments").select("id,workspace_id,customer_id,vehicle_id,location_id,starts_at,ends_at,status,source,assigned_user_id,metadata").eq("id", id).eq("workspace_id", workspace_id).single(), supabase.from("workspaces").select("name,timezone").eq("id", workspace_id).single()]);
   if (currentError || !current) throw currentError ?? new Error("Appointment was not found in this workspace.");
   if (workspaceError || !workspace) throw workspaceError ?? new Error("Workspace was not found.");
   const workspaceTimezone = workspace.timezone || "UTC";
@@ -360,11 +361,21 @@ appointmentsRouter.patch("/v1/appointments/:id", async (c: Context) => {
   if ((startsAt !== current.starts_at || endsAt !== current.ends_at) && body.override_availability !== true) { const { data: conflicts, error } = await supabase.from("appointments").select("id").eq("workspace_id", workspace_id).neq("id", id).not("status", "in", '("cancelled","no_show")').lt("starts_at", endsAt).gt("ends_at", startsAt).limit(1); if (error) throw error; if (conflicts?.length) return json({ error: { code: "schedule_conflict", message: "The requested time overlaps an existing appointment." } }, { status: 409 }); }
   const existing = current.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata) ? current.metadata as Record<string, unknown> : {};
   const metadata = { ...existing };
-  for (const key of compatibilityKeys) if (hasOwn(body, key)) metadata[key] = body[key] ?? null;
+  // Website quote lock: on a locked appointment the price-bearing metadata
+  // keys are not writable through PATCH — the website quote stays the price
+  // (see @/lib/price-lock). Schedule, status, notes and guest fields still are.
+  const priceLocked = isWebsiteQuoteLocked(current);
+  for (const key of compatibilityKeys) {
+    if (priceLocked && (key === "estimated_cost" || key === "tax_amount" || key === "service_catalog_id")) continue;
+    if (hasOwn(body, key)) metadata[key] = body[key] ?? null;
+  }
   if (hasOwn(body, "override_availability")) metadata.override_availability = body.override_availability === true;
   if (hasOwn(body, "status") && body.status === "in_progress" && current.status !== "in_progress" && !metadata.actual_start_time) metadata.actual_start_time = new Date().toISOString();
   const canonicalPatch: Record<string, unknown> = { starts_at: startsAt, ends_at: endsAt, metadata, updated_at: new Date().toISOString() };
-  for (const key of ["customer_id", "vehicle_id", "location_id", "assigned_user_id", "status", "source", "notes"] as const) if (hasOwn(body, key)) canonicalPatch[key] = body[key] ?? null;
+  // `source` is deliberately NOT patchable: it is the pricing channel, set once
+  // at creation. Rewriting it on edit-save relabelled website bookings as
+  // staff bookings and silently destroyed their price lock.
+  for (const key of ["customer_id", "vehicle_id", "location_id", "assigned_user_id", "status", "notes"] as const) if (hasOwn(body, key)) canonicalPatch[key] = body[key] ?? null;
   const { data, error } = await supabase.from("appointments").update(canonicalPatch as any).eq("id", id).eq("workspace_id", workspace_id).select("id,workspace_id,customer_id,starts_at,ends_at,status,assigned_user_id,notes,metadata,updated_at,customers(id,first_name,last_name,email),vehicles(id,year,make,model)").single();
   if (error) throw error;
   try {
@@ -844,12 +855,20 @@ appointmentsRouter.put("/v1/appointment-items", async (c: Context) => {
 
   const { data: appointment, error: appointmentError } = await supabase
     .from("appointments")
-    .select("id")
+    .select("id,source,metadata")
     .eq("workspace_id", workspace_id)
     .eq("id", body.appointment_id)
     .single();
   if (appointmentError || !appointment) {
     throw appointmentError ?? new Error("Appointment was not found in this workspace.");
+  }
+
+  // Website quote lock: the appointment's single service line already carries
+  // the locked website quote. Never delete or supplement it with a
+  // catalog-priced line — that re-price is the edit-save inflation bug
+  // (see @/lib/price-lock). The sync is a no-op for locked appointments.
+  if (isWebsiteQuoteLocked(appointment)) {
+    return json({ data: null, price_locked: true });
   }
 
   let catalog: { id: string; name: string; labor_price: number | string } | null = null;
@@ -2724,12 +2743,33 @@ const appointmentServiceWriteSchema = z.object({
   added_at_service: z.boolean(),
 });
 
+// Website quote lock guard for the service-line write endpoints below: a
+// locked appointment's service lines define its price, so they cannot be
+// added, edited, or removed in Service Writer (see @/lib/price-lock).
+function priceLockedError() {
+  return json(
+    { error: { code: "price_locked", message: "This appointment carries a locked website quote, so its service lines cannot be changed in Service Writer." } },
+    { status: 409 },
+  );
+}
+
+async function appointmentIsPriceLocked(db: any, workspaceId: string, appointmentId: string): Promise<boolean> {
+  const { data } = await db
+    .from("appointments")
+    .select("source,metadata")
+    .eq("workspace_id", workspaceId)
+    .eq("id", appointmentId)
+    .maybeSingle();
+  return Boolean(data && isWebsiteQuoteLocked(data));
+}
+
 // POST /v1/appointments/:id/services — add a service line to an appointment.
 appointmentsRouter.post("/v1/appointments/:id/services", async (c: Context) => {
   const id = z.string().uuid().parse(c.req.param("id"));
   const body = appointmentServiceWriteSchema.parse(await c.req.json());
   const { supabase, workspaceId } = await requireStaffWorkspace(c, selectedWorkspaceHint(new URL(c.req.url)));
   const db = supabase as any;
+  if (await appointmentIsPriceLocked(db, workspaceId, id)) return priceLockedError();
   const { data, error } = await db
     .from("appointment_items")
     .insert({
@@ -2756,6 +2796,15 @@ appointmentsRouter.patch("/v1/appointments/services/:serviceId", async (c: Conte
   const body = appointmentServiceWriteSchema.parse(await c.req.json());
   const { supabase, workspaceId } = await requireStaffWorkspace(c, selectedWorkspaceHint(new URL(c.req.url)));
   const db = supabase as any;
+  const { data: existingItem } = await db
+    .from("appointment_items")
+    .select("appointment_id")
+    .eq("workspace_id", workspaceId)
+    .eq("id", serviceId)
+    .maybeSingle();
+  if (existingItem?.appointment_id && (await appointmentIsPriceLocked(db, workspaceId, existingItem.appointment_id))) {
+    return priceLockedError();
+  }
   const { data, error } = await db
     .from("appointment_items")
     .update({
@@ -2779,6 +2828,16 @@ appointmentsRouter.patch("/v1/appointments/services/:serviceId", async (c: Conte
 appointmentsRouter.delete("/v1/appointments/services/:serviceId", async (c: Context) => {
   const serviceId = z.string().uuid().parse(c.req.param("serviceId"));
   const { supabase, workspaceId } = await requireStaffWorkspace(c, undefined);
+  const db = supabase as any;
+  const { data: existingItem } = await db
+    .from("appointment_items")
+    .select("appointment_id")
+    .eq("workspace_id", workspaceId)
+    .eq("id", serviceId)
+    .maybeSingle();
+  if (existingItem?.appointment_id && (await appointmentIsPriceLocked(db, workspaceId, existingItem.appointment_id))) {
+    return priceLockedError();
+  }
   const { error } = await (supabase as any)
     .from("appointment_items")
     .delete()

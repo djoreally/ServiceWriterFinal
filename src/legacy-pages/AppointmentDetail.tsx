@@ -2,6 +2,7 @@ import { errorMessage } from "@/lib/error-message";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sendReviewRequest } from "@/application/commands/review-request.command";
 import { computeFinancialSummary } from "@/lib/financialMath";
+import { isWebsiteQuoteLocked } from "@/lib/price-lock";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   getCurrentAuthUser,
@@ -445,16 +446,27 @@ export const AppointmentDetail = ({
   const customerPhone = appointment.customer?.phone || appointment.guest_phone || null;
   const address = resolvedAddress || appointment.customer?.address || null;
   const humanNotes = cleanHumanNotes(appointment.notes || appointment.description);
-  const estimatedCost = servicesTotal || appointment.estimated_cost || 0;
-  const taxAmount = appointment.tax_amount || 0;
-
-  const financials = computeFinancialSummary({
-    subtotal: estimatedCost,
-    feeSettings: feeSettings
-      ? { ...feeSettings, waste_oil_fee_enabled: feeSettings.waste_oil_fee_enabled && showsFluids }
-      : undefined,
-    taxAmount,
+  // Website quote lock: for a website-pushed appointment the stored quote is
+  // the total — no fee or tax recompute may move the displayed/charged amount
+  // (see @/lib/price-lock).
+  const priceLocked = isWebsiteQuoteLocked({
+    source: appointment.source,
+    metadata: appointment.intake_responses,
   });
+  const estimatedCost = priceLocked
+    ? appointment.estimated_cost || 0
+    : servicesTotal || appointment.estimated_cost || 0;
+  const taxAmount = priceLocked ? 0 : appointment.tax_amount || 0;
+
+  const financials = priceLocked
+    ? computeFinancialSummary({ subtotal: estimatedCost, taxAmount: 0 })
+    : computeFinancialSummary({
+        subtotal: estimatedCost,
+        feeSettings: feeSettings
+          ? { ...feeSettings, waste_oil_fee_enabled: feeSettings.waste_oil_fee_enabled && showsFluids }
+          : undefined,
+        taxAmount,
+      });
   const { wasteOilFee, shopFee, surcharge } = financials;
   const totalDue = financials.total;
   const isEditable = appointment.status !== "completed" && appointment.status !== "cancelled";

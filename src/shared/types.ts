@@ -79,6 +79,12 @@ export interface Appointment {
   notes?: string;
   estimated_cost?: number;
   tax_amount?: number;
+  // Pricing channel, set once at creation ('staff', 'public_booking',
+  // 'moms_website', ...). Website-pushed appointments carry a locked quote —
+  // see @/lib/price-lock.
+  source?: string;
+  // Raw appointment metadata as returned by the detail query.
+  intake_responses?: Record<string, unknown> | null;
   service_record_id?: string | null; // Link to the generated service record when completed
   // Dispatch fields
   dispatch_status?: string | null;

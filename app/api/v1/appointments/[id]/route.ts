@@ -7,6 +7,7 @@ import { syncAppointmentToGoogleCalendar } from "@/server/google-calendar/sync";
 import { after } from "next/server";
 import { z } from "zod";
 import { createHonoApp } from "@/server/hono/app";
+import { isWebsiteQuoteLocked } from "@/lib/price-lock";
 
 const patchSchema = z.object({
   workspace_id: z.string().uuid(),
@@ -156,7 +157,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     );
 
     const [currentResult, workspaceResult, settingsResult] = await Promise.all([
-      supabase.from("appointments").select("id,workspace_id,customer_id,vehicle_id,location_id,starts_at,ends_at,status,assigned_user_id,metadata").eq("id", id).eq("workspace_id", workspace_id).single(),
+      supabase.from("appointments").select("id,workspace_id,customer_id,vehicle_id,location_id,starts_at,ends_at,status,source,assigned_user_id,metadata").eq("id", id).eq("workspace_id", workspace_id).single(),
       supabase.from("workspaces").select("name,timezone").eq("id", workspace_id).single(),
       supabase.from("workspace_settings").select("day_hours,opening_time,closing_time,working_days,buffer_time_before,buffer_time_after,min_lead_time_hours").eq("workspace_id", workspace_id).single(),
     ]);
@@ -245,7 +246,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       ? current.metadata as Record<string, unknown>
       : {};
     const metadata = { ...existing };
-    for (const key of compatibilityKeys) if (hasOwn(body, key)) metadata[key] = body[key] ?? null;
+    // Website quote lock: on a locked appointment the price-bearing metadata
+    // keys are not writable through PATCH — the website quote stays the price
+    // (see @/lib/price-lock). Schedule, status, notes and guest fields still are.
+    const priceLocked = isWebsiteQuoteLocked(current);
+    for (const key of compatibilityKeys) {
+      if (priceLocked && (key === "estimated_cost" || key === "tax_amount" || key === "service_catalog_id")) continue;
+      if (hasOwn(body, key)) metadata[key] = body[key] ?? null;
+    }
     if (hasOwn(body, "override_availability")) metadata.override_availability = body.override_availability === true;
     if (hasOwn(body, "status") && body.status === "in_progress" && current.status !== "in_progress" && !metadata.actual_start_time) {
       metadata.actual_start_time = new Date().toISOString();
@@ -257,7 +265,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       metadata,
       updated_at: new Date().toISOString(),
     };
-    for (const key of ["customer_id", "vehicle_id", "location_id", "assigned_user_id", "status", "source", "notes"] as const) {
+    // `source` is deliberately NOT patchable: it is the pricing channel, set
+    // once at creation. Rewriting it on edit-save relabelled website bookings
+    // as staff bookings and silently destroyed their price lock.
+    for (const key of ["customer_id", "vehicle_id", "location_id", "assigned_user_id", "status", "notes"] as const) {
       if (hasOwn(body, key)) canonicalPatch[key] = body[key] ?? null;
     }
 

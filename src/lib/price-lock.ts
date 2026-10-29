@@ -1,0 +1,64 @@
+/**
+ * Website quote price lock.
+ *
+ * Pricing channel rule (Ty, 2026-10-29): the price source follows the booking
+ * channel.
+ *
+ * - Bookings created through the Service Writer booking link or by staff are
+ *   priced natively in Service Writer (service catalog + workspace settings).
+ * - Bookings pushed from the MOMS website carry the website's quoted total.
+ *   That quote is locked: no Service Writer edit, service-line change, status
+ *   transition, or invoice sync may re-price it — including website-only deal
+ *   prices (e.g. the $89 SOCIAL89 / $99 SOCIAL99 offers), which exist only
+ *   inside the website quote.
+ *
+ * The lock is carried on the appointment itself, written once by the staff
+ * push RPC (`public_booking_book_appointment_staff_v1`):
+ * - `appointments.source = 'moms_website'` (the pricing channel; write-once)
+ * - `appointments.metadata.pricing_state = 'website_quote_locked'`
+ * - `appointments.metadata.estimated_cost` (mirrored to
+ *   `client_estimated_cost`) holds the locked quote, and the appointment has a
+ *   single `appointment_items` row whose unit price is the quote.
+ *
+ * Every recompute path (PATCH totals merge, primary-service sync, detail-page
+ * service lines, the `sync_appointment_invoice_v1` trigger, and the detail
+ * page's displayed total) must check `isWebsiteQuoteLocked` first and leave a
+ * locked appointment's money exactly as the website quoted it.
+ */
+
+export const WEBSITE_QUOTE_SOURCE = "moms_website";
+export const WEBSITE_QUOTE_PRICING_STATE = "website_quote_locked";
+
+export interface PriceLockRow {
+  source?: unknown;
+  metadata?: unknown;
+}
+
+function metadataObject(metadata: unknown): Record<string, unknown> {
+  return metadata && typeof metadata === "object" && !Array.isArray(metadata)
+    ? (metadata as Record<string, unknown>)
+    : {};
+}
+
+/**
+ * True when the appointment is a website booking whose quoted total is locked.
+ * The `website_booking_id` metadata key is accepted as an alternative marker so
+ * the lock still holds if a later sync rewrites `pricing_state`.
+ */
+export function isWebsiteQuoteLocked(row: PriceLockRow | null | undefined): boolean {
+  if (!row || row.source !== WEBSITE_QUOTE_SOURCE) return false;
+  const metadata = metadataObject(row.metadata);
+  return (
+    metadata.pricing_state === WEBSITE_QUOTE_PRICING_STATE ||
+    typeof metadata.website_booking_id === "string"
+  );
+}
+
+/** The locked website quote in dollars, or null when the row is not locked. */
+export function websiteQuoteTotal(row: PriceLockRow | null | undefined): number | null {
+  if (!isWebsiteQuoteLocked(row)) return null;
+  const metadata = metadataObject(row?.metadata);
+  const raw = metadata.estimated_cost ?? metadata.client_estimated_cost;
+  const value = typeof raw === "number" ? raw : Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
