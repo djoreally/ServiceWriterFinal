@@ -98,6 +98,24 @@ export async function stampWebsiteBookingPushed(
   });
 }
 
+/**
+ * Record why an automatic (prepaid) push attempt failed. The backend
+ * stores the reason on the booking (auto_push_last_error) and releases
+ * the auto-push claim; the booking itself is NOT stamped and stays in
+ * the manual queue. Used only by the auto-push path — a manual push
+ * reports its result to the staff member directly.
+ */
+export async function recordWebsiteBookingAutoPushFailure(
+  config: WebsiteBookingsConfig,
+  bookingId: string,
+  reason: string,
+): Promise<{ id: string; auto_push_last_error: string | null }> {
+  return callWebsiteBackend(config, `/internal/website-bookings/${encodeURIComponent(bookingId)}/auto-push-failure`, {
+    method: "POST",
+    body: { reason },
+  });
+}
+
 export async function setWebsiteBookingNeverPush(
   config: WebsiteBookingsConfig,
   bookingId: string,

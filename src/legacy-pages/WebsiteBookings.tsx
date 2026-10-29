@@ -288,6 +288,15 @@ export default function WebsiteBookings() {
                               {booking.pushed_at ? ` · pushed ${format(new Date(booking.pushed_at), "MMM d, h:mm a")}` : ""}
                             </div>
                           )}
+                          {tab === "unpushed" && booking.auto_push_last_error && (
+                            <div className="mt-0.5 text-xs text-destructive">
+                              Auto-push failed
+                              {booking.auto_push_last_attempt_at
+                                ? ` ${format(new Date(booking.auto_push_last_attempt_at), "MMM d, h:mm a")}`
+                                : ""}
+                              : {booking.auto_push_last_error}
+                            </div>
+                          )}
                         </div>
                         {tab === "unpushed" && (
                           <div className="flex gap-2">

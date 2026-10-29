@@ -34,6 +34,10 @@ export interface WebsiteBooking {
   vehicle: WebsiteBookingVehicle | null;
   pushed_sw_appointment_id?: string | null;
   pushed_at?: string | null;
+  /** Set when a prepaid auto-push attempt failed; the booking stays in
+   * the unpushed queue and this is the pipeline's reason, shown to staff. */
+  auto_push_last_error?: string | null;
+  auto_push_last_attempt_at?: string | null;
 }
 
 export type WebsiteBookingListStatus = "unpushed" | "never_push" | "pushed";
@@ -89,6 +93,18 @@ export interface PushDecision {
 export interface PushResult {
   booking_id: string;
   status: "created" | "linked" | "skipped" | "failed";
+  appointment_id: string | null;
+  message: string;
+}
+
+/**
+ * Result of one automatic (prepaid) push attempt. `already_pushed` is the
+ * duplicate-trigger outcome: the booking was already stamped, nothing was
+ * created, and `appointment_id` is the existing appointment.
+ */
+export interface AutoPushResult {
+  booking_id: string;
+  status: "created" | "linked" | "already_pushed" | "failed";
   appointment_id: string | null;
   message: string;
 }

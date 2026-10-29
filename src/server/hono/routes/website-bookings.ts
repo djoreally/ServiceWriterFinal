@@ -7,6 +7,9 @@
  * - POST /v1/website-bookings/prepare  { workspace_id, booking_ids }
  * - POST /v1/website-bookings/push     { workspace_id, decisions }
  * - POST /v1/website-bookings/never-push { workspace_id, booking_id, never_push }
+ * - POST /internal/website-bookings/auto-push { booking_id }
+ *   (server-to-server only, shared push secret — the prepaid auto-push
+ *   added 2026-10-29; every staff route above is unchanged)
  *
  * Everything here is behind requireWorkspaceAuth with the same role list as
  * POST /v1/appointments. Creation happens only inside
@@ -14,13 +17,16 @@
  * canonical v3 create) — see src/server/website-bookings/service.ts.
  * The public booking routes are untouched by this router.
  */
+import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
+import { createSupabaseAdminClient } from "@/lib/supabase";
 import { json } from "@/server/api";
 import { requireWorkspaceAuth } from "@/server/hono/middleware/auth";
 import { WebsiteBackendError } from "@/server/website-bookings/client";
 import {
+  executeAutoPush,
   executePushes,
   listWebsiteBookingsQueue,
   preparePushes,
@@ -98,6 +104,68 @@ websiteBookingsRouter.post("/v1/website-bookings/push", async (c: Context) => {
   try {
     const results = await executePushes(supabase, body.workspace_id, body.decisions);
     return json({ data: results });
+  } catch (error) {
+    const response = backendErrorResponse(error);
+    if (response) return response;
+    throw error;
+  }
+});
+
+const autoPushSchema = z.object({
+  booking_id: z.string().uuid(),
+});
+
+/**
+ * POST /api/internal/website-bookings/auto-push — server-to-server only.
+ *
+ * The website backend calls this when a website booking's prepayment
+ * completes (Stripe webhook). Auth is the shared push secret
+ * (SW_PUSH_SECRET, the same secret Service Writer uses to call the
+ * website backend's internal endpoints), compared in constant time.
+ * There is no staff session: the push runs with the service-role client
+ * through the SAME pipeline as the manual queue (executeAutoPush →
+ * executePushes in auto_prepaid mode → the service-role variant of the
+ * canonical staff create RPC, quote re-verified, booking stamped).
+ *
+ * The MOMS website maps to exactly one Service Writer workspace,
+ * configured server-side as WEBSITE_BOOKINGS_WORKSPACE_ID — the caller
+ * cannot choose a workspace. Unconfigured secret or workspace is an
+ * honest 503, never a silent drop: the booking stays in the manual
+ * queue either way.
+ */
+websiteBookingsRouter.post("/internal/website-bookings/auto-push", async (c: Context) => {
+  const expected = (process.env.SW_PUSH_SECRET || "").trim();
+  if (!expected) {
+    return json(
+      { error: { code: "auto_push_not_configured", message: "Auto-push is not configured on the server (SW_PUSH_SECRET must be set)." } },
+      { status: 503 },
+    );
+  }
+  const provided = c.req.header("x-sw-push-secret") ?? "";
+  const providedBuffer = Buffer.from(provided);
+  const expectedBuffer = Buffer.from(expected);
+  if (providedBuffer.length !== expectedBuffer.length || !timingSafeEqual(providedBuffer, expectedBuffer)) {
+    return json({ error: { code: "unauthorized", message: "Invalid push secret." } }, { status: 401 });
+  }
+
+  const workspaceId = (process.env.WEBSITE_BOOKINGS_WORKSPACE_ID || "").trim();
+  if (!z.string().uuid().safeParse(workspaceId).success) {
+    return json(
+      {
+        error: {
+          code: "auto_push_not_configured",
+          message: "Auto-push is not configured on the server (WEBSITE_BOOKINGS_WORKSPACE_ID must be set to the MOMS workspace id).",
+        },
+      },
+      { status: 503 },
+    );
+  }
+
+  const body = autoPushSchema.parse(await c.req.json());
+  try {
+    const supabase = createSupabaseAdminClient();
+    const result = await executeAutoPush(supabase, workspaceId, body.booking_id);
+    return json({ data: result });
   } catch (error) {
     const response = backendErrorResponse(error);
     if (response) return response;

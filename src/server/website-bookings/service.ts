@@ -25,6 +25,7 @@ import {
   staffNote,
   windowsOverlap,
   type AppointmentLite,
+  type AutoPushResult,
   type PushDecision,
   type PushPreview,
   type PushResult,
@@ -33,6 +34,7 @@ import {
 import {
   fetchWebsiteBookings,
   getWebsiteBookingsConfig,
+  recordWebsiteBookingAutoPushFailure,
   setWebsiteBookingNeverPush,
   stampWebsiteBookingPushed,
   websiteIntegrationNotConfigured,
@@ -382,11 +384,42 @@ async function verifyStoredTotal(
   return { ok: stored === roundMoney(quotedTotal), stored };
 }
 
+export interface ExecutePushesOptions {
+  /**
+   * "manual" (default): the staff queue — a human confirmed each push,
+   * duplicates are the human's choice (link / push anyway / skip).
+   * "auto_prepaid": the prepaid auto-push — same pipeline, same canonical
+   * create, same quote verification, but the create runs through the
+   * service-role RPC variant, a same-job duplicate resolves as Link
+   * (never a twin), and every failure is recorded on the website booking
+   * so the reason is staff-visible in the queue. Only prepaid,
+   * non-cancelled bookings may be pushed in this mode; the guards below
+   * enforce that inside the pipeline, not just at trigger time.
+   */
+  mode?: "manual" | "auto_prepaid";
+}
+
+/** Best-effort failure record for the auto-push path: the manual queue
+ * (booking left unstamped) is the fail-safe; this just attaches the why. */
+async function recordAutoPushFailureBestEffort(
+  config: WebsiteBookingsConfig,
+  bookingId: string,
+  reason: string,
+): Promise<void> {
+  try {
+    await recordWebsiteBookingAutoPushFailure(config, bookingId, reason);
+  } catch {
+    // Recording must never mask the pipeline's own result.
+  }
+}
+
 export async function executePushes(
   supabase: any,
   workspaceId: string,
   decisions: PushDecision[],
+  options: ExecutePushesOptions = {},
 ): Promise<PushResult[]> {
+  const auto = options.mode === "auto_prepaid";
   const config = requireConfig();
   const ctx = await getWorkspaceContext(supabase, workspaceId);
   const results: PushResult[] = [];
@@ -472,18 +505,64 @@ export async function executePushes(
     }
 
     booking = normalizeWindow(booking, ctx.timezone);
+
+    if (auto) {
+      // Guards inside the pipeline (not just at trigger time): the
+      // booking is re-read fresh above, so a booking cancelled — or no
+      // longer showing "paid" — between payment and this execution must
+      // not be pushed, and the automatic path never pushes an unpaid
+      // booking (unpaid stays a manual-queue decision).
+      if (booking.status === "cancelled") {
+        const message = "Booking was cancelled on the website before the auto-push ran, so nothing was pushed.";
+        await recordAutoPushFailureBestEffort(config, bookingId, message);
+        results.push({ booking_id: bookingId, status: "failed", appointment_id: null, message });
+        continue;
+      }
+      if (booking.payment !== "paid") {
+        const message = `Booking is not prepaid (website payment status: ${booking.payment ?? "unknown"}), so the automatic push does not apply. It stays in the manual queue.`;
+        results.push({ booking_id: bookingId, status: "failed", appointment_id: null, message });
+        continue;
+      }
+    }
+
     const resolution = await resolveBooking(supabase, workspaceId, booking, ctx);
     if (resolution.blocked_reason || !resolution.geocode || !resolution.service_match.catalog_id) {
+      const message = resolution.blocked_reason ?? "Booking could not be resolved for push.";
+      if (auto) await recordAutoPushFailureBestEffort(config, bookingId, message);
       results.push({
         booking_id: bookingId,
         status: "failed",
         appointment_id: null,
-        message: resolution.blocked_reason ?? "Booking could not be resolved for push.",
+        message,
       });
       continue;
     }
 
-    const { data: appointmentId, error: rpcError } = await supabase.rpc("public_booking_book_appointment_staff_v1", {
+    if (auto && resolution.duplicate_candidates.length > 0) {
+      // Spec §7A, automatic edition: the same job already exists in
+      // Service Writer, so Link — stamp against the existing appointment
+      // and create nothing. (The manual flow leaves this choice to staff;
+      // the automatic flow has no one to ask, and a twin is never right.)
+      const linkId = resolution.duplicate_candidates[0].appointment_id;
+      try {
+        await stampWebsiteBookingPushed(config, bookingId, linkId);
+        results.push({
+          booking_id: bookingId,
+          status: "linked",
+          appointment_id: linkId,
+          message: "Linked to the existing Service Writer appointment for the same job. Nothing new was created.",
+        });
+      } catch (error) {
+        const message = `Failed to stamp the website booking as linked: ${error instanceof Error ? error.message : "unknown error"}`;
+        await recordAutoPushFailureBestEffort(config, bookingId, message);
+        results.push({ booking_id: bookingId, status: "failed", appointment_id: null, message });
+      }
+      continue;
+    }
+
+    const { data: appointmentId, error: rpcError } = await supabase.rpc(
+      auto ? "public_booking_book_appointment_auto_v1" : "public_booking_book_appointment_staff_v1",
+      {
       p_booking_slug: ctx.slug,
       p_scheduled_date: resolution.scheduled.date,
       p_scheduled_time: resolution.scheduled.time,
@@ -514,11 +593,13 @@ export async function executePushes(
       p_payment_status: booking.payment,
     });
     if (rpcError) {
+      const message = rpcError.message || "The booking path rejected this push.";
+      if (auto) await recordAutoPushFailureBestEffort(config, bookingId, message);
       results.push({
         booking_id: bookingId,
         status: "failed",
         appointment_id: null,
-        message: rpcError.message || "The booking path rejected this push.",
+        message,
       });
       continue;
     }
@@ -531,11 +612,13 @@ export async function executePushes(
     // the discrepancy stays visible in the queue.
     const verification = await verifyStoredTotal(supabase, createdId, booking.quoted_total_usd);
     if (!verification.ok) {
+      const message = `Price drift: appointment ${createdId} was created but its stored total is $${verification.stored.toFixed(2)}, not the website quote $${roundMoney(booking.quoted_total_usd).toFixed(2)}. The website booking was left unstamped so this stays visible.`;
+      if (auto) await recordAutoPushFailureBestEffort(config, bookingId, message);
       results.push({
         booking_id: bookingId,
         status: "failed",
         appointment_id: createdId,
-        message: `Price drift: appointment ${createdId} was created but its stored total is $${verification.stored.toFixed(2)}, not the website quote $${roundMoney(booking.quoted_total_usd).toFixed(2)}. The website booking was left unstamped so this stays visible.`,
+        message,
       });
       continue;
     }
@@ -549,16 +632,81 @@ export async function executePushes(
         message: "Appointment created in Service Writer at the website quote.",
       });
     } catch (error) {
+      const message = `Appointment ${createdId} was created, but stamping the website booking failed: ${error instanceof Error ? error.message : "unknown error"}. Pushing again is safe — the booking path returns the same appointment instead of duplicating it.`;
+      if (auto) await recordAutoPushFailureBestEffort(config, bookingId, message);
       results.push({
         booking_id: bookingId,
         status: "failed",
         appointment_id: createdId,
-        message: `Appointment ${createdId} was created, but stamping the website booking failed: ${error instanceof Error ? error.message : "unknown error"}. Pushing again is safe — the booking path returns the same appointment instead of duplicating it.`,
+        message,
       });
     }
   }
 
   return results;
+}
+
+/**
+ * In-flight auto-push attempts, by website booking id. Stripe webhooks
+ * retry and handlers double-fire; when a second trigger for the same
+ * booking arrives while the first is still running in this process, it
+ * joins the same attempt instead of starting a second one. Cross-process
+ * protection is layered underneath: the backend's atomic claim, the
+ * one-push-ever stamp, and the RPC's per-booking idempotency.
+ */
+const autoPushInFlight = new Map<string, Promise<AutoPushResult>>();
+
+/**
+ * Push ONE prepaid website booking automatically (Ty, 2026-10-29).
+ * This is the manual pipeline (`executePushes`) in `auto_prepaid` mode —
+ * same prepare/resolve checks, same canonical create (service-role RPC
+ * variant), same stored-total re-verification, same stamp. A booking
+ * that is already stamped returns `already_pushed` and creates nothing.
+ */
+export function executeAutoPush(
+  supabase: any,
+  workspaceId: string,
+  bookingId: string,
+): Promise<AutoPushResult> {
+  const inFlight = autoPushInFlight.get(bookingId);
+  if (inFlight) return inFlight;
+  const attempt = (async (): Promise<AutoPushResult> => {
+    const config = requireConfig();
+    const pushed = await fetchWebsiteBookings(config, "pushed");
+    const already = pushed.find((b) => b.id === bookingId);
+    if (already?.pushed_sw_appointment_id) {
+      return {
+        booking_id: bookingId,
+        status: "already_pushed",
+        appointment_id: already.pushed_sw_appointment_id,
+        message: `Already pushed as appointment ${already.pushed_sw_appointment_id}.`,
+      };
+    }
+    const [result] = await executePushes(supabase, workspaceId, [{ booking_id: bookingId, action: "push" }], {
+      mode: "auto_prepaid",
+    });
+    if (!result) {
+      return { booking_id: bookingId, status: "failed", appointment_id: null, message: "Auto-push produced no result." };
+    }
+    if (result.status === "created" || result.status === "linked") {
+      return { booking_id: bookingId, status: result.status, appointment_id: result.appointment_id, message: result.message };
+    }
+    // executePushes reports an already-pushed race as a failed result
+    // carrying the existing appointment id; translate it honestly.
+    if (result.appointment_id && result.message.startsWith("Already pushed")) {
+      return { booking_id: bookingId, status: "already_pushed", appointment_id: result.appointment_id, message: result.message };
+    }
+    return { booking_id: bookingId, status: "failed", appointment_id: result.appointment_id, message: result.message };
+  })();
+  autoPushInFlight.set(bookingId, attempt);
+  // Clean up as the attempt settles. Registered before any caller can
+  // await the attempt, so a later (non-concurrent) trigger never joins a
+  // completed attempt — it re-enters and sees the pushed stamp instead.
+  const cleanup = () => {
+    if (autoPushInFlight.get(bookingId) === attempt) autoPushInFlight.delete(bookingId);
+  };
+  attempt.then(cleanup, cleanup);
+  return attempt;
 }
 
 export async function setNeverPush(bookingId: string, neverPush: boolean): Promise<void> {
