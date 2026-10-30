@@ -42,12 +42,15 @@ describe("appointmentTotal", () => {
     expect(total).toBe(108);
   });
 
-  it("falls back to the business tax_rate when no tax_amount was stamped", () => {
+  it("does not synthesize tax from the business tax_rate when no tax_amount was stamped", () => {
+    // List/card surfaces must display the same stamped pricing as the
+    // detail page: tax comes only from the appointment itself, never
+    // synthesized from the business default (see appointmentTotal.ts).
     const total = computeAppointmentTotal(
       { estimated_cost: 100 },
       { tax_rate: 8 },
     );
-    expect(total).toBe(108);
+    expect(total).toBe(100);
   });
 
   it("applies fee settings (waste oil + shop fee) into the total", () => {

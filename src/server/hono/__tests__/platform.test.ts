@@ -169,7 +169,10 @@ describe("platform router", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...body, invited_email: "nope" }),
       });
-      expect(res.status).toBe(500);
+      // zod email violation -> ZodError -> 400 invalid_input via
+      // errorResponse (validation failures are a 400, never a 500).
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.code).toBe("invalid_input");
     });
   });
 

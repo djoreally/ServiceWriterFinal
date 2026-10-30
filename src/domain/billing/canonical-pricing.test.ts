@@ -1,4 +1,3 @@
-import { describe, expect, it } from "vitest";
 import { ANNUAL_DISCOUNT_RATE, SERVICE_WRITER_PRICING, annualPriceFromMonthly } from "./canonical-pricing";
 
 describe("canonical Service Writer pricing", () => {

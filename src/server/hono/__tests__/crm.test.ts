@@ -70,7 +70,10 @@ describe("crm router", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...body, email: "not-an-email" }),
       });
-      expect(res.status).toBe(500);
+      // zod email violation -> ZodError -> 400 invalid_input via
+      // errorResponse (validation failures are a 400, never a 500).
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.code).toBe("invalid_input");
       expect(calls.inserts).toHaveLength(0);
     });
 
@@ -80,7 +83,9 @@ describe("crm router", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ workspace_id: WS_ID }),
       });
-      expect(res.status).toBe(500);
+      // Missing required field -> ZodError -> 400 invalid_input.
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.code).toBe("invalid_input");
     });
 
     it("enforces staff write roles", async () => {
@@ -137,8 +142,10 @@ describe("crm router", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ workspace_id: WS_ID }),
       });
-      // zod .refine violation -> ZodError -> 500 via app onError
-      expect(res.status).toBe(500);
+      // zod .refine violation -> ZodError -> 400 invalid_input via
+      // errorResponse (validation failures are a 400, never a 500).
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.code).toBe("invalid_input");
       expect(calls.updates).toHaveLength(0);
     });
   });

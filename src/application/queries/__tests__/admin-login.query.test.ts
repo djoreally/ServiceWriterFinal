@@ -1,34 +1,44 @@
-jest.mock("@/integrations/supabase/client", () => {
-  const maybeSingle = jest.fn();
-  const eqRole = jest.fn(() => ({ maybeSingle }));
-  const eqUser = jest.fn(() => ({ eq: eqRole }));
-  const select = jest.fn(() => ({ eq: eqUser }));
-
-  return {
-    supabase: {
-      auth: {
-        signInWithPassword: jest.fn(),
-        signOut: jest.fn(),
-      },
-      from: jest.fn(() => ({
-        select,
-      })),
+jest.mock("@/integrations/supabase/client", () => ({
+  supabase: {
+    auth: {
+      signInWithPassword: jest.fn(),
+      signOut: jest.fn(),
     },
-  };
-});
+  },
+}));
+
+jest.mock("@/lib/api-client", () => ({
+  apiClient: {
+    get: jest.fn(),
+    post: jest.fn(),
+    patch: jest.fn(),
+    delete: jest.fn(),
+  },
+  ApiClientError: class ApiClientError extends Error {
+    constructor(
+      public status: number,
+      public code: string,
+      message: string,
+    ) {
+      super(message);
+      this.name = "ApiClientError";
+    }
+  },
+}));
 
 import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { checkAdminRole, signInAdmin, signOut } from "@/application/queries/admin-login.query";
 
 describe("admin-login.query auth boundaries", () => {
   const mockSignInWithPassword = supabase.auth.signInWithPassword as jest.Mock;
   const mockSignOut = supabase.auth.signOut as jest.Mock;
-  const mockFrom = supabase.from as jest.Mock;
+  const mockGet = apiClient.get as jest.Mock;
 
   beforeEach(() => {
     mockSignInWithPassword.mockReset();
     mockSignOut.mockReset();
-    mockFrom.mockClear();
+    mockGet.mockReset();
   });
 
   it("signInAdmin passes credentials to auth provider", async () => {
@@ -42,22 +52,20 @@ describe("admin-login.query auth boundaries", () => {
     });
   });
 
-  it("checkAdminRole enforces user and admin role filters", async () => {
-    await checkAdminRole("user-123");
+  it("checkAdminRole resolves the role through the admin role endpoint", async () => {
+    // The user + admin role filters now run server-side: the endpoint
+    // (src/server/hono/routes/platform.ts) queries user_roles with
+    // .eq("user_id", userId).eq("role", "admin"). This pins the client
+    // half: the check is scoped to the exact user id and surfaces the
+    // server's role row.
+    mockGet.mockResolvedValue({ data: { role: "admin" } });
 
-    expect(mockFrom).toHaveBeenCalledWith("user_roles");
+    await expect(checkAdminRole("user-123")).resolves.toEqual({
+      data: { role: "admin" },
+      error: null,
+    });
 
-    const select = mockFrom.mock.results[0].value.select as jest.Mock;
-    expect(select).toHaveBeenCalledWith("role");
-
-    const eqUser = select.mock.results[0].value.eq as jest.Mock;
-    expect(eqUser).toHaveBeenCalledWith("user_id", "user-123");
-
-    const eqRole = eqUser.mock.results[0].value.eq as jest.Mock;
-    expect(eqRole).toHaveBeenCalledWith("role", "admin");
-
-    const maybeSingle = eqRole.mock.results[0].value.maybeSingle as jest.Mock;
-    expect(maybeSingle).toHaveBeenCalled();
+    expect(mockGet).toHaveBeenCalledWith("/v1/platform/admin/users/user-123/role");
   });
 
   it("signOut delegates to auth signOut", async () => {

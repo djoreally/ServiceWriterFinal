@@ -36,6 +36,16 @@ jest.mock("@/lib/api-client", () => ({
     patch: jest.fn(),
     delete: jest.fn(),
   },
+  ApiClientError: class ApiClientError extends Error {
+    constructor(
+      public status: number,
+      public code: string,
+      message: string,
+    ) {
+      super(message);
+      this.name = "ApiClientError";
+    }
+  },
 }));
 jest.mock("@/application/queries/settings.query", () => ({ resolveCurrentWorkspace: jest.fn() }));
 jest.mock("@/lib/auth/current-user", () => ({ getCurrentAuthUser: jest.fn() }));
@@ -105,22 +115,38 @@ describe("coverage-critical persistence contracts", () => {
   });
 
   it("preserves vehicle-scoped booking persistence payloads", async () => {
-    await bookAppointmentSafe({ p_booking_slug: "provider-booking", p_scheduled_date: "2026-08-20", p_scheduled_time: "10:00", p_duration_minutes: 90, p_title: "Two vehicles", p_guest_name: "Customer", p_guest_email: "customer@example.com", p_guest_phone: null, p_description: "Vehicle 1 oil; Vehicle 2 tires", p_notes: null, p_estimated_cost: 300, p_tax_amount: 24, p_service_catalog_id: null, p_vehicle_id: null });
-    expect(rpc).toHaveBeenCalledWith("public_booking_book_appointment", expect.objectContaining({ p_status: "confirmed", p_vehicle_id: null }));
+    // Canonical creation now requires a persisted vehicle and a service
+    // location, and posts to the typed endpoint (which does not expose
+    // the underlying RPC name); configuration/service writes go through
+    // the booking-rpc proxy with the caller's contact context.
+    apiPost.mockResolvedValue({ data: "appointment-1", error: null });
+    await bookAppointmentSafe({ p_booking_slug: "provider-booking", p_scheduled_date: "2026-08-20", p_scheduled_time: "10:00", p_duration_minutes: 90, p_title: "Two vehicles", p_guest_name: "Customer", p_guest_email: "customer@example.com", p_guest_phone: null, p_description: "Vehicle 1 oil; Vehicle 2 tires", p_notes: null, p_estimated_cost: 300, p_tax_amount: 24, p_service_catalog_id: null, p_vehicle_id: "persisted-1", p_location_address: "123 Main St", p_location_lat: null, p_location_lng: null });
+    expect(apiPost).toHaveBeenCalledWith("/v1/public-bookings/appointments", expect.objectContaining({ p_status: "confirmed", p_vehicle_id: "persisted-1", p_location_address: "123 Main St" }));
     const configuration = { version: 1, vehicles: [{ clientVehicleId: "vehicle-1", services: [{ id: "oil", name: "Oil", price: 90, quantity: 1 }] }, { clientVehicleId: "vehicle-2", services: [{ id: "tires", name: "Tires", price: 210, quantity: 4 }] }] } as never;
-    await saveAppointmentBookingConfiguration("appointment-1", "provider-booking", configuration);
-    expect(rpc).toHaveBeenCalledWith("public_booking_save_configuration", expect.objectContaining({ p_appointment_id: "appointment-1", p_configuration: configuration }));
-    await insertBookingAppointmentServices("appointment-1", "provider-booking", [{ vehicle_id: "persisted-1", service_catalog_id: "oil", name: "Oil", price: 90, quantity: 1, is_prepaid: false }, { vehicle_id: "persisted-2", service_catalog_id: "tires", name: "Tire", price: 210, quantity: 4, is_prepaid: false }]);
-    expect(rpc).toHaveBeenCalledWith("public_booking_insert_services", expect.objectContaining({ p_services: expect.arrayContaining([expect.objectContaining({ vehicle_id: "persisted-2", quantity: 4 })]) }));
+    await saveAppointmentBookingConfiguration("appointment-1", "provider-booking", "customer@example.com", "555-0100", configuration);
+    expect(apiPost).toHaveBeenCalledWith("/v1/appointments/booking-rpc", { fn: "public_booking_save_configuration_v2", params: expect.objectContaining({ p_appointment_id: "appointment-1", p_configuration: configuration }) });
+    await insertBookingAppointmentServices("appointment-1", "provider-booking", "customer@example.com", "555-0100", [{ vehicle_id: "persisted-1", service_catalog_id: "oil", name: "Oil", price: 90, quantity: 1, is_prepaid: false }, { vehicle_id: "persisted-2", service_catalog_id: "tires", name: "Tire", price: 210, quantity: 4, is_prepaid: false }]);
+    expect(apiPost).toHaveBeenCalledWith("/v1/appointments/booking-rpc", { fn: "public_booking_insert_services_v7", params: expect.objectContaining({ p_services: expect.arrayContaining([expect.objectContaining({ vehicle_id: "persisted-2", quantity: 4 })]) }) });
   });
 
   it("covers appointment update persistence and notification payloads", async () => {
-    const eq = jest.fn().mockResolvedValue({ error: null });
-    const update = jest.fn().mockReturnValue({ eq });
-    from.mockReturnValue({ update });
-    await updateBookingAppointment("appointment-1", { status: "confirmed" });
-    expect(update).toHaveBeenCalledWith({ status: "confirmed" });
-    expect(eq).toHaveBeenCalledWith("id", "appointment-1");
+    // Public-booking updates are context-only now (dispatch notes /
+    // location) via the v2 context RPC; the booking slug comes from the
+    // /book/<slug> URL.
+    window.history.pushState({}, "", "/book/provider-booking");
+    apiPost.mockResolvedValue({ data: null, error: null });
+    await updateBookingAppointment("appointment-1", { dispatch_notes: "Gate code 42", location_address: "123 Main St" }, "customer@example.com", "555-0100");
+    expect(apiPost).toHaveBeenCalledWith("/v1/appointments/booking-rpc", {
+      fn: "public_booking_update_appointment_context_v2",
+      params: expect.objectContaining({
+        p_booking_slug: "provider-booking",
+        p_appointment_id: "appointment-1",
+        p_customer_email: "customer@example.com",
+        p_customer_phone: "555-0100",
+        p_dispatch_notes: "Gate code 42",
+        p_location_address: "123 Main St",
+      }),
+    });
 
     await notifyLowInventory("Tire", 2, 4);
     await notifyNewBooking("Customer", "Tire installation", "2026-08-20");

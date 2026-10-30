@@ -8,10 +8,14 @@ const rows: ServiceCategoryPolicyRow[] = [
 ];
 
 describe("resolveCategoryPolicy", () => {
-  it("defaults to YMM + fluids when nothing is selected", () => {
+  it("defaults to YMM without fluid specs when nothing is selected", () => {
+    // Since aecf70f0d ("categories deterministically drive fitment
+    // requirements"), fluid specs are shown only when an oil/fluid
+    // service is actually selected — the empty-selection default hides
+    // them instead of assuming an oil service.
     expect(resolveCategoryPolicy(rows, [])).toEqual({
       vehicleSelector: "ymm_engine",
-      showsFluidSpecs: true,
+      showsFluidSpecs: false,
       matched: false,
       requirements: ["basic_vehicle"],
     });
@@ -41,8 +45,14 @@ describe("resolveCategoryPolicy", () => {
     expect(policy.vehicleSelector).toBe("ymm_engine");
   });
 
-  it("prefers the tire selector when a tire service is mixed in", () => {
-    expect(resolveCategoryPolicy(rows, ["oil_change", "tires"]).vehicleSelector).toBe("wheel_tire");
+  it("keeps the YMM selector when oil and tire services are mixed in", () => {
+    // Combined oil+tire bookings keep the authoritative YMM+engine
+    // selector and append tire fitment; only pure tire bookings use the
+    // wheel/tire selector.
+    const policy = resolveCategoryPolicy(rows, ["oil_change", "tires"]);
+    expect(policy.vehicleSelector).toBe("ymm_engine");
+    expect(policy.showsFluidSpecs).toBe(true);
+    expect(policy.requirements).toEqual(expect.arrayContaining(["oil_fitment", "tire_fitment"]));
   });
 
   it("falls back to keywords for legacy free-text categories", () => {

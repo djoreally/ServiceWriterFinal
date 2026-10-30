@@ -1,14 +1,27 @@
-jest.mock("@/integrations/supabase/client", () => ({
-  supabase: {
-    rpc: jest.fn(),
-    from: jest.fn(),
-    auth: {
-      getUser: jest.fn(),
-    },
+jest.mock("@/lib/api-client", () => ({
+  apiClient: {
+    get: jest.fn(),
+    post: jest.fn(),
+    patch: jest.fn(),
+    delete: jest.fn(),
+  },
+  ApiClientError: class ApiClientError extends Error {
+    constructor(
+      public status: number,
+      public code: string,
+      message: string,
+    ) {
+      super(message);
+      this.name = "ApiClientError";
+    }
   },
 }));
 
-import { supabase } from "@/integrations/supabase/client";
+jest.mock("@/application/queries/settings.query", () => ({
+  resolveCurrentWorkspace: jest.fn(async () => ({ workspaceId: "workspace-1" })),
+}));
+
+import { apiClient } from "@/lib/api-client";
 import { createServicePackage, updateServicePackage } from "@/application/commands/packages.command";
 
 const payload = {
@@ -34,47 +47,53 @@ const items = [
   },
 ];
 
+// The command posts to the canonical service-packages API; the Hono route
+// forwards `items` to the upsert_service_package RPC as a JSONB array.
+// These tests pin the client half of that contract: items travel as a
+// real array, never a stringified JSON blob.
 describe("service package commands", () => {
-  const mockRpc = supabase.rpc as jest.Mock;
+  const mockPost = apiClient.post as jest.Mock;
 
   beforeEach(() => {
-    mockRpc.mockReset();
+    mockPost.mockReset();
   });
 
   it("creates packages with JSONB item arrays instead of stringified JSON", async () => {
-    mockRpc.mockResolvedValue({ data: "package-id", error: null });
+    mockPost.mockResolvedValue({ data: "package-id" });
 
     await expect(createServicePackage(payload, items)).resolves.toBe("package-id");
 
-    expect(mockRpc).toHaveBeenCalledWith("upsert_service_package", {
-      p_name: payload.name,
-      p_description: payload.description,
-      p_package_price: payload.package_price,
-      p_discount_type: payload.discount_type,
-      p_discount_value: payload.discount_value,
-      p_is_active: payload.is_active,
-      p_estimated_duration: payload.estimated_duration,
-      p_items: items,
+    expect(mockPost).toHaveBeenCalledWith("/v1/platform/service-packages/upsert", {
+      selected_workspace_id: "workspace-1",
+      name: payload.name,
+      description: payload.description,
+      package_price: payload.package_price,
+      discount_type: payload.discount_type,
+      discount_value: payload.discount_value,
+      is_active: payload.is_active,
+      estimated_duration: payload.estimated_duration,
+      items,
     });
-    expect(typeof mockRpc.mock.calls[0][1].p_items).not.toBe("string");
+    expect(typeof mockPost.mock.calls[0][1].items).not.toBe("string");
   });
 
   it("updates packages with JSONB item arrays instead of stringified JSON", async () => {
-    mockRpc.mockResolvedValue({ data: "package-id", error: null });
+    mockPost.mockResolvedValue({ data: "package-id" });
 
     await expect(updateServicePackage("package-id", payload, items)).resolves.toBeUndefined();
 
-    expect(mockRpc).toHaveBeenCalledWith("upsert_service_package", {
-      p_package_id: "package-id",
-      p_name: payload.name,
-      p_description: payload.description,
-      p_package_price: payload.package_price,
-      p_discount_type: payload.discount_type,
-      p_discount_value: payload.discount_value,
-      p_is_active: payload.is_active,
-      p_estimated_duration: payload.estimated_duration,
-      p_items: items,
+    expect(mockPost).toHaveBeenCalledWith("/v1/platform/service-packages/upsert", {
+      selected_workspace_id: "workspace-1",
+      package_id: "package-id",
+      name: payload.name,
+      description: payload.description,
+      package_price: payload.package_price,
+      discount_type: payload.discount_type,
+      discount_value: payload.discount_value,
+      is_active: payload.is_active,
+      estimated_duration: payload.estimated_duration,
+      items,
     });
-    expect(typeof mockRpc.mock.calls[0][1].p_items).not.toBe("string");
+    expect(typeof mockPost.mock.calls[0][1].items).not.toBe("string");
   });
 });

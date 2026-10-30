@@ -40,8 +40,11 @@ describe("Phase 1 Journey — Auth and Routing Spine", () => {
       persona: personas.asDispatcher(),
     });
 
+    // /dispatch is an App Router redirect page in production
+    // (app/(app)/dispatch/page.tsx) — the dispatch engine lives at
+    // /command-center now.
     await waitFor(() => {
-      expect(getCurrentPath()).toBe("/dispatch");
+      expect(getCurrentPath()).toBe("/command-center");
     });
 
     expectNoConsoleErrors();

@@ -80,7 +80,10 @@ describe("documents router", () => {
       const res = await documentsRouter.request(
         "/v1/invoices?workspace_id=nope",
       );
-      expect(res.status).toBe(500);
+      // zod uuid parse on the query param -> ZodError -> 400
+      // invalid_input via errorResponse (never a 500).
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.code).toBe("invalid_input");
     });
   });
 
@@ -136,7 +139,10 @@ describe("documents router", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...body, subtotal: -5 }),
       });
-      expect(res.status).toBe(500);
+      // zod nonnegative violation -> ZodError -> 400 invalid_input via
+      // errorResponse (validation failures are a 400, never a 500).
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.code).toBe("invalid_input");
       expect(calls.rpc).toHaveLength(0);
     });
 

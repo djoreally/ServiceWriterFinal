@@ -1,8 +1,23 @@
-jest.mock("@/integrations/supabase/client", () => ({
-  supabase: { rpc: jest.fn() },
+jest.mock("@/lib/api-client", () => ({
+  apiClient: {
+    get: jest.fn(),
+    post: jest.fn(),
+    patch: jest.fn(),
+    delete: jest.fn(),
+  },
+  ApiClientError: class ApiClientError extends Error {
+    constructor(
+      public status: number,
+      public code: string,
+      message: string,
+    ) {
+      super(message);
+      this.name = "ApiClientError";
+    }
+  },
 }));
 
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import {
   resolveBookingFilterMatch,
   buildFilterMatchJobContext,
@@ -10,7 +25,10 @@ import {
   requiredPartCategories,
 } from "@/lib/bookingFilterMatch";
 
-const mockRpc = supabase.rpc as unknown as jest.Mock;
+// Fitment resolution now goes through POST /v1/vehicles/filter-resolution
+// (backed server-side by resolve_vehicle_filters_v1); the mock sits at
+// that API boundary.
+const mockPost = apiClient.post as unknown as jest.Mock;
 
 function filterRow(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -31,7 +49,7 @@ function filterRow(overrides: Partial<Record<string, unknown>> = {}) {
 const BASE_DESCRIPTION = "Vehicles: 2020 Toyota Camry\nServices: Oil Change\nPayment: Pay at Service";
 
 describe("booking submit filter-match attachment (end-to-end)", () => {
-  beforeEach(() => mockRpc.mockReset());
+  beforeEach(() => mockPost.mockReset());
 
   it("infers oil filter as the required category for an oil change", () => {
     expect(requiredPartCategories(["Full Synthetic Oil Change"])).toEqual(["oil_filter"]);
@@ -40,7 +58,7 @@ describe("booking submit filter-match attachment (end-to-end)", () => {
   });
 
   it("attaches the resolved match to BOTH description and dispatch notes", async () => {
-    mockRpc.mockResolvedValue({ data: [filterRow()], error: null });
+    mockPost.mockResolvedValue({ data: [filterRow()] });
 
     const matches = await resolveBookingFilterMatch({
       vehicles: [{ year: "2020", make: "Toyota", model: "Camry", licensePlate: "ABC123" }],
@@ -66,11 +84,11 @@ describe("booking submit filter-match attachment (end-to-end)", () => {
   });
 
   it("labels a match for EVERY selected vehicle", async () => {
-    mockRpc.mockImplementation((_fn: string, args: { p_make: string }) =>
+    mockPost.mockImplementation((_path: string, args: { make: string }) =>
       Promise.resolve(
-        args.p_make === "Toyota"
-          ? { data: [filterRow()], error: null }
-          : { data: [filterRow({ brand: "FRAM", part_number: "PH3593A", oem_number: null })], error: null },
+        args.make === "Toyota"
+          ? { data: [filterRow()] }
+          : { data: [filterRow({ brand: "FRAM", part_number: "PH3593A", oem_number: null })] },
       ),
     );
 
@@ -95,7 +113,7 @@ describe("booking submit filter-match attachment (end-to-end)", () => {
   });
 
   it("still labels a vehicle with no catalogue match so the tech verifies on site", async () => {
-    mockRpc.mockResolvedValue({ data: [], error: null });
+    mockPost.mockResolvedValue({ data: [] });
 
     const matches = await resolveBookingFilterMatch({
       vehicles: [{ year: "2026", make: "Rivian", model: "R1T" }],
@@ -113,7 +131,7 @@ describe("booking submit filter-match attachment (end-to-end)", () => {
   });
 
   it("keeps the vehicle in job context when the lookup RPC fails", async () => {
-    mockRpc.mockResolvedValue({ data: null, error: { message: "boom" } });
+    mockPost.mockRejectedValue(new Error("boom"));
 
     const matches = await resolveBookingFilterMatch({
       vehicles: [{ year: "2020", make: "Toyota", model: "Camry" }],

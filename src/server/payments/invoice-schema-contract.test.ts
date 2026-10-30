@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
 
 const root = process.cwd();
 const read = (relativePath: string) => fs.readFileSync(path.join(root, relativePath), "utf8");
@@ -28,9 +27,14 @@ describe("canonical invoice delivery schema contract", () => {
 
   it("records delivery evidence through the trusted server client", () => {
     const route = read("app/api/v1/invoices/[id]/send/route.ts");
+    const sender = read("src/server/messaging/lifecycle-sender.ts");
 
-    expect(route).toContain('createSupabaseAdminClient');
-    expect(route).toContain('admin.from("message_logs").insert');
-    expect(route).not.toContain('supabase.from("message_logs").insert');
+    // The route delegates delivery to the lifecycle sender, which records
+    // message_logs evidence through the admin (trusted server) client —
+    // never through the caller's RLS-scoped client in the route itself.
+    expect(route).toContain("sendLifecycleEmail");
+    expect(sender).toContain("createSupabaseAdminClient");
+    expect(sender).toContain('supabase.from("message_logs").upsert');
+    expect(route).not.toContain('from("message_logs")');
   });
 });

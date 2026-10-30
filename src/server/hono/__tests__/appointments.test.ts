@@ -128,8 +128,16 @@ describe("appointments router", () => {
       expect(res.status).toBe(201);
       const body = await res.json();
       expect(body.data.id).toBe(APPT_ID);
-      expect(calls.inserts).toHaveLength(1);
+      // A create writes two rows: the appointment itself, plus the
+      // audit_events record from the route's logMutation call
+      // (action "appointment.created"). The audit write is part of the
+      // current contract, so the insert count is 2, not 1.
+      expect(calls.inserts).toHaveLength(2);
       expect(calls.inserts[0].table).toBe("appointments");
+      expect(calls.inserts[1].table).toBe("audit_events");
+      expect(
+        (calls.inserts[1].rows as Record<string, unknown>).action,
+      ).toBe("appointment.created");
     });
 
     it("rejects an unknown customer with 400", async () => {
@@ -153,8 +161,10 @@ describe("appointments router", () => {
           ends_at: "2026-10-01T13:00:00Z",
         }),
       });
-      // zod superRefine violation -> ZodError -> 500 via app onError
-      expect(res.status).toBe(500);
+      // zod superRefine violation -> ZodError -> 400 invalid_input via
+      // errorResponse: client validation failures are a 400, never a 500.
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.code).toBe("invalid_input");
     });
 
     it("enforces staff roles on create", async () => {
@@ -192,11 +202,14 @@ describe("appointments router", () => {
       expect((await res.json()).data.id).toBe(APPT_ID);
     });
 
-    it("rejects a malformed id", async () => {
+    it("rejects a malformed id with 404 (route pattern only matches uuid-shaped ids)", async () => {
       const res = await appointmentsRouter.request(
         `/v1/appointments/not-a-uuid?workspace_id=${WS_ID}`,
       );
-      expect(res.status).toBe(500);
+      // The GET route is registered with an id pattern of
+      // {[0-9a-fA-F-]{36}}, so a malformed id matches no route and the
+      // router answers 404 rather than reaching the handler at all.
+      expect(res.status).toBe(404);
     });
   });
 

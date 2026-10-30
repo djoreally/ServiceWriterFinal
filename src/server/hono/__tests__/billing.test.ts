@@ -89,8 +89,10 @@ describe("billing router", () => {
       const res = await billingRouter.request(
         "/v1/payments?workspace_id=nope",
       );
-      // zod uuid parse on the query param -> 500 via app onError
-      expect(res.status).toBe(500);
+      // zod uuid parse on the query param -> ZodError -> 400
+      // invalid_input via errorResponse (never a 500).
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.code).toBe("invalid_input");
     });
   });
 
