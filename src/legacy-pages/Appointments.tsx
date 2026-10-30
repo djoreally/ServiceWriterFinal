@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
 import { useRealtimeWorkflow } from "@/hooks/useRealtimeWorkflow";
@@ -7,7 +7,6 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { MobileAppointmentView } from "@/components/appointments/MobileAppointmentView";
 import { CompleteAppointmentDialog } from "@/components/appointments/CompleteAppointmentDialog";
 import { WorkflowStatusIndicator } from "@/components/workflow/WorkflowStatusIndicator";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/states";
@@ -28,10 +27,8 @@ import {
 } from "@/application/commands";
 // ENTERPRISE: In-app notifications are now created server-side by transactional-email-worker
 import { toast } from "@/components/ui/sonner";
-import { Loader2, Calendar, Download, LayoutGrid } from "lucide-react";
+import { Loader2, Download } from "lucide-react";
 import { TableSkeleton } from "@/components/loading/PageSkeletons";
-import { DispatchBoard } from "@/components/workflow/DispatchBoard";
-import { addDays } from "date-fns";
 import { downloadCsv } from "@/lib/exportCsv";
 import { useOptimisticAction } from "@/hooks/useOptimisticAction";
 import {
@@ -49,9 +46,7 @@ const AppointmentsPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [userId, setUserId] = useState<string | undefined>();
-  const [viewMode, setViewMode] = useState<"list" | "calendar" | "month">("list");
-  const [sourceFilter, setSourceFilter] = useState<"all" | "upcoming">("all");
-  const [activeTab, setActiveTab] = useState<"appointments" | "dispatch">("appointments");
+  const [viewMode, setViewMode] = useState<"today" | "week" | "month">("today");
 
   // Real-time workflow updates
   const { isConnected } = useRealtimeWorkflow({
@@ -198,27 +193,6 @@ const AppointmentsPage = () => {
 
   const { isRefreshing, containerRef } = usePullToRefresh({ onRefresh: fetchData });
 
-  // Filter appointments based on source tab
-  const filteredAppointments = useMemo(() => {
-    if (sourceFilter === "upcoming") {
-      const now = new Date();
-      const sevenDaysOut = addDays(now, 7);
-
-      const withinNextWeek = appointments
-        .map((apt) => ({
-          appointment: apt,
-          date: new Date(`${apt.scheduled_date}T${apt.scheduled_time || "00:00"}`),
-        }))
-        .filter(({ date }) => !Number.isNaN(date.getTime()) && date >= now && date <= sevenDaysOut)
-        .sort((a, b) => a.date.getTime() - b.date.getTime())
-        .map(({ appointment }) => appointment);
-
-      return withinNextWeek;
-    }
-
-    return appointments;
-  }, [appointments, sourceFilter]);
-
   const handleExportAppointments = useCallback(() => {
     downloadCsv("appointments", [
       { header: "Title", value: (appointment) => appointment.title || "" },
@@ -232,8 +206,8 @@ const AppointmentsPage = () => {
       { header: "Location", value: (appointment) => appointment.location_address || "" },
       { header: "Source", value: (appointment) => appointment.source || "" },
       { header: "Notes", value: (appointment) => appointment.notes || "" },
-    ], filteredAppointments);
-  }, [filteredAppointments]);
+    ], appointments);
+  }, [appointments]);
 
   useEffect(() => {
     fetchData();
@@ -500,118 +474,87 @@ const AppointmentsPage = () => {
     }
   };
 
-  // Unified view for both mobile and desktop - uses the same component with List/Calendar toggle
+  // Unified view for both mobile and desktop - uses the same component with Today/Week/Month toggle
   return (
     <AppLayout title="Appointments">
-      {/* Top-level tabs: Appointments vs Dispatch Board */}
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "appointments" | "dispatch")} className="mb-4">
-        {/* One toolbar: view switcher + source filter left, sync status + export right. */}
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <TabsList>
-              <TabsTrigger value="appointments" className="gap-2">
-                <Calendar className="h-4 w-4" />
-                Appointments
-              </TabsTrigger>
-              <TabsTrigger value="dispatch" className="gap-2">
-                <LayoutGrid className="h-4 w-4" />
-                Dispatch Board
-              </TabsTrigger>
-            </TabsList>
-            {activeTab === "appointments" && (
-              <Tabs value={sourceFilter} onValueChange={(v) => setSourceFilter(v as "all" | "upcoming")}>
-                <TabsList>
-                  <TabsTrigger value="upcoming" className="gap-2">
-                    <Calendar className="h-4 w-4" />
-                    Upcoming (7d)
-                  </TabsTrigger>
-                  <TabsTrigger value="all" className="gap-2">
-                    <Calendar className="h-4 w-4" />
-                    All Appointments
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
-            )}
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <WorkflowStatusIndicator isConnected={isConnected} />
-            {pendingOutboxCount > 0 && (
-              <>
-                <Badge variant="secondary">{pendingOutboxCount} pending sync</Badge>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleRetryPendingSync}
-                  disabled={syncingOutbox}
-                >
-                  {syncingOutbox ? "Retrying..." : "Retry sync"}
-                </Button>
-              </>
-            )}
-            {deadLetterCount > 0 && (
-              <>
-                <Badge variant="destructive">{deadLetterCount} dead-letter</Badge>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handleRetryDeadLetter}
-                  disabled={resolvingDeadLetter}
-                >
-                  Retry dead-letter
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={handleDiscardDeadLetter}
-                  disabled={resolvingDeadLetter}
-                >
-                  Discard
-                </Button>
-              </>
-            )}
-            {appointmentsLoading && appointments.length > 0 && (
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            )}
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-2"
-              onClick={handleExportAppointments}
-              disabled={appointmentsLoading}
-            >
-              <Download className="h-4 w-4" />
-              Export appointments
-            </Button>
-          </div>
+      {/* One toolbar: sync status left, outbox actions + export right. */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <WorkflowStatusIndicator isConnected={isConnected} />
         </div>
-
-        <TabsContent value="appointments" className="mt-4">
-          {appointmentsError ? (
-            <ErrorState title="Appointments couldn't be loaded" description={appointmentsError} />
-          ) : appointmentsLoading && appointments.length === 0 ? (
-            <TableSkeleton rows={7} columns={5} />
-          ) : (
-            <MobileAppointmentView
-              appointments={filteredAppointments as Appointment[]}
-              onSelectAppointment={handleSelectAppointment}
-              onAddAppointment={handleAddAppointment}
-              onEditAppointment={handleEditAppointment}
-              businessHours={businessHours}
-              onDateChange={setCurrentDate}
-              currentDate={currentDate}
-              onCompleteAppointment={handleCompleteAppointment}
-              onStatusChange={handleStatusChange}
-              viewMode={viewMode}
-              onViewModeChange={setViewMode}
-              scheduleResources={scheduleResources}
-            />
+        <div className="flex flex-wrap items-center gap-2">
+          {pendingOutboxCount > 0 && (
+            <>
+              <Badge variant="secondary">{pendingOutboxCount} pending sync</Badge>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleRetryPendingSync}
+                disabled={syncingOutbox}
+              >
+                {syncingOutbox ? "Retrying..." : "Retry sync"}
+              </Button>
+            </>
           )}
-        </TabsContent>
+          {deadLetterCount > 0 && (
+            <>
+              <Badge variant="destructive">{deadLetterCount} dead-letter</Badge>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleRetryDeadLetter}
+                disabled={resolvingDeadLetter}
+              >
+                Retry dead-letter
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleDiscardDeadLetter}
+                disabled={resolvingDeadLetter}
+              >
+                Discard
+              </Button>
+            </>
+          )}
+          {appointmentsLoading && appointments.length > 0 && (
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-2"
+            onClick={handleExportAppointments}
+            disabled={appointmentsLoading}
+          >
+            <Download className="h-4 w-4" />
+            Export appointments
+          </Button>
+        </div>
+      </div>
 
-        <TabsContent value="dispatch" className="mt-4">
-          <DispatchBoard />
-        </TabsContent>
-      </Tabs>
+      <div className="mt-4">
+        {appointmentsError ? (
+          <ErrorState title="Appointments couldn't be loaded" description={appointmentsError} />
+        ) : appointmentsLoading && appointments.length === 0 ? (
+          <TableSkeleton rows={7} columns={5} />
+        ) : (
+          <MobileAppointmentView
+            appointments={appointments as Appointment[]}
+            onSelectAppointment={handleSelectAppointment}
+            onAddAppointment={handleAddAppointment}
+            onEditAppointment={handleEditAppointment}
+            businessHours={businessHours}
+            onDateChange={setCurrentDate}
+            currentDate={currentDate}
+            onCompleteAppointment={handleCompleteAppointment}
+            onStatusChange={handleStatusChange}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+            scheduleResources={scheduleResources}
+          />
+        )}
+      </div>
 
       <AppointmentForm
         open={dialogOpen}

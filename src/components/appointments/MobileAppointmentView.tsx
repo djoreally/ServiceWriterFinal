@@ -1,7 +1,7 @@
 
 import { useState, useMemo } from 'react';
 import { Appointment, BusinessHours } from "@/shared/types";
-import { format, parseISO, isToday, isPast, isSameDay, isSameMonth, addDays, subDays, addMonths, subMonths, startOfMonth, endOfMonth, startOfWeek, eachDayOfInterval } from 'date-fns';
+import { format, parseISO, isToday, isPast, isSameDay, isSameMonth, addDays, subDays, addMonths, subMonths, addWeeks, subWeeks, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval } from 'date-fns';
 // ⚡ Native groupBy - avoids lodash dependency (not installed in prod)
 const groupBy = <T,>(arr: T[], key: keyof T): Record<string, T[]> =>
   arr.reduce((acc, item) => {
@@ -12,7 +12,6 @@ const groupBy = <T,>(arr: T[], key: keyof T): Record<string, T[]> =>
 import { Plus, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 
 import { MobileAppointmentCard } from './MobileAppointmentCard';
-import { DayCalendarView } from './DayCalendarView';
 import type { ScheduleResource } from '@/components/schedule/CurbeeScheduleBoard';
 import { Button } from '@/components/ui/button';
 import { SegmentedControl } from '@/components/ui/setting-controls';
@@ -22,8 +21,8 @@ import { Badge } from '@/components/ui/badge';
 import { getAppointmentStatusStyle } from './statusStyles';
 import { combineDateAndTime, formatDateLabel } from '@/lib/datetime';
 
-type ViewMode = 'list' | 'calendar' | 'month';
-type FilterMode = 'all' | 'today' | 'confirmed' | 'completed' | 'cancelled' | 'upcoming';
+type ViewMode = 'today' | 'week' | 'month';
+type FilterMode = 'all' | 'confirmed' | 'completed' | 'cancelled';
 
 interface MobileAppointmentViewProps {
   appointments: Appointment[];
@@ -57,16 +56,14 @@ export const MobileAppointmentView = ({
   onSelectAppointment,
   onAddAppointment,
   onEditAppointment,
-  businessHours,
   onDateChange,
   currentDate,
   onCompleteAppointment,
   onStatusChange,
   viewMode: externalViewMode,
   onViewModeChange,
-  scheduleResources,
 }: MobileAppointmentViewProps) => {
-  const [internalViewMode, setInternalViewMode] = useState<ViewMode>('list');
+  const [internalViewMode, setInternalViewMode] = useState<ViewMode>('today');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
 
   // Use external viewMode if provided, otherwise use internal state
@@ -79,47 +76,34 @@ export const MobileAppointmentView = ({
     }
   };
 
-  const filteredAppointments = useMemo(() => {
-    const items = [...appointments];
-    switch (filterMode) {
-      case 'today':
-        return items.filter(a => {
-          const date = combineDateAndTime(a.scheduled_date, null);
-          return date ? isToday(date) : false;
-        });
-      case 'confirmed':
-        return items.filter(a => a.status === 'confirmed');
-      case 'completed':
-        return items.filter(a => a.status === 'completed');
-      case 'cancelled':
-        return items.filter(a => a.status === 'cancelled');
-      case 'upcoming': {
-        const now = new Date();
-        const sevenDaysOut = addDays(now, 7);
-
-        return items
-          .map((apt) => ({
-            appointment: apt,
-            when: combineDateAndTime(apt.scheduled_date, apt.scheduled_time),
-          }))
-          .filter(({ when }) => when !== null && !Number.isNaN(when.getTime()) && when >= now && when <= sevenDaysOut)
-          .sort((a, b) => a.when.getTime() - b.when.getTime())
-          .map(({ appointment }) => appointment);
-      }
-      default:
-        // "All" shows every appointment
-        return items;
+  // The list-shaped views are date-scoped by the switcher: Today shows
+  // today's appointments (the status chips then filter inside today),
+  // Week shows the week containing currentDate. Month renders its own grid.
+  const listAppointments = useMemo(() => {
+    if (viewMode === 'week') {
+      const weekStart = startOfWeek(currentDate, { weekStartsOn: 0 });
+      const weekEnd = endOfWeek(currentDate, { weekStartsOn: 0 });
+      return appointments.filter(a => {
+        const date = combineDateAndTime(a.scheduled_date, null);
+        return date !== null && date >= weekStart && date <= weekEnd;
+      });
     }
-  }, [appointments, filterMode]);
-  
+    const todays = appointments.filter(a => {
+      const date = combineDateAndTime(a.scheduled_date, null);
+      return date ? isToday(date) : false;
+    });
+    if (filterMode === 'all') return todays;
+    return todays.filter(a => a.status === filterMode);
+  }, [appointments, viewMode, filterMode, currentDate]);
+
   const groupedAppointments = useMemo(() => {
-    const sorted = [...filteredAppointments].sort((a, b) => {
+    const sorted = [...listAppointments].sort((a, b) => {
       const aTime = combineDateAndTime(a.scheduled_date, a.scheduled_time)?.getTime() ?? Number.MAX_SAFE_INTEGER;
       const bTime = combineDateAndTime(b.scheduled_date, b.scheduled_time)?.getTime() ?? Number.MAX_SAFE_INTEGER;
       return aTime - bTime;
     });
     return groupBy(sorted, 'scheduled_date');
-  }, [filteredAppointments]);
+  }, [listAppointments]);
 
   const sortedGroupKeys = useMemo(() => {
      const keys = Object.keys(groupedAppointments);
@@ -144,7 +128,7 @@ export const MobileAppointmentView = ({
      return keys;
   }, [groupedAppointments]);
 
-  const renderAppointmentList = () => {
+  const renderAppointmentList = (emptyMessage = "No appointments found for this filter.") => {
     const dayColors = [
       'border-red-400', 'border-sky-400', 'border-green-400', 'border-yellow-400', 'border-indigo-400', 'border-purple-400', 'border-pink-400',
     ];
@@ -189,7 +173,7 @@ export const MobileAppointmentView = ({
             })
           ) : (
             <div className="text-center py-20">
-              <p className="text-muted-foreground">No appointments found for this filter.</p>
+              <p className="text-muted-foreground">{emptyMessage}</p>
             </div>
           )}
         </div>
@@ -197,17 +181,28 @@ export const MobileAppointmentView = ({
     );
   };
   
-   const renderCalendar = () => (
-     <DayCalendarView
-       appointments={appointments}
-       currentDate={currentDate}
-       onAppointmentClick={onSelectAppointment}
-       onTimeSlotClick={onAddAppointment}
-       onDateChange={onDateChange}
-       businessHours={businessHours}
-       resources={scheduleResources}
-     />
-   );
+   const renderWeekView = () => {
+     const weekStart = startOfWeek(currentDate, { weekStartsOn: 0 });
+     const weekEnd = endOfWeek(currentDate, { weekStartsOn: 0 });
+     return (
+       <div className="flex flex-col h-full">
+         <div className="flex items-center justify-between p-4 border-b border-border/50">
+           <Button variant="ghost" size="icon" onClick={() => onDateChange(subWeeks(currentDate, 1))}>
+             <ChevronLeft />
+           </Button>
+           <h2 className="text-lg font-semibold">
+             {format(weekStart, "MMM d")} – {format(weekEnd, "MMM d, yyyy")}
+           </h2>
+           <Button variant="ghost" size="icon" onClick={() => onDateChange(addWeeks(currentDate, 1))}>
+             <ChevronRight />
+           </Button>
+         </div>
+         <div className="flex-1 overflow-y-auto">
+           {renderAppointmentList("No appointments this week.")}
+         </div>
+       </div>
+     );
+   };
 
    const renderMonthView = () => {
      const monthStart = startOfMonth(currentDate);
@@ -260,7 +255,7 @@ export const MobileAppointmentView = ({
                    )}
                    onClick={() => {
                      onDateChange(day);
-                     if (onViewModeChange) onViewModeChange('calendar');
+                     setViewMode('week');
                    }}
                  >
                    <div className={cn(
@@ -314,9 +309,10 @@ export const MobileAppointmentView = ({
             label="Appointment view"
             value={viewMode}
             onChange={setViewMode}
+            selectedClassName="bg-primary text-primary-foreground shadow"
             options={[
-              { value: "list", label: "List" },
-              { value: "calendar", label: "Day" },
+              { value: "today", label: "Today" },
+              { value: "week", label: "Week" },
               { value: "month", label: "Month" },
             ]}
           />
@@ -326,14 +322,14 @@ export const MobileAppointmentView = ({
         </Button>
       </div>
       
-      {viewMode === 'list' && (
+      {viewMode === 'today' && (
         <div className="shrink-0 border-b border-border/50 p-2">
             <ScrollArea className="w-full whitespace-nowrap">
                 <div className="flex gap-2 pb-2 items-center">
-                  {(['today', 'confirmed', 'completed', 'cancelled', 'upcoming', 'all'] as FilterMode[]).map(filter => (
+                  {(['all', 'confirmed', 'completed', 'cancelled'] as FilterMode[]).map(filter => (
                     <FilterPill
                       key={filter}
-                      label={filter === 'upcoming' ? 'Upcoming' : filter.charAt(0).toUpperCase() + filter.slice(1)}
+                      label={filter.charAt(0).toUpperCase() + filter.slice(1)}
                       isActive={filterMode === filter}
                       onClick={() => setFilterMode(filter)}
                     />
@@ -344,7 +340,7 @@ export const MobileAppointmentView = ({
       )}
 
       <div className="flex-1">
-        {viewMode === 'list' ? renderAppointmentList() : viewMode === 'month' ? renderMonthView() : renderCalendar()}
+        {viewMode === 'today' ? renderAppointmentList() : viewMode === 'month' ? renderMonthView() : renderWeekView()}
       </div>
     </div>
   );
