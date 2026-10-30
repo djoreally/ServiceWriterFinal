@@ -1,11 +1,13 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { usePathname } from "next/navigation";
+import { useEffect } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import {
   getTenantSlugFromHostname,
   isMigratedPath,
 } from "@/lib/migratedRoutes";
+import { isStartupDecisionPath } from "@/lib/resolveStartupRoute";
 import ShellSkeleton from "./components/routing/ShellSkeleton";
 
 const BrowserApplication = dynamic(() => import("./NextClientShell"), {
@@ -32,6 +34,22 @@ function hasSupabaseSessionCookie(): boolean {
 
 export default function ClientOnlyShell() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  // While the SPA boots and its startup gate waits on auth/role/
+  // subscription API calls, warm the route the signed-in owner lands on
+  // (§3.2.1 R3): the /dashboard RSC payload and its chunks download in
+  // parallel with the gate instead of starting only after it resolves.
+  // Owners/admins/viewers land on /dashboard (see ROLE_LANDING); other
+  // roles land elsewhere and simply ignore the prefetch.
+  useEffect(() => {
+    if (!isStartupDecisionPath(pathname)) return;
+    if (isMigratedPath(pathname)) return;
+    if (getTenantSlugFromHostname(window.location.hostname)) return;
+    if (!hasSupabaseSessionCookie()) return;
+    router.prefetch("/dashboard");
+  }, [pathname, router]);
+
   if (NATIVE_PUBLIC_ROUTES.has(pathname)) return null;
   // Migrated sections are served by App Router pages under `app/(app)/` —
   // the legacy SPA shell must not mount there (it would double-mount the
