@@ -135,6 +135,10 @@ export interface InvoiceLineItemRow {
   unit_price: number;
   line_total: number;
   display_order: number;
+  /** Recorded fee kind for fee lines (line metadata): waste_oil_fee | surcharge | shop_fee | tax. Null for service lines. */
+  fee_key: string | null;
+  /** Line provenance from line metadata (e.g. appointment_item, appointment_fee). */
+  source: string | null;
   vin: string | null;
   vehicle_year: number | null;
   vehicle_make: string | null;
@@ -285,6 +289,8 @@ export async function fetchInvoiceDetail(invoiceId: string): Promise<InvoiceFull
         unit_price: Number(line.unit_price ?? 0),
         line_total: Number(line.quantity ?? 0) * Number(line.unit_price ?? 0),
         display_order: Number(line.sort_order ?? 0),
+        fee_key: optionalString(meta.fee_key),
+        source: optionalString(meta.source),
         vin: optionalString(meta.vin),
         vehicle_year: optionalNumber(meta.vehicle_year),
         vehicle_make: optionalString(meta.vehicle_make),
@@ -342,6 +348,20 @@ export async function fetchInvoiceDetail(invoiceId: string): Promise<InvoiceFull
     fleet_clients: null,
     invoice_line_items: lines,
   };
+}
+
+/**
+ * The invoice recorded for an appointment (invoices link back via
+ * metadata.appointment_id), or null when the appointment has none.
+ * Returns the full invoice with lines and recorded totals.
+ */
+export async function fetchInvoiceForAppointment(appointmentId: string): Promise<InvoiceFullRow | null> {
+  const id = workspaceId();
+  const response = await apiClient.get<{ data: unknown[] }>(`/v1/invoices`, { query: { workspace_id: id } });
+  const rows = z.array(invoiceApiSchema).parse(response.data ?? []);
+  const match = rows.find((row) => object(row.metadata).appointment_id === appointmentId);
+  if (!match) return null;
+  return fetchInvoiceDetail(match.id);
 }
 
 export async function fetchInvoiceFormOptions(_userId: string): Promise<{

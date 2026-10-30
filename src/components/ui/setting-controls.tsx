@@ -168,6 +168,10 @@ interface SegmentedControlProps<T extends string> {
   onChange: (value: T) => void;
   /** Rendered right of the label — e.g. a ChangeDot. */
   trailing?: ReactNode;
+  /** Classes for the selected option. Defaults to the neutral card fill;
+   *  high-traffic switchers can pass the primary fill so the active
+   *  option reads as pressed at a glance. */
+  selectedClassName?: string;
 }
 
 /**
@@ -180,6 +184,7 @@ export function SegmentedControl<T extends string>({
   value,
   onChange,
   trailing,
+  selectedClassName = "bg-card text-foreground shadow-sm",
 }: SegmentedControlProps<T>) {
   return (
     <div className="space-y-2">
@@ -203,7 +208,7 @@ export function SegmentedControl<T extends string>({
             className={cn(
               "min-h-[44px] rounded-md px-3 py-2 text-sm font-medium transition-colors",
               value === opt.value
-                ? "bg-card text-foreground shadow-sm"
+                ? selectedClassName
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
