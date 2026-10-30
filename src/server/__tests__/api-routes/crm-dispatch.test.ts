@@ -155,10 +155,9 @@ describe("crm/activities (GET/POST)", () => {
     expect(body.error.code).toBe("crm_forbidden");
   });
 
-  // Grey-box note: these routes have no ZodError mapping, so schema validation
-  // failures surface as 500 internal_error via errorResponse (only 3 of the
-  // 60 v1 routes map ZodError to 400 explicitly).
-  it("POST returns 500 for an invalid activity body (no ZodError mapping)", async () => {
+  // Grey-box note: errorResponse maps ZodError to 400 invalid_input, so
+  // schema validation failures surface as 400, never 500.
+  it("POST returns 400 for an invalid activity body (ZodError maps to 400 invalid_input)", async () => {
     const { status, body } = await readJson(
       await activitiesPost(
         makeRequest("/api/v1/crm/activities", {
@@ -167,8 +166,8 @@ describe("crm/activities (GET/POST)", () => {
         }),
       ),
     );
-    expect(status).toBe(500);
-    expect(body.error.code).toBe("internal_error");
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("invalid_input");
   });
 
   it("POST creates the activity and returns 201", async () => {
@@ -221,7 +220,7 @@ describe("crm/campaigns (GET/POST)", () => {
     expect(body.data[0].name).toBe("Spring reminders");
   });
 
-  it("POST returns 500 for a missing name (no ZodError mapping)", async () => {
+  it("POST returns 400 for a missing name (ZodError maps to 400 invalid_input)", async () => {
     const { status, body } = await readJson(
       await campaignsPost(
         makeRequest("/api/v1/crm/campaigns", {
@@ -230,8 +229,8 @@ describe("crm/campaigns (GET/POST)", () => {
         }),
       ),
     );
-    expect(status).toBe(500);
-    expect(body.error.code).toBe("internal_error");
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("invalid_input");
   });
 
   it("POST drafts a campaign and returns 201", async () => {
@@ -278,14 +277,14 @@ describe("crm/profiles (GET/POST/PATCH)", () => {
     expect(body.meta).toMatchObject({ limit: 25, offset: 0 });
   });
 
-  it("POST returns 500 for a missing customer_id (no ZodError mapping)", async () => {
+  it("POST returns 400 for a missing customer_id (ZodError maps to 400 invalid_input)", async () => {
     const { status, body } = await readJson(
       await profilesPost(
         makeRequest("/api/v1/crm/profiles", { method: "POST", body: { workspace_id: WS_ID } }),
       ),
     );
-    expect(status).toBe(500);
-    expect(body.error.code).toBe("internal_error");
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("invalid_input");
   });
 
   it("POST creates a profile and returns 201", async () => {
@@ -301,7 +300,7 @@ describe("crm/profiles (GET/POST/PATCH)", () => {
     expect(body.data[0].id).toBe(PROFILE_ID);
   });
 
-  it("PATCH returns 500 when id or workspace_id is missing (no ZodError mapping)", async () => {
+  it("PATCH returns 400 when id or workspace_id is missing (ZodError maps to 400 invalid_input)", async () => {
     const { status, body } = await readJson(
       await profilesPatch(
         makeRequest("/api/v1/crm/profiles", {
@@ -310,8 +309,8 @@ describe("crm/profiles (GET/POST/PATCH)", () => {
         }),
       ),
     );
-    expect(status).toBe(500);
-    expect(body.error.code).toBe("internal_error");
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("invalid_input");
   });
 
   it("PATCH updates the profile and returns 200", async () => {
@@ -362,7 +361,7 @@ describe("dispatch-events (GET/POST)", () => {
     expect(body.pagination).toMatchObject({ limit: 25, offset: 0 });
   });
 
-  it("POST returns 500 when neither appointment_id nor work_order_id is given (no ZodError mapping)", async () => {
+  it("POST returns 400 when neither appointment_id nor work_order_id is given (ZodError maps to 400 invalid_input)", async () => {
     const { status, body } = await readJson(
       await dispatchEventsPost(
         makeRequest("/api/v1/dispatch-events", {
@@ -371,8 +370,8 @@ describe("dispatch-events (GET/POST)", () => {
         }),
       ),
     );
-    expect(status).toBe(500);
-    expect(body.error.code).toBe("internal_error");
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("invalid_input");
   });
 
   it("POST returns 403 when a technician records an event for someone else", async () => {
@@ -478,7 +477,7 @@ describe("dispatch/assign (POST)", () => {
     expect(resBody.error.code).toBe("unauthenticated");
   });
 
-  it("returns 500 for an invalid job_source (no ZodError mapping)", async () => {
+  it("returns 400 for an invalid job_source (ZodError maps to 400 invalid_input)", async () => {
     const { status, body } = await readJson(
       await dispatchAssignPost(
         makeRequest("/api/v1/dispatch/assign", {
@@ -487,8 +486,8 @@ describe("dispatch/assign (POST)", () => {
         }),
       ),
     );
-    expect(status).toBe(500);
-    expect(body.error.code).toBe("internal_error");
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("invalid_input");
   });
 
   it("assigns the job through the RPC and returns 200", async () => {

@@ -123,7 +123,10 @@ describe("vehicles router", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...body, year: 1800 }),
       });
-      expect(res.status).toBe(500);
+      // zod year-range violation -> ZodError -> 400 invalid_input via
+      // errorResponse (validation failures are a 400, never a 500).
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.code).toBe("invalid_input");
     });
   });
 

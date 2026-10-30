@@ -100,13 +100,12 @@ describe("imports (GET/POST)", () => {
     expect(status).toBe(401);
   });
 
-  // Grey-box note: these routes have no ZodError mapping, so schema validation
-  // failures surface as 500 internal_error via errorResponse (only 3 of the
-  // 60 v1 routes map ZodError to 400 explicitly).
-  it("GET returns 500 when workspace_id is missing (no ZodError mapping)", async () => {
+  // Grey-box note: errorResponse maps ZodError to 400 invalid_input, so
+  // schema validation failures surface as 400, never 500.
+  it("GET returns 400 when workspace_id is missing (ZodError maps to 400 invalid_input)", async () => {
     const { status, body } = await readJson(await importsGet(makeRequest("/api/v1/imports")));
-    expect(status).toBe(500);
-    expect(body.error.code).toBe("internal_error");
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("invalid_input");
   });
 
   it("GET returns the batch list", async () => {
@@ -118,14 +117,14 @@ describe("imports (GET/POST)", () => {
     expect(body.meta).toMatchObject({ limit: 25, offset: 0, total: 0 });
   });
 
-  it("POST returns 500 for an invalid body (no ZodError mapping)", async () => {
+  it("POST returns 400 for an invalid body (ZodError maps to 400 invalid_input)", async () => {
     const { status, body } = await readJson(
       await importsPost(
         makeRequest("/api/v1/imports", { method: "POST", body: { workspace_id: WS_ID } }),
       ),
     );
-    expect(status).toBe(500);
-    expect(body.error.code).toBe("internal_error");
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("invalid_input");
     expect(createImportBatch).not.toHaveBeenCalled();
   });
 
@@ -334,7 +333,7 @@ describe("invitations (GET/POST)", () => {
     expect(body.pagination).toMatchObject({ limit: 25, offset: 0 });
   });
 
-  it("POST returns 500 for an invalid email (no ZodError mapping)", async () => {
+  it("POST returns 400 for an invalid email (ZodError maps to 400 invalid_input)", async () => {
     const { status, body } = await readJson(
       await invitationsPost(
         makeRequest("/api/v1/invitations", {
@@ -343,8 +342,8 @@ describe("invitations (GET/POST)", () => {
         }),
       ),
     );
-    expect(status).toBe(500);
-    expect(body.error.code).toBe("internal_error");
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("invalid_input");
     expect(sendInvitationEmail).not.toHaveBeenCalled();
   });
 
@@ -540,15 +539,15 @@ describe("invitations/[id] (GET preview/DELETE revoke/POST accept)", () => {
     );
   });
 
-  it("POST accept returns 500 for a short token (no ZodError mapping)", async () => {
+  it("POST accept returns 400 for a short token (ZodError maps to 400 invalid_input)", async () => {
     const { status, body } = await readJson(
       await invitationPost(
         makeRequest(`/api/v1/invitations/${INVITATION_ID}`, { method: "POST", body: { token: "short" } }),
         ctx,
       ),
     );
-    expect(status).toBe(500);
-    expect(body.error.code).toBe("internal_error");
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("invalid_input");
   });
 
   it("POST accept accepts the invitation via RPC", async () => {
@@ -671,9 +670,9 @@ describe("invitations/resolve (GET)", () => {
     (createSupabaseAdminClient as jest.Mock).mockReturnValue(admin);
   });
 
-  it("returns 500 when the token is missing", async () => {
+  it("returns 400 when the token is missing", async () => {
     const { status } = await readJson(await invitationResolveGet(makeRequest("/api/v1/invitations/resolve")));
-    expect(status).toBe(500);
+    expect(status).toBe(400);
   });
 
   it("returns 404 for an unknown token", async () => {

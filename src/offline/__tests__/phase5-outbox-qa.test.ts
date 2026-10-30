@@ -128,7 +128,12 @@ describe('Phase 5 offline outbox QA scenarios', () => {
     expect(mutation._raw.dead_letter_reason).toContain('Max retry attempts');
   });
 
-  it('missing server endpoint: parks inventory transfer in dead-letter for operator retry', async () => {
+  it('implemented server endpoint: inventory transfer syncs through the API with its idempotency key', async () => {
+    // POST /v1/tech-app/inventory-transfer now exists (wraps the
+    // transfer_inventory_to_van RPC), so queued transfers sync instead
+    // of being parked in dead-letter as "not implemented".
+    mockApiPost.mockResolvedValue({ data: { success: true } });
+
     const mutation = createMutation({
       mutation_id: 'inventory-van-1-item-1',
       entity: 'inventory',
@@ -143,9 +148,13 @@ describe('Phase 5 offline outbox QA scenarios', () => {
 
     await processOfflineOutbox();
 
-    expect(mockApiPost).not.toHaveBeenCalled();
-    expect(mutation._raw.status).toBe('dead_letter');
-    expect(mutation._raw.dead_letter_reason).toContain('not implemented');
+    expect(mockApiPost).toHaveBeenCalledWith('/v1/tech-app/inventory-transfer', {
+      item_id: 'item-1',
+      van_id: 'van-1',
+      quantity: 2,
+      idempotency_key: 'inventory-transfer-van-1-item-1-2',
+    });
+    expect(mutation._raw.status).toBe('synced');
   });
 
   it('dead-letter operator controls: retry resets state and discard marks discarded', async () => {

@@ -110,13 +110,13 @@ describe("customers/route", () => {
       expect(status).toBe(401);
     });
 
-    it("returns 500 when the body fails zod validation", async () => {
+    it("returns 400 when the body fails zod validation", async () => {
       stubWorkspaceMember(api, makeSupabaseClient());
       const { status, body } = await readJson(
         await customersPost(makeRequest("/api/v1/customers", { method: "POST", body: { workspace_id: WS_ID } })),
       );
-      expect(status).toBe(500);
-      expect(body.error.code).toBe("internal_error");
+      expect(status).toBe(400);
+      expect(body.error.code).toBe("invalid_input");
     });
 
     it("returns 201 with the created customer", async () => {
@@ -152,7 +152,7 @@ describe("customers/[id]/route", () => {
       expect(status).toBe(401);
     });
 
-    it("returns 500 when the id is not a uuid", async () => {
+    it("returns 400 when the id is not a uuid", async () => {
       stubWorkspaceMember(api, makeSupabaseClient());
       const { status } = await readJson(
         await customerGet(
@@ -160,7 +160,7 @@ describe("customers/[id]/route", () => {
           contextWithParams({ id: "nope" }),
         ),
       );
-      expect(status).toBe(500);
+      expect(status).toBe(400);
     });
 
     it("returns 200 with the customer", async () => {
@@ -194,7 +194,7 @@ describe("customers/[id]/route", () => {
       expect(status).toBe(401);
     });
 
-    it("returns 500 when the body has no updatable fields", async () => {
+    it("returns 400 when the body has no updatable fields", async () => {
       stubWorkspaceMember(api, makeSupabaseClient());
       const { status } = await readJson(
         await customerPatch(
@@ -205,7 +205,7 @@ describe("customers/[id]/route", () => {
           contextWithParams({ id: CUSTOMER_ID }),
         ),
       );
-      expect(status).toBe(500);
+      expect(status).toBe(400);
     });
 
     it("returns 200 with the updated customer", async () => {
@@ -239,7 +239,7 @@ describe("customers/[id]/route", () => {
       expect(status).toBe(401);
     });
 
-    it("returns 500 when the id is not a uuid", async () => {
+    it("returns 400 when the id is not a uuid", async () => {
       stubWorkspaceMember(api, makeSupabaseClient());
       const { status } = await readJson(
         await customerDelete(
@@ -247,7 +247,7 @@ describe("customers/[id]/route", () => {
           contextWithParams({ id: "nope" }),
         ),
       );
-      expect(status).toBe(500);
+      expect(status).toBe(400);
     });
 
     it("archives the customer (soft delete)", async () => {
@@ -323,10 +323,10 @@ describe("vehicles/route", () => {
       expect(status).toBe(401);
     });
 
-    it("returns 500 when workspace_id is missing (route throws before auth)", async () => {
+    it("returns 400 when workspace_id is missing", async () => {
       stubWorkspaceMember(api, makeSupabaseClient());
       const { status } = await readJson(await vehiclesGet(makeRequest("/api/v1/vehicles")));
-      expect(status).toBe(500);
+      expect(status).toBe(400);
     });
 
     it("filters out archived vehicles and reports pagination from visible rows", async () => {
@@ -371,18 +371,18 @@ describe("vehicles/route", () => {
       expect(status).toBe(401);
     });
 
-    it("returns 500 when the body fails zod validation", async () => {
+    it("returns 400 when the body fails zod validation", async () => {
       stubWorkspaceMember(api, makeSupabaseClient());
       const { status } = await readJson(
         await vehiclesPost(makeRequest("/api/v1/vehicles", { method: "POST", body: {} })),
       );
-      expect(status).toBe(500);
+      expect(status).toBe(400);
     });
 
-    it("returns 500 when the customer does not belong to the workspace", async () => {
+    it("returns 409 invalid_customer when the customer does not belong to the workspace", async () => {
       const supabase = makeSupabaseClient({ customers: { data: null, error: null } });
       stubWorkspaceMember(api, supabase);
-      const { status } = await readJson(
+      const { status, body } = await readJson(
         await vehiclesPost(
           makeRequest("/api/v1/vehicles", {
             method: "POST",
@@ -390,7 +390,8 @@ describe("vehicles/route", () => {
           }),
         ),
       );
-      expect(status).toBe(500);
+      expect(status).toBe(409);
+      expect(body.error.code).toBe("invalid_customer");
     });
 
     it("returns 201 with the created vehicle", async () => {
@@ -444,7 +445,7 @@ describe("vehicles/[id]/route", () => {
       expect(status).toBe(401);
     });
 
-    it("returns 500 when the id is not a uuid", async () => {
+    it("returns 400 when the id is not a uuid", async () => {
       stubWorkspaceMember(api, makeSupabaseClient());
       const { status } = await readJson(
         await vehicleGet(
@@ -452,7 +453,7 @@ describe("vehicles/[id]/route", () => {
           contextWithParams({ id: "nope" }),
         ),
       );
-      expect(status).toBe(500);
+      expect(status).toBe(400);
     });
 
     it("returns 200 with the vehicle", async () => {
@@ -486,7 +487,7 @@ describe("vehicles/[id]/route", () => {
       expect(status).toBe(401);
     });
 
-    it("returns 500 when the body has no updatable fields", async () => {
+    it("returns 400 when the body has no updatable fields", async () => {
       stubWorkspaceMember(api, makeSupabaseClient());
       const { status } = await readJson(
         await vehiclePatch(
@@ -497,7 +498,7 @@ describe("vehicles/[id]/route", () => {
           contextWithParams({ id: VEHICLE_ID }),
         ),
       );
-      expect(status).toBe(500);
+      expect(status).toBe(400);
     });
 
     it("returns 200 with the updated vehicle", async () => {
@@ -550,7 +551,7 @@ describe("vehicles/[id]/route", () => {
       expect(status).toBe(401);
     });
 
-    it("returns 500 when the vehicle is not found", async () => {
+    it("returns 404 when the vehicle is not found", async () => {
       const supabase = makeSupabaseClient({ vehicles: { data: null, error: null } });
       stubWorkspaceMember(api, supabase);
       const { status } = await readJson(
@@ -559,7 +560,7 @@ describe("vehicles/[id]/route", () => {
           contextWithParams({ id: VEHICLE_ID }),
         ),
       );
-      expect(status).toBe(500);
+      expect(status).toBe(404);
     });
 
     it("archives the vehicle via metadata (soft delete)", async () => {
@@ -636,10 +637,10 @@ describe("service-records/route", () => {
       expect(status).toBe(401);
     });
 
-    it("returns 500 when workspace_id is not a uuid", async () => {
+    it("returns 400 when workspace_id is not a uuid", async () => {
       stubWorkspaceMember(api, makeSupabaseClient());
       const { status } = await readJson(await serviceRecordsGet(makeRequest("/api/v1/service-records")));
-      expect(status).toBe(500);
+      expect(status).toBe(400);
     });
 
     it("returns 200 with paginated service records", async () => {
@@ -670,12 +671,12 @@ describe("service-records/route", () => {
       expect(status).toBe(401);
     });
 
-    it("returns 500 when the body fails zod validation", async () => {
+    it("returns 400 when the body fails zod validation", async () => {
       stubWorkspaceMember(api, makeSupabaseClient());
       const { status } = await readJson(
         await serviceRecordsPost(makeRequest("/api/v1/service-records", { method: "POST", body: {} })),
       );
-      expect(status).toBe(500);
+      expect(status).toBe(400);
     });
 
     it("returns 400 discount_exceeds_subtotal when the discount is too large", async () => {
@@ -774,7 +775,7 @@ describe("service-records/[id]/route", () => {
       expect(status).toBe(401);
     });
 
-    it("returns 500 when the id is not a uuid", async () => {
+    it("returns 400 when the id is not a uuid", async () => {
       stubWorkspaceMember(api, makeSupabaseClient());
       const { status } = await readJson(
         await serviceRecordGet(
@@ -782,7 +783,7 @@ describe("service-records/[id]/route", () => {
           contextWithParams({ id: "nope" }),
         ),
       );
-      expect(status).toBe(500);
+      expect(status).toBe(400);
     });
 
     it("returns 200 with the service record", async () => {
@@ -831,7 +832,7 @@ describe("service-records/[id]/route", () => {
       expect(status).toBe(401);
     });
 
-    it("returns 500 when the body fails zod validation", async () => {
+    it("returns 400 when the body fails zod validation", async () => {
       stubWorkspaceMember(api, makeSupabaseClient());
       const { status } = await readJson(
         await serviceRecordPatch(
@@ -842,7 +843,7 @@ describe("service-records/[id]/route", () => {
           contextWithParams({ id: SERVICE_RECORD_ID }),
         ),
       );
-      expect(status).toBe(500);
+      expect(status).toBe(400);
     });
 
     it("returns 400 discount_exceeds_subtotal when the discount is too large", async () => {

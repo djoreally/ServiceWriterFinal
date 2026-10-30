@@ -34,6 +34,38 @@ jest.mock("@/integrations/supabase/client", () => {
   };
 });
 
+// Mock Next.js navigation: migrated section pages mount `NextRouterAdapter`,
+// whose hooks call `useRouter()`/`usePathname()` unconditionally — the real
+// implementations throw outside a Next app-router tree. Inside the harness
+// MemoryRouter the adapter detects the existing router context and renders
+// children directly, so these only need to exist and be inert.
+jest.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: jest.fn(),
+    replace: jest.fn(),
+    back: jest.fn(),
+    forward: jest.fn(),
+    refresh: jest.fn(),
+    prefetch: jest.fn(),
+  }),
+  usePathname: () => "/",
+  useSearchParams: () => new URLSearchParams(),
+  useParams: () => ({}),
+  redirect: (url: string) => {
+    throw new Error(`next/navigation redirect to ${url} is not supported in journey tests`);
+  },
+  notFound: () => {
+    throw new Error("next/navigation notFound is not supported in journey tests");
+  },
+}));
+
+// Mock the typed API client: the Phase 2 data layer reads through
+// `@/lib/api-client` (Hono API), not Supabase. Back it with the FakeBackend
+// so workforce identity, workspace context, billing, and public booking
+// resolve from the same fixtures as the Supabase-shaped fake.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+jest.mock("@/lib/api-client", () => require("../mocks/apiClient"));
+
 // Mock Mapbox
 jest.mock("mapbox-gl", () => ({
   Map: jest.fn(() => ({

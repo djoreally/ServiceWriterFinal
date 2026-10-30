@@ -148,15 +148,14 @@ describe("billing/checkout (POST)", () => {
     (workspaceBilling.stripeBillingClient as jest.Mock).mockReturnValue(stripe);
   });
 
-  // Grey-box note: this route has no ZodError mapping, so schema validation
-  // failures surface as 500 internal_error via errorResponse (only 3 of the
-  // 60 v1 routes map ZodError to 400 explicitly).
-  it("returns 500 for an invalid plan_tier (no ZodError mapping)", async () => {
+  // Grey-box note: errorResponse maps ZodError to 400 invalid_input, so
+  // schema validation failures surface as 400, never 500.
+  it("returns 400 for an invalid plan_tier (ZodError maps to 400 invalid_input)", async () => {
     const { status, body } = await readJson(
       await checkoutPost(makeRequest("/api/v1/billing/checkout", { method: "POST", body: { plan_tier: "ultra" } })),
     );
-    expect(status).toBe(500);
-    expect(body.error.code).toBe("internal_error");
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("invalid_input");
   });
 
   it("returns 401 when billing workspace authorization fails", async () => {
@@ -308,12 +307,12 @@ describe("billing/seats (POST)", () => {
 
   const validBody = { workspace_id: WS_ID, additional_technician_quantity: 2 };
 
-  it("returns 500 for a negative quantity (no ZodError mapping)", async () => {
+  it("returns 400 for a negative quantity (ZodError maps to 400 invalid_input)", async () => {
     const { status, body } = await readJson(
       await seatsPost(makeRequest("/api/v1/billing/seats", { method: "POST", body: { additional_technician_quantity: -1 } })),
     );
-    expect(status).toBe(500);
-    expect(body.error.code).toBe("internal_error");
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("invalid_input");
   });
 
   it("returns 401 when billing workspace authorization fails", async () => {
@@ -479,14 +478,14 @@ describe("payments (POST)", () => {
     expect(status).toBe(402);
   });
 
-  it("returns 500 for an invalid body (no ZodError mapping)", async () => {
+  it("returns 400 for an invalid body (ZodError maps to 400 invalid_input)", async () => {
     const { status, body } = await readJson(
       await paymentsPost(
         makeRequest("/api/v1/payments", { method: "POST", body: { workspace_id: WS_ID } }),
       ),
     );
-    expect(status).toBe(500);
-    expect(body.error.code).toBe("internal_error");
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("invalid_input");
   });
 
   it("returns 422 when no payment provenance is supplied", async () => {
@@ -629,15 +628,15 @@ describe("payments/[id] (GET/PATCH/DELETE)", () => {
     expect(body.error.code).toBe("not_found");
   });
 
-  it("PATCH returns 500 when no updatable field is supplied (no ZodError mapping)", async () => {
+  it("PATCH returns 400 when no updatable field is supplied (ZodError maps to 400 invalid_input)", async () => {
     const { status, body } = await readJson(
       await paymentPatch(
         makeRequest(path, { method: "PATCH", body: { workspace_id: WS_ID } }),
         contextWithParams({ id: PAYMENT_ID }),
       ),
     );
-    expect(status).toBe(500);
-    expect(body.error.code).toBe("internal_error");
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("invalid_input");
   });
 
   it("PATCH updates the payment and returns 200", async () => {
@@ -731,7 +730,7 @@ describe("payments/actions (POST)", () => {
     (markStripeInvoicePaidOutOfBand as jest.Mock).mockResolvedValue({ status: "skipped" });
   });
 
-  it("returns 500 for an unknown action (no ZodError mapping)", async () => {
+  it("returns 400 for an unknown action (ZodError maps to 400 invalid_input)", async () => {
     const { status, body } = await readJson(
       await paymentActionsPost(
         makeRequest("/api/v1/payments/actions", {
@@ -740,8 +739,8 @@ describe("payments/actions (POST)", () => {
         }),
       ),
     );
-    expect(status).toBe(500);
-    expect(body.error.code).toBe("internal_error");
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("invalid_input");
   });
 
   it("returns 410 for send_manual_invoice (moved endpoint)", async () => {
@@ -978,12 +977,12 @@ describe("payments/stripe-direct (GET/PUT/DELETE)", () => {
     });
   });
 
-  it("PUT returns 500 for an invalid body (no ZodError mapping)", async () => {
+  it("PUT returns 400 for an invalid body (ZodError maps to 400 invalid_input)", async () => {
     const { status, body } = await readJson(
       await stripeDirectPut(makeRequest("/api/v1/payments/stripe-direct", { method: "PUT", body: { workspace_id: WS_ID } })),
     );
-    expect(status).toBe(500);
-    expect(body.error.code).toBe("internal_error");
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("invalid_input");
   });
 
   it("PUT rejects a secret key that is not a Stripe secret key", async () => {

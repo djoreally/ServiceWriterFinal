@@ -71,7 +71,10 @@ describe("AppointmentConfigurationSummary", () => {
     await screen.findByText("Oil service specifications");
     expect(screen.getByText("5W-20 Full Synthetic")).toBeInTheDocument();
     expect(screen.getByText("4.5 qt")).toBeInTheDocument();
-    expect(screen.getByText(/Capacity source: MANUAL/)).toBeInTheDocument();
+    // The capacity-source provenance line was removed by the appointment
+    // UI cleanup (42f13779d); the spec grid shows engine and filter.
+    expect(screen.getAllByText("2.5L I4").length).toBeGreaterThan(0);
+    expect(screen.getByText("Spin-on standard")).toBeInTheDocument();
   });
 
   it("renders the tire fitment summary with selected options", async () => {

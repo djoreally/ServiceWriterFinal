@@ -112,7 +112,10 @@ describe("work-orders router", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...body, priority: "whenever" }),
       });
-      expect(res.status).toBe(500);
+      // zod enum violation -> ZodError -> 400 invalid_input via
+      // errorResponse (validation failures are a 400, never a 500).
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.code).toBe("invalid_input");
       expect(calls.rpc).toHaveLength(0);
     });
   });

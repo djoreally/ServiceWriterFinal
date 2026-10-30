@@ -96,17 +96,16 @@ describe("invoices (GET/POST)", () => {
     expect(body.pagination).toMatchObject({ limit: 25, offset: 0 });
   });
 
-  // Grey-box note: these routes have no ZodError mapping, so schema validation
-  // failures surface as 500 internal_error via errorResponse (only 3 of the
-  // 60 v1 routes map ZodError to 400 explicitly).
-  it("POST returns 500 when customer_id is missing (no ZodError mapping)", async () => {
+  // Grey-box note: errorResponse maps ZodError to 400 invalid_input, so
+  // schema validation failures surface as 400, never 500.
+  it("POST returns 400 when customer_id is missing (ZodError maps to 400 invalid_input)", async () => {
     const { status, body } = await readJson(
       await invoicesPost(
         makeRequest("/api/v1/invoices", { method: "POST", body: { workspace_id: WS_ID } }),
       ),
     );
-    expect(status).toBe(500);
-    expect(body.error.code).toBe("internal_error");
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("invalid_input");
   });
 
   it("POST creates a draft invoice via RPC and returns 201", async () => {
@@ -195,12 +194,12 @@ describe("invoices/[id] (GET/PATCH/DELETE)", () => {
     expect(status).toBe(401);
   });
 
-  it("PATCH returns 500 when only workspace_id is supplied (no ZodError mapping)", async () => {
+  it("PATCH returns 400 when only workspace_id is supplied (ZodError maps to 400 invalid_input)", async () => {
     const { status, body } = await readJson(
       await invoicePatch(makeRequest(path, { method: "PATCH", body: { workspace_id: WS_ID } }), ctx),
     );
-    expect(status).toBe(500);
-    expect(body.error.code).toBe("internal_error");
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("invalid_input");
   });
 
   it("PATCH updates the invoice and returns 200", async () => {
@@ -301,15 +300,15 @@ describe("invoices/[id]/send (POST)", () => {
     expect(status).toBe(401);
   });
 
-  it("returns 500 for an invalid body (no ZodError mapping)", async () => {
+  it("returns 400 for an invalid body (ZodError maps to 400 invalid_input)", async () => {
     const { status, body } = await readJson(
       await invoiceSendPost(
         makeRequest(`/api/v1/invoices/${INVOICE_ID}/send`, { method: "POST", body: {} }),
         ctx,
       ),
     );
-    expect(status).toBe(500);
-    expect(body.error.code).toBe("internal_error");
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("invalid_input");
   });
 
   it("returns 409 for a void invoice", async () => {
@@ -478,6 +477,77 @@ describe("quotes/[id]/convert (POST)", () => {
     expect(status).toBe(409);
     expect(resBody.error.code).toBe("quote_already_converted");
   });
+
+  // Route-level concurrency contract — ported from
+  // quote-conversion-concurrency.integration.test.ts. The convert route
+  // module can only be bound to one @/server/api mock per worker process;
+  // two suites importing it with different mocks poisoned each other's
+  // runs, so these tests live here with the route's other tests.
+  it("returns the same service record for concurrent requests using one idempotency key", async () => {
+    const store = new Map<string, { conversion_id: string; quote_id: string; service_record_id: string; status: string; replayed?: boolean }>();
+    supabase.rpc.mockImplementation(async (_fn: string, args: { p_workspace_id: string; p_quote_id: string; p_idempotency_key: string }) => {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      const key = `${args.p_workspace_id}:${args.p_quote_id}:${args.p_idempotency_key}`;
+      const existing = store.get(key);
+      if (existing) return { data: { ...existing, replayed: true }, error: null };
+      const result = { conversion_id: "44444444-4444-4444-8444-444444444444", quote_id: args.p_quote_id, service_record_id: "55555555-5555-4555-8555-555555555555", status: "converted" };
+      store.set(key, result);
+      return { data: result, error: null };
+    });
+
+    const responses = await Promise.all(
+      Array.from({ length: 20 }, () =>
+        quoteConvertPost(makeRequest(`/api/v1/quotes/${QUOTE_ID}/convert`, { method: "POST", body }), ctx),
+      ),
+    );
+    const bodies = await Promise.all(responses.map((r) => readJson(r)));
+
+    expect(bodies.every((b) => b.status === 200)).toBe(true);
+    expect(new Set(bodies.map((b) => b.body.data.service_record_id)).size).toBe(1);
+    expect(supabase.rpc).toHaveBeenCalledTimes(20);
+    expect(
+      (supabase.rpc as jest.Mock).mock.calls.every(
+        ([fn, args]) => fn === "convert_quote_to_service_record_v1" && args.p_workspace_id === WS_ID && args.p_quote_id === QUOTE_ID,
+      ),
+    ).toBe(true);
+  });
+
+  it("allows only one winner when concurrent callers use different idempotency keys", async () => {
+    let winner: { conversion_id: string; quote_id: string; service_record_id: string; status: string } | null = null;
+    supabase.rpc.mockImplementation(async (_fn: string, args: { p_quote_id: string }) => {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      if (winner) return { data: null, error: new Error("quote_already_converted") };
+      winner = { conversion_id: "66666666-6666-4666-8666-666666666666", quote_id: args.p_quote_id, service_record_id: "77777777-7777-4777-8777-777777777777", status: "converted" };
+      return { data: winner, error: null };
+    });
+
+    const responses = await Promise.all(
+      ["first-key-001234", "second-key-00123"].map((idempotency_key) =>
+        quoteConvertPost(
+          makeRequest(`/api/v1/quotes/${QUOTE_ID}/convert`, { method: "POST", body: { workspace_id: WS_ID, idempotency_key } }),
+          ctx,
+        ),
+      ),
+    );
+    const statuses = await Promise.all(responses.map(async (r) => (await readJson(r)).status));
+
+    expect(statuses.sort()).toEqual([200, 409]);
+    expect(supabase.rpc).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects malformed workspace and idempotency input before calling the RPC", async () => {
+    const { status } = await readJson(
+      await quoteConvertPost(
+        makeRequest(`/api/v1/quotes/${QUOTE_ID}/convert`, {
+          method: "POST",
+          body: { workspace_id: "not-a-uuid", idempotency_key: "short" },
+        }),
+        ctx,
+      ),
+    );
+    expect(status).toBe(400);
+    expect(supabase.rpc).not.toHaveBeenCalled();
+  });
 });
 
 describe("quotes/[id]/status (POST)", () => {
@@ -511,7 +581,7 @@ describe("quotes/[id]/status (POST)", () => {
     expect(status).toBe(401);
   });
 
-  it("returns 500 for an invalid status (no ZodError mapping)", async () => {
+  it("returns 400 for an invalid status (ZodError maps to 400 invalid_input)", async () => {
     const { status, body } = await readJson(
       await quoteStatusPost(
         makeRequest(`/api/v1/quotes/${QUOTE_ID}/status`, {
@@ -521,8 +591,8 @@ describe("quotes/[id]/status (POST)", () => {
         ctx,
       ),
     );
-    expect(status).toBe(500);
-    expect(body.error.code).toBe("internal_error");
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("invalid_input");
   });
 
   it("returns 409 for a converted quote", async () => {

@@ -84,12 +84,12 @@ describe("work-orders/route", () => {
       expect(status).toBe(401);
     });
 
-    it("returns 500 when the body fails zod validation", async () => {
+    it("returns 400 when the body fails zod validation", async () => {
       stubWorkspaceMember(api, makeSupabaseClient());
       const { status } = await readJson(
         await workOrdersPost(makeRequest("/api/v1/work-orders", { method: "POST", body: {} })),
       );
-      expect(status).toBe(500);
+      expect(status).toBe(400);
     });
 
     it("returns 500 when the RPC returns no work order identifier", async () => {
@@ -191,7 +191,7 @@ describe("work-orders/[id]/route", () => {
       expect(body.error.code).toBe("unauthenticated");
     });
 
-    it("returns 500 when the body fails zod validation", async () => {
+    it("returns 400 when the body fails zod validation", async () => {
       stubMember(makeSupabaseClient());
       const { status } = await readJson(
         await workOrderPatch(
@@ -199,7 +199,7 @@ describe("work-orders/[id]/route", () => {
           contextWithParams({ id: WORK_ORDER_ID }),
         ),
       );
-      expect(status).toBe(500);
+      expect(status).toBe(400);
     });
 
     it("returns 403 technician_field_forbidden when a technician changes a restricted field", async () => {
@@ -327,7 +327,7 @@ describe("work-orders/checklist/items/[itemId]/route", () => {
       expect(status).toBe(401);
     });
 
-    it("returns 500 when the body has no updatable fields", async () => {
+    it("returns 400 when the body has no updatable fields", async () => {
       stubWorkspaceMember(api, makeSupabaseClient());
       const { status } = await readJson(
         await checklistItemPatch(
@@ -338,7 +338,7 @@ describe("work-orders/checklist/items/[itemId]/route", () => {
           contextWithParams({ itemId: ITEM_ID }),
         ),
       );
-      expect(status).toBe(500);
+      expect(status).toBe(400);
     });
 
     it("returns 500 when the checklist item is not found", async () => {

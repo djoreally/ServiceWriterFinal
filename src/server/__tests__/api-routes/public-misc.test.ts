@@ -312,10 +312,10 @@ describe("POST /api/v1/reviews/actions", () => {
     expect(body.error.code).toBe("unauthenticated");
   });
 
-  it("returns 500 for an invalid body (zod parse failure)", async () => {
+  it("returns 400 for an invalid body (zod parse failure maps to 400 invalid_input)", async () => {
     const { status, body } = await readJson(await reviewsRequest({ workspace_id: "nope" }));
-    expect(status).toBe(500);
-    expect(body.error.code).toBe("internal_error");
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("invalid_input");
   });
 
   it("returns 409 when the service is not completed", async () => {
@@ -376,10 +376,10 @@ describe("POST /api/v1/email-testing/send", () => {
     expect(body.error.code).toBe("unauthenticated");
   });
 
-  it("returns 500 for an invalid body (zod parse failure)", async () => {
+  it("returns 400 for an invalid body (zod parse failure maps to 400 invalid_input)", async () => {
     const { status, body } = await readJson(await emailTestRequest({ workspace_id: WS_ID }));
-    expect(status).toBe(500);
-    expect(body.error.code).toBe("internal_error");
+    expect(status).toBe(400);
+    expect(body.error.code).toBe("invalid_input");
   });
 
   it("sends a test email through the Resend adapter", async () => {

@@ -81,11 +81,11 @@ describe("catalog router", () => {
         `/v1/catalog/items?workspace_id=not-a-uuid`,
       );
       // Grey-box note: the router parses the query param with zod before
-      // auth; the app-level onError has no ZodError special-case, so this
-      // surfaces as 500 internal_error rather than a 400.
-      expect(res.status).toBe(500);
+      // auth; errorResponse maps ZodError to the validation contract —
+      // 400 invalid_input. Client input failures are a 400, never a 500.
+      expect(res.status).toBe(400);
       const body = await res.json();
-      expect(body.error.code).toBe("internal_error");
+      expect(body.error.code).toBe("invalid_input");
     });
 
     it("propagates database errors through the error contract", async () => {
@@ -170,8 +170,10 @@ describe("catalog router", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ workspace_id: WS_ID, rows: [] }),
       });
-      // zod min(1) violation -> ZodError -> app onError -> 500 internal_error
-      expect(res.status).toBe(500);
+      // zod min(1) violation -> ZodError -> 400 invalid_input via
+      // errorResponse (validation failures are a 400, never a 500).
+      expect(res.status).toBe(400);
+      expect((await res.json()).error.code).toBe("invalid_input");
       expect(calls.inserts).toHaveLength(0);
     });
   });

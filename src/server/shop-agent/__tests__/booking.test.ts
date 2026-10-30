@@ -101,6 +101,22 @@ async function errorCode(result: { data: unknown } | { error: Response }) {
 }
 
 describe("bookAppointmentCore", () => {
+  beforeEach(() => {
+    // Pin Date.now to Monday 2026-10-05 08:00 EDT, before the 10:00 AM
+    // fixture slot. The core's lead-time check compares starts_at
+    // against Date.now(); without a pinned clock these tests rot as
+    // wall-clock time passes the fixture date and lead_time pre-empts
+    // the behavior under test (conflict / happy-path insert). Only
+    // Date.now is stubbed — full fake timers stall Response.json() in
+    // this harness.
+    jest
+      .spyOn(Date, "now")
+      .mockReturnValue(Date.parse("2026-10-05T12:00:00Z"));
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it("rejects an unknown customer with invalid_customer", async () => {
     const { client } = mockSupabase({ "customers": { data: null, error: null } });
     const result = await bookAppointmentCore(client, {
@@ -174,6 +190,18 @@ describe("bookAppointmentCore", () => {
 });
 
 describe("bookAppointmentAsAgent", () => {
+  beforeEach(() => {
+    // Same pinned Date.now as bookAppointmentCore above: the fixture
+    // slot (Mon 2026-10-05 10:00 AM ET) must stay ahead of Date.now()
+    // or the core's lead-time check rejects the booking before insert.
+    jest
+      .spyOn(Date, "now")
+      .mockReturnValue(Date.parse("2026-10-05T12:00:00Z"));
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it("books through the shared core with source shop-agent-sms", async () => {
     const { client, calls } = mockSupabase({
       "customers": validCustomer(),

@@ -15,12 +15,9 @@ import { FeatureProvider } from "@/shared/features/feature.provider";
 import { SubscriptionProvider } from "@/contexts/SubscriptionContext";
 import { TenantProvider, useTenant } from "@/contexts/TenantContext";
 import { KeyboardShortcutsProvider } from "@/contexts/KeyboardShortcutsContext";
-import { PostHogIdentity } from "@/components/analytics/PostHogIdentity";
 import { OfflineStatusBanner } from "@/components/offline/OfflineStatusBanner";
 import { GDPRConsentBanner } from "@/components/security/GDPRConsentBanner";
-import { useServiceWorkerUpdate } from "@/hooks/useServiceWorkerUpdate";
-import { useOfflinePhase1Bootstrap } from "@/offline/useOfflinePhase1Bootstrap";
-import { useOfflineOutboxWorker } from "@/offline/useOfflineOutboxWorker";
+import { DeferredBootTasks } from "@/components/routing/DeferredBootTasks";
 import { setCurrentOfflineTenantSlug } from "@/offline/rollout";
 import { lazyRetry } from "@/lib/lazyRetry";
 import { NextRouterAdapter } from "@/components/routing/NextRouterAdapter";
@@ -70,28 +67,31 @@ const AIAssistant = lazyRetry(() =>
   import("@/components/ai/AIAssistant").then((m) => ({ default: m.AIAssistant })),
 );
 
+// PostHogIdentity is lazy-loaded for the same reason (§3.2.1 rule 2:
+// analytics identity arms after first paint, never on the critical path).
+// Its module graph pulls in posthog-js, which must not compete with the
+// shell boot on slow phones.
+const PostHogIdentity = lazyRetry(() =>
+  import("@/components/analytics/PostHogIdentity").then((m) => ({ default: m.PostHogIdentity })),
+);
+
 /**
- * App-shell side effects: service-worker updates, offline bootstrap/outbox,
- * and the current offline tenant slug. Mirrors the hooks mounted in the
- * SPA's `AppRoutes`.
+ * App-shell side effects: the current offline tenant slug, plus the
+ * deferred boot tasks (service-worker updates, offline bootstrap/outbox)
+ * shared with the SPA shell. Mirrors the wiring mounted in the SPA's
+ * `AppRoutes`. The boot tasks mount only after first paint via
+ * DeferredBootTasks (§3.2.1 rule 2) so they never compete with the
+ * page's own first render and data fetches; the tenant-slug effect is
+ * cheap and ordering-relevant, so it stays immediate.
  */
 function ShellWiring() {
   const { slug: tenantSlug } = useTenant();
-
-  // Auto-update service worker on new deployments
-  useServiceWorkerUpdate();
 
   useEffect(() => {
     setCurrentOfflineTenantSlug(tenantSlug ?? null);
   }, [tenantSlug]);
 
-  // Phase 1 offline bootstrap: pull read-only snapshot into local DB when feature flag is enabled
-  useOfflinePhase1Bootstrap();
-
-  // Phase 2 outbox worker: continuously tries pending offline mutations with retry backoff
-  useOfflineOutboxWorker();
-
-  return null;
+  return <DeferredBootTasks />;
 }
 
 /**
@@ -127,7 +127,9 @@ export default function MigratedAppLayout({ children }: { children: ReactNode })
                           <Suspense fallback={null}>
                             <NextRouterAdapter>
                               <KeyboardShortcutsProvider>
-                                <PostHogIdentity />
+                                <Suspense fallback={null}>
+                                  <PostHogIdentity />
+                                </Suspense>
                                 <OfflineStatusBanner />
                                 <Toaster />
                                 <Sonner />

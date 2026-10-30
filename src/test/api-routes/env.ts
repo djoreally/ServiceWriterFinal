@@ -13,11 +13,15 @@ const nodeFetch = require("node-fetch") as {
 };
 
 const g = globalThis as unknown as Record<string, unknown>;
-if (typeof g.Request === "undefined") {
-  g.Request = nodeFetch.Request;
-  g.Response = nodeFetch.Response;
-  g.Headers = nodeFetch.Headers;
-}
+// Install unconditionally: these suites exercise the real next/server
+// classes, which extend the fetch globals. Another suite's stand-in
+// classes may already occupy the globals (test files share the worker
+// process), and a stand-in Request/Response silently breaks route
+// behavior (e.g. next/headers request-scope detection) — the real
+// node-fetch implementations must win here.
+g.Request = nodeFetch.Request;
+g.Response = nodeFetch.Response;
+g.Headers = nodeFetch.Headers;
 
 // node-fetch v2 lacks the static Response.json() that NextResponse.json()
 // delegates to. Install a spec-shaped equivalent.

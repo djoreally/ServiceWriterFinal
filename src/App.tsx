@@ -1,5 +1,5 @@
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -19,17 +19,21 @@ import { useSeoSync } from "./components/routing/useSeoSync";
 const AIAssistant = lazyRetry(() =>
   import("./components/ai/AIAssistant").then((m) => ({ default: m.AIAssistant }))
 );
-import { useServiceWorkerUpdate } from "./hooks/useServiceWorkerUpdate";
+// PostHogIdentity is lazy-loaded for the same reason (§3.2.1 rule 2:
+// analytics identity arms after first paint, never on the critical path).
+// Its module graph pulls in posthog-js, which must not compete with the
+// shell boot on slow phones.
+const PostHogIdentity = lazyRetry(() =>
+  import("@/components/analytics/PostHogIdentity").then((m) => ({ default: m.PostHogIdentity }))
+);
 import { RequireRole } from "./components/security/RequireRole";
 import { RouteRoleGuard } from "./components/security/RouteRoleGuard";
 
 import RouteErrorBoundary from "./shared/errors/RouteErrorBoundary";
-import { useOfflinePhase1Bootstrap } from "./offline/useOfflinePhase1Bootstrap";
-import { useOfflineOutboxWorker } from "./offline/useOfflineOutboxWorker";
 import { setCurrentOfflineTenantSlug } from "./offline/rollout";
 import { KeyboardShortcutsProvider } from "@/contexts/KeyboardShortcutsContext";
 import { OfflineStatusBanner } from "@/components/offline/OfflineStatusBanner";
-import { PostHogIdentity } from "@/components/analytics/PostHogIdentity";
+import { DeferredBootTasks } from "./components/routing/DeferredBootTasks";
 import { useStartupNavigation } from "@/hooks/useStartupNavigation";
 
 // `lazyRetry` lives in `./lib/lazyRetry` (shared with the App Router shell).
@@ -134,7 +138,9 @@ const App = () => (
               <TenantProvider>
                 <BrowserRouter>
                   <KeyboardShortcutsProvider>
-                    <PostHogIdentity />
+                    <Suspense fallback={null}>
+                      <PostHogIdentity />
+                    </Suspense>
                     <OfflineStatusBanner />
                     <Toaster />
                     <Sonner />
@@ -162,62 +168,10 @@ const HomeRoute = () => {
   return <LoadingScreen message="Opening your workspace..." />;
 };
 
-/**
- * BootTasks — non-critical startup work: service-worker update checks,
- * the Phase 1 offline snapshot bootstrap, and the Phase 2 offline outbox
- * worker. None of it is needed for the first render, and all of it
- * competes with the shell boot on slow phones, so it mounts only after
- * first paint via DeferredBootTasks (§3.2.1 rule 2: non-critical work
- * starts after first paint). All three hooks are effect-only and return
- * nothing, so deferring their mount defers only their effects.
- */
-const BootTasks = () => {
-  // Auto-update service worker on new deployments
-  useServiceWorkerUpdate();
-  // Phase 1 offline bootstrap: pull read-only snapshot into local DB when feature flag is enabled
-  useOfflinePhase1Bootstrap();
-  // Phase 2 outbox worker: continuously tries pending offline mutations with retry backoff
-  useOfflineOutboxWorker();
-  return null;
-};
-
-const DeferredBootTasks = () => {
-  const [ready, setReady] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    let idleId: number | undefined;
-    let timer: number | undefined;
-    const arm = () => {
-      if (!cancelled) setReady(true);
-    };
-    // Let the first frames paint, then take an idle slot (2s cap) so the
-    // boot tasks never delay the shell becoming interactive.
-    const rafId = requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (cancelled) return;
-        const w = window as unknown as {
-          requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
-          cancelIdleCallback?: (id: number) => void;
-        };
-        if (typeof w.requestIdleCallback === "function") {
-          idleId = w.requestIdleCallback(arm, { timeout: 2000 });
-        } else {
-          timer = window.setTimeout(arm, 500);
-        }
-      });
-    });
-    return () => {
-      cancelled = true;
-      cancelAnimationFrame(rafId);
-      const w = window as unknown as { cancelIdleCallback?: (id: number) => void };
-      if (idleId !== undefined && typeof w.cancelIdleCallback === "function") {
-        w.cancelIdleCallback(idleId);
-      }
-      if (timer !== undefined) window.clearTimeout(timer);
-    };
-  }, []);
-  return ready ? <BootTasks /> : null;
-};
+// BootTasks / DeferredBootTasks live in
+// `./components/routing/DeferredBootTasks` — shared with the App Router
+// shell (`app/(app)/layout.tsx`) so both entry paths defer the same
+// non-critical startup work (§3.2.1 rule 2).
 
 export const AppRoutes = () => {
   const {

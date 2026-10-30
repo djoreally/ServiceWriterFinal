@@ -78,6 +78,13 @@ jest.mock("@/server/messaging/lifecycle-events", () => ({
 jest.mock("@/server/payments/stripe-invoice-sync", () => ({
   syncCanonicalInvoiceToStripe: jest.fn().mockResolvedValue(undefined),
 }));
+// The appointments routes schedule Google Calendar sync via next/server's
+// after(), which throws outside a Next request scope. Stub after() as a
+// no-op: the sync is fire-and-forget and must never affect the response.
+jest.mock("next/server", () => ({
+  ...jest.requireActual("next/server"),
+  after: jest.fn(),
+}));
 jest.mock("@/lib/supabase", () => ({
   createSupabaseAdminClient: jest.fn(),
 }));
@@ -195,18 +202,19 @@ describe("appointments/route (collection)", () => {
       expect(status).toBe(401);
     });
 
-    it("returns 500 when the body fails zod validation", async () => {
-      // errorResponse maps ZodError to 500 internal_error (no zod-specific branch).
+    it("returns 400 when the body fails zod validation", async () => {
+      // errorResponse maps ZodError to 400 invalid_input (client input failed
+      // validation — a 400, never a 500).
       const supabase = makeSupabaseClient();
       stubWorkspaceMember(api, supabase);
       const { status, body } = await readJson(
         await appointmentsPost(makeRequest("/api/v1/appointments", { method: "POST", body: {} })),
       );
-      expect(status).toBe(500);
-      expect(body.error.code).toBe("internal_error");
+      expect(status).toBe(400);
+      expect(body.error.code).toBe("invalid_input");
     });
 
-    it("returns 500 when ends_at is not after starts_at", async () => {
+    it("returns 400 when ends_at is not after starts_at", async () => {
       const supabase = makeSupabaseClient();
       stubWorkspaceMember(api, supabase);
       const { status } = await readJson(
@@ -217,7 +225,7 @@ describe("appointments/route (collection)", () => {
           }),
         ),
       );
-      expect(status).toBe(500);
+      expect(status).toBe(400);
     });
 
     it("returns 400 invalid_customer when the customer is not in the workspace", async () => {
@@ -279,16 +287,18 @@ describe("appointments/[id]/route", () => {
       expect(status).toBe(401);
     });
 
-    it("returns 500 when the id is not a uuid", async () => {
+    it("returns 404 when the id is not a uuid (falls through to the Hono app)", async () => {
+      // The Next route deliberately delegates non-uuid ids to the Hono app
+      // (createHonoApp().fetch); no Hono route matches this path, so the
+      // observable contract is a bare 404 with no JSON error body.
       stubWorkspaceMember(api, makeSupabaseClient());
-      const { status, body } = await readJson(
+      const { status } = await readJson(
         await appointmentGet(
           makeRequest(`/api/v1/appointments/not-a-uuid?workspace_id=${WS_ID}`),
           contextWithParams({ id: "not-a-uuid" }),
         ),
       );
-      expect(status).toBe(500);
-      expect(body.error.code).toBe("internal_error");
+      expect(status).toBe(404);
     });
 
     it("returns 200 with the appointment", async () => {
@@ -334,7 +344,7 @@ describe("appointments/[id]/route", () => {
       expect(status).toBe(401);
     });
 
-    it("returns 500 when the body has no updatable fields", async () => {
+    it("returns 400 when the body has no updatable fields", async () => {
       const supabase = makeSupabaseClient();
       stubWorkspaceMember(api, supabase);
       const { status } = await readJson(
@@ -346,7 +356,7 @@ describe("appointments/[id]/route", () => {
           contextWithParams({ id: APPOINTMENT_ID }),
         ),
       );
-      expect(status).toBe(500);
+      expect(status).toBe(400);
     });
 
     it("returns 200 and dispatches bookingDetailsChanged for a notes update", async () => {
@@ -377,13 +387,16 @@ describe("appointments/[id]/route", () => {
     it("returns 200 and dispatches appointmentRescheduled when moved via scheduled_date/time", async () => {
       // The route reads the appointment, checks conflicts, then returns the
       // UPDATED row — stub each appointments query in order so the rescheduled
-      // times show up in the update result.
+      // times show up in the update result. The route now also validates
+      // local availability on a schedule change, so stub workspace_settings
+      // with the target weekday open and move to a future date (2027-01-05
+      // is a Tuesday) so the lead-time check passes.
       const current = currentRow();
       const reads = [
         { data: current, error: null },
         { data: [], error: null }, // conflict check: no overlapping appointments
         {
-          data: { ...current, starts_at: "2026-10-06T09:30:00.000Z", ends_at: "2026-10-06T10:30:00.000Z" },
+          data: { ...current, starts_at: "2027-01-05T09:30:00.000Z", ends_at: "2027-01-05T10:30:00.000Z" },
           error: null,
         },
       ];
@@ -391,6 +404,7 @@ describe("appointments/[id]/route", () => {
       const supabase = withExtraChains(
         makeSupabaseClient({
           workspaces: { data: { name: "Shop", timezone: "UTC" }, error: null },
+          workspace_settings: { data: { working_days: ["tuesday"] }, error: null },
           customers: { data: { id: CUSTOMER_ID, status: "active" }, error: null },
         }),
       );
@@ -411,7 +425,7 @@ describe("appointments/[id]/route", () => {
             method: "PATCH",
             body: {
               workspace_id: WS_ID,
-              scheduled_date: "2026-10-06",
+              scheduled_date: "2027-01-05",
               scheduled_time: "09:30",
               duration_minutes: 60,
             },
@@ -438,7 +452,7 @@ describe("appointments/[id]/route", () => {
       expect(status).toBe(401);
     });
 
-    it("returns 500 when the id is not a uuid", async () => {
+    it("returns 400 when the id is not a uuid", async () => {
       stubWorkspaceMember(api, makeSupabaseClient());
       const { status } = await readJson(
         await appointmentDelete(
@@ -446,7 +460,7 @@ describe("appointments/[id]/route", () => {
           contextWithParams({ id: "not-a-uuid" }),
         ),
       );
-      expect(status).toBe(500);
+      expect(status).toBe(400);
     });
 
     it("soft-cancels the appointment and dispatches appointmentCancelled", async () => {
@@ -512,7 +526,7 @@ describe("appointments/[id]/complete/route", () => {
     expect(status).toBe(401);
   });
 
-  it("returns 500 when the body fails zod validation", async () => {
+  it("returns 400 when the body fails zod validation", async () => {
     stubMember(makeSupabaseClient());
     const { status } = await readJson(
       await appointmentComplete(
@@ -520,7 +534,7 @@ describe("appointments/[id]/complete/route", () => {
         contextWithParams({ id: APPOINTMENT_ID }),
       ),
     );
-    expect(status).toBe(500);
+    expect(status).toBe(400);
   });
 
   it("returns 403 when a technician completes someone else's appointment", async () => {
@@ -647,7 +661,7 @@ describe("appointments/[id]/confirmation/route", () => {
     expect(status).toBe(401);
   });
 
-  it("returns 500 when the body fails zod validation", async () => {
+  it("returns 400 when the body fails zod validation", async () => {
     stubWorkspaceMember(api, makeSupabaseClient());
     const { status } = await readJson(
       await appointmentConfirmation(
@@ -655,7 +669,7 @@ describe("appointments/[id]/confirmation/route", () => {
         contextWithParams({ id: APPOINTMENT_ID }),
       ),
     );
-    expect(status).toBe(500);
+    expect(status).toBe(400);
   });
 
   it("returns 422 missing_recipient when no customer email resolves", async () => {
@@ -895,7 +909,7 @@ describe("appointments/[id]/technician-status/route", () => {
     expect(status).toBe(401);
   });
 
-  it("returns 500 when the status enum fails validation", async () => {
+  it("returns 400 when the status enum fails validation", async () => {
     stubMember(makeSupabaseClient());
     const { status } = await readJson(
       await technicianStatusPost(
@@ -906,7 +920,7 @@ describe("appointments/[id]/technician-status/route", () => {
         contextWithParams({ id: APPOINTMENT_ID }),
       ),
     );
-    expect(status).toBe(500);
+    expect(status).toBe(400);
   });
 
   it("returns 409 invalid_status for a completed appointment", async () => {
@@ -1028,18 +1042,18 @@ describe("appointment-items/route", () => {
       expect(status).toBe(401);
     });
 
-    it("returns 500 when workspace_id is missing", async () => {
+    it("returns 400 when workspace_id is missing", async () => {
       stubWorkspaceMember(api, makeSupabaseClient());
       const { status } = await readJson(await itemsGet(makeRequest("/api/v1/appointment-items")));
-      expect(status).toBe(500);
+      expect(status).toBe(400);
     });
 
-    it("returns 500 when appointment_id is not a uuid", async () => {
+    it("returns 400 when appointment_id is not a uuid", async () => {
       stubWorkspaceMember(api, makeSupabaseClient());
       const { status } = await readJson(
         await itemsGet(makeRequest(`/api/v1/appointment-items?workspace_id=${WS_ID}&appointment_id=nope`)),
       );
-      expect(status).toBe(500);
+      expect(status).toBe(400);
     });
 
     it("returns 200 with the item list", async () => {
@@ -1070,12 +1084,12 @@ describe("appointment-items/route", () => {
       expect(status).toBe(401);
     });
 
-    it("returns 500 when the body fails zod validation", async () => {
+    it("returns 400 when the body fails zod validation", async () => {
       stubWorkspaceMember(api, makeSupabaseClient());
       const { status } = await readJson(
         await itemsPut(makeRequest("/api/v1/appointment-items", { method: "PUT", body: {} })),
       );
-      expect(status).toBe(500);
+      expect(status).toBe(400);
     });
 
     it("clears form-sourced items and returns null when no service is selected", async () => {

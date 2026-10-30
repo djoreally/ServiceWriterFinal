@@ -397,6 +397,13 @@ jest.mock("@/application/queries/job-thread.query", () => ({
   openCommunicationThreadsForJobs: jest.fn(async () => undefined),
 }));
 
+jest.mock("@/application/queries/settings.query", () => ({
+  resolveCurrentWorkspace: jest.fn(async () => ({
+    workspaceId: "00000000-0000-4000-8000-000000000001",
+    userId: mockOwner,
+  })),
+}));
+
 /**
  * In-memory emulation of the dispatch read-model HTTP surface. The technician
  * dashboard now reads through GET /v1/dispatch/operational-jobs, so the mock
@@ -439,7 +446,22 @@ jest.mock("@/lib/api-client", () => ({
       }
       return { data: null };
     }),
-    post: jest.fn(async () => ({ data: null })),
+    post: jest.fn(async (path: string, body?: Record<string, unknown>) => {
+      // Emulate the Fleet dispatch endpoint: the server persists the
+      // assignment on the fleet work order (fleet lifecycle).
+      const fleetDispatch = typeof path === "string" ? path.match(/^\/v1\/fleet\/work-orders\/([^/]+)\/dispatch$/) : null;
+      if (fleetDispatch) {
+        const row = mockStore.fleet_work_orders.find((f) => f.id === fleetDispatch[1]);
+        if (row) {
+          row.assigned_technician_id = (body?.technician_id as string | null) ?? null;
+          row.assigned_van_id = (body?.van_id as string | null) ?? null;
+          row.status = body?.technician_id ? "assigned" : "scheduled";
+          row.updated_at = new Date().toISOString();
+        }
+        return { data: { success: true } };
+      }
+      return { data: null };
+    }),
     put: jest.fn(async () => ({ data: null })),
     patch: jest.fn(async () => ({ data: null })),
     delete: jest.fn(async () => ({ data: null })),
@@ -528,12 +550,26 @@ describe("dispatch assignment paths → technician dashboards (E2E)", () => {
     })).rejects.toThrow(/Fleet dispatch is separated/i);
   });
 
-  it("rejects scored Fleet dispatch because Fleet dispatch is a separate product boundary", async () => {
-    await expect(dispatchFleetWorkOrder("fwo-2", TECH_B)).rejects.toThrow(/Fleet dispatch is separated/i);
+  it("scored Fleet dispatch assigns through the Fleet dispatch endpoint, not the Service Writer dispatch boundary", async () => {
+    // Fleet dispatch was rescued as its own product surface: it assigns
+    // through POST /v1/fleet/work-orders/:id/dispatch and never through
+    // the Service Writer assign_dispatch_job_v1 RPC.
+    await dispatchFleetWorkOrder("fwo-2", TECH_B);
+
+    const row = mockStore.fleet_work_orders.find((f) => f.id === "fwo-2");
+    expect(row?.assigned_technician_id).toBe(TECH_B);
+    expect(row?.status).toBe("assigned");
+    expect(mockStore.rpcCalls.filter((c) => c.name === "assign_dispatch_job_v1")).toHaveLength(0);
   });
 
-  it("rejects Fleet override dispatch because Fleet dispatch is a separate product boundary", async () => {
-    await expect(assignFleetWorkOrderWithOverride({ workOrderId: "fwo-1", technicianId: TECH_A, overrideReason: "closest van" })).rejects.toThrow(/Fleet dispatch is separated/i);
+  it("Fleet override dispatch assigns through the Fleet dispatch endpoint without client-side activity logs", async () => {
+    await assignFleetWorkOrderWithOverride({ workOrderId: "fwo-1", technicianId: TECH_A, overrideReason: "closest van" });
+
+    const row = mockStore.fleet_work_orders.find((f) => f.id === "fwo-1");
+    expect(row?.assigned_technician_id).toBe(TECH_A);
+    expect(row?.status).toBe("assigned");
+    // The dispatch event is recorded server-side; the client writes no
+    // fleet_activity_logs rows directly.
     expect(mockStore.fleet_activity_logs).toHaveLength(0);
   });
 
