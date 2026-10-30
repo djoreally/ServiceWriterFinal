@@ -2697,7 +2697,7 @@ appointmentsRouter.get("/v1/appointments/:id/services", async (c: Context) => {
 
   const { data: items, error: itemsError } = await db
     .from("appointment_items")
-    .select("id,appointment_id,description,quantity,unit_price,service_catalog_id,is_prepaid,added_at_service,created_at,service_catalog(id,name,description,labor_price)")
+    .select("id,appointment_id,description,quantity,unit_price,service_catalog_id,is_prepaid,added_at_service,created_at,item_type,metadata,service_catalog(id,name,description,labor_price)")
     .eq("workspace_id", workspaceId)
     .eq("appointment_id", id)
     .order("sort_order", { ascending: true })

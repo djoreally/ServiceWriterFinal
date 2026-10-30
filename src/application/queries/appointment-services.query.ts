@@ -18,6 +18,10 @@ export interface AppointmentServiceRow {
   is_prepaid: boolean | null;
   added_at_service: boolean | null;
   created_at: string | null;
+  /** 'service' | 'fee' — fee rows are recorded charges (waste, processing, tax). */
+  item_type: string | null;
+  /** Recorded fee kind for fee rows (from item metadata): waste_oil_fee | surcharge | shop_fee | tax. */
+  fee_key: string | null;
 }
 
 export interface FeeSettings {
@@ -38,6 +42,7 @@ export interface CatalogServiceInfo { id: string; name: string; description: str
 type ItemRow = {
   id: string; appointment_id: string; description: string; quantity: number; unit_price: number;
   service_catalog_id: string | null; is_prepaid: boolean | null; added_at_service: boolean | null; created_at: string | null;
+  item_type: string | null; metadata: Record<string, unknown> | null;
   service_catalog: { id: string; name: string; description: string | null; labor_price: number } | null;
 };
 
@@ -57,6 +62,8 @@ export async function fetchAppointmentServices(appointmentId: string, serviceCat
     price: Number(item.unit_price), quantity: Number(item.quantity),
     service_catalog_id: item.service_catalog_id, is_prepaid: item.is_prepaid,
     added_at_service: item.added_at_service, created_at: item.created_at,
+    item_type: item.item_type ?? null,
+    fee_key: typeof item.metadata?.fee_key === "string" ? item.metadata.fee_key : null,
   }));
   if (services.length) return { services, catalogService: null };
 

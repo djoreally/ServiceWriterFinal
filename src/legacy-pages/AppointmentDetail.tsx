@@ -15,6 +15,14 @@ import {
   updateAppointmentStatus as updateAppointmentStatusQuery,
   deleteAppointment as deleteAppointmentQuery,
 } from "@/application/commands/appointment-detail.command";
+import {
+  fetchAppointmentServices,
+  type AppointmentServiceRow,
+} from "@/application/queries/appointment-services.query";
+import {
+  fetchInvoiceForAppointment,
+  type InvoiceFullRow,
+} from "@/application/queries/invoices.query";
 import { unassignAppointment, updateAppointmentSchedule } from "@/application/commands";
 import { fetchReviewRequestStatusForService } from "@/application/queries/appointments.query";
 
@@ -113,6 +121,10 @@ function cleanHumanNotes(value?: string | null) {
     }
 
     if (/^(vehicles?|services?|payment):/i.test(line)) continue;
+    // System provenance from the website push ("Pushed from MOMS website
+    // booking <id>. Source: website. Website payment status: ...") is not a
+    // customer note — the Notes card shows customer notes only.
+    if (/^pushed from .*website booking\b/i.test(line)) continue;
     if (/^filter match\s*\(/i.test(line)) {
       suppressFilterBlock = true;
       continue;
@@ -132,11 +144,6 @@ function Eyebrow({ children, className }: { children: React.ReactNode; className
       {children}
     </p>
   );
-}
-
-/** Definition-list label for field data (VIN, plate, odometer). Caption size, always paired with mono data. */
-function FieldLabel({ children }: { children: React.ReactNode }) {
-  return <dt className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">{children}</dt>;
 }
 
 export const AppointmentDetail = ({
@@ -180,6 +187,11 @@ export const AppointmentDetail = ({
     surcharge_description: string;
     tax_rate: number | null;
   } | null>(null);
+  // Recorded money for the Financial summary: the appointment's invoice and
+  // its item rows, loaded independently of the services tab.
+  const [summaryInvoice, setSummaryInvoice] = useState<InvoiceFullRow | null>(null);
+  const [summaryItems, setSummaryItems] = useState<AppointmentServiceRow[]>([]);
+  const [succeededPaymentTotal, setSucceededPaymentTotal] = useState(0);
 
   const categoryPolicy = useServiceCategoryPolicy([
     appointment?.service_catalog?.category ?? null,
@@ -234,8 +246,32 @@ export const AppointmentDetail = ({
 
     const { data: payments } = await fetchSucceededPayments(id);
     setIsPrepaid(Boolean(payments?.length));
+    const paidRows = (payments ?? []) as Array<{ amount?: number | string }>;
+    setSucceededPaymentTotal(
+      paidRows.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0),
+    );
     setLoading(false);
   }, [id, overrideUserId]);
+
+  // Load the recorded financial breakdown (invoice + appointment items) for
+  // the summary card. Best-effort: a missing invoice/items just leaves the
+  // summary on its legacy single-total presentation.
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    void (async () => {
+      const [invoice, services] = await Promise.all([
+        fetchInvoiceForAppointment(id).catch(() => null),
+        fetchAppointmentServices(id).catch(() => null),
+      ]);
+      if (cancelled) return;
+      setSummaryInvoice(invoice);
+      setSummaryItems(services?.services ?? []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   useEffect(() => {
     void fetchAppointment();
@@ -438,9 +474,6 @@ export const AppointmentDetail = ({
   }
 
   const statusStyle = STATUS_STYLES[appointment.status] || STATUS_STYLES.confirmed;
-  const vehicleName = appointment.vehicle
-    ? `${appointment.vehicle.year} ${appointment.vehicle.make} ${appointment.vehicle.model}`
-    : "Vehicle not specified";
   const customerName = appointment.guest_name || appointment.customer?.name || "Customer";
   const customerEmail = appointment.customer?.email || appointment.guest_email || null;
   const customerPhone = appointment.customer?.phone || appointment.guest_phone || null;
@@ -469,6 +502,57 @@ export const AppointmentDetail = ({
       });
   const { wasteOilFee, shopFee, surcharge } = financials;
   const totalDue = financials.total;
+
+  // --- Financial summary from recorded data -------------------------------
+  // Lines and totals come from what is actually recorded on the appointment
+  // (its invoice lines, else its item rows) — never a fee/tax split derived
+  // from workspace settings. Records whose only recorded shape is a single
+  // lump line (legacy locked website quotes) show exactly that line, plus
+  // Total / Amount Paid / Balance Due.
+  const roundMoney = (value: number) => Math.round(value * 100) / 100;
+  const feeKeyForDescription = (description: string): string | null => {
+    const normalized = description.trim().toLowerCase();
+    if (normalized === "waste oil disposal fee") return "waste_oil_fee";
+    if (normalized === "card processing fee") return "surcharge";
+    if (normalized === "tax") return "tax";
+    return null;
+  };
+  type RecordedLine = { description: string; amount: number; feeKey: string | null };
+  const recordedLines: RecordedLine[] =
+    summaryInvoice && summaryInvoice.invoice_line_items.length > 0
+      ? summaryInvoice.invoice_line_items.map((line) => ({
+          description: line.description,
+          amount: line.line_total,
+          feeKey: line.fee_key ?? feeKeyForDescription(line.description),
+        }))
+      : summaryItems.map((item) => ({
+          description: item.name,
+          amount: item.price * item.quantity,
+          feeKey:
+            item.fee_key ??
+            (item.item_type === "fee" ? feeKeyForDescription(item.name) : null),
+        }));
+  const recordedServiceLines = recordedLines.filter((line) => line.feeKey === null);
+  const recordedFeeTotal = (key: string) =>
+    roundMoney(
+      recordedLines
+        .filter((line) => line.feeKey === key)
+        .reduce((sum, line) => sum + line.amount, 0),
+    );
+  const recordedWasteFee = recordedFeeTotal("waste_oil_fee");
+  const recordedProcessingFee = recordedFeeTotal("surcharge");
+  const recordedShopFee = recordedFeeTotal("shop_fee");
+  const recordedTaxLines = recordedFeeTotal("tax");
+  const hasRecordedBreakdown = recordedLines.length > 0;
+  const summaryTax =
+    recordedTaxLines > 0
+      ? recordedTaxLines
+      : summaryInvoice
+        ? summaryInvoice.tax_amount
+        : taxAmount;
+  const summaryTotal = summaryInvoice ? summaryInvoice.total : totalDue;
+  const summaryPaid = summaryInvoice ? summaryInvoice.amount_paid : succeededPaymentTotal;
+  const summaryBalance = Math.max(0, roundMoney(summaryTotal - summaryPaid));
   const isEditable = appointment.status !== "completed" && appointment.status !== "cancelled";
   const canReactivate = appointment.status === "cancelled" || appointment.status === "no_show";
 
@@ -611,54 +695,6 @@ export const AppointmentDetail = ({
                       </div>
                     )}
                   </div>
-
-                  <Separator />
-
-                  {/* Vehicle block */}
-                  <div className="space-y-4 p-6">
-                    <div>
-                      <Eyebrow>{terms.vehicle}</Eyebrow>
-                      <p className="mt-1 text-[18px] font-semibold leading-[1.35]">{vehicleName}</p>
-                    </div>
-                    {appointment.vehicle ? (
-                      <dl className="grid grid-cols-2 gap-x-6 gap-y-4">
-                        {appointment.vehicle.vin && (
-                          <div className="col-span-2 sm:col-span-1">
-                            <FieldLabel>VIN</FieldLabel>
-                            <dd className="mt-1 break-all font-mono text-[14px]">{appointment.vehicle.vin}</dd>
-                          </div>
-                        )}
-                        {appointment.vehicle.license_plate && (
-                          <div>
-                            <FieldLabel>Plate</FieldLabel>
-                            <dd className="mt-1 font-mono text-[14px]">{appointment.vehicle.license_plate}</dd>
-                          </div>
-                        )}
-                        {appointment.vehicle.mileage != null && (
-                          <div>
-                            <FieldLabel>Odometer</FieldLabel>
-                            <dd className="mt-1 font-mono text-[14px]">{appointment.vehicle.mileage.toLocaleString()} mi</dd>
-                          </div>
-                        )}
-                        {appointment.vehicle.color && (
-                          <div>
-                            <FieldLabel>Color</FieldLabel>
-                            <dd className="mt-1 text-base">{appointment.vehicle.color}</dd>
-                          </div>
-                        )}
-                      </dl>
-                    ) : (
-                      <div className="rounded-lg border border-dashed px-4 py-4">
-                        <p className="text-sm text-muted-foreground">
-                          No vehicle attached yet.{" "}
-                          <button className="underline underline-offset-2" onClick={() => setEditDialogOpen(true)}>
-                            Add one
-                          </button>{" "}
-                          so the tech knows what to service.
-                        </p>
-                      </div>
-                    )}
-                  </div>
                 </CardContent>
               </Card>
             </section>
@@ -738,43 +774,90 @@ export const AppointmentDetail = ({
                 <p className="text-sm text-muted-foreground">One total for this appointment</p>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="flex items-baseline justify-between gap-4">
-                  <span className="text-sm text-muted-foreground">Services</span>
-                  <span className="font-mono text-[14px]">{formatCurrency(estimatedCost)}</span>
-                </div>
-                {wasteOilFee > 0 && (
-                  <div className="flex items-baseline justify-between gap-4">
-                    <span className="text-sm text-muted-foreground">Waste oil disposal fee</span>
-                    <span className="font-mono text-[14px]">{formatCurrency(wasteOilFee)}</span>
-                  </div>
-                )}
-                {shopFee > 0 && (
-                  <div className="flex items-baseline justify-between gap-4">
-                    <span className="text-sm text-muted-foreground">{feeSettings?.shop_fee_description || "Shop supplies fee"}</span>
-                    <span className="font-mono text-[14px]">{formatCurrency(shopFee)}</span>
-                  </div>
-                )}
-                {surcharge > 0 && (
-                  <div className="flex items-baseline justify-between gap-4">
-                    <span className="text-sm text-muted-foreground">{feeSettings?.surcharge_description || "Card processing fee"}</span>
-                    <span className="font-mono text-[14px]">{formatCurrency(surcharge)}</span>
-                  </div>
-                )}
-                {taxAmount > 0 && (
-                  <div className="flex items-baseline justify-between gap-4">
-                    <span className="text-sm text-muted-foreground">Tax</span>
-                    <span className="font-mono text-[14px]">{formatCurrency(taxAmount)}</span>
-                  </div>
+                {hasRecordedBreakdown ? (
+                  <>
+                    {recordedServiceLines.map((line, index) => (
+                      <div key={`${line.description}-${index}`} className="flex items-baseline justify-between gap-4">
+                        <span className="text-sm text-muted-foreground">{line.description}</span>
+                        <span className="font-mono text-[14px]">{formatCurrency(line.amount)}</span>
+                      </div>
+                    ))}
+                    {recordedWasteFee > 0 && (
+                      <div className="flex items-baseline justify-between gap-4">
+                        <span className="text-sm text-muted-foreground">Waste Oil Disposal Fee</span>
+                        <span className="font-mono text-[14px]">{formatCurrency(recordedWasteFee)}</span>
+                      </div>
+                    )}
+                    {recordedShopFee > 0 && (
+                      <div className="flex items-baseline justify-between gap-4">
+                        <span className="text-sm text-muted-foreground">{feeSettings?.shop_fee_description || "Shop fee"}</span>
+                        <span className="font-mono text-[14px]">{formatCurrency(recordedShopFee)}</span>
+                      </div>
+                    )}
+                    {recordedProcessingFee > 0 && (
+                      <div className="flex items-baseline justify-between gap-4">
+                        <span className="text-sm text-muted-foreground">Card Processing Fee</span>
+                        <span className="font-mono text-[14px]">{formatCurrency(recordedProcessingFee)}</span>
+                      </div>
+                    )}
+                    {summaryTax > 0 && (
+                      <div className="flex items-baseline justify-between gap-4">
+                        <span className="text-sm text-muted-foreground">Tax</span>
+                        <span className="font-mono text-[14px]">{formatCurrency(summaryTax)}</span>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-baseline justify-between gap-4">
+                      <span className="text-sm text-muted-foreground">Services</span>
+                      <span className="font-mono text-[14px]">{formatCurrency(estimatedCost)}</span>
+                    </div>
+                    {wasteOilFee > 0 && (
+                      <div className="flex items-baseline justify-between gap-4">
+                        <span className="text-sm text-muted-foreground">Waste oil disposal fee</span>
+                        <span className="font-mono text-[14px]">{formatCurrency(wasteOilFee)}</span>
+                      </div>
+                    )}
+                    {shopFee > 0 && (
+                      <div className="flex items-baseline justify-between gap-4">
+                        <span className="text-sm text-muted-foreground">{feeSettings?.shop_fee_description || "Shop supplies fee"}</span>
+                        <span className="font-mono text-[14px]">{formatCurrency(shopFee)}</span>
+                      </div>
+                    )}
+                    {surcharge > 0 && (
+                      <div className="flex items-baseline justify-between gap-4">
+                        <span className="text-sm text-muted-foreground">{feeSettings?.surcharge_description || "Card processing fee"}</span>
+                        <span className="font-mono text-[14px]">{formatCurrency(surcharge)}</span>
+                      </div>
+                    )}
+                    {taxAmount > 0 && (
+                      <div className="flex items-baseline justify-between gap-4">
+                        <span className="text-sm text-muted-foreground">Tax</span>
+                        <span className="font-mono text-[14px]">{formatCurrency(taxAmount)}</span>
+                      </div>
+                    )}
+                  </>
                 )}
                 <Separator />
+                <div className="flex items-baseline justify-between gap-4">
+                  <span className="text-sm font-medium">Total</span>
+                  <span className="font-mono text-[14px]">{formatCurrency(summaryTotal)}</span>
+                </div>
+                {summaryPaid > 0 && (
+                  <div className="flex items-baseline justify-between gap-4">
+                    <span className="text-sm text-muted-foreground">Amount paid</span>
+                    <span className="font-mono text-[14px]">{formatCurrency(summaryPaid)}</span>
+                  </div>
+                )}
                 <div className="flex items-end justify-between gap-4 pt-1">
                   <div>
-                    <p className="text-base font-semibold">{isPrepaid ? "Total (paid)" : "Due at service"}</p>
+                    <p className="text-base font-semibold">Due at service</p>
                     <p className="mt-0.5 text-sm text-muted-foreground">
-                      {isPrepaid ? "Paid in full" : "Collect after the job"}
+                      {summaryBalance > 0 ? "Collect after the job" : summaryPaid > 0 ? "Paid in full" : "Collect after the job"}
                     </p>
                   </div>
-                  <p className="font-mono text-[30px] font-semibold leading-none text-primary">{formatCurrency(totalDue)}</p>
+                  <p className="font-mono text-[30px] font-semibold leading-none text-primary">{formatCurrency(summaryBalance)}</p>
                 </div>
               </CardContent>
             </Card>
