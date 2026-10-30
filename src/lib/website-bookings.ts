@@ -17,6 +17,33 @@ export interface WebsiteBookingVehicle {
   engine: string | null;
 }
 
+export interface WebsiteBookingJobVehicle {
+  year: number | null;
+  make: string | null;
+  model: string | null;
+  engine: string | null;
+  vin: string | null;
+}
+
+/**
+ * One vehicle + service on a website booking, with that job's own price
+ * components (mirroring Service Writer's native per-vehicle fee lines).
+ * Legacy bookings (created before the backend served components) carry
+ * all-zero components with a correct `total_usd`.
+ */
+export interface WebsiteBookingJob {
+  position: number;
+  service_id: string | null;
+  service_name: string;
+  vehicle: WebsiteBookingJobVehicle | null;
+  subtotal_usd: number;
+  waste_fee_usd: number;
+  processing_fee_usd: number;
+  tax_usd: number;
+  total_usd: number;
+  duration_minutes: number;
+}
+
 /** Shape returned by the website backend's internal endpoint (export shape). */
 export interface WebsiteBooking {
   id: string;
@@ -32,6 +59,10 @@ export interface WebsiteBooking {
   source_channel: string | null;
   status: string;
   vehicle: WebsiteBookingVehicle | null;
+  /** Every job on the booking. The top-level `service` / `vehicle` /
+   * `quoted_total_usd` remain the first job's + the booking total. May be
+   * absent on older feed payloads — use `resolveBookingJobs`. */
+  jobs?: WebsiteBookingJob[];
   pushed_sw_appointment_id?: string | null;
   pushed_at?: string | null;
   /** Set when a prepaid auto-push attempt failed; the booking stays in
@@ -297,4 +328,203 @@ export function staffNote(booking: WebsiteBooking): string {
   const channel = booking.source_channel ?? "website";
   const payment = booking.payment ?? "unknown";
   return `Pushed from MOMS website booking ${booking.id}. Source: ${channel}. Website payment status: ${payment}.`;
+}
+
+// ---------------------------------------------------------------------------
+// Per-job structure (each vehicle is its own record)
+// ---------------------------------------------------------------------------
+
+/**
+ * The booking's jobs in position order. Feed payloads without jobs (or
+ * with an empty list) synthesize a single job from the top-level fields:
+ * total only, all price components 0 — the legacy shape.
+ */
+export function resolveBookingJobs(booking: WebsiteBooking): WebsiteBookingJob[] {
+  const raw = Array.isArray(booking.jobs) ? booking.jobs.filter((j) => j && typeof j === "object") : [];
+  if (raw.length > 0) {
+    return [...raw].sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0));
+  }
+  return [
+    {
+      position: 0,
+      service_id: null,
+      service_name: booking.service,
+      vehicle: booking.vehicle
+        ? {
+            year: booking.vehicle.year,
+            make: booking.vehicle.make,
+            model: booking.vehicle.model,
+            engine: booking.vehicle.engine,
+            vin: null,
+          }
+        : null,
+      subtotal_usd: 0,
+      waste_fee_usd: 0,
+      processing_fee_usd: 0,
+      tax_usd: 0,
+      total_usd: booking.quoted_total_usd,
+      duration_minutes: 0,
+    },
+  ];
+}
+
+/** A booking with `jobs` guaranteed present (feed normalization). */
+export function normalizeWebsiteBooking(booking: WebsiteBooking): WebsiteBooking {
+  return { ...booking, jobs: resolveBookingJobs(booking) };
+}
+
+export function jobVehicleLabel(vehicle: WebsiteBookingJobVehicle | null): string {
+  if (!vehicle) return "Vehicle not recorded";
+  const base = [vehicle.year, vehicle.make, vehicle.model]
+    .map((part) => (part === null || part === undefined ? "" : String(part).trim()))
+    .filter(Boolean)
+    .join(" ");
+  return `${base || "Vehicle not recorded"}${vehicle.engine ? ` (${vehicle.engine})` : ""}`;
+}
+
+function jobVehicleShort(vehicle: WebsiteBookingJobVehicle | null): string {
+  if (!vehicle) return "";
+  return [vehicle.year, vehicle.make, vehicle.model]
+    .map((part) => (part === null || part === undefined ? "" : String(part).trim()))
+    .filter(Boolean)
+    .join(" ");
+}
+
+function distinctJobServices(jobs: WebsiteBookingJob[], fallback: string): string {
+  const names: string[] = [];
+  for (const job of jobs) {
+    const name = (job.service_name || "").trim();
+    if (name && !names.includes(name)) names.push(name);
+  }
+  return names.length > 0 ? names.join(" + ") : fallback;
+}
+
+/** Multi-job title: "<services> — <vehicle> + <vehicle>" (single-job parity
+ * with `appointmentTitle` when the top-level fields mirror the first job). */
+export function appointmentTitleForJobs(booking: WebsiteBooking, jobs: WebsiteBookingJob[]): string {
+  const services = distinctJobServices(jobs, booking.service);
+  const vehicles = jobs.map((job) => jobVehicleShort(job.vehicle)).filter(Boolean);
+  return (vehicles.length > 0 ? `${services} — ${vehicles.join(" + ")}` : services).slice(0, 500);
+}
+
+export function appointmentDescriptionForJobs(booking: WebsiteBooking, jobs: WebsiteBookingJob[]): string {
+  const services = distinctJobServices(jobs, booking.service);
+  const labels = jobs.map((job) => jobVehicleLabel(job.vehicle));
+  return `${services} for ${labels.join(" + ")} — booked on the MOMS website.`;
+}
+
+// Fee-line conventions mirror the invoice sync's native fee lines
+// (sync_appointment_invoice_v1): same descriptions, same fee_keys
+// (metadata), so a per-job fee item reads identically once the sync
+// rebuilds invoice lines from appointment items.
+export const WASTE_FEE_DESCRIPTION = "Waste Oil Disposal Fee";
+export const PROCESSING_FEE_DESCRIPTION = "Card Processing Fee";
+export const TAX_FEE_DESCRIPTION = "Tax";
+export const WASTE_FEE_KEY = "waste_oil_fee";
+export const PROCESSING_FEE_KEY = "surcharge";
+export const TAX_FEE_KEY = "tax";
+
+export interface PerJobItemDraft {
+  item_type: "service" | "fee";
+  description: string;
+  quantity: 1;
+  unit_price: number;
+  service_catalog_id: string | null;
+  sort_order: number;
+  metadata: Record<string, unknown>;
+}
+
+/**
+ * Build the per-job appointment items for a pushed booking. Pure: the
+ * caller resolves each job's Service Writer vehicle id and catalog id.
+ *
+ * Per job: one service item at the job subtotal, plus one fee item per
+ * non-zero component (waste / processing / tax), every item pinned to
+ * the job's vehicle via metadata.vehicle_id. A job whose components are
+ * all zero but whose total is positive (legacy booking) collapses to a
+ * single service item at its total — the pre-existing behavior, per job.
+ *
+ * Invariant: the drafts sum to `quotedTotalUsd` to the cent. Any
+ * residual (component rounding drift) is applied to the LAST job's
+ * service item and reported via `residualUsd` so the caller can log it.
+ */
+export function buildPerJobItems(input: {
+  bookingId: string;
+  quotedTotalUsd: number;
+  jobs: WebsiteBookingJob[];
+  vehicleIds: Array<string | null>;
+  catalogIds: Array<string | null>;
+}): { items: PerJobItemDraft[]; taxTotalUsd: number; residualUsd: number } {
+  const items: PerJobItemDraft[] = [];
+  const serviceItemByJob: Array<PerJobItemDraft | null> = [];
+  let taxTotal = 0;
+
+  input.jobs.forEach((job, index) => {
+    const vehicleId = input.vehicleIds[index] ?? null;
+    const baseMetadata: Record<string, unknown> = {
+      source: "website_push",
+      price_source: "website_quote",
+      website_booking_id: input.bookingId,
+      job_position: job.position,
+    };
+    if (vehicleId) baseMetadata.vehicle_id = vehicleId;
+    const sortBase = index * 10;
+
+    const subtotal = roundMoney(Number(job.subtotal_usd) || 0);
+    const waste = roundMoney(Number(job.waste_fee_usd) || 0);
+    const processing = roundMoney(Number(job.processing_fee_usd) || 0);
+    const tax = roundMoney(Number(job.tax_usd) || 0);
+    const total = roundMoney(Number(job.total_usd) || 0);
+    taxTotal += tax;
+
+    const serviceItem: PerJobItemDraft = {
+      item_type: "service",
+      description: (job.service_name || "Website booking").slice(0, 250),
+      quantity: 1,
+      unit_price: subtotal,
+      service_catalog_id: input.catalogIds[index] ?? null,
+      sort_order: sortBase,
+      metadata: { ...baseMetadata },
+    };
+
+    if (subtotal === 0 && waste === 0 && processing === 0 && tax === 0) {
+      // Legacy job (or a genuinely free job): one lump service item at
+      // the job total, exactly what the push wrote before per-job data.
+      serviceItem.unit_price = total;
+      items.push(serviceItem);
+      serviceItemByJob.push(serviceItem);
+      return;
+    }
+
+    items.push(serviceItem);
+    serviceItemByJob.push(serviceItem);
+    const fees: Array<{ amount: number; description: string; feeKey: string; offset: number }> = [
+      { amount: waste, description: WASTE_FEE_DESCRIPTION, feeKey: WASTE_FEE_KEY, offset: 1 },
+      { amount: processing, description: PROCESSING_FEE_DESCRIPTION, feeKey: PROCESSING_FEE_KEY, offset: 2 },
+      { amount: tax, description: TAX_FEE_DESCRIPTION, feeKey: TAX_FEE_KEY, offset: 3 },
+    ];
+    for (const fee of fees) {
+      if (fee.amount <= 0) continue;
+      items.push({
+        item_type: "fee",
+        description: fee.description,
+        quantity: 1,
+        unit_price: fee.amount,
+        service_catalog_id: null,
+        sort_order: sortBase + fee.offset,
+        metadata: { ...baseMetadata, fee_key: fee.feeKey },
+      });
+    }
+  });
+
+  const sum = roundMoney(items.reduce((acc, item) => acc + item.unit_price, 0));
+  const residual = roundMoney(roundMoney(input.quotedTotalUsd) - sum);
+  if (residual !== 0) {
+    const lastService = [...serviceItemByJob].reverse().find((item) => item !== null) ?? null;
+    if (lastService) {
+      lastService.unit_price = roundMoney(lastService.unit_price + residual);
+    }
+  }
+
+  return { items, taxTotalUsd: roundMoney(taxTotal), residualUsd: residual };
 }

@@ -36,6 +36,9 @@ const WS_ID = "11111111-1111-4111-8111-111111111111";
 const CATALOG_ID = "77777777-7777-4777-8777-777777777777";
 const CREATED_ID = "a1111111-1111-4111-8111-111111111111";
 const EXISTING_APPT_ID = "b2222222-2222-4222-8222-222222222222";
+const CUSTOMER_ID = "c3333333-3333-4333-8333-333333333333";
+const VEHICLE_ID = "d4444444-4444-4444-8444-444444444444";
+const NEW_VEHICLE_ID = "e5555555-5555-4555-8555-555555555555";
 
 const fetchBookings = client.fetchWebsiteBookings as jest.Mock;
 const stampPushed = client.stampWebsiteBookingPushed as jest.Mock;
@@ -62,34 +65,71 @@ const booking = (overrides: Partial<WebsiteBooking> = {}): WebsiteBooking => {
   };
 };
 
+interface FakeItem {
+  id: string;
+  quantity: number;
+  unit_price: number;
+  metadata: Record<string, unknown>;
+}
+
+interface FakeVehicle {
+  id: string;
+  customer_id: string;
+  vin: string | null;
+  year: number | null;
+  make: string | null;
+  model: string | null;
+}
+
 interface FakeState {
   unpushed: WebsiteBooking[];
   pushed: WebsiteBooking[];
   catalog: Array<{ id: string; name: string }>;
   dayAppointments: unknown[];
   geocodeFeatures: unknown[];
+  /** appointment_items rows for the created appointment (stateful: the
+   * RPC seeds one item, normalization replaces it). */
+  items: FakeItem[];
+  vehicles: FakeVehicle[];
 }
 
 function makeFakeSupabase(state: FakeState) {
   const rpcCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
   const builder = (listResult: unknown, singleResult: unknown) => {
     const b: Record<string, unknown> = {};
-    for (const m of ["select", "eq", "ilike", "in", "gte", "lte", "order", "limit"]) {
+    for (const m of ["select", "eq", "ilike", "in", "gte", "lte", "order", "limit", "insert", "update", "upsert"]) {
       b[m] = jest.fn(() => b);
     }
+    b.delete = jest.fn(() => b);
     b.maybeSingle = jest.fn(async () => singleResult);
-    b.then = (resolve: (value: unknown) => void) => resolve(listResult);
+    b.single = jest.fn(async () => singleResult);
+    b.then = (resolve: (value: unknown) => void) =>
+      resolve(typeof listResult === "function" ? (listResult as () => unknown)() : listResult);
     return b;
   };
   const supabase = {
     rpc: jest.fn(async (name: string, args: Record<string, unknown>) => {
       rpcCalls.push({ name, args });
+      // The booking RPC creates the appointment + its one canonical item.
+      state.items = [
+        {
+          id: "rpc-item-1",
+          quantity: 1,
+          unit_price: Number(args.p_quoted_total),
+          metadata: {
+            source: "website_push",
+            price_source: "website_quote",
+            website_booking_id: args.p_website_booking_id,
+            vehicle_id: VEHICLE_ID,
+          },
+        },
+      ];
       return { data: CREATED_ID, error: null };
     }),
     from: jest.fn((table: string) => {
       switch (table) {
         case "workspaces":
-          return builder(null, { data: { timezone: "America/New_York" }, error: null });
+          return builder(null, { data: { timezone: "America/New_York", name: "MOMS" }, error: null });
         case "workspace_settings":
           return builder(null, { data: { booking_slug: "moms" }, error: null });
         case "customers":
@@ -97,12 +137,51 @@ function makeFakeSupabase(state: FakeState) {
         case "service_catalog":
           return builder({ data: state.catalog, error: null }, null);
         case "appointments":
-          return builder(
-            { data: state.dayAppointments, error: null },
-            { data: { metadata: { estimated_cost: 122.57, tax_amount: 0 } }, error: null },
-          );
-        case "appointment_items":
-          return builder({ data: [{ quantity: 1, unit_price: 122.57 }], error: null }, null);
+          return builder({ data: state.dayAppointments, error: null }, {
+            data: {
+              id: CREATED_ID,
+              workspace_id: WS_ID,
+              customer_id: CUSTOMER_ID,
+              vehicle_id: VEHICLE_ID,
+              starts_at: "2026-10-21T12:00:00.000Z",
+              ends_at: "2026-10-21T13:00:00.000Z",
+              status: "confirmed",
+              notes: null,
+              confirmation_code: "TEST1234",
+              metadata: { estimated_cost: 122.57, tax_amount: 0, title: "Full Synthetic Oil Change" },
+            },
+            error: null,
+          });
+        case "appointment_items": {
+          const b = builder(() => ({ data: state.items, error: null }), null);
+          b.insert = jest.fn(async (rows: Array<Omit<FakeItem, "id">>) => {
+            state.items = rows.map((row, i) => ({ id: `normalized-item-${i}`, ...row }));
+            return { error: null };
+          });
+          b.delete = jest.fn(() => {
+            const chain: Record<string, unknown> = {};
+            chain.eq = jest.fn(() => chain);
+            chain.in = jest.fn(async (_column: string, ids: string[]) => {
+              state.items = state.items.filter((item) => !ids.includes(item.id));
+              return { error: null };
+            });
+            return chain;
+          });
+          return b;
+        }
+        case "vehicles": {
+          const b = builder(() => ({ data: state.vehicles, error: null }), null);
+          b.insert = jest.fn((row: Omit<FakeVehicle, "id">) => ({
+            select: () => ({
+              single: async () => {
+                const created: FakeVehicle = { id: NEW_VEHICLE_ID, ...row };
+                state.vehicles.push(created);
+                return { data: { id: created.id }, error: null };
+              },
+            }),
+          }));
+          return b;
+        }
         default:
           return builder({ data: [], error: null }, { data: null, error: null });
       }
@@ -118,6 +197,10 @@ function baseState(overrides: Partial<FakeState> = {}): FakeState {
     catalog: [{ id: CATALOG_ID, name: "Full Synthetic Oil Change" }],
     dayAppointments: [],
     geocodeFeatures: [{ center: [-75.6, 39.96] }],
+    items: [],
+    vehicles: [
+      { id: VEHICLE_ID, customer_id: CUSTOMER_ID, vin: null, year: 2025, make: "Toyota", model: "Land Cruiser" },
+    ],
     ...overrides,
   };
 }
@@ -285,5 +368,56 @@ describe("manual pipeline is unchanged by auto mode", () => {
     expect(rpcCalls).toHaveLength(1);
     expect(rpcCalls[0].name).toBe("public_booking_book_appointment_staff_v1");
     expect(recordFailure).not.toHaveBeenCalled();
+  });
+
+  it("normalizes a two-job booking into per-vehicle items after the RPC creates the appointment", async () => {
+    const b = booking({
+      payment: "due_at_appointment",
+      quoted_total_usd: 259.85,
+      jobs: [
+        {
+          position: 0,
+          service_id: "ws-svc-1",
+          service_name: "Full Synthetic Oil Change",
+          vehicle: { year: 2025, make: "Toyota", model: "Land Cruiser", engine: "Turbo 2.4", vin: null },
+          subtotal_usd: 119,
+          waste_fee_usd: 0,
+          processing_fee_usd: 3.57,
+          tax_usd: 0,
+          total_usd: 122.57,
+          duration_minutes: 45,
+        },
+        {
+          position: 1,
+          service_id: "ws-svc-1",
+          service_name: "Full Synthetic Oil Change",
+          vehicle: { year: 2025, make: "SUBARU", model: "Crosstrek", engine: null, vin: null },
+          subtotal_usd: 119,
+          waste_fee_usd: 4,
+          processing_fee_usd: 3.69,
+          tax_usd: 10.59,
+          total_usd: 137.28,
+          duration_minutes: 45,
+        },
+      ],
+    });
+    const state = baseState({ unpushed: [b] });
+    const { supabase } = wireState(state);
+
+    const [result] = await executePushes(supabase, WS_ID, [{ booking_id: b.id, action: "push" }]);
+
+    expect(result.status).toBe("created");
+    // The second job's vehicle was created under the customer.
+    expect(state.vehicles).toHaveLength(2);
+    expect(state.vehicles[1].make).toBe("SUBARU");
+    // Items: 2 service + job 1 processing + job 2 waste/processing/tax.
+    const services = state.items.filter((i) => i.metadata.fee_key === undefined);
+    const fees = state.items.filter((i) => i.metadata.fee_key !== undefined);
+    expect(services).toHaveLength(2);
+    expect(services.map((i) => i.metadata.vehicle_id)).toEqual([VEHICLE_ID, NEW_VEHICLE_ID]);
+    expect(fees.map((f) => f.metadata.fee_key)).toEqual(["surcharge", "waste_oil_fee", "surcharge", "tax"]);
+    expect(fees.filter((f) => f.metadata.job_position === 1).every((f) => f.metadata.vehicle_id === NEW_VEHICLE_ID)).toBe(true);
+    const total = Math.round(state.items.reduce((acc, i) => acc + i.unit_price, 0) * 100) / 100;
+    expect(total).toBe(259.85);
   });
 });

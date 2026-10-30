@@ -6,8 +6,12 @@
  * public_booking_book_appointment_staff_v1, the authenticated staff variant
  * of public_booking_book_appointment_v3 delivered in
  * supabase/migrations/20261028235900_website_booking_staff_push_rpc.sql.
- * No direct inserts into appointments anywhere in this module, and no
- * customer-facing side effects: this module never calls the confirmation
+ * No direct inserts into appointments anywhere in this module. After the
+ * RPC creates the appointment, its items are normalized to the booking's
+ * per-job structure (one service item per vehicle/job at that job's own
+ * price, fee items pinned per vehicle) by replacing exactly the items
+ * the push itself owns. No customer-facing side effects: this module
+ * never calls the confirmation
  * endpoint and never emails the customer (the website already did). The
  * one messaging side effect is deliberate and shop-side only: after a
  * push creates an appointment, the shop gets the same "new appointment
@@ -16,7 +20,10 @@
  */
 import {
   appointmentDescription,
+  appointmentDescriptionForJobs,
   appointmentTitle,
+  appointmentTitleForJobs,
+  buildPerJobItems,
   computeStoredTotal,
   findDuplicateCandidates,
   findOverlaps,
@@ -24,6 +31,7 @@ import {
   localDateInTimezone,
   matchServiceCatalogId,
   phoneDigits,
+  resolveBookingJobs,
   roundMoney,
   splitScheduledStart,
   staffNote,
@@ -34,6 +42,7 @@ import {
   type PushPreview,
   type PushResult,
   type WebsiteBooking,
+  type WebsiteBookingJob,
 } from "@/lib/website-bookings";
 import {
   fetchWebsiteBookings,
@@ -145,6 +154,10 @@ interface Resolution {
   warnings: string[];
   customer_match: PushPreview["customer_match"];
   service_match: PushPreview["service_match"];
+  /** Catalog id per booking job (aligned with `resolveBookingJobs`
+   * order); entry 0 is the first job and mirrors `service_match`. Only
+   * set on the fully-resolved (unblocked) return. */
+  job_catalog_ids?: Array<string | null>;
   geocode: { lat: number; lng: number } | null;
   scheduled: PushPreview["scheduled"];
   duplicate_candidates: PushPreview["duplicate_candidates"];
@@ -308,6 +321,29 @@ async function resolveBooking(
     };
   }
 
+  // Per-job service resolution: every job on the booking must resolve to
+  // a catalog service, or the push cannot build that vehicle's items
+  // (same spec §4 rule as the first job, applied per job).
+  const jobs = resolveBookingJobs(booking);
+  const jobCatalogIds: Array<string | null> = jobs.map((job, index) =>
+    index === 0
+      ? catalogId
+      : matchServiceCatalogId((catalog ?? []) as Array<{ id: string; name: string }>, job.service_name),
+  );
+  const unmatchedJob = jobs.find((job, index) => jobCatalogIds[index] === null);
+  if (unmatchedJob) {
+    return {
+      blocked_reason: `Service "${unmatchedJob.service_name}" (job ${unmatchedJob.position + 1} of this booking) does not match any active Service Writer catalog service in this workspace. Add or rename the catalog service, or skip this booking.`,
+      warnings,
+      customer_match: customerMatch,
+      service_match: { catalog_id: catalogId, name: booking.service },
+      geocode: null,
+      scheduled: scheduledOut,
+      duplicate_candidates: [],
+      overlaps: [],
+    };
+  }
+
   // Geocode (spec §4): no coordinates, no push — never create without a
   // location.
   let geocode: { lat: number; lng: number } | null = null;
@@ -347,6 +383,7 @@ async function resolveBooking(
     warnings,
     customer_match: customerMatch,
     service_match: { catalog_id: catalogId, name: booking.service },
+    job_catalog_ids: jobCatalogIds,
     geocode,
     scheduled: scheduledOut,
     duplicate_candidates: duplicates,
@@ -437,6 +474,269 @@ async function verifyStoredTotal(
     (items ?? []) as Array<{ quantity: unknown; unit_price: unknown }>,
   );
   return { ok: stored === roundMoney(quotedTotal), stored };
+}
+
+interface VehicleRow {
+  id: string;
+  vin: string | null;
+  year: number | null;
+  make: string | null;
+  model: string | null;
+}
+
+/** VIN comparison key, mirroring upsert_booking_vehicle's normalization. */
+function normalizeVin(value: string | null | undefined): string | null {
+  const vin = String(value ?? "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+  return vin.length > 0 ? vin : null;
+}
+
+/**
+ * Match a job's vehicle against the customer's Service Writer vehicles:
+ * VIN first (when the feed carries one), then year/make/model, with the
+ * specs engine breaking ties when the job names an engine.
+ */
+function matchJobVehicle(
+  job: WebsiteBookingJob,
+  vehicles: VehicleRow[],
+  specEngineByVehicle: Map<string, string | null>,
+): string | null {
+  const wanted = job.vehicle;
+  if (!wanted) return null;
+  const vin = normalizeVin(wanted.vin);
+  if (vin) {
+    const byVin = vehicles.find((v) => normalizeVin(v.vin) === vin);
+    if (byVin) return byVin.id;
+  }
+  const ci = (a: unknown, b: unknown) =>
+    String(a ?? "").trim().toLowerCase() === String(b ?? "").trim().toLowerCase();
+  const yearMakeModel = vehicles.filter(
+    (v) => v.year === wanted.year && ci(v.make, wanted.make) && ci(v.model, wanted.model),
+  );
+  if (yearMakeModel.length === 0) return null;
+  if (wanted.engine) {
+    const withEngine = yearMakeModel.find((v) => {
+      const engine = specEngineByVehicle.get(v.id);
+      return engine ? ci(engine, wanted.engine) : false;
+    });
+    if (withEngine) return withEngine.id;
+  }
+  return yearMakeModel[0].id;
+}
+
+/**
+ * Ensure a vehicle_service_specs row exists for the vehicle (the push
+ * RPC writes one for the first job's vehicle only). Never overwrites
+ * existing spec values — a staff-entered oil type/capacity survives;
+ * only a missing engine is filled from the feed. Oil capacity is not in
+ * the feed, so it stays null on rows the push creates.
+ */
+async function ensureVehicleSpecs(
+  supabase: any,
+  workspaceId: string,
+  vehicleId: string,
+  engine: string | null,
+): Promise<void> {
+  const { data: existing, error } = await supabase
+    .from("vehicle_service_specs")
+    .select("vehicle_id,engine")
+    .eq("workspace_id", workspaceId)
+    .eq("vehicle_id", vehicleId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!existing) {
+    const { error: insertError } = await supabase.from("vehicle_service_specs").insert({
+      workspace_id: workspaceId,
+      vehicle_id: vehicleId,
+      engine: engine ?? null,
+      oil_type: null,
+      oil_capacity: null,
+      oil_filter: null,
+      source: "website_push",
+      metadata: {},
+    });
+    if (insertError) throw insertError;
+    return;
+  }
+  if (!existing.engine && engine) {
+    const { error: updateError } = await supabase
+      .from("vehicle_service_specs")
+      .update({ engine })
+      .eq("workspace_id", workspaceId)
+      .eq("vehicle_id", vehicleId);
+    if (updateError) throw updateError;
+  }
+}
+
+/**
+ * Reshape a freshly pushed appointment's items to the booking's per-job
+ * structure. The booking RPC created the appointment canonically with a
+ * single item at the quote; this replaces exactly the items that push
+ * owns (metadata markers: source 'website_push' + this booking's id)
+ * with one service item per job at that job's own price plus per-vehicle
+ * fee items, each pinned to the job's vehicle — the same structure a
+ * native multi-vehicle appointment carries. Staff-added items (any
+ * other source) are never touched.
+ *
+ * Idempotent: a re-push (the RPC returns the same appointment) deletes
+ * the previously normalized set and rebuilds it deterministically, so
+ * the appointment always converges to the same item set.
+ */
+async function normalizePushedAppointmentItems(
+  supabase: any,
+  workspaceId: string,
+  booking: WebsiteBooking,
+  appointmentId: string,
+  resolution: Resolution,
+): Promise<{ taxTotalUsd: number; residualUsd: number }> {
+  const jobs = resolveBookingJobs(booking);
+
+  const { data: appointment, error: appointmentError } = await supabase
+    .from("appointments")
+    .select("id,customer_id,vehicle_id,metadata")
+    .eq("id", appointmentId)
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  if (appointmentError) throw appointmentError;
+  if (!appointment) throw new Error(`Appointment ${appointmentId} was not found after creation.`);
+  const customerId = (appointment.customer_id as string | null) ?? null;
+  if (!customerId) throw new Error(`Appointment ${appointmentId} has no customer to attach vehicles to.`);
+
+  const { data: vehicleRows, error: vehiclesError } = await supabase
+    .from("vehicles")
+    .select("id,vin,year,make,model")
+    .eq("workspace_id", workspaceId)
+    .eq("customer_id", customerId);
+  if (vehiclesError) throw vehiclesError;
+  const vehicles: VehicleRow[] = [...((vehicleRows ?? []) as VehicleRow[])];
+
+  const specEngineByVehicle = new Map<string, string | null>();
+  if (vehicles.length > 0) {
+    const { data: specRows, error: specsError } = await supabase
+      .from("vehicle_service_specs")
+      .select("vehicle_id,engine")
+      .eq("workspace_id", workspaceId)
+      .in("vehicle_id", vehicles.map((v) => v.id));
+    if (specsError) throw specsError;
+    for (const row of (specRows ?? []) as Array<{ vehicle_id: string; engine: string | null }>) {
+      specEngineByVehicle.set(row.vehicle_id, row.engine ?? null);
+    }
+  }
+
+  const vehicleIds: Array<string | null> = [];
+  for (let index = 0; index < jobs.length; index++) {
+    const job = jobs[index];
+    let vehicleId: string | null = null;
+    if (index === 0 && appointment.vehicle_id && vehicles.some((v) => v.id === appointment.vehicle_id)) {
+      // Job 1's vehicle was resolved authoritatively by the booking RPC
+      // (it is the appointment's vehicle) — reuse it, never duplicate.
+      vehicleId = appointment.vehicle_id as string;
+    } else if (job.vehicle) {
+      vehicleId = matchJobVehicle(job, vehicles, specEngineByVehicle);
+      if (!vehicleId) {
+        const { data: created, error: createError } = await supabase
+          .from("vehicles")
+          .insert({
+            workspace_id: workspaceId,
+            customer_id: customerId,
+            vin: normalizeVin(job.vehicle.vin),
+            year: job.vehicle.year,
+            make: job.vehicle.make,
+            model: job.vehicle.model,
+            metadata: { source: "website_push" },
+          })
+          .select("id")
+          .single();
+        if (createError) throw createError;
+        vehicleId = (created as { id: string }).id;
+        vehicles.push({
+          id: vehicleId,
+          vin: normalizeVin(job.vehicle.vin),
+          year: job.vehicle.year,
+          make: job.vehicle.make,
+          model: job.vehicle.model,
+        });
+      }
+    }
+    if (vehicleId) {
+      await ensureVehicleSpecs(supabase, workspaceId, vehicleId, job.vehicle?.engine ?? null);
+      if (job.vehicle?.engine && !specEngineByVehicle.get(vehicleId)) {
+        specEngineByVehicle.set(vehicleId, job.vehicle.engine);
+      }
+    }
+    vehicleIds.push(vehicleId);
+  }
+
+  const catalogIds = jobs.map(
+    (_, index) => resolution.job_catalog_ids?.[index] ?? (index === 0 ? resolution.service_match.catalog_id : null),
+  );
+  const { items, taxTotalUsd, residualUsd } = buildPerJobItems({
+    bookingId: booking.id,
+    quotedTotalUsd: booking.quoted_total_usd,
+    jobs,
+    vehicleIds,
+    catalogIds,
+  });
+
+  const { data: existingItems, error: itemsError } = await supabase
+    .from("appointment_items")
+    .select("id,metadata")
+    .eq("workspace_id", workspaceId)
+    .eq("appointment_id", appointmentId);
+  if (itemsError) throw itemsError;
+  const managedIds = ((existingItems ?? []) as Array<{ id: string; metadata: Record<string, unknown> | null }>)
+    .filter((item) => item.metadata?.source === "website_push" && item.metadata?.website_booking_id === booking.id)
+    .map((item) => item.id);
+  if (managedIds.length > 0) {
+    const { error: deleteError } = await supabase
+      .from("appointment_items")
+      .delete()
+      .eq("workspace_id", workspaceId)
+      .in("id", managedIds);
+    if (deleteError) throw deleteError;
+  }
+  if (items.length > 0) {
+    const { error: insertError } = await supabase.from("appointment_items").insert(
+      items.map((draft) => ({
+        workspace_id: workspaceId,
+        appointment_id: appointmentId,
+        service_catalog_id: draft.service_catalog_id,
+        item_type: draft.item_type,
+        description: draft.description,
+        quantity: draft.quantity,
+        unit_price: draft.unit_price,
+        is_prepaid: false,
+        sort_order: draft.sort_order,
+        metadata: draft.metadata,
+      })),
+    );
+    if (insertError) throw insertError;
+  }
+
+  // Appointment metadata: name every job's vehicle in the title /
+  // description, and record the booking's total tax at the canonical
+  // tax_amount key. NOTE: under the current price lock
+  // (20261029130000), the invoice sync re-runs on this metadata write
+  // and pins tax_amount back to 0 — while tax rides as per-job Tax
+  // items, the sync treats the quote as tax-inclusive. Making the
+  // figure persist (and land in invoice tax_total) is the sync change
+  // assessed separately; the write here keeps the value stated at the
+  // canonical key for that change to pick up.
+  const mergedMetadata = {
+    ...((appointment.metadata as Record<string, unknown> | null) ?? {}),
+    title: appointmentTitleForJobs(booking, jobs),
+    description: appointmentDescriptionForJobs(booking, jobs),
+    tax_amount: taxTotalUsd.toFixed(2),
+  };
+  const { error: metadataError } = await supabase
+    .from("appointments")
+    .update({ metadata: mergedMetadata })
+    .eq("id", appointmentId)
+    .eq("workspace_id", workspaceId);
+  if (metadataError) throw metadataError;
+
+  return { taxTotalUsd, residualUsd };
 }
 
 export interface ExecutePushesOptions {
@@ -661,6 +961,26 @@ export async function executePushes(
 
     const createdId = appointmentId as string;
 
+    // Per-job normalization: the RPC created the appointment through the
+    // canonical single-vehicle path (one item at the quote). Reshape its
+    // items to the per-vehicle structure the booking actually carries —
+    // one service item per job at that job's price, fee items pinned per
+    // vehicle. Failure leaves the booking unstamped, like price drift.
+    let normalization: { taxTotalUsd: number; residualUsd: number };
+    try {
+      normalization = await normalizePushedAppointmentItems(supabase, workspaceId, booking, createdId, resolution);
+    } catch (error) {
+      const message = `Appointment ${createdId} was created, but reshaping its items per vehicle failed: ${error instanceof Error ? error.message : "unknown error"}. The website booking was left unstamped so this stays visible.`;
+      if (auto) await recordAutoPushFailureBestEffort(config, bookingId, message);
+      results.push({
+        booking_id: bookingId,
+        status: "failed",
+        appointment_id: createdId,
+        message,
+      });
+      continue;
+    }
+
     // Price lock verification (spec §6): the stored total must equal the
     // website quote to the cent, or the result is a failure — never a
     // silent success. The booking is deliberately NOT stamped on drift so
@@ -685,7 +1005,10 @@ export async function executePushes(
         booking_id: bookingId,
         status: "created",
         appointment_id: createdId,
-        message: "Appointment created in Service Writer at the website quote.",
+        message:
+          normalization.residualUsd !== 0
+            ? `Appointment created in Service Writer at the website quote. A rounding residual of $${normalization.residualUsd.toFixed(2)} was applied to the last service item so the items total the quote exactly.`
+            : "Appointment created in Service Writer at the website quote.",
       });
     } catch (error) {
       const message = `Appointment ${createdId} was created, but stamping the website booking failed: ${error instanceof Error ? error.message : "unknown error"}. Pushing again is safe — the booking path returns the same appointment instead of duplicating it.`;

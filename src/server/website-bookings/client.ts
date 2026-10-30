@@ -10,7 +10,7 @@
  * When unconfigured, callers surface a 503 with an honest message instead of
  * failing obscurely.
  */
-import type { WebsiteBooking, WebsiteBookingListStatus } from "@/lib/website-bookings";
+import { normalizeWebsiteBooking, type WebsiteBooking, type WebsiteBookingListStatus } from "@/lib/website-bookings";
 
 export class WebsiteBackendError extends Error {
   status: number;
@@ -84,7 +84,9 @@ export async function fetchWebsiteBookings(
     config,
     `/internal/website-bookings?status=${encodeURIComponent(status)}`,
   );
-  return Array.isArray(data) ? data : [];
+  // Guarantee the per-job structure downstream: payloads from an older
+  // backend (no jobs array) synthesize one job from the top-level fields.
+  return (Array.isArray(data) ? data : []).map((booking) => normalizeWebsiteBooking(booking));
 }
 
 export async function stampWebsiteBookingPushed(
