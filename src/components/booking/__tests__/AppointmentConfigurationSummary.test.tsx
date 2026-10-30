@@ -66,6 +66,19 @@ describe("AppointmentConfigurationSummary", () => {
     expect(screen.getByText("VIN 1HGCM82633A004352")).toBeInTheDocument();
   });
 
+  it("renders the odometer from the vehicle record in the same block", async () => {
+    mockedFetch.mockResolvedValue({
+      vehicles: [
+        {
+          ...configuration.vehicles[0],
+          vehicle: { ...configuration.vehicles[0].vehicle, mileage: 60020 },
+        },
+      ],
+    });
+    render(<AppointmentConfigurationSummary appointmentId="appt-1" />);
+    expect(await screen.findByText("Odometer 60,020 mi")).toBeInTheDocument();
+  });
+
   it("renders the oil service specifications", async () => {
     render(<AppointmentConfigurationSummary appointmentId="appt-1" />);
     await screen.findByText("Oil service specifications");

@@ -85,6 +85,9 @@ export function AppointmentConfigurationSummary({ appointmentId }: { appointment
                     {vehicle.vehicle.vin && (
                       <Badge variant="outline" className="font-mono text-xs">VIN {vehicle.vehicle.vin}</Badge>
                     )}
+                    {vehicle.vehicle.mileage != null && vehicle.vehicle.mileage > 0 && (
+                      <Badge variant="secondary" className="font-mono text-xs">Odometer {vehicle.vehicle.mileage.toLocaleString("en-US")} mi</Badge>
+                    )}
                   </div>
                 </div>
               </div>

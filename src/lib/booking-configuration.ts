@@ -6,7 +6,7 @@ export const BOOKING_CONFIGURATION_VERSION = 2 as const;
 
 export interface BookingVehicleConfiguration {
   clientVehicleId: string;
-  vehicle: { year: string; make: string; model: string; vin?: string; licensePlate?: string };
+  vehicle: { year: string; make: string; model: string; vin?: string; licensePlate?: string; mileage?: number };
   services?: Array<{ id: string; name: string; price: number; quantity: number }>;
   package?: { id: string; name: string; price: number };
   oil?: { engine?: string; oilType?: string; oilCapacity?: string; oilFilter?: string; capacitySource?: "db" | "ai" | "manual" };
