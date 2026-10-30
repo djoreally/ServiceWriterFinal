@@ -101,7 +101,7 @@ export async function stampWebsiteBookingPushed(
 }
 
 /**
- * Record why an automatic (prepaid) push attempt failed. The backend
+ * Record why an automatic push attempt failed. The backend
  * stores the reason on the booking (auto_push_last_error) and releases
  * the auto-push claim; the booking itself is NOT stamped and stays in
  * the manual queue. Used only by the auto-push path — a manual push

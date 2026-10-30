@@ -862,19 +862,18 @@ export async function executePushes(
     booking = normalizeWindow(booking, ctx.timezone);
 
     if (auto) {
-      // Guards inside the pipeline (not just at trigger time): the
-      // booking is re-read fresh above, so a booking cancelled — or no
-      // longer showing "paid" — between payment and this execution must
-      // not be pushed, and the automatic path never pushes an unpaid
-      // booking (unpaid stays a manual-queue decision).
+      // Guard inside the pipeline (not just at trigger time): the
+      // booking is re-read fresh above, so a booking cancelled between
+      // the trigger and this execution must not be pushed. Payment
+      // status is NOT a gate here (Ty's ruling, 2026-10-30): the
+      // automatic path pushes every website booking — prepaid and
+      // pay-at-appointment alike. The backend only calls this path at
+      // its two decision points (payment succeeded, or pay-at-
+      // appointment chosen); payment itself is handled at the payment
+      // level, never by this pipeline.
       if (booking.status === "cancelled") {
         const message = "Booking was cancelled on the website before the auto-push ran, so nothing was pushed.";
         await recordAutoPushFailureBestEffort(config, bookingId, message);
-        results.push({ booking_id: bookingId, status: "failed", appointment_id: null, message });
-        continue;
-      }
-      if (booking.payment !== "paid") {
-        const message = `Booking is not prepaid (website payment status: ${booking.payment ?? "unknown"}), so the automatic push does not apply. It stays in the manual queue.`;
         results.push({ booking_id: bookingId, status: "failed", appointment_id: null, message });
         continue;
       }
@@ -1036,7 +1035,8 @@ export async function executePushes(
 const autoPushInFlight = new Map<string, Promise<AutoPushResult>>();
 
 /**
- * Push ONE prepaid website booking automatically (Ty, 2026-10-29).
+ * Push ONE website booking automatically — prepaid or pay-at-appointment
+ * (Ty, 2026-10-29; extended to every booking 2026-10-30).
  * This is the manual pipeline (`executePushes`) in `auto_prepaid` mode —
  * same prepare/resolve checks, same canonical create (service-role RPC
  * variant), same stored-total re-verification, same stamp. A booking

@@ -224,7 +224,7 @@ function wireState(state: FakeState) {
   return makeFakeSupabase(state);
 }
 
-describe("executeAutoPush (prepaid auto-push pipeline)", () => {
+describe("executeAutoPush (auto-push pipeline)", () => {
   it("pushes a prepaid booking through the auto RPC at the locked quote and stamps it", async () => {
     const b = booking();
     const state = baseState({ unpushed: [b] });
@@ -287,17 +287,19 @@ describe("executeAutoPush (prepaid auto-push pipeline)", () => {
     expect(stampPushed).not.toHaveBeenCalled();
   });
 
-  it("unpaid booking: the automatic path refuses and creates nothing", async () => {
+  it("pay-at-appointment booking: the automatic path pushes it like a prepaid one (Ty's 2026-10-30 ruling)", async () => {
     const b = booking({ payment: "due_at_appointment" });
     const state = baseState({ unpushed: [b] });
     const { supabase, rpcCalls } = wireState(state);
 
     const result = await executeAutoPush(supabase, WS_ID, b.id);
 
-    expect(result.status).toBe("failed");
-    expect(result.message).toMatch(/not prepaid/i);
-    expect(rpcCalls).toHaveLength(0);
-    expect(stampPushed).not.toHaveBeenCalled();
+    expect(result.status).toBe("created");
+    expect(result.appointment_id).toBe(CREATED_ID);
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0].name).toBe("public_booking_book_appointment_auto_v1");
+    expect(stampPushed).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "https://backend.test" }), b.id, CREATED_ID);
+    expect(recordFailure).not.toHaveBeenCalled();
   });
 
   it("not push-ready (service does not resolve): blocked, failure recorded, still unstamped for the manual queue", async () => {
