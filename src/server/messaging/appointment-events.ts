@@ -1,6 +1,7 @@
 import { dispatchLifecycleEvent, type LifecycleRecipientRole } from "@/server/messaging/lifecycle-events";
 import type { LifecycleVariables } from "@/server/messaging/lifecycle-templates";
 import { buildAppointmentEmailSnapshot } from "@/server/messaging/appointment-email-snapshot";
+import { withAppointmentContext } from "@/server/messaging/lifecycle-action-urls";
 import { createSupabaseAdminClient } from "@/lib/supabase";
 
 type CustomerContact = { id?: string | null; first_name?: string | null; last_name?: string | null; email?: string | null };
@@ -24,5 +25,13 @@ export async function dispatchAppointmentLifecycle(input: { eventKey: string; ev
   try { snapshot = await buildAppointmentEmailSnapshot(createSupabaseAdminClient(), input.appointment, input.workspaceTimezone); } catch (error) { console.error("[Lifecycle] appointment email snapshot enrichment failed; using route payload", error); }
   const recipientEmail = input.recipientEmail ?? snapshot?.customerEmail ?? appointmentCustomerEmail(input.appointment); if (!recipientEmail) return null;
   const snapshotVariables = Object.fromEntries(Object.entries(snapshot?.variables ?? {}).filter(([, value]) => value !== null && value !== undefined && value !== "")) as LifecycleVariables;
-  return dispatchLifecycleEvent({ templateKey: input.eventKey, eventId: input.eventId, entityType: "appointment", entityId: input.appointment.id, workspaceId: input.appointment.workspace_id, customerId: (input.recipientRole ?? "customer") === "customer" ? (snapshot?.customerId ?? input.appointment.customer_id) : null, recipientEmail, recipientRole: input.recipientRole ?? "customer", variables: { ...appointmentLifecycleVariables(input), ...snapshotVariables }, metadata: { appointmentId: input.appointment.id, ...(snapshot?.metadata ?? {}) } });
+  const variables: LifecycleVariables = { ...appointmentLifecycleVariables(input), ...snapshotVariables };
+  // Customer CTAs carry the appointment context so "View appointment" lands
+  // on this appointment (through sign-in / account creation) instead of a
+  // bare portal home page. Only the platform-default /my-bookings link is
+  // rewritten; workspace-configured manage URLs pass through untouched.
+  if ((input.recipientRole ?? "customer") === "customer" && typeof variables["email.primary_action_url"] === "string") {
+    variables["email.primary_action_url"] = withAppointmentContext(variables["email.primary_action_url"], input.appointment.id);
+  }
+  return dispatchLifecycleEvent({ templateKey: input.eventKey, eventId: input.eventId, entityType: "appointment", entityId: input.appointment.id, workspaceId: input.appointment.workspace_id, customerId: (input.recipientRole ?? "customer") === "customer" ? (snapshot?.customerId ?? input.appointment.customer_id) : null, recipientEmail, recipientRole: input.recipientRole ?? "customer", variables, metadata: { appointmentId: input.appointment.id, ...(snapshot?.metadata ?? {}) } });
 }

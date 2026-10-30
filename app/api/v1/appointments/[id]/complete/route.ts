@@ -1,5 +1,6 @@
 import { ApiError, errorResponse, json, requireWorkspaceMember } from "@/server/api";
 import { dispatchAppointmentLifecycle } from "@/server/messaging/appointment-events";
+import { withAppointmentContext } from "@/server/messaging/lifecycle-action-urls";
 import { dispatchLifecycleEvent, LIFECYCLE_EVENT_KEYS } from "@/server/messaging/lifecycle-events";
 import { syncCanonicalInvoiceToStripe } from "@/server/payments/stripe-invoice-sync";
 import { z } from "zod";
@@ -34,7 +35,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         const customer = one<any>(appointment.customers); const vehicle = one<any>(appointment.vehicles); const recipientEmail = customer?.email ?? null;
         if (recipientEmail) {
           const customerName = [customer?.first_name, customer?.last_name].filter(Boolean).join(" ") || "Customer"; const vehicleDescription = [vehicle?.year, vehicle?.make, vehicle?.model].filter(Boolean).join(" ") || "Vehicle on file"; const confirmationCode = String((appointment.metadata as any)?.confirmation_code || id.replace(/-/g, "").slice(0, 8).toUpperCase());
-          const baseVariables = { "business.name": workspace?.name ?? "Service Writer", "business.timezone": workspace?.timezone ?? "UTC", "customer.first_name": customerName.split(/\s+/)[0], "customer.full_name": customerName, "appointment.confirmation_code": confirmationCode, "vehicle.description": vehicleDescription, "service.work_performed": serviceRecord?.work_performed || "Completed service", "service.mileage": serviceRecord?.mileage_at_service != null ? String(serviceRecord.mileage_at_service) : "Recorded on service record", "email.primary_action_url": actionUrl };
+          const baseVariables = { "business.name": workspace?.name ?? "Service Writer", "business.timezone": workspace?.timezone ?? "UTC", "customer.first_name": customerName.split(/\s+/)[0], "customer.full_name": customerName, "appointment.confirmation_code": confirmationCode, "vehicle.description": vehicleDescription, "service.work_performed": serviceRecord?.work_performed || "Completed service", "service.mileage": serviceRecord?.mileage_at_service != null ? String(serviceRecord.mileage_at_service) : "Recorded on service record", "email.primary_action_url": withAppointmentContext(actionUrl, id) };
           const summary = await dispatchLifecycleEvent({ templateKey: LIFECYCLE_EVENT_KEYS.serviceCompletionSummary, eventId: `${id}:completion-summary:${serviceRecordId}`, entityType: "service_record", entityId: serviceRecordId || id, workspaceId: workspace_id, customerId: appointment.customer_id, recipientEmail, recipientRole: "customer", variables: baseVariables, metadata: { appointmentId: id, serviceRecordId, invoiceId, paymentId } });
           completionSummary = { status: summary.status };
           const supportUrl = new URL("/support", request.url).toString();

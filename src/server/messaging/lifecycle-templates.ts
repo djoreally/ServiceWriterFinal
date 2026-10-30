@@ -3,7 +3,10 @@
  *
  * This registry is intentionally provider-neutral: delivery adapters receive a
  * rendered subject/body, while event producers depend only on a stable key.
+ * All HTML presentation comes from the one master email layout
+ * (email-layout.ts); this module owns copy and the plain-text composition.
  */
+import { parseEmailDetails, renderEmailLayout } from "@/server/messaging/email-layout";
 
 export type LifecyclePurpose =
   | "transactional"
@@ -38,16 +41,6 @@ function valueFor(variables: LifecycleVariables, path: string): string {
 function requiredVariables(template: LifecycleTemplate): string[] {
   const source = [template.subject, template.preview, template.headline, template.body, template.essentialInformation].join("\n");
   return [...new Set([...source.matchAll(VARIABLE_PATTERN)].map((match) => match[1]))];
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;",
-  })[character] ?? character);
 }
 
 export function interpolate(value: string, variables: LifecycleVariables): string {
@@ -476,18 +469,11 @@ function personalizeBody(body: string, variables: LifecycleVariables): string {
   return body.replace(/^Hello,/, greetingFor(variables));
 }
 
-function renderParagraphs(body: string): string {
-  return body
-    .split(/\n\s*\n/)
-    .map((paragraph) => `<p style="margin:0 0 16px;font-size:16px;line-height:1.6">${escapeHtml(paragraph).replace(/\n/g, "<br>")}</p>`)
-    .join("");
-}
-
-function renderDetails(essentialInformation: string): string {
-  return essentialInformation
-    .split(/\s*\|\s*/)
-    .map((item) => `<div style="padding:5px 0">${escapeHtml(item)}</div>`)
-    .join("");
+function contactFrom(variables: LifecycleVariables): { phone?: string | null; email?: string | null } {
+  return {
+    phone: typeof variables["business.phone"] === "string" ? variables["business.phone"] : null,
+    email: typeof variables["business.email"] === "string" ? variables["business.email"] : null,
+  };
 }
 
 export function renderLifecycleEmail(key: string, variables: LifecycleVariables): {
@@ -525,10 +511,19 @@ export function renderLifecycleEmail(key: string, variables: LifecycleVariables)
   const preferencesUrl = template.purpose === "marketing" ? valueFor(variables, "email.preferences_url") : null;
   const preferencesText = preferencesUrl ? `Manage email preferences or unsubscribe: ${preferencesUrl}` : null;
   const text = [headline, "", body, "", essentialInformation, "", cta, "", help, preferencesText ? "" : null, preferencesText, "", "Powered by Service Writer."].filter((value) => value !== null).join("\n");
-  const preferencesHtml = preferencesUrl
-    ? `<p style="margin:14px 0 0;color:#687386;font-size:12px;line-height:1.5"><a href="${escapeHtml(preferencesUrl)}" style="color:#475569">Manage email preferences or unsubscribe</a></p>`
-    : "";
-  const html = `<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"></head><body style="margin:0;background:#f5f7fb;color:#172033;font-family:Arial,Helvetica,sans-serif"><div style="display:none;max-height:0;overflow:hidden;opacity:0">${escapeHtml(preview)}</div><main style="max-width:600px;margin:0 auto;padding:28px 16px"><section style="background:#ffffff;border:1px solid #e4e8f0;border-radius:16px;overflow:hidden"><header style="background:#172033;padding:20px 24px;color:#ffffff"><div style="font-size:20px;font-weight:700">${escapeHtml(businessName)}</div><div style="margin-top:4px;color:#cbd5e1;font-size:12px">Powered by Service Writer</div></header><article style="padding:28px 24px"><p style="margin:0 0 10px;color:#687386;font-size:13px;text-transform:uppercase;letter-spacing:.04em">${escapeHtml(title)}</p><h1 style="margin:0 0 20px;font-size:26px;line-height:1.2">${escapeHtml(headline)}</h1>${renderParagraphs(body)}<div style="margin:22px 0;padding:14px 16px;border-radius:10px;background:#f5f7fb;font-size:14px;line-height:1.5">${renderDetails(essentialInformation)}</div><p style="margin:0"><a href="${escapeHtml(ctaUrl)}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:8px;padding:12px 18px;font-weight:700">${escapeHtml(template.ctaLabel)}</a></p><p style="margin:24px 0 0;color:#687386;font-size:13px;line-height:1.5">${escapeHtml(help)}</p>${preferencesHtml}</article><footer style="border-top:1px solid #e4e8f0;padding:18px 24px;color:#687386;font-size:12px">Sent by ${escapeHtml(businessName)} using Service Writer.</footer></section></main></body></html>`;
+  const html = renderEmailLayout({
+    businessName,
+    logoUrl: typeof variables["business.logo_url"] === "string" ? variables["business.logo_url"] : null,
+    preview,
+    eyebrow: { text: title },
+    headline,
+    introParagraphs: body.split(/\n\s*\n/),
+    details: parseEmailDetails(essentialInformation),
+    cta: { label: template.ctaLabel, url: ctaUrl },
+    helpText: help,
+    contact: contactFrom(variables),
+    preferencesUrl,
+  });
   return { templateKey: template.key, subject, preview, body, text, html, purpose: template.purpose };
 }
 

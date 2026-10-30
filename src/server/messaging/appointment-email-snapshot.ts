@@ -38,6 +38,7 @@ export async function buildAppointmentEmailSnapshot(
   const [
     { data: items, error: itemsError },
     { data: invoice, error: invoiceError },
+    { data: workspaceSettings },
   ] = await Promise.all([
     supabase.from("appointment_items")
       .select("description,quantity,unit_price,service_catalog(name)")
@@ -48,6 +49,11 @@ export async function buildAppointmentEmailSnapshot(
       .eq("workspace_id", workspaceId)
       .eq("metadata->>appointment_id", appointmentId)
       .order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    // Best-effort branding only: a settings read failure must not sink the
+    // snapshot, so its error is intentionally not propagated.
+    supabase.from("workspace_settings")
+      .select("logo_url")
+      .eq("workspace_id", workspaceId).maybeSingle(),
   ]);
   if (itemsError || invoiceError) throw itemsError ?? invoiceError;
 
@@ -99,6 +105,7 @@ export async function buildAppointmentEmailSnapshot(
       "appointment.time": appointmentTime,
       "appointment.arrival_window": text(metadata.arrival_window) ?? appointmentTime,
       "appointment.manage_url": text(metadata.manage_url),
+      "business.logo_url": text((workspaceSettings as { logo_url?: unknown } | null)?.logo_url),
       "business.timezone": timezone,
       "appointment.total": invoice ? money(invoice.total) : (metadata.estimated_cost != null ? money(metadata.estimated_cost) : undefined),
       "invoice.number": invoice?.invoice_number ?? undefined,

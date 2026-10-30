@@ -99,7 +99,11 @@ export default function CustomerAuth({ providerId, providerName, onSuccess, retu
   
   const [loading, setLoading] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
-  const [activeTab, setActiveTab] = useState<"login" | "signup" | "reset">("login");
+  // ?mode=signup deep-links a guest straight to account creation (the
+  // returnTo context rides along either way and is honored after auth).
+  const [activeTab, setActiveTab] = useState<"login" | "signup" | "reset">(
+    searchParams.get("mode") === "signup" ? "signup" : "login",
+  );
   
   const [loginEmail, setLoginEmail] = useState("");
   const [loginPassword, setLoginPassword] = useState("");

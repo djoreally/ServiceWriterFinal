@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { fetchCustomerAppointments } from "@/application/queries/customer-appointments.query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -55,9 +55,11 @@ const canModifyAppointment = (status: string) =>
 
 interface Props {
   account: { id: string; email: string; full_name: string | null };
+  /** Appointment to spotlight (arrives from email CTAs via ?appointment=). */
+  focusAppointmentId?: string | null;
 }
 
-export function CustomerAppointmentsTab({ account }: Props) {
+export function CustomerAppointmentsTab({ account, focusAppointmentId }: Props) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [appointments, setAppointments] = useState<CustomerAppointment[]>([]);
@@ -101,13 +103,38 @@ export function CustomerAppointmentsTab({ account }: Props) {
     const bt = combineDateAndTime(b.scheduled_date, b.scheduled_time)?.getTime() ?? Number.MAX_SAFE_INTEGER;
     return at - bt;
   })[0];
+
+  // Email deep link: open the sub-tab that actually contains the focused
+  // appointment, then scroll it into view and spotlight it (once per id).
+  const focusedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (loading || !focusAppointmentId || focusedRef.current === focusAppointmentId) return;
+    if (!appointments.some((appt) => appt.id === focusAppointmentId)) return;
+    focusedRef.current = focusAppointmentId;
+    const needsPastTab = past.some((appt) => appt.id === focusAppointmentId) && !upcoming.some((appt) => appt.id === focusAppointmentId);
+    // Deferred: switch the sub-tab first (when the appointment lives in
+    // Past), then scroll once the focused card is rendered.
+    const tabTimer = needsPastTab ? setTimeout(() => setSubTab("past"), 50) : null;
+    const scrollTimer = setTimeout(() => {
+      document.getElementById(`customer-appointment-${focusAppointmentId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, needsPastTab ? 250 : 150);
+    return () => {
+      if (tabTimer) clearTimeout(tabTimer);
+      clearTimeout(scrollTimer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, focusAppointmentId, appointments]);
   const renderCard = (appt: CustomerAppointment) => {
     const date = combineDateAndTime(appt.scheduled_date, appt.scheduled_time);
     const isUpcoming =
       date !== null && (isFuture(date) || isToday(date)) && canModifyAppointment(appt.status);
 
     return (
-      <Card key={appt.id} className="border-border/50">
+      <Card
+        key={appt.id}
+        id={`customer-appointment-${appt.id}`}
+        className={appt.id === focusAppointmentId ? "border-primary ring-2 ring-primary/40 scroll-mt-24" : "border-border/50"}
+      >
         <CardContent className="p-5">
           <div className="flex items-start justify-between gap-4">
             <div className="flex-1 space-y-3">
