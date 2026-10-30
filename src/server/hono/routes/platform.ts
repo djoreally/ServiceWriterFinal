@@ -49,7 +49,19 @@ import { ApiError, json, paginationSchema } from "@/server/api";
 import { accountExportSchema, createImportBatch, executeImportBatch, rollbackImportBatch } from "@/server/accountImport";
 import { sendBookingConfirmation } from "@/server/messaging/booking-confirmation";
 import { enrollNewsletterFromBooking } from "@/server/crm/newsletter";
-import { requireAuth, requireWorkspaceAuth } from "@/server/hono/middleware/auth";
+import { requireAuth, requireWorkspaceAuth, requireWorkspacePaymentsAddonAuth } from "@/server/hono/middleware/auth";
+import {
+  PROVIDER_SYNC_STAFF_ROLES,
+  executeAppointmentProviderSync,
+  findAppointmentSyncTarget,
+  getSyncRecord,
+  listSyncRecordLogs,
+  listSyncRecordsForAppointments,
+  listWorkspaceAppointmentIds,
+  normalizeSyncMode,
+  providerSyncFunctionVersion,
+  summarizeSyncRecords,
+} from "@/server/payments/provider-sync";
 import type { RequestAuthContext } from "@/server/hono/types";
 import {
   AUTOMATION_TEMPLATES,
@@ -3129,80 +3141,184 @@ platformRouter.post("/v1/platform/booking/assessment-photo", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// Provider sync edge proxies (migrated from provider-sync.query.ts,
+// Provider sync (migrated from provider-sync.query.ts,
 // provider-sync.command.ts, provider-sync-manager.command.ts,
 // sync-function-version.query.ts).
 //
-// These forward to the provider-sync-manager / sync-appointment-to-provider
-// edge functions with the caller's session token, preserving query strings
-// and JSON error bodies that supabase.functions.invoke would swallow.
+// These used to proxy to the `provider-sync-manager` /
+// `sync-appointment-to-provider` Supabase Edge Functions, which do not
+// exist — the version probe 404'd ("fn unreachable") and the proxy's
+// session lookup 401'd every signed-in caller ("Not authenticated": the
+// request-scoped Supabase client is built from the bearer token with
+// persistSession off, so auth.getSession() is always null). The sync now
+// runs natively in this API via @/server/payments/provider-sync: a sync
+// creates the appointment's invoice on the workspace's own Stripe account
+// through the canonical invoice sync, and attempts are recorded in
+// payment_provider_records / payment_provider_sync_logs.
 // ---------------------------------------------------------------------------
 
-async function proxyEdgeWithQuery(
-  c: Context,
-  functionName: string,
-  query: URLSearchParams,
-  method: "GET" | "POST",
-  body?: unknown,
-  opts: { allowAnonymous?: boolean } = {},
-) {
-  const url = `${supabaseFunctionsBaseUrl()}/${functionName}${query.toString() ? `?${query}` : ""}`;
-  const headers: Record<string, string> = { apikey: supabasePublishableKey() };
-  if (opts.allowAnonymous) {
-    const res = await fetch(url, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined });
-    const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-    if (!res.ok) throw new ApiError(res.status, `Version probe failed (${res.status})`, "edge_error");
-    return json(data);
-  }
-  const { supabase } = await requireAuth(c);
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) throw new ApiError(401, "Not authenticated", "not_authenticated");
-  headers.Authorization = `Bearer ${session.access_token}`;
-  if (body !== undefined) headers["Content-Type"] = "application/json";
-  const res = await fetch(url, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined });
-  const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!res.ok) {
-    const message = typeof data.error === "string" && data.error ? data.error : `Request failed (${res.status})`;
-    throw new ApiError(res.status, message, "edge_error");
-  }
-  return json(data);
-}
-
-platformRouter.get("/v1/platform/provider-sync/summary", (c) =>
-  proxyEdgeWithQuery(c, "provider-sync-manager", new URLSearchParams({ action: "summary" }), "GET"),
-);
-
-platformRouter.get("/v1/platform/provider-sync/records", (c) => {
-  const url = new URL(c.req.url);
-  const query = new URLSearchParams({ action: "list" });
-  const status = url.searchParams.get("status");
-  const limit = url.searchParams.get("limit");
-  if (status) query.set("status", status);
-  if (limit) query.set("limit", limit);
-  return proxyEdgeWithQuery(c, "provider-sync-manager", query, "GET");
+const providerSyncRequestSchema = z.object({
+  appointment_id: z.string().uuid(),
+  payment_record_id: z.string().uuid().nullable().optional(),
+  sync_mode: z
+    .enum(["appointment_created", "payment_pending", "payment_succeeded", "manual_resync"])
+    .optional(),
+  // Accepted for client compatibility; the workspace's configured provider
+  // governs the sync, so this hint is advisory only.
+  provider: z.enum(["stripe", "square"]).optional(),
+  guest_email: z.string().nullable().optional(),
 });
 
-platformRouter.get("/v1/platform/provider-sync/logs", (c) => {
+const providerSyncManageSchema = z.object({
+  action: z.enum(["retry", "retry_all_failed"]),
+  record_id: z.string().uuid().optional(),
+});
+
+platformRouter.get("/v1/platform/provider-sync/summary", async (c) => {
+  const { supabase, user } = await requireAuth(c);
   const url = new URL(c.req.url);
-  const query = new URLSearchParams({
-    action: "logs",
-    record_id: url.searchParams.get("record_id") ?? "",
+  const workspaceId = await resolveWorkspaceIdForUser(
+    supabase,
+    user.id,
+    url.searchParams.get("selected_workspace_id") ?? undefined,
+  );
+  if (!workspaceId) return json(summarizeSyncRecords([]));
+  const admin = createSupabaseAdminClient();
+  const appointmentIds = await listWorkspaceAppointmentIds(admin, workspaceId);
+  const records = await listSyncRecordsForAppointments(admin, appointmentIds, { limit: 5000 });
+  return json(summarizeSyncRecords(records));
+});
+
+platformRouter.get("/v1/platform/provider-sync/records", async (c) => {
+  const { supabase, user } = await requireAuth(c);
+  const url = new URL(c.req.url);
+  const workspaceId = await resolveWorkspaceIdForUser(
+    supabase,
+    user.id,
+    url.searchParams.get("selected_workspace_id") ?? undefined,
+  );
+  if (!workspaceId) return json({ records: [] });
+  const admin = createSupabaseAdminClient();
+  const appointmentIds = await listWorkspaceAppointmentIds(admin, workspaceId);
+  const limitParam = Number(url.searchParams.get("limit") ?? 50);
+  const records = await listSyncRecordsForAppointments(admin, appointmentIds, {
+    status: url.searchParams.get("status") ?? undefined,
+    limit: Number.isFinite(limitParam) ? Math.min(Math.max(limitParam, 1), 200) : 50,
   });
-  return proxyEdgeWithQuery(c, "provider-sync-manager", query, "GET");
+  return json({ records });
+});
+
+platformRouter.get("/v1/platform/provider-sync/logs", async (c) => {
+  const { supabase, user } = await requireAuth(c);
+  const url = new URL(c.req.url);
+  const recordId = z.string().uuid().parse(url.searchParams.get("record_id") ?? "");
+  const workspaceId = await resolveWorkspaceIdForUser(
+    supabase,
+    user.id,
+    url.searchParams.get("selected_workspace_id") ?? undefined,
+  );
+  const admin = createSupabaseAdminClient();
+  const record = workspaceId ? await getSyncRecord(admin, recordId) : null;
+  const target = record ? await findAppointmentSyncTarget(admin, record.appointment_id) : null;
+  if (!record || !target || target.workspace_id !== workspaceId) {
+    throw new ApiError(404, "Sync record not found", "not_found");
+  }
+  const logs = await listSyncRecordLogs(admin, recordId);
+  return json({ logs });
 });
 
 platformRouter.post("/v1/platform/provider-sync/manage", async (c) => {
-  const body = z.record(z.string(), z.unknown()).parse(await c.req.json());
-  return proxyEdgeWithQuery(c, "provider-sync-manager", new URLSearchParams(), "POST", body);
+  const body = providerSyncManageSchema.parse(await c.req.json());
+  const { supabase: authSupabase, user } = await requireAuth(c);
+  const admin = createSupabaseAdminClient();
+
+  if (body.action === "retry") {
+    if (!body.record_id) throw new ApiError(400, "record_id is required", "record_id_required");
+    const record = await getSyncRecord(admin, body.record_id);
+    const target = record ? await findAppointmentSyncTarget(admin, record.appointment_id) : null;
+    if (!record || !target) throw new ApiError(404, "Sync record not found", "not_found");
+    const { supabase } = await requireWorkspacePaymentsAddonAuth(
+      c,
+      target.workspace_id,
+      PROVIDER_SYNC_STAFF_ROLES,
+    );
+    const result = await executeAppointmentProviderSync({
+      supabase,
+      admin,
+      workspaceId: target.workspace_id,
+      appointment: target,
+      actorUserId: user.id,
+      syncMode: normalizeSyncMode(record.sync_mode),
+      paymentRecordId: record.payment_record_id ?? null,
+    });
+    return json(result);
+  }
+
+  // retry_all_failed: re-run the workspace's failed syncs (bounded batch).
+  const workspaceId = await resolveWorkspaceIdForUser(authSupabase, user.id, undefined);
+  if (!workspaceId) return json({ retried: 0, succeeded: 0, failed: 0 });
+  const { supabase } = await requireWorkspacePaymentsAddonAuth(
+    c,
+    workspaceId,
+    PROVIDER_SYNC_STAFF_ROLES,
+  );
+  const appointmentIds = await listWorkspaceAppointmentIds(admin, workspaceId);
+  const failedRecords = await listSyncRecordsForAppointments(admin, appointmentIds, {
+    status: "failed",
+    limit: 10,
+  });
+  let succeeded = 0;
+  let failed = 0;
+  for (const record of failedRecords) {
+    const target = await findAppointmentSyncTarget(admin, record.appointment_id);
+    if (!target || target.workspace_id !== workspaceId) {
+      failed += 1;
+      continue;
+    }
+    try {
+      await executeAppointmentProviderSync({
+        supabase,
+        admin,
+        workspaceId,
+        appointment: target,
+        actorUserId: user.id,
+        syncMode: normalizeSyncMode(record.sync_mode),
+        paymentRecordId: record.payment_record_id ?? null,
+      });
+      succeeded += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  return json({ retried: failedRecords.length, succeeded, failed });
 });
 
 platformRouter.post("/v1/platform/provider-sync/request", async (c) => {
-  const body = z.record(z.string(), z.unknown()).parse(await c.req.json());
-  return proxyEdgeWithQuery(c, "sync-appointment-to-provider", new URLSearchParams(), "POST", body);
+  const body = providerSyncRequestSchema.parse(await c.req.json());
+  const { user } = await requireAuth(c);
+  const admin = createSupabaseAdminClient();
+  const target = await findAppointmentSyncTarget(admin, body.appointment_id);
+  if (!target) throw new ApiError(404, "Appointment not found", "not_found");
+  const { supabase } = await requireWorkspacePaymentsAddonAuth(
+    c,
+    target.workspace_id,
+    PROVIDER_SYNC_STAFF_ROLES,
+  );
+  const result = await executeAppointmentProviderSync({
+    supabase,
+    admin,
+    workspaceId: target.workspace_id,
+    appointment: target,
+    actorUserId: user.id,
+    syncMode: body.sync_mode ?? "manual_resync",
+    paymentRecordId: body.payment_record_id ?? null,
+  });
+  // Legacy edge contract: the client reads `version` off the raw body.
+  return json(result);
 });
 
 platformRouter.get("/v1/platform/provider-sync/function-version", (c) =>
-  proxyEdgeWithQuery(c, "sync-appointment-to-provider", new URLSearchParams(), "GET", undefined, { allowAnonymous: true }),
+  json(providerSyncFunctionVersion()),
 );
 
 // ---------------------------------------------------------------------------
