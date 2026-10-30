@@ -6,10 +6,13 @@ import {
   getTenantSlugFromHostname,
   isMigratedPath,
 } from "@/lib/migratedRoutes";
+import ShellSkeleton from "./components/routing/ShellSkeleton";
 
 const BrowserApplication = dynamic(() => import("./NextClientShell"), {
   ssr: false,
-  loading: () => <div aria-label="Loading Service Writer" className="min-h-screen bg-background" />,
+  // First paint must never be blank (§3.2.1 R2): the fallback ships in the
+  // initial HTML and paints before the client bundle boots.
+  loading: () => <ShellSkeleton />,
 });
 
 const NATIVE_PUBLIC_ROUTES = new Set(["/tire", "/detailers"]);
