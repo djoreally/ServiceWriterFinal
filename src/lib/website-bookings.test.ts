@@ -6,6 +6,7 @@ import {
   localDateInTimezone,
   matchServiceCatalogId,
   phoneDigits,
+  resolveServiceCatalogId,
   phoneKey,
   splitScheduledStart,
   windowsOverlap,
@@ -108,6 +109,32 @@ describe("matchServiceCatalogId", () => {
   });
   it("returns null for an unresolvable service", () => {
     expect(matchServiceCatalogId(catalog, "Brake Service")).toBeNull();
+  });
+});
+
+describe("resolveServiceCatalogId", () => {
+  const catalog = [
+    { id: "svc-1", name: "Full Synthetic Oil Change" },
+    { id: "d0aa9821-cc62-4ce1-8383-29987464323f", name: "Mobil 1 Full Synthetic" },
+  ];
+  it("resolves the exact catalog record by id even when the name has drifted", () => {
+    expect(
+      resolveServiceCatalogId(catalog, "Mobil 1 Advanced", "d0aa9821-cc62-4ce1-8383-29987464323f"),
+    ).toBe("d0aa9821-cc62-4ce1-8383-29987464323f");
+  });
+  it("falls back to name matching when the id is unknown", () => {
+    expect(resolveServiceCatalogId(catalog, "Full Synthetic Oil Change", "no-such-id")).toBe("svc-1");
+  });
+  it("falls back to name matching when the id is not in the active catalog (inactive or another workspace)", () => {
+    // svc-2 exists as a service but is not in this workspace's active list.
+    expect(resolveServiceCatalogId(catalog, "Mobil 1 Full Synthetic", "svc-2")).toBe(
+      "d0aa9821-cc62-4ce1-8383-29987464323f",
+    );
+  });
+  it("behaves exactly like name matching when no id is provided", () => {
+    expect(resolveServiceCatalogId(catalog, "full synthetic oil change")).toBe("svc-1");
+    expect(resolveServiceCatalogId(catalog, "Full Synthetic Oil Change", null)).toBe("svc-1");
+    expect(resolveServiceCatalogId(catalog, "Brake Service", undefined)).toBeNull();
   });
 });
 

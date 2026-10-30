@@ -34,6 +34,17 @@ export interface WebsiteBookingJobVehicle {
 export interface WebsiteBookingJob {
   position: number;
   service_id: string | null;
+  /** The exact Service Writer service_catalog UUID for this job, sent by
+   * the website backend (SW catalog is the master record). This is the same
+   * binding the Service Writer API itself is designed around: the public
+   * catalog serves record ids and booking create takes `service_catalog_id`
+   * (see bookyouroilchangeext/docs/service-writer-api-audit.md). The wire
+   * alias below is the API-contract spelling; `resolveBookingJobs`
+   * normalizes either spelling into this field. Optional: older feed
+   * payloads omit it and resolution falls back to name matching. */
+  serviceCatalogId?: string | null;
+  /** Wire spelling of the catalog binding, per the SW API contract. */
+  service_catalog_id?: string | null;
   service_name: string;
   vehicle: WebsiteBookingJobVehicle | null;
   subtotal_usd: number;
@@ -239,6 +250,25 @@ export function matchServiceCatalogId(
   return fuzzy ? fuzzy.id : null;
 }
 
+/**
+ * Resolve a job's catalog service, preferring the exact catalog record id
+ * the website backend sends (`serviceCatalogId`). `catalog` must already be
+ * the appointment workspace's ACTIVE catalog (callers load it scoped by
+ * workspace_id + is_active), so an incoming id can only ever resolve to an
+ * active service in that same workspace — never another workspace's row,
+ * never an inactive one. When the id is absent or does not resolve, the
+ * existing name matching decides, unchanged.
+ */
+export function resolveServiceCatalogId(
+  catalog: Array<{ id: string; name: string }>,
+  serviceName: string,
+  serviceCatalogId?: string | null,
+): string | null {
+  const wantedId = typeof serviceCatalogId === "string" ? serviceCatalogId.trim() : "";
+  if (wantedId && catalog.some((s) => s.id === wantedId)) return wantedId;
+  return matchServiceCatalogId(catalog, serviceName);
+}
+
 function vehicleMatches(
   a: { year: number; make: string; model: string } | null,
   b: WebsiteBookingVehicle | null,
@@ -342,12 +372,19 @@ export function staffNote(booking: WebsiteBooking): string {
 export function resolveBookingJobs(booking: WebsiteBooking): WebsiteBookingJob[] {
   const raw = Array.isArray(booking.jobs) ? booking.jobs.filter((j) => j && typeof j === "object") : [];
   if (raw.length > 0) {
-    return [...raw].sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0));
+    return [...raw]
+      .sort((a, b) => (Number(a.position) || 0) - (Number(b.position) || 0))
+      .map((job) => ({
+        ...job,
+        // One normalized catalog binding regardless of wire spelling.
+        serviceCatalogId: job.serviceCatalogId ?? job.service_catalog_id ?? null,
+      }));
   }
   return [
     {
       position: 0,
       service_id: null,
+      serviceCatalogId: null,
       service_name: booking.service,
       vehicle: booking.vehicle
         ? {

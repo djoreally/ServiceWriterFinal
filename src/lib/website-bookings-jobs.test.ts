@@ -65,6 +65,17 @@ describe("resolveBookingJobs", () => {
     );
     expect(jobs.map((j) => j.service_name)).toEqual(["A", "B"]);
   });
+
+  it("normalizes the catalog binding from either wire spelling", () => {
+    const snake = resolveBookingJobs(
+      booking({ jobs: [job({ service_catalog_id: "d0aa9821-cc62-4ce1-8383-29987464323f" })] }),
+    );
+    expect(snake[0].serviceCatalogId).toBe("d0aa9821-cc62-4ce1-8383-29987464323f");
+    const camel = resolveBookingJobs(booking({ jobs: [job({ serviceCatalogId: "cat-9" })] }));
+    expect(camel[0].serviceCatalogId).toBe("cat-9");
+    const absent = resolveBookingJobs(booking({ jobs: [job({})] }));
+    expect(absent[0].serviceCatalogId).toBeNull();
+  });
 });
 
 describe("buildPerJobItems", () => {

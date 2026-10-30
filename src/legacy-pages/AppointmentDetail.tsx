@@ -779,31 +779,31 @@ export const AppointmentDetail = ({
                     {recordedServiceLines.map((line, index) => (
                       <div key={`${line.description}-${index}`} className="flex items-baseline justify-between gap-4">
                         <span className="text-sm text-muted-foreground">{line.description}</span>
-                        <span className="font-mono text-[14px]">{formatCurrency(line.amount)}</span>
+                        <span className="font-mono text-sm">{formatCurrency(line.amount)}</span>
                       </div>
                     ))}
                     {recordedWasteFee > 0 && (
                       <div className="flex items-baseline justify-between gap-4">
                         <span className="text-sm text-muted-foreground">Waste Oil Disposal Fee</span>
-                        <span className="font-mono text-[14px]">{formatCurrency(recordedWasteFee)}</span>
+                        <span className="font-mono text-sm">{formatCurrency(recordedWasteFee)}</span>
                       </div>
                     )}
                     {recordedShopFee > 0 && (
                       <div className="flex items-baseline justify-between gap-4">
                         <span className="text-sm text-muted-foreground">{feeSettings?.shop_fee_description || "Shop fee"}</span>
-                        <span className="font-mono text-[14px]">{formatCurrency(recordedShopFee)}</span>
+                        <span className="font-mono text-sm">{formatCurrency(recordedShopFee)}</span>
                       </div>
                     )}
                     {recordedProcessingFee > 0 && (
                       <div className="flex items-baseline justify-between gap-4">
                         <span className="text-sm text-muted-foreground">Card Processing Fee</span>
-                        <span className="font-mono text-[14px]">{formatCurrency(recordedProcessingFee)}</span>
+                        <span className="font-mono text-sm">{formatCurrency(recordedProcessingFee)}</span>
                       </div>
                     )}
                     {summaryTax > 0 && (
                       <div className="flex items-baseline justify-between gap-4">
                         <span className="text-sm text-muted-foreground">Tax</span>
-                        <span className="font-mono text-[14px]">{formatCurrency(summaryTax)}</span>
+                        <span className="font-mono text-sm">{formatCurrency(summaryTax)}</span>
                       </div>
                     )}
                   </>
@@ -811,30 +811,30 @@ export const AppointmentDetail = ({
                   <>
                     <div className="flex items-baseline justify-between gap-4">
                       <span className="text-sm text-muted-foreground">Services</span>
-                      <span className="font-mono text-[14px]">{formatCurrency(estimatedCost)}</span>
+                      <span className="font-mono text-sm">{formatCurrency(estimatedCost)}</span>
                     </div>
                     {wasteOilFee > 0 && (
                       <div className="flex items-baseline justify-between gap-4">
                         <span className="text-sm text-muted-foreground">Waste oil disposal fee</span>
-                        <span className="font-mono text-[14px]">{formatCurrency(wasteOilFee)}</span>
+                        <span className="font-mono text-sm">{formatCurrency(wasteOilFee)}</span>
                       </div>
                     )}
                     {shopFee > 0 && (
                       <div className="flex items-baseline justify-between gap-4">
                         <span className="text-sm text-muted-foreground">{feeSettings?.shop_fee_description || "Shop supplies fee"}</span>
-                        <span className="font-mono text-[14px]">{formatCurrency(shopFee)}</span>
+                        <span className="font-mono text-sm">{formatCurrency(shopFee)}</span>
                       </div>
                     )}
                     {surcharge > 0 && (
                       <div className="flex items-baseline justify-between gap-4">
                         <span className="text-sm text-muted-foreground">{feeSettings?.surcharge_description || "Card processing fee"}</span>
-                        <span className="font-mono text-[14px]">{formatCurrency(surcharge)}</span>
+                        <span className="font-mono text-sm">{formatCurrency(surcharge)}</span>
                       </div>
                     )}
                     {taxAmount > 0 && (
                       <div className="flex items-baseline justify-between gap-4">
                         <span className="text-sm text-muted-foreground">Tax</span>
-                        <span className="font-mono text-[14px]">{formatCurrency(taxAmount)}</span>
+                        <span className="font-mono text-sm">{formatCurrency(taxAmount)}</span>
                       </div>
                     )}
                   </>
@@ -842,12 +842,12 @@ export const AppointmentDetail = ({
                 <Separator />
                 <div className="flex items-baseline justify-between gap-4">
                   <span className="text-sm font-medium">Total</span>
-                  <span className="font-mono text-[14px]">{formatCurrency(summaryTotal)}</span>
+                  <span className="font-mono text-sm">{formatCurrency(summaryTotal)}</span>
                 </div>
                 {summaryPaid > 0 && (
                   <div className="flex items-baseline justify-between gap-4">
                     <span className="text-sm text-muted-foreground">Amount paid</span>
-                    <span className="font-mono text-[14px]">{formatCurrency(summaryPaid)}</span>
+                    <span className="font-mono text-sm">{formatCurrency(summaryPaid)}</span>
                   </div>
                 )}
                 <div className="flex items-end justify-between gap-4 pt-1">
