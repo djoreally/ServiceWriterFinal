@@ -29,9 +29,9 @@ import {
   findOverlaps,
   isValidEmailLoose,
   localDateInTimezone,
-  matchServiceCatalogId,
   phoneDigits,
   resolveBookingJobs,
+  resolveServiceCatalogId,
   roundMoney,
   splitScheduledStart,
   staffNote,
@@ -301,13 +301,17 @@ async function resolveBooking(
   }
 
   // Service resolution (spec §4): unresolvable service blocks the push.
+  // The catalog is loaded scoped to THIS workspace's active services, so a
+  // backend-supplied serviceCatalogId can only resolve inside the workspace.
   const { data: catalog, error: catalogError } = await supabase
     .from("service_catalog")
     .select("id,name")
     .eq("workspace_id", workspaceId)
     .eq("is_active", true);
   if (catalogError) throw catalogError;
-  const catalogId = matchServiceCatalogId((catalog ?? []) as Array<{ id: string; name: string }>, booking.service);
+  const catalogRows = (catalog ?? []) as Array<{ id: string; name: string }>;
+  const jobs = resolveBookingJobs(booking);
+  const catalogId = resolveServiceCatalogId(catalogRows, booking.service, jobs[0]?.serviceCatalogId);
   if (!catalogId) {
     return {
       blocked_reason: `Service "${booking.service}" does not match any active Service Writer catalog service in this workspace. Add or rename the catalog service, or skip this booking.`,
@@ -323,12 +327,13 @@ async function resolveBooking(
 
   // Per-job service resolution: every job on the booking must resolve to
   // a catalog service, or the push cannot build that vehicle's items
-  // (same spec §4 rule as the first job, applied per job).
-  const jobs = resolveBookingJobs(booking);
+  // (same spec §4 rule as the first job, applied per job). Each job prefers
+  // its backend-supplied serviceCatalogId (exact catalog record) and falls
+  // back to name matching.
   const jobCatalogIds: Array<string | null> = jobs.map((job, index) =>
     index === 0
       ? catalogId
-      : matchServiceCatalogId((catalog ?? []) as Array<{ id: string; name: string }>, job.service_name),
+      : resolveServiceCatalogId(catalogRows, job.service_name, job.serviceCatalogId),
   );
   const unmatchedJob = jobs.find((job, index) => jobCatalogIds[index] === null);
   if (unmatchedJob) {
