@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { fetchCustomerAccount, onAuthStateChange, customerSignOut } from "@/application/queries/customer-dashboard.query";
 import { toast } from "@/components/ui/sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -25,19 +25,29 @@ export interface CustomerAccount {
 
 export default function CustomerDashboard() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const focusAppointmentId = searchParams.get("appointment");
   const [loading, setLoading] = useState(true);
   const [account, setAccount] = useState<CustomerAccount | null>(null);
-  const [activeTab, setActiveTab] = useState("overview");
+  // An email deep link (?appointment=) opens straight on the appointments
+  // tab; the focused card is spotlighted by CustomerAppointmentsTab.
+  const [activeTab, setActiveTab] = useState(focusAppointmentId ? "appointments" : "overview");
 
   const fetchAccount = useCallback(async () => {
     const data = await fetchCustomerAccount();
     if (!data) {
-      navigate("/customer/auth");
+      // Carry the full destination (including the email's ?appointment=
+      // context) through sign-in / account creation so the customer lands
+      // on their appointment afterwards instead of a bare portal home.
+      const returnTo = focusAppointmentId
+        ? `/customer/dashboard?appointment=${encodeURIComponent(focusAppointmentId)}`
+        : "/customer/dashboard";
+      navigate(`/customer/auth?returnTo=${encodeURIComponent(returnTo)}`);
       return;
     }
     setAccount(data);
     setLoading(false);
-  }, [navigate]);
+  }, [navigate, focusAppointmentId]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChange((event) => {
@@ -180,7 +190,7 @@ export default function CustomerDashboard() {
           </TabsContent>
 
           <TabsContent value="appointments">
-            {account && <CustomerAppointmentsTab account={account} />}
+            {account && <CustomerAppointmentsTab account={account} focusAppointmentId={focusAppointmentId} />}
           </TabsContent>
 
           <TabsContent value="payments">

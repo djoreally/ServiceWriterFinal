@@ -1,5 +1,6 @@
 import { createSupabaseAdminClient } from "@/lib/supabase";
 import { LIFECYCLE_EVENT_KEYS } from "@/server/messaging/lifecycle-events";
+import { withAppointmentContext } from "@/server/messaging/lifecycle-action-urls";
 import { sendLifecycleEmail } from "@/server/messaging/lifecycle-sender";
 
 type AppointmentRow = {
@@ -102,7 +103,10 @@ function buildBookingVariables(input: {
     ? metadata.confirmation_code.trim()
     : input.appointment.id.slice(0, 8).toUpperCase();
   const configuredManageUrl = typeof metadata.manage_url === "string" && /^https?:\/\//i.test(metadata.manage_url) ? metadata.manage_url : null;
-  const manageUrl = configuredManageUrl ?? input.actionUrl;
+  // Platform-default links carry the appointment context (see
+  // lifecycle-action-urls); a workspace-configured manage URL is respected
+  // exactly as configured.
+  const manageUrl = configuredManageUrl ?? withAppointmentContext(input.actionUrl, input.appointment.id);
 
   return {
     "business.name": input.workspaceName,

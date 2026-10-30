@@ -102,6 +102,7 @@ import { dispatchLifecycleEvent, LIFECYCLE_EVENT_KEYS } from "@/server/messaging
 import { processInAppNotificationPushOutbox } from "@/server/notifications/push-outbox";
 import { processLifecycleEventOutbox } from "@/server/messaging/lifecycle-sender";
 import { produceCustomerAppointmentReminders } from "@/server/messaging/appointment-reminder-producer";
+import { parseEmailDetails, renderEmailLayout } from "@/server/messaging/email-layout";
 
 export const messagingRouter = new Hono();
 
@@ -691,10 +692,6 @@ function safeType(value: string): string {
   return value.replace(/[\r\n]+/g, " ").trim();
 }
 
-function escapeHtml(value: string): string {
-  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
-}
-
 // ---------------------------------------------------------------------------
 // Review request actions (workspace member auth)
 // ---------------------------------------------------------------------------
@@ -1207,7 +1204,14 @@ messagingRouter.post("/v1/email-testing/send", async (c) => {
   ].filter(Boolean) as string[];
 
   const bodyText = lines.join("\n");
-  const html = `<p>${lines.map(escapeHtml).join("</p><p>")}</p>`;
+  const html = renderEmailLayout({
+    businessName: body.businessName ?? "Service Writer",
+    preview: subject,
+    eyebrow: { text: "EMAIL TEST" },
+    headline: "Transactional email test",
+    introParagraphs: [lines[0]],
+    details: parseEmailDetails(lines.slice(1).join(" | ")),
+  });
   const adapter = new ResendEmailAdapter();
   const delivery = await adapter.send({
     workspaceId,

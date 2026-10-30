@@ -1,5 +1,6 @@
 import type { ProviderSendResult } from "@/server/messaging/types";
 import { ResendEmailAdapter } from "@/server/messaging/resend";
+import { renderEmailLayout } from "@/server/messaging/email-layout";
 import { createSupabaseAdminClient } from "@/lib/supabase";
 
 const CANONICAL_PRODUCTION_APP_URL = "https://servicewriter.xyz";
@@ -84,7 +85,20 @@ export async function sendInvitationEmail(input: {
   const roleLabel = input.role.replaceAll("_", " ");
   const expires = new Date(input.expiresAt).toLocaleString("en-US", { timeZone: "America/New_York" });
   const text = `You have been invited to Service Writer as ${roleLabel}. Open this secure invitation link to sign in and join the workspace: ${actionLink}\n\nThis invitation expires ${expires}.`;
-  const html = `<p>You have been invited to <strong>Service Writer</strong> as ${roleLabel}.</p><p><a href="${actionLink}">Accept invitation</a></p><p>This secure invitation expires ${expires}.</p>`;
+  const html = renderEmailLayout({
+    businessName: "Service Writer",
+    headerSubtitle: "Workspace invitation",
+    preview: `You've been invited to join a Service Writer workspace as ${roleLabel}.`,
+    eyebrow: { text: "INVITATION" },
+    headline: "You're invited to Service Writer",
+    introParagraphs: [`You have been invited to Service Writer as ${roleLabel}. Open the secure invitation link to sign in and join the workspace.`],
+    details: [
+      { label: "Role", value: roleLabel },
+      { label: "Expires", value: expires },
+    ],
+    cta: { label: "Accept invitation", url: actionLink },
+    helpText: "If you weren't expecting this invitation, you can ignore this email.",
+  });
 
   return new ResendEmailAdapter().send({
     workspaceId: input.workspaceId,
