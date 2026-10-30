@@ -8,7 +8,11 @@
  * supabase/migrations/20261028235900_website_booking_staff_push_rpc.sql.
  * No direct inserts into appointments anywhere in this module, and no
  * customer-facing side effects: this module never calls the confirmation
- * endpoint or any messaging path.
+ * endpoint and never emails the customer (the website already did). The
+ * one messaging side effect is deliberate and shop-side only: after a
+ * push creates an appointment, the shop gets the same "new appointment
+ * booked" notification the public booking path sends, so a website
+ * booking is never silent to the shop.
  */
 import {
   appointmentDescription,
@@ -41,6 +45,7 @@ import {
   WebsiteBackendError,
   type WebsiteBookingsConfig,
 } from "./client";
+import { sendShopBookingNotification } from "@/server/messaging/booking-confirmation";
 
 // Mirrors geocodeAddressServer in src/server/hono/routes/appointments.ts
 // (Mapbox v5, same token env) so pushed appointments geocode identically to
@@ -63,18 +68,68 @@ async function geocodeAddress(address: string): Promise<{ lat: number; lng: numb
 
 interface WorkspaceContext {
   timezone: string;
+  name: string;
   slug: string | null;
 }
 
 async function getWorkspaceContext(supabase: any, workspaceId: string): Promise<WorkspaceContext> {
   const [{ data: workspace }, { data: settings }] = await Promise.all([
-    supabase.from("workspaces").select("timezone").eq("id", workspaceId).maybeSingle(),
+    supabase.from("workspaces").select("timezone, name").eq("id", workspaceId).maybeSingle(),
     supabase.from("workspace_settings").select("booking_slug").eq("workspace_id", workspaceId).maybeSingle(),
   ]);
   return {
     timezone: (workspace?.timezone as string) || "UTC",
+    name: (workspace?.name as string) || "Service Writer",
     slug: (settings?.booking_slug as string) || null,
   };
+}
+
+/**
+ * Best-effort shop notification for a freshly pushed appointment: the
+ * same "new appointment booked" email the public booking path sends to
+ * booking_notification_emails plus the workspace owner. The website
+ * already emailed the customer, so the customer is excluded. A failure
+ * is logged and never changes the push result.
+ */
+async function notifyShopOfPushedBooking(
+  supabase: any,
+  ctx: WorkspaceContext,
+  booking: WebsiteBooking,
+  appointmentId: string,
+): Promise<void> {
+  try {
+    const { data: appointment } = await supabase
+      .from("appointments")
+      .select("id, workspace_id, customer_id, starts_at, ends_at, status, notes, metadata, confirmation_code")
+      .eq("id", appointmentId)
+      .maybeSingle();
+    if (!appointment) return;
+    const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://servicewriter.xyz").replace(/\/$/, "");
+    await sendShopBookingNotification({
+      appointment: {
+        id: appointment.id,
+        workspace_id: appointment.workspace_id,
+        customer_id: appointment.customer_id,
+        starts_at: appointment.starts_at,
+        ends_at: appointment.ends_at,
+        status: appointment.status,
+        notes: appointment.notes,
+        metadata: {
+          ...((appointment.metadata as Record<string, unknown> | null) ?? {}),
+          confirmation_code: appointment.confirmation_code ?? undefined,
+        },
+      },
+      workspaceName: ctx.name,
+      workspaceTimezone: ctx.timezone,
+      actionUrl: appUrl,
+      excludeEmail: booking.email,
+    });
+  } catch (error) {
+    console.error(
+      "[WebsiteBookings] shop booking notification failed",
+      error instanceof Error ? error.message : "unknown",
+    );
+  }
 }
 
 /** Fill scheduled_end from the start + duration when the backend omitted it. */
@@ -625,6 +680,7 @@ export async function executePushes(
 
     try {
       await stampWebsiteBookingPushed(config, bookingId, createdId);
+      await notifyShopOfPushedBooking(supabase, ctx, booking, createdId);
       results.push({
         booking_id: bookingId,
         status: "created",

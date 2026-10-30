@@ -85,11 +85,10 @@ function configuredBookingRecipients(value: unknown): string[] {
     .filter((entry) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(entry));
 }
 
-export async function sendBookingConfirmation(input: {
+function buildBookingVariables(input: {
   appointment: AppointmentRow;
   workspaceName: string;
   workspaceTimezone: string;
-  recipientEmail: string;
   actionUrl: string;
 }) {
   const metadata = input.appointment.metadata ?? {};
@@ -105,7 +104,7 @@ export async function sendBookingConfirmation(input: {
   const configuredManageUrl = typeof metadata.manage_url === "string" && /^https?:\/\//i.test(metadata.manage_url) ? metadata.manage_url : null;
   const manageUrl = configuredManageUrl ?? input.actionUrl;
 
-  const customerVariables = {
+  return {
     "business.name": input.workspaceName,
     "business.timezone": input.workspaceTimezone,
     "business.email": typeof metadata.business_email === "string" ? metadata.business_email : undefined,
@@ -123,6 +122,16 @@ export async function sendBookingConfirmation(input: {
     "vehicle.description": vehicleDescription,
     "email.primary_action_url": manageUrl,
   };
+}
+
+export async function sendBookingConfirmation(input: {
+  appointment: AppointmentRow;
+  workspaceName: string;
+  workspaceTimezone: string;
+  recipientEmail: string;
+  actionUrl: string;
+}) {
+  const customerVariables = buildBookingVariables(input);
   const customerResult = await sendLifecycleEmail({
     workspaceId: input.appointment.workspace_id,
     customerId: input.appointment.customer_id,
@@ -133,7 +142,29 @@ export async function sendBookingConfirmation(input: {
     metadata: { appointmentId: input.appointment.id, recipientRole: "customer" },
   });
 
+  await sendShopBookingNotification({ ...input, excludeEmail: input.recipientEmail });
+
+  return customerResult;
+}
+
+/**
+ * The shop-side "new appointment booked" email: enqueued for every
+ * configured booking_notification_emails address plus the workspace
+ * owner, minus excludeEmail (the customer, who gets their own email
+ * from whichever path created the booking). Shared by the public
+ * booking confirmation path and the website-bookings push pipeline so
+ * a booking notifies the shop the same way however it arrived.
+ * Best-effort: a failure is logged, never thrown.
+ */
+export async function sendShopBookingNotification(input: {
+  appointment: AppointmentRow;
+  workspaceName: string;
+  workspaceTimezone: string;
+  actionUrl: string;
+  excludeEmail?: string;
+}) {
   try {
+    const customerVariables = buildBookingVariables(input);
     const admin = createSupabaseAdminClient();
     const [workspace, settings] = await Promise.all([
       admin.from("workspaces").select("created_by").eq("id", input.appointment.workspace_id).single(),
@@ -144,7 +175,7 @@ export async function sendBookingConfirmation(input: {
     const ownerEmail = owner?.data?.user?.email?.trim().toLowerCase();
     const recipients = new Set(configuredBookingRecipients(settings.data?.operational_settings));
     if (ownerEmail) recipients.add(ownerEmail);
-    recipients.delete(input.recipientEmail.trim().toLowerCase());
+    if (input.excludeEmail) recipients.delete(input.excludeEmail.trim().toLowerCase());
 
     const staffUrl = new URL(`/appointments/${input.appointment.id}`, input.actionUrl).toString();
     await Promise.all(Array.from(recipients).map((recipientEmail) =>
@@ -165,6 +196,4 @@ export async function sendBookingConfirmation(input: {
   } catch (ownerNotificationError) {
     console.error("[Lifecycle] shop booking notification enqueue failed", ownerNotificationError);
   }
-
-  return customerResult;
 }
