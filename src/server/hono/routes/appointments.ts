@@ -31,6 +31,12 @@ import { dispatchLifecycleEvent, LIFECYCLE_EVENT_KEYS } from "@/server/messaging
 import { syncAppointmentToGoogleCalendar } from "@/server/google-calendar/sync";
 import { zonedDateTimeParts, zonedLocalDateTimeToUtc } from "@/server/scheduling/timezone";
 import { syncCanonicalInvoiceToStripe } from "@/server/payments/stripe-invoice-sync";
+import {
+  findAppointmentSyncTarget,
+  getSyncRecord,
+  listAppointmentSyncRecords,
+  listSyncRecordLogs,
+} from "@/server/payments/provider-sync";
 import { technicianJobUrl } from "@/server/messaging/lifecycle-action-urls";
 import { createSupabaseAdminClient, createSupabaseBrowserClient, createSupabaseRequestClient } from "@/lib/supabase";
 import { isWebsiteQuoteLocked } from "@/lib/price-lock";
@@ -1610,34 +1616,32 @@ function supabaseFunctionsBase(): { base: string; anonKey: string } {
   return { base, anonKey };
 }
 
-/** Forward a GET-style edge-function call (query params) with the caller's auth header. */
-async function forwardEdgeGet(c: Context, functionName: string, query: Record<string, string>) {
-  const { base, anonKey } = supabaseFunctionsBase();
-  const url = new URL(`${base}/functions/v1/${functionName}`);
-  for (const [key, value] of Object.entries(query)) url.searchParams.set(key, value);
-  const headers: Record<string, string> = { apikey: anonKey };
-  const authorization = c.req.header("authorization");
-  if (authorization) headers["authorization"] = authorization;
-  const res = await fetch(url.toString(), { headers });
-  const data = await res.json().catch(() => null);
-  if (!res.ok) {
-    return { data: null, error: { message: `Edge function ${functionName} failed`, code: String(res.status), details: data, hint: null } };
-  }
-  return { data, error: null };
-}
-
-// GET /v1/appointments/:id/provider-sync — sync-state for an appointment (edge GET forward).
+// GET /v1/appointments/:id/provider-sync — sync-state for an appointment.
+// Served from payment_provider_records, written by the canonical provider
+// sync (@/server/payments/provider-sync). This used to forward to the
+// `provider-sync-manager` edge function, which does not exist.
 appointmentsRouter.get("/v1/appointments/:id/provider-sync", async (c: Context) => {
   const id = z.string().uuid().parse(c.req.param("id"));
   await requireAuth(c);
-  return json(await forwardEdgeGet(c, "provider-sync-manager", { action: "for_appointment", appointment_id: id }));
+  const admin = createSupabaseAdminClient();
+  const target = await findAppointmentSyncTarget(admin, id);
+  if (!target) return json({ data: { records: [] }, error: null });
+  await requireWorkspaceAuth(c, target.workspace_id);
+  const records = await listAppointmentSyncRecords(admin, id);
+  return json({ data: { records }, error: null });
 });
 
-// GET /v1/appointments/provider-sync-logs — sync logs for a provider record (edge GET forward).
+// GET /v1/appointments/provider-sync-logs — sync logs for a provider record.
 appointmentsRouter.get("/v1/appointments/provider-sync-logs", async (c: Context) => {
   const recordId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("record_id") ?? "");
   await requireAuth(c);
-  return json(await forwardEdgeGet(c, "provider-sync-manager", { action: "logs", record_id: recordId }));
+  const admin = createSupabaseAdminClient();
+  const record = await getSyncRecord(admin, recordId);
+  const target = record ? await findAppointmentSyncTarget(admin, record.appointment_id) : null;
+  if (!record || !target) return json({ data: { logs: [] }, error: null });
+  await requireWorkspaceAuth(c, target.workspace_id);
+  const logs = await listSyncRecordLogs(admin, recordId);
+  return json({ data: { logs }, error: null });
 });
 
 // POST /v1/appointments/voice-transcribe — forward multipart audio to transcribe-audio.
