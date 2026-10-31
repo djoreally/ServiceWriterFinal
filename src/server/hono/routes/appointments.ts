@@ -41,6 +41,8 @@ import { technicianJobUrl, withAppointmentContext } from "@/server/messaging/lif
 import { createSupabaseAdminClient, createSupabaseBrowserClient, createSupabaseRequestClient } from "@/lib/supabase";
 import { isWebsiteQuoteLocked } from "@/lib/price-lock";
 import { appointmentStatusView, invoiceStatusView, normalizeAppointmentStatus, paymentStatusView, resolveDispatchStatus, withAppointmentStatusView } from "@/lib/status-vocabulary";
+import { withAppointmentTitleFields } from "@/lib/appointment-title";
+import { resolvePrimaryServiceNames, resolveWorkspaceTimezone } from "@/server/appointments/title-resolution";
 import { logMutation } from "@/server/audit";
 import { z } from "zod";
 
@@ -62,7 +64,13 @@ appointmentsRouter.get("/v1/appointments", async (c: Context) => {
   const { limit, offset } = paginationSchema.parse(Object.fromEntries(url.searchParams));
   const { data, error } = await supabase.from("appointments").select("*,customers(id,first_name,last_name,email,phone),vehicles(id,customer_id,year,make,model,vin,license_plate,plate_region,color,mileage,notes),locations(id,name)").eq("workspace_id", workspaceId).order("starts_at").range(offset, offset + limit - 1);
   if (error) throw error;
-  return json({ data: (data ?? []).map((row) => withAppointmentStatusView(row)), pagination: { limit, offset } });
+  const rows = data ?? [];
+  // B2/T-1: every job response carries the server-composed title fields.
+  const [timezone, primaryServiceNames] = await Promise.all([
+    resolveWorkspaceTimezone(supabase, workspaceId),
+    resolvePrimaryServiceNames(supabase, workspaceId, rows.map((row) => row.id)),
+  ]);
+  return json({ data: rows.map((row) => withAppointmentTitleFields(withAppointmentStatusView(row), { timezone, primaryServiceName: primaryServiceNames.get(row.id) })), pagination: { limit, offset } });
 });
 
 appointmentsRouter.post("/v1/appointments", async (c: Context) => {
@@ -250,13 +258,19 @@ appointmentsRouter.get("/v1/appointments/dispatchable", async (c: Context) => {
   const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit") ?? 50) || 50));
   const { data, error } = await (supabase as any)
     .from("appointments")
-    .select("id,status,starts_at,ends_at,dispatch_status,metadata")
+    .select("id,status,starts_at,ends_at,dispatch_status,metadata,confirmation_code,customers(first_name,last_name,company_name)")
     .eq("workspace_id", workspaceId)
     .not("status", "in", '("completed","cancelled")')
     .order("starts_at", { ascending: true })
     .limit(limit);
   if (error) throw error;
-  return json({ data: (data ?? []).map((row) => withAppointmentStatusView(row)) });
+  const rows = data ?? [];
+  // B2/T-1: server-composed title fields on the dispatch monitor rows.
+  const [timezone, primaryServiceNames] = await Promise.all([
+    resolveWorkspaceTimezone(supabase, workspaceId),
+    resolvePrimaryServiceNames(supabase, workspaceId, rows.map((row) => row.id)),
+  ]);
+  return json({ data: rows.map((row) => withAppointmentTitleFields(withAppointmentStatusView(row), { timezone, primaryServiceName: primaryServiceNames.get(row.id) })) });
 });
 
 appointmentsRouter.get("/v1/appointments/day-appointments", async (c: Context) => {
@@ -348,7 +362,12 @@ appointmentsRouter.get("/v1/appointments/:id{[0-9a-fA-F-]{36}}", async (c: Conte
   }
   const { data, error } = await supabase.from("appointments").select("*,customers(id,first_name,last_name,company_name,email,phone,address_line1,address_line2,city,region,postal_code,notes),vehicles(id,customer_id,year,make,model,vin,license_plate,plate_region,color,mileage,notes)").eq("workspace_id", workspaceId).eq("id", id).single();
   if (error) throw error;
-  return json({ data: withAppointmentStatusView(data) });
+  // B2/T-1: server-composed title fields on the detail response.
+  const [timezone, primaryServiceNames] = await Promise.all([
+    resolveWorkspaceTimezone(supabase, workspaceId),
+    resolvePrimaryServiceNames(supabase, workspaceId, [id]),
+  ]);
+  return json({ data: withAppointmentTitleFields(withAppointmentStatusView(data), { timezone, primaryServiceName: primaryServiceNames.get(id) }) });
 });
 
 appointmentsRouter.patch("/v1/appointments/:id", async (c: Context) => {
@@ -388,7 +407,7 @@ appointmentsRouter.patch("/v1/appointments/:id", async (c: Context) => {
   if (hasOwn(body, "status") && typeof body.status === "string") {
     canonicalPatch.status = normalizeAppointmentStatus(body.status) ?? body.status;
   }
-  const { data, error } = await supabase.from("appointments").update(canonicalPatch as any).eq("id", id).eq("workspace_id", workspace_id).select("id,workspace_id,customer_id,starts_at,ends_at,status,assigned_user_id,notes,metadata,updated_at,customers(id,first_name,last_name,email),vehicles(id,year,make,model)").single();
+  const { data, error } = await supabase.from("appointments").update(canonicalPatch as any).eq("id", id).eq("workspace_id", workspace_id).select("id,workspace_id,customer_id,starts_at,ends_at,status,confirmation_code,assigned_user_id,notes,metadata,updated_at,customers(id,first_name,last_name,email),vehicles(id,year,make,model)").single();
   if (error) throw error;
   try {
     const updated = data.metadata && typeof data.metadata === "object" && !Array.isArray(data.metadata) ? data.metadata as Record<string, unknown> : {};
@@ -411,7 +430,9 @@ appointmentsRouter.patch("/v1/appointments/:id", async (c: Context) => {
     before: current,
     after: data,
   });
-  return json({ data: withAppointmentStatusView(data) });
+  // B2/T-1: the updated row leaves with the composed title fields too.
+  const primaryServiceNames = await resolvePrimaryServiceNames(supabase, workspace_id, [id]);
+  return json({ data: withAppointmentTitleFields(withAppointmentStatusView(data), { timezone: workspaceTimezone, primaryServiceName: primaryServiceNames.get(id) }) });
 });
 
 appointmentsRouter.delete("/v1/appointments/:id", async (c: Context) => {
@@ -423,7 +444,7 @@ appointmentsRouter.delete("/v1/appointments/:id", async (c: Context) => {
     .eq("id", id)
     .eq("workspace_id", workspaceId)
     .maybeSingle();
-  const { data, error } = await supabase.from("appointments").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("id", id).eq("workspace_id", workspaceId).select("id,workspace_id,customer_id,starts_at,ends_at,status,notes,metadata,updated_at,customers(id,first_name,last_name,email),vehicles(id,year,make,model)").single();
+  const { data, error } = await supabase.from("appointments").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("id", id).eq("workspace_id", workspaceId).select("id,workspace_id,customer_id,starts_at,ends_at,status,confirmation_code,notes,metadata,updated_at,customers(id,first_name,last_name,email),vehicles(id,year,make,model)").single();
   if (error) throw error;
   logMutation({
     supabase: createSupabaseAdminClient(),
@@ -436,15 +457,19 @@ appointmentsRouter.delete("/v1/appointments/:id", async (c: Context) => {
     before,
     after: data,
   });
+  let workspaceTimezone = "UTC";
   try {
     const { data: workspace } = await supabase.from("workspaces").select("name,timezone").eq("id", workspaceId).single();
+    workspaceTimezone = workspace?.timezone ?? "UTC";
     const metadata = data.metadata && typeof data.metadata === "object" && !Array.isArray(data.metadata) ? data.metadata as Record<string, unknown> : {};
     const url = typeof metadata.manage_url === "string" && /^https?:\/\//i.test(metadata.manage_url) ? metadata.manage_url : new URL("/my-bookings", c.req.url).toString();
-    await dispatchAppointmentLifecycle({ eventKey: LIFECYCLE_EVENT_KEYS.appointmentCancelled, eventId: `${id}:cancelled:${data.updated_at}`, appointment: data, workspaceName: workspace?.name ?? "Service Writer", workspaceTimezone: workspace?.timezone ?? "UTC", actionUrl: url });
+    await dispatchAppointmentLifecycle({ eventKey: LIFECYCLE_EVENT_KEYS.appointmentCancelled, eventId: `${id}:cancelled:${data.updated_at}`, appointment: data, workspaceName: workspace?.name ?? "Service Writer", workspaceTimezone, actionUrl: url });
   } catch (e) { console.error("[Lifecycle] appointment cancellation email enqueue failed", e); }
   // Google Calendar auto-sync (delete event). Never fails this cancellation.
   await syncAppointmentToGoogleCalendar({ supabase, userId: user.id, appointmentId: id });
-  return json({ data: withAppointmentStatusView(data) });
+  // B2/T-1: the cancelled row leaves with the composed title fields too.
+  const primaryServiceNames = await resolvePrimaryServiceNames(supabase, workspaceId, [id]);
+  return json({ data: withAppointmentTitleFields(withAppointmentStatusView(data), { timezone: workspaceTimezone, primaryServiceName: primaryServiceNames.get(id) }) });
 });
 
 // ---------------------------------------------------------------------------
@@ -3047,7 +3072,7 @@ appointmentsRouter.get("/v1/dispatch/operational-jobs", async (c: Context) => {
   // which is not in the generated schema).
   const [appointmentsRes, workOrdersRes, membersRes, fleetRes] = await Promise.all([
     db.from("appointments")
-      .select("id,status,starts_at,ends_at,assigned_user_id,updated_at,dispatch_status,metadata,customers(first_name,last_name,company_name,phone,address_line1,address_line2,city,region,postal_code),vehicles(year,make,model),locations(address_line1,address_line2,city,region,postal_code,latitude,longitude)")
+      .select("id,status,starts_at,ends_at,assigned_user_id,updated_at,dispatch_status,metadata,confirmation_code,customers(first_name,last_name,company_name,phone,address_line1,address_line2,city,region,postal_code),vehicles(year,make,model),locations(address_line1,address_line2,city,region,postal_code,latitude,longitude)")
       .eq("workspace_id", workspaceId)
       .gte("starts_at", startIso)
       .lte("starts_at", endIso)
@@ -3081,9 +3106,14 @@ appointmentsRouter.get("/v1/dispatch/operational-jobs", async (c: Context) => {
     : { data: [], error: null };
   if (fleetTechsError) throw fleetTechsError;
 
+  // B2/T-1: server-composed title fields on the board's appointment rows.
+  const [timezone, primaryServiceNames] = await Promise.all([
+    resolveWorkspaceTimezone(db, workspaceId),
+    resolvePrimaryServiceNames(db, workspaceId, (appointmentsRes.data ?? []).map((row: Record<string, unknown>) => row.id as string)),
+  ]);
   return json({
     data: {
-      appointments: (appointmentsRes.data ?? []).map((row: Record<string, unknown>) => withAppointmentStatusView(row)),
+      appointments: (appointmentsRes.data ?? []).map((row: Record<string, unknown>) => withAppointmentTitleFields(withAppointmentStatusView(row), { timezone, primaryServiceName: primaryServiceNames.get(row.id as string) })),
       work_orders: workOrdersRes.data ?? [],
       members: membersRes.data ?? [],
       fleet_work_orders: fleetRes.data ?? [],
@@ -3105,7 +3135,7 @@ appointmentsRouter.get("/v1/dispatch/board-staff", async (c: Context) => {
   return json({ data: { members: members ?? [], presence: presence ?? [] } });
 });
 
-const DISPATCHABLE_COLUMNS = "id,starts_at,ends_at,status,assigned_user_id,vehicle_id,customer_id,priority,dispatch_status,metadata,location_address,location_lat,location_lng,created_at";
+const DISPATCHABLE_COLUMNS = "id,starts_at,ends_at,status,assigned_user_id,vehicle_id,customer_id,priority,dispatch_status,metadata,location_address,location_lat,location_lng,created_at,confirmation_code,customers(first_name,last_name,company_name),vehicles(year,make,model)";
 
 // GET /v1/dispatch/dispatchable-appointments — open appointments with assignment context.
 appointmentsRouter.get("/v1/dispatch/dispatchable-appointments", async (c: Context) => {
@@ -3121,7 +3151,13 @@ appointmentsRouter.get("/v1/dispatch/dispatchable-appointments", async (c: Conte
     .order("starts_at", { ascending: true })
     .limit(limit);
   if (error) throw error;
-  return json({ data: (data ?? []).map((row) => withAppointmentStatusView(row)) });
+  const rows = data ?? [];
+  // B2/T-1: server-composed title fields on the dispatchable rows.
+  const [timezone, primaryServiceNames] = await Promise.all([
+    resolveWorkspaceTimezone(supabase, workspaceId),
+    resolvePrimaryServiceNames(supabase, workspaceId, rows.map((row) => row.id)),
+  ]);
+  return json({ data: rows.map((row) => withAppointmentTitleFields(withAppointmentStatusView(row), { timezone, primaryServiceName: primaryServiceNames.get(row.id) })) });
 });
 
 // GET /v1/dispatch/settings — dispatch settings for the caller's business profile.
@@ -3247,13 +3283,18 @@ appointmentsRouter.get("/v1/dispatch/mobile-state", async (c: Context) => {
     db.from("workspace_members").select("user_id,role,is_active").eq("workspace_id", workspaceId).eq("user_id", userId).eq("is_active", true).maybeSingle(),
     db.from("technician_presence").select("*").eq("workspace_id", workspaceId).eq("user_id", userId).maybeSingle(),
     db.from("technician_clock_entries").select("*").eq("workspace_id", workspaceId).eq("user_id", userId).gte("clock_in", `${today}T00:00:00`).order("clock_in", { ascending: false }).limit(10),
-    db.from("appointments").select("id,starts_at,ends_at,status,assigned_user_id,vehicle_id,customer_id,priority,dispatch_status,metadata,location_address,location_lat,location_lng,customers(id,first_name,last_name,phone,email),vehicles(id,year,make,model,license_plate)").eq("workspace_id", workspaceId).eq("assigned_user_id", userId).not("status", "in", '("completed","cancelled","no_show")').order("starts_at", { ascending: true }).limit(50),
+    db.from("appointments").select("id,starts_at,ends_at,status,assigned_user_id,vehicle_id,customer_id,priority,dispatch_status,metadata,location_address,location_lat,location_lng,confirmation_code,customers(id,first_name,last_name,phone,email),vehicles(id,year,make,model,license_plate)").eq("workspace_id", workspaceId).eq("assigned_user_id", userId).not("status", "in", '("completed","cancelled","no_show")').order("starts_at", { ascending: true }).limit(50),
   ]);
   if (memberError) throw memberError;
   if (presenceError) throw presenceError;
   if (clockError) throw clockError;
   if (jobsError) throw jobsError;
-  return json({ data: { member: member ?? null, presence: presence ?? null, clockEntries: clockEntries ?? [], jobs: (jobs ?? []).map((row: Record<string, unknown>) => withAppointmentStatusView(row)) } });
+  // B2/T-1: server-composed title fields on the tech's job rows.
+  const [timezone, primaryServiceNames] = await Promise.all([
+    resolveWorkspaceTimezone(db, workspaceId),
+    resolvePrimaryServiceNames(db, workspaceId, (jobs ?? []).map((row: Record<string, unknown>) => row.id as string)),
+  ]);
+  return json({ data: { member: member ?? null, presence: presence ?? null, clockEntries: clockEntries ?? [], jobs: (jobs ?? []).map((row: Record<string, unknown>) => withAppointmentTitleFields(withAppointmentStatusView(row), { timezone, primaryServiceName: primaryServiceNames.get(row.id as string) })) } });
 });
 
 // POST /v1/dispatch/technician-location — update live location + presence via RPC.

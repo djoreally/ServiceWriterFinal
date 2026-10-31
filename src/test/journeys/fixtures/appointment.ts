@@ -1,6 +1,8 @@
+import { composeAppointmentTitleFields } from "@/lib/appointment-title";
+
 export function buildAppointmentFixture(overrides: Record<string, any> = {}) {
   const scheduledDate = new Date().toISOString().split("T")[0];
-  return {
+  const row: Record<string, any> = {
     id: "appt-001",
     user_id: "00000000-0000-0000-0000-000000000001",
     title: "Full Synthetic Oil Change",
@@ -31,6 +33,22 @@ export function buildAppointmentFixture(overrides: Record<string, any> = {}) {
     location_address: "500 Market St, Philadelphia, PA 19106",
     notes: "Customer prefers morning service.",
     created_at: new Date().toISOString(),
+  };
+  // B2 (redesign truth T-1): the API composes display_title /
+  // primary_service_name / confirmation_code server-side, and the journey
+  // mock returns table rows as API rows — so the fixture carries the fields
+  // exactly as the real composition produces them for this row (workspace
+  // timezone America/New_York, per the workspace-context mock). Stored
+  // titles above stay in the row: the composition must ignore them.
+  const composed = composeAppointmentTitleFields(
+    { ...row, ...overrides },
+    { timezone: "America/New_York" },
+  );
+  return {
+    ...row,
+    display_title: composed.display_title,
+    primary_service_name: composed.primary_service_name,
+    confirmation_code: composed.confirmation_code,
     ...overrides,
   };
 }

@@ -595,12 +595,17 @@ export const AppointmentDetail = ({
               <Eyebrow>{stageEyebrow}</Eyebrow>
               <div className="mt-1 flex flex-wrap items-center gap-3">
                 <h2 className="text-[30px] font-semibold leading-[1.2] tracking-tight">
-                  Appointment <span className="font-mono">{appointment.id.slice(0, 8).toUpperCase()}</span>
+                  {appointment.display_title || appointment.title}
                 </h2>
                 <Badge className={cn("capitalize", statusStyle.className)}>
                   {getStatusIcon(appointment.status)}
                   <span className="ml-1">{statusStyle.label}</span>
                 </Badge>
+                {appointment.confirmation_code && (
+                  <span className="font-mono text-sm uppercase tracking-wide text-muted-foreground">
+                    {appointment.confirmation_code}
+                  </span>
+                )}
               </div>
               <p className="mt-2 font-mono text-sm text-muted-foreground">
                 {formatDate(appointment.scheduled_date)} at {formatTimeLabel(appointment.scheduled_time, "h:mm a")} · {appointment.duration_minutes} min

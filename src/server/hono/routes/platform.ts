@@ -69,6 +69,8 @@ import {
   renderTemplate,
 } from "@/lib/retention/automation-templates";
 import { zonedDateTimeParts, zonedLocalDateTimeToUtc } from "@/server/scheduling/timezone";
+import { withAppointmentTitleFields } from "@/lib/appointment-title";
+import { resolvePrimaryServiceNames, resolveWorkspaceTimezone } from "@/server/appointments/title-resolution";
 import { dollarsToCents as dollarsToCents360, toDollars as toDollars360 } from "@/lib/money";
 import type { Cents as Cents360 } from "@/lib/money";
 
@@ -2546,13 +2548,13 @@ platformRouter.get("/v1/platform/dashboard/cockpit-rows", async (c) => {
   const [
     todayAppts, upcoming7, inProgress, completedToday, completedMonth, invoices,
   ] = await Promise.all([
-    db.from("appointments").select("id,starts_at,status,metadata").eq("workspace_id", workspaceId)
+    db.from("appointments").select("id,starts_at,status,metadata,confirmation_code,customers(first_name,last_name,company_name)").eq("workspace_id", workspaceId)
       .gte("starts_at", bounds.today_start).lt("starts_at", bounds.today_end)
       .in("status", ["confirmed", "in_progress"]).order("starts_at", { ascending: true }),
-    db.from("appointments").select("id,starts_at,status,metadata").eq("workspace_id", workspaceId)
+    db.from("appointments").select("id,starts_at,status,metadata,confirmation_code,customers(first_name,last_name,company_name)").eq("workspace_id", workspaceId)
       .gt("starts_at", bounds.today_end).lt("starts_at", bounds.next7_end)
       .eq("status", "confirmed").order("starts_at", { ascending: true }).limit(10),
-    db.from("appointments").select("id,starts_at,customer_id,vehicle_id,metadata,customers(first_name,last_name),vehicles(year,make,model)")
+    db.from("appointments").select("id,starts_at,customer_id,vehicle_id,metadata,confirmation_code,customers(first_name,last_name),vehicles(year,make,model)")
       .eq("workspace_id", workspaceId).eq("status", "in_progress")
       .order("starts_at", { ascending: false }).limit(20),
     db.from("service_records").select("appointment_id").eq("workspace_id", workspaceId)
@@ -2566,10 +2568,24 @@ platformRouter.get("/v1/platform/dashboard/cockpit-rows", async (c) => {
   for (const result of [todayAppts, upcoming7, inProgress, completedToday, completedMonth, invoices]) {
     if (result.error) throw result.error;
   }
+  // B2/T-1: the cockpit's appointment rows carry the server-composed title
+  // fields — the client's private CockpitAppointment title synthesis retires.
+  const [timezone, primaryServiceNames] = await Promise.all([
+    resolveWorkspaceTimezone(db, workspaceId),
+    resolvePrimaryServiceNames(db, workspaceId, [
+      ...((todayAppts.data ?? []) as Array<{ id: string }>).map((row) => row.id),
+      ...((upcoming7.data ?? []) as Array<{ id: string }>).map((row) => row.id),
+      ...((inProgress.data ?? []) as Array<{ id: string }>).map((row) => row.id),
+    ]),
+  ]);
+  const withTitles = (rows: unknown) =>
+    ((rows ?? []) as Array<Record<string, unknown>>).map((row) =>
+      withAppointmentTitleFields(row, { timezone, primaryServiceName: primaryServiceNames.get(row.id as string) }),
+    );
   return json({
-    todayApptRows: todayAppts.data ?? [],
-    upcoming7Rows: upcoming7.data ?? [],
-    inProgressRows: inProgress.data ?? [],
+    todayApptRows: withTitles(todayAppts.data),
+    upcoming7Rows: withTitles(upcoming7.data),
+    inProgressRows: withTitles(inProgress.data),
     completedTodayRows: completedToday.data ?? [],
     completedMonthRows: completedMonth.data ?? [],
     invoiceRows: invoices.data ?? [],

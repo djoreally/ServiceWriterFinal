@@ -75,6 +75,7 @@ function mapAppointment(row: {
   starts_at: string;
   status: string;
   metadata: unknown;
+  display_title?: unknown;
 }, timeZone: string): CockpitAppointment {
   const metadata = object(row.metadata);
   // safeParseDate returns null for null/undefined/malformed input instead of
@@ -83,7 +84,9 @@ function mapAppointment(row: {
   const local = startsAt ? zonedDateTimeParts(startsAt, timeZone) : null;
   return {
     id: row.id,
-    title: String(metadata.title ?? metadata.service_name ?? 'Appointment'),
+    // B2/T-1: the title is the server's composition (display_title) — the
+    // cockpit's private metadata synthesis is retired.
+    title: typeof row.display_title === 'string' && row.display_title ? row.display_title : 'Appointment',
     scheduled_date: local ? `${local.year}-${String(local.month).padStart(2, '0')}-${String(local.day).padStart(2, '0')}` : '',
     scheduled_time: local ? `${String(local.hour).padStart(2, '0')}:${String(local.minute).padStart(2, '0')}` : null,
     status: row.status,
