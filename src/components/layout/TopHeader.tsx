@@ -52,7 +52,7 @@ export const TopHeader = ({ title, onMenuClick, showMenuButton = true }: TopHead
               <Menu className="h-5 w-5" />
             </Button>
           )}
-          <h1 className="min-w-0 flex-1 truncate text-base font-semibold text-foreground md:text-lg">{title}</h1>
+          <h1 className="min-w-0 flex-1 truncate font-display text-base font-bold text-foreground md:text-lg">{title}</h1>
         </div>
 
         <div className="flex min-w-0 shrink-0 items-center gap-1 sm:gap-2 md:gap-4">

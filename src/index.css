@@ -537,6 +537,14 @@
   border: 2px solid hsl(var(--background));
 }
 
+/* SocialMetric primary action fill (redesign design system §2.2): the one
+   gradient in the product system — primary buttons + the selected segment
+   of a view switcher. Defined here so .tsx stays free of gradient classes
+   (frontend UI contract ratchet). */
+.bg-primary-action {
+  background: linear-gradient(135deg, #2196f3 0%, #1769ff 100%);
+}
+
 /* =========================================
    TEXT GRADIENT HELPERS
    ========================================= */

@@ -27,7 +27,7 @@ export const Sidebar = () => {
     <aside className="hidden h-screen w-60 shrink-0 flex-col border-r border-border bg-card lg:flex">
       <div className="shrink-0 border-b border-border px-5 py-5">
         <Link to="/dashboard" className="block min-w-0">
-          <p className="truncate text-base font-semibold text-foreground">{brand.name}</p>
+          <p className="truncate font-display text-base font-bold text-foreground">{brand.name}</p>
           {brand.tagline && <p className="mt-0.5 truncate text-xs text-muted-foreground">{brand.tagline}</p>}
         </Link>
         <div className="mt-4"><DashboardModeToggle /></div>

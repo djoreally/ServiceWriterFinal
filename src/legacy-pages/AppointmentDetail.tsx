@@ -40,12 +40,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { statusBadgeClasses } from "@/lib/statusStyles";
 import { formatTimeLabel } from "@/lib/datetime";
+import { AppointmentStatusChip } from "@/components/appointments/StatusToneChip";
+import { PaymentStateBand } from "@/components/appointments/PaymentStateBand";
+import { resolveStatusChip, statusToneClasses } from "@/lib/status-tone";
+import { realCustomerEmail } from "@/lib/contact-display";
 import {
   ArrowLeft,
   MapPin,
@@ -65,6 +67,8 @@ import {
   UserX,
   MessageSquare,
   Navigation,
+  Lock,
+  Mail,
 } from "lucide-react";
 import { InternalInbox } from "@/components/communications/InternalInbox";
 import {
@@ -91,29 +95,6 @@ import { FieldJobView } from "@/components/tech/FieldJobView";
 import { AppointmentSmsTimeline } from "@/components/appointments/AppointmentSmsTimeline";
 import { toast } from "@/components/ui/sonner";
 import { useServiceCategoryPolicy } from "@/hooks/useServiceCategoryPolicy";
-
-const STATUS_STYLES: Record<string, { className: string; label: string }> = {
-  pending: { className: `${statusBadgeClasses.awaiting} animate-pulse`, label: "Pending Approval" },
-  confirmed: { className: statusBadgeClasses.scheduled, label: "Confirmed" },
-  completed: { className: statusBadgeClasses.completed, label: "Completed" },
-  cancelled: { className: statusBadgeClasses.critical, label: "Cancelled" },
-  no_show: { className: statusBadgeClasses.awaiting, label: "No Show" },
-};
-
-const UNKNOWN_STATUS_CLASSNAME = "bg-muted text-muted-foreground";
-
-/**
- * Resolves the badge presentation for an appointment status. A known status
- * renders its curated label and tone; an unrecognized status renders as
- * itself — the raw status as its label, in a neutral tone — and never as
- * another status. (Redesign map A1 / friction F-6: this page previously
- * defaulted unknown statuses to "Confirmed", so a live in_progress or
- * arrived job displayed as Confirmed. Canonical API-provided labels are
- * B1's job; until then the truthful minimum is to show the status itself.)
- */
-export function resolveAppointmentStatusStyle(status: string): { className: string; label: string } {
-  return STATUS_STYLES[status] ?? { className: UNKNOWN_STATUS_CLASSNAME, label: status };
-}
 
 interface AppointmentDetailProps {
   embedded?: boolean;
@@ -155,7 +136,7 @@ function cleanHumanNotes(value?: string | null) {
 /** 12px uppercase eyebrow — establishes context above a heading, never carries content alone. */
 function Eyebrow({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <p className={cn("text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground", className)}>
+    <p className={cn("text-xs font-semibold uppercase tracking-widest text-muted-foreground", className)}>
       {children}
     </p>
   );
@@ -342,7 +323,8 @@ export const AppointmentDetail = ({
 
   const handleRequestReview = async () => {
     if (!appointment) return;
-    const customerEmail = appointment.customer?.email || appointment.guest_email;
+    // T-15: a placeholder/system email is not the customer's — never send to it.
+    const customerEmail = realCustomerEmail(appointment.customer?.email || appointment.guest_email);
     const customerName = appointment.customer?.name || appointment.guest_name || "Customer";
     const customerId = appointment.customer?.id;
 
@@ -449,19 +431,19 @@ export const AppointmentDetail = ({
       <AppointmentDetailLayout embedded={embedded}>
         <div className="mx-auto w-full max-w-6xl space-y-6 px-4 pb-12 pt-6" aria-busy="true" aria-label="Loading appointment details">
           <div className="flex items-center gap-3">
-            <div className="h-12 w-12 animate-pulse rounded-md bg-muted" />
+            <div className="h-12 w-12 animate-pulse rounded-md bg-secondary" />
             <div className="space-y-2">
-              <div className="h-3 w-32 animate-pulse rounded bg-muted" />
-              <div className="h-8 w-64 animate-pulse rounded bg-muted" />
+              <div className="h-3 w-32 animate-pulse rounded bg-secondary" />
+              <div className="h-8 w-64 animate-pulse rounded bg-secondary" />
             </div>
           </div>
-          <div className="h-20 animate-pulse rounded-xl bg-muted" />
+          <div className="h-20 animate-pulse rounded-2xl bg-secondary" />
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
             <div className="space-y-6 lg:col-span-2">
-              <div className="h-72 animate-pulse rounded-xl bg-muted" />
-              <div className="h-48 animate-pulse rounded-xl bg-muted" />
+              <div className="h-72 animate-pulse rounded-2xl bg-secondary" />
+              <div className="h-48 animate-pulse rounded-2xl bg-secondary" />
             </div>
-            <div className="h-96 animate-pulse rounded-xl bg-muted" />
+            <div className="h-96 animate-pulse rounded-2xl bg-secondary" />
           </div>
           <span className="sr-only">Loading appointment details</span>
         </div>
@@ -473,7 +455,7 @@ export const AppointmentDetail = ({
     return (
       <AppointmentDetailLayout embedded={embedded}>
         <div className="mx-auto max-w-md space-y-4 px-4 py-12 text-center">
-          <h2 className="text-[30px] font-semibold leading-[1.2] tracking-tight">Appointment unavailable</h2>
+          <h2 className="font-display text-3xl font-extrabold leading-tight tracking-tight">Appointment unavailable</h2>
           <p className="text-base text-muted-foreground">{error ?? "This appointment could not be found."}</p>
           <div className="flex flex-col gap-3 pt-2">
             <Button onClick={() => fetchAppointment()} className="min-h-[56px] text-base">
@@ -488,9 +470,12 @@ export const AppointmentDetail = ({
     );
   }
 
-  const statusStyle = resolveAppointmentStatusStyle(appointment.status);
+  const statusChip = resolveStatusChip(appointment);
   const customerName = appointment.guest_name || appointment.customer?.name || "Customer";
   const customerEmail = appointment.customer?.email || appointment.guest_email || null;
+  // T-15: what renders as the customer's email — a placeholder/system
+  // address renders as "No email on file", never as a sendable address.
+  const displayEmail = realCustomerEmail(customerEmail);
   const customerPhone = appointment.customer?.phone || appointment.guest_phone || null;
   const address = resolvedAddress || appointment.customer?.address || null;
   const humanNotes = cleanHumanNotes(appointment.notes || appointment.description);
@@ -594,20 +579,17 @@ export const AppointmentDetail = ({
             <div className="min-w-0">
               <Eyebrow>{stageEyebrow}</Eyebrow>
               <div className="mt-1 flex flex-wrap items-center gap-3">
-                <h2 className="text-[30px] font-semibold leading-[1.2] tracking-tight">
+                <h2 className="font-display text-3xl font-extrabold leading-tight tracking-tight">
                   {appointment.display_title || appointment.title}
                 </h2>
-                <Badge className={cn("capitalize", statusStyle.className)}>
-                  {getStatusIcon(appointment.status)}
-                  <span className="ml-1">{statusStyle.label}</span>
-                </Badge>
+                <AppointmentStatusChip appointment={appointment} />
                 {appointment.confirmation_code && (
                   <span className="font-mono text-sm uppercase tracking-wide text-muted-foreground">
-                    {appointment.confirmation_code}
+                    Confirmation {appointment.confirmation_code}
                   </span>
                 )}
               </div>
-              <p className="mt-2 font-mono text-sm text-muted-foreground">
+              <p className="mt-2 font-display text-sm font-semibold text-muted-foreground">
                 {formatDate(appointment.scheduled_date)} at {formatTimeLabel(appointment.scheduled_time, "h:mm a")} · {appointment.duration_minutes} min
               </p>
             </div>
@@ -647,17 +629,17 @@ export const AppointmentDetail = ({
           {/* Main column — what the job is */}
           <div className="space-y-8 lg:col-span-2">
             <section aria-labelledby="customer-vehicle-heading">
-              <h2 id="customer-vehicle-heading" className="text-[24px] font-semibold leading-[1.25] tracking-tight">
+              <h2 id="customer-vehicle-heading" className="font-display text-2xl font-bold leading-tight tracking-tight">
                 {terms.customer} &amp; {terms.vehicle}
               </h2>
-              <Card className="mt-4">
+              <Card className="mt-4 rounded-2xl shadow-card">
                 <CardContent className="p-0">
                   {/* Customer block */}
                   <div className="space-y-4 p-6">
                     <div className="flex items-start justify-between gap-4">
                       <div className="min-w-0">
                         <Eyebrow>{terms.customer}</Eyebrow>
-                        <p className="mt-1 break-words text-[18px] font-semibold leading-[1.35]">{customerName}</p>
+                        <p className="mt-1 break-words font-display text-lg font-bold leading-snug">{customerName}</p>
                       </div>
                       {appointment.customer && (
                         <Button
@@ -681,17 +663,22 @@ export const AppointmentDetail = ({
                       </ClickablePhone>
                     )}
 
-                    {customerEmail && (
+                    {displayEmail ? (
                       <ClickableEmail
-                        email={customerEmail}
+                        email={displayEmail}
                         className="flex min-h-[56px] w-full items-center gap-3 rounded-lg border px-4 text-[15px] text-foreground no-underline hover:bg-muted/40 hover:text-foreground hover:no-underline"
                         iconClassName="h-5 w-5 text-primary"
                       >
                         <span className="min-w-0 flex-1 break-all font-mono text-[14px]">
                           <span className="sr-only">Email </span>
-                          {customerEmail}
+                          {displayEmail}
                         </span>
                       </ClickableEmail>
+                    ) : (
+                      <div className="flex min-h-[56px] w-full items-center gap-3 rounded-lg border border-dashed px-4 text-[15px] text-muted-foreground">
+                        <Mail className="h-5 w-5 shrink-0" aria-hidden />
+                        No email on file
+                      </div>
                     )}
 
                     {address ? (
@@ -722,16 +709,16 @@ export const AppointmentDetail = ({
             <AppointmentConfigurationSummary appointmentId={appointment.id} />
 
             <section aria-label="Job records">
-              <h2 className="text-[24px] font-semibold leading-[1.25] tracking-tight">Job records</h2>
+              <h2 className="font-display text-2xl font-bold leading-tight tracking-tight">Job records</h2>
               <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-4">
-                <TabsList className="grid h-auto w-full grid-cols-3 gap-1 rounded-xl p-1">
-                  <TabsTrigger value="services" className="min-h-[56px] gap-2 text-base">
+                <TabsList className="flex h-auto w-full justify-start gap-1 rounded-none border-b border-border bg-transparent p-0">
+                  <TabsTrigger value="services" className="min-h-11 gap-2 rounded-none border-b-2 border-transparent px-3 text-base shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:font-bold data-[state=active]:text-primary data-[state=active]:shadow-none">
                     <Wrench className="h-5 w-5" />Services
                   </TabsTrigger>
-                  <TabsTrigger value="payments" className="min-h-[56px] gap-2 text-base">
+                  <TabsTrigger value="payments" className="min-h-11 gap-2 rounded-none border-b-2 border-transparent px-3 text-base shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:font-bold data-[state=active]:text-primary data-[state=active]:shadow-none">
                     <Receipt className="h-5 w-5" />Invoices &amp; Payments
                   </TabsTrigger>
-                  <TabsTrigger value="messages" className="min-h-[56px] gap-2 text-base">
+                  <TabsTrigger value="messages" className="min-h-11 gap-2 rounded-none border-b-2 border-transparent px-3 text-base shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:font-bold data-[state=active]:text-primary data-[state=active]:shadow-none">
                     <MessageSquare className="h-5 w-5" />Job Messages
                   </TabsTrigger>
                 </TabsList>
@@ -762,7 +749,7 @@ export const AppointmentDetail = ({
                 </TabsContent>
 
                 <TabsContent value="messages" className="mt-4">
-                  <div className="h-[600px] overflow-hidden rounded-xl border">
+                  <div className="h-[600px] overflow-hidden rounded-2xl border">
                     <InternalInbox initialAppointmentId={appointment.id} embedded />
                   </div>
                 </TabsContent>
@@ -772,10 +759,10 @@ export const AppointmentDetail = ({
             {humanNotes && (
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-[18px] font-semibold leading-[1.35]">Notes</CardTitle>
+                  <CardTitle className="font-display text-lg font-bold leading-snug">Notes</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="rounded-lg bg-muted/30 p-5">
+                  <div className="rounded-lg bg-secondary p-5">
                     <p className="whitespace-pre-wrap text-base leading-[1.5]">{humanNotes}</p>
                   </div>
                 </CardContent>
@@ -785,13 +772,30 @@ export const AppointmentDetail = ({
 
           {/* Rail — money and actions, nothing else */}
           <div className="space-y-6 self-start lg:sticky lg:top-24">
-            <Card className="border-primary/20">
+            <PaymentStateBand
+              invoiceNumber={summaryInvoice?.invoice_number ?? null}
+              invoiceStatus={summaryInvoice?.status ?? null}
+              total={summaryTotal}
+              amountPaid={summaryPaid}
+              balance={summaryBalance}
+              onViewPayments={() => setActiveTab("payments")}
+            />
+            <Card className="rounded-2xl shadow-card">
               <CardHeader>
                 <div className="flex items-center justify-between gap-3">
-                  <CardTitle className="text-[18px] font-semibold leading-[1.35]">Financial summary</CardTitle>
-                  {isPrepaid && <Badge className={statusBadgeClasses.completed}>Prepaid</Badge>}
+                  <CardTitle className="font-display text-lg font-bold leading-snug">Financial summary</CardTitle>
+                  {isPrepaid && (
+                    <span className={cn("inline-flex shrink-0 items-center rounded-full border px-2.5 py-1 text-xs font-semibold", statusToneClasses("success").chip)}>
+                      Prepaid
+                    </span>
+                  )}
                 </div>
                 <p className="text-sm text-muted-foreground">One total for this appointment</p>
+                {priceLocked && (
+                  <p className="flex items-center gap-1.5 text-xs font-semibold text-primary">
+                    <Lock className="h-3.5 w-3.5" />Website quote locked
+                  </p>
+                )}
               </CardHeader>
               <CardContent className="space-y-3">
                 {hasRecordedBreakdown ? (
@@ -861,30 +865,30 @@ export const AppointmentDetail = ({
                 )}
                 <Separator />
                 <div className="flex items-baseline justify-between gap-4">
-                  <span className="text-sm font-medium">Total</span>
-                  <span className="font-mono text-sm">{formatCurrency(summaryTotal)}</span>
+                  <span className="font-display text-base font-bold">Total</span>
+                  <span className="font-display text-lg font-extrabold">{formatCurrency(summaryTotal)}</span>
                 </div>
                 {summaryPaid > 0 && (
                   <div className="flex items-baseline justify-between gap-4">
                     <span className="text-sm text-muted-foreground">Amount paid</span>
-                    <span className="font-mono text-sm">{formatCurrency(summaryPaid)}</span>
+                    <span className="font-semibold text-status-completed-fg">{formatCurrency(summaryPaid)}</span>
                   </div>
                 )}
                 <div className="flex items-end justify-between gap-4 pt-1">
                   <div>
-                    <p className="text-base font-semibold">Due at service</p>
+                    <p className="text-base font-semibold">Balance due</p>
                     <p className="mt-0.5 text-sm text-muted-foreground">
                       {summaryBalance > 0 ? "Collect after the job" : summaryPaid > 0 ? "Paid in full" : "Collect after the job"}
                     </p>
                   </div>
-                  <p className="font-mono text-[30px] font-semibold leading-none text-primary">{formatCurrency(summaryBalance)}</p>
+                  <p className="font-display text-3xl font-extrabold leading-none text-blue-strong">{formatCurrency(summaryBalance)}</p>
                 </div>
               </CardContent>
             </Card>
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-[18px] font-semibold leading-[1.35]">Job actions</CardTitle>
+                <CardTitle className="font-display text-lg font-bold leading-snug">Job actions</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
                 {isEditable && (
@@ -975,7 +979,7 @@ export const AppointmentDetail = ({
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-[18px] font-semibold leading-[1.35]">Timeline</CardTitle>
+                <CardTitle className="font-display text-lg font-bold leading-snug">Timeline</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-5">
@@ -998,7 +1002,7 @@ export const AppointmentDetail = ({
                       {getStatusIcon(appointment.status)}
                     </div>
                     <div>
-                      <p className="text-base font-semibold capitalize">{statusStyle.label}</p>
+                      <p className="text-base font-semibold">{statusChip.label}</p>
                       <p className="mt-0.5 text-sm text-muted-foreground">Current status</p>
                     </div>
                   </div>
@@ -1010,8 +1014,8 @@ export const AppointmentDetail = ({
 
         {/* Text messages — the paper trail, below the fold */}
         <section aria-labelledby="job-texts-heading">
-          <h2 id="job-texts-heading" className="text-[24px] font-semibold leading-[1.25] tracking-tight">Text messages</h2>
-          <div className="mt-4 overflow-hidden rounded-xl border">
+          <h2 id="job-texts-heading" className="font-display text-2xl font-bold leading-tight tracking-tight">Text messages</h2>
+          <div className="mt-4 overflow-hidden rounded-2xl border">
             <AppointmentSmsTimeline
               appointmentId={appointment.id}
               customerPhone={appointment.customer?.phone || appointment.guest_phone}

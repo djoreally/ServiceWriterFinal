@@ -105,4 +105,37 @@ describe("AppointmentConfigurationSummary", () => {
     await waitFor(() => expect(mockedFetch).toHaveBeenCalled());
     expect(container).toBeEmptyDOMElement();
   });
+
+  // Phase 1 / B4: EVERY vehicle on the job renders with its merged working
+  // spec and its specStatus state — verified and needs_verification side
+  // by side (the two-vehicle job shape).
+  it("renders every vehicle with its spec status state", async () => {
+    mockedFetch.mockResolvedValue({
+      vehicles: [
+        {
+          clientVehicleId: "cv-jag",
+          vehicle: { year: 2020, make: "Jaguar", model: "F-PACE", vin: "SADCJ2FXXLA648278", mileage: 60020 },
+          oil: { engine: "2.0L I4", oilType: "0W-20 Full Synthetic", oilCapacity: "5.8 qt", oilFilter: "OE filter" },
+          specStatus: "verified",
+          specSources: { engine: "learned", oilType: "learned", oilCapacity: "learned", oilFilter: "learned" },
+        },
+        {
+          clientVehicleId: "cv-sub",
+          vehicle: { year: 2025, make: "Subaru", model: "Crosstrek", mileage: 6755 },
+          oil: { engine: "2.5L H4", oilType: "0W-20 Full Synthetic", oilCapacity: "4.4 qt" },
+          specStatus: "needs_verification",
+          specSources: { engine: "catalog", oilType: "catalog", oilCapacity: "catalog" },
+        },
+      ],
+    });
+    render(<AppointmentConfigurationSummary appointmentId="appt-2" />);
+    expect(await screen.findByText("2020 Jaguar F-PACE")).toBeInTheDocument();
+    expect(screen.getByText("2025 Subaru Crosstrek")).toBeInTheDocument();
+    expect(screen.getByText("2 vehicles on this job")).toBeInTheDocument();
+    expect(screen.getByText("Verified")).toBeInTheDocument();
+    expect(screen.getByText("5.8 qt")).toBeInTheDocument();
+    expect(screen.getByText("Needs verification")).toBeInTheDocument();
+    expect(screen.getByText(/Still needed: filter/)).toBeInTheDocument();
+    expect(screen.queryByText("Verify")).not.toBeInTheDocument();
+  });
 });

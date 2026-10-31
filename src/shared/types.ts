@@ -64,6 +64,10 @@ export interface Appointment {
   display_title?: string | null;
   primary_service_name?: string | null;
   confirmation_code?: string | null;
+  // B1/T-9: server-composed status presentation (see @/lib/status-vocabulary).
+  // Clients render these; they never map a raw status to a label themselves.
+  status_label?: string | null;
+  status_tone?: import("@/lib/status-vocabulary").StatusTone | null;
   scheduled_date: string;
   scheduled_time: string;
   duration_minutes: number;
