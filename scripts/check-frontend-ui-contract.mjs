@@ -14,7 +14,11 @@ const dashboard = read("src/components/dashboard/DashboardCockpit.tsx");
 const navItems = read("src/components/layout/navItems.ts");
 const tenantBooking = read("src/legacy-pages/TenantBooking.tsx");
 
-if (!shell.includes('defaultTheme="system"')) fail("new users must default to system theme");
+// Redesign Phase 0 (Gate 1, 2026-10-30): light is the product default and the
+// only shipping theme; dark is deferred (design spec §6). This assertion was
+// amended from defaultTheme="system" in the same change that flipped the
+// default — it stays equally strict: any other default fails the contract.
+if (!shell.includes('defaultTheme="light"')) fail("new users must default to light theme");
 if (!theme.includes("${storageKey}:${userId}")) fail("theme storage must be scoped to the authenticated user");
 if (settings.includes("<TabsList") || settings.includes("<TabsTrigger")) fail("Settings must use one category navigation surface, not a duplicate tab strip");
 if ((bottomNav.match(/path: "\/settings"/g) || []).length > 0) fail("mobile bottom navigation must not duplicate Settings");
@@ -69,7 +73,10 @@ if (!rootLayout.includes("@fontsource-variable/inter")) {
 for (const token of ["--radius-sm:", "--radius-md:", "--radius-lg:", "--radius-xl:"]) {
   if (indexCss.includes(token)) fail(`duplicate radius token ${token} in index.css — the scale is owned by components/ui/radius.css`);
 }
-for (const [token, value] of [["--radius-sm:", "4px"], ["--radius-md:", "8px"], ["--radius-lg:", "16px"]]) {
+// Redesign Phase 0 (Gate 1, 2026-10-30): the canonical scale was re-based on
+// SocialMetric geometry (8/12/16) in the same change that updated radius.css —
+// amended here with equal strictness; any other values fail the contract.
+for (const [token, value] of [["--radius-sm:", "8px"], ["--radius-md:", "12px"], ["--radius-lg:", "16px"]]) {
   if (!radiusCss.includes(`${token} ${value}`)) fail(`canonical radius scale must define ${token} ${value}`);
 }
 if (!tailwindConfig.includes('lg: "var(--radius-lg)"')) fail("tailwind rounded-lg must map to var(--radius-lg)");
