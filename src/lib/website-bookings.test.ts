@@ -1,5 +1,6 @@
 import {
   computeStoredTotal,
+  customerNotes,
   findDuplicateCandidates,
   findOverlaps,
   isValidEmailLoose,
@@ -179,5 +180,32 @@ describe("computeStoredTotal", () => {
   });
   it("rounds to cents", () => {
     expect(computeStoredTotal({ tax_amount: 0 }, [{ quantity: 3, unit_price: 33.333 }])).toBe(100);
+  });
+});
+
+describe("customerNotes — appointment notes are the customer's words only", () => {
+  it("returns exactly what the customer entered, trimmed", () => {
+    expect(customerNotes(booking({ notes: "  Gate code is 4242. Dog is friendly.  " }))).toBe(
+      "Gate code is 4242. Dog is friendly.",
+    );
+  });
+
+  it("preserves the customer's interior line breaks", () => {
+    expect(customerNotes(booking({ notes: "Line one.\nLine two." }))).toBe("Line one.\nLine two.");
+  });
+
+  it("is null when the customer wrote nothing", () => {
+    expect(customerNotes(booking())).toBeNull();
+    expect(customerNotes(booking({ notes: null }))).toBeNull();
+    expect(customerNotes(booking({ notes: "" }))).toBeNull();
+    expect(customerNotes(booking({ notes: "   \n  " }))).toBeNull();
+  });
+
+  it("never contains push provenance, whatever the booking carries", () => {
+    const result = customerNotes(
+      booking({ id: "abc-123", source_channel: "website", payment: "paid", notes: "Real note." }),
+    );
+    expect(result).toBe("Real note.");
+    expect(result).not.toMatch(/pushed from/i);
   });
 });

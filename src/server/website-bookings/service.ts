@@ -25,6 +25,7 @@ import {
   appointmentTitleForJobs,
   buildPerJobItems,
   computeStoredTotal,
+  customerNotes,
   findDuplicateCandidates,
   findOverlaps,
   isValidEmailLoose,
@@ -34,7 +35,6 @@ import {
   resolveServiceCatalogId,
   roundMoney,
   splitScheduledStart,
-  staffNote,
   windowsOverlap,
   type AppointmentLite,
   type AutoPushResult,
@@ -931,7 +931,11 @@ export async function executePushes(
       p_guest_email: booking.email,
       p_guest_phone: booking.phone,
       p_description: appointmentDescription(booking),
-      p_notes: staffNote(booking),
+      // Notes are the customer's words only (Ty's standing rule): what
+      // they typed on the website, or nothing. Provenance rides in the
+      // RPC's own params below (p_website_booking_id / p_source_channel /
+      // p_payment_status), which the RPC stores in appointment metadata.
+      p_notes: customerNotes(booking),
       p_quoted_total: booking.quoted_total_usd,
       p_service_catalog_id: resolution.service_match.catalog_id,
       p_service_name: booking.service,
