@@ -459,6 +459,287 @@ describe("appointments router", () => {
     });
   });
 
+  describe("B4 spec merge + multi-vehicle union (T-2/T-3/T-4)", () => {
+    const JAG_ID = "aa0e8400-e29b-41d4-a716-446655440001";
+    const CROSS_ID = "aa0e8400-e29b-41d4-a716-446655440002";
+    const SRX_ID = "aa0e8400-e29b-41d4-a716-446655440003";
+    const INV_ID = "aa0e8400-e29b-41d4-a716-446655440010";
+
+    const jaguarRow = {
+      id: JAG_ID, year: 2020, make: "Jaguar", model: "F-PACE",
+      vin: "SADCJ2FXXLA648278", license_plate: null, mileage: 60020,
+    };
+    const crosstrekRow = {
+      id: CROSS_ID, year: 2025, make: "Subaru", model: "Crosstrek",
+      vin: "4S4GUHM61S3747426", license_plate: null, mileage: 6755,
+    };
+
+    function seedMembershipAndAppointment(appointment: Record<string, unknown>) {
+      db.workspace_members = { data: [{ workspace_id: WS_ID }], error: null };
+      db["appointments:single"] = { data: appointment, error: null };
+    }
+
+    it("returns EVERY vehicle on the job with merged specs (Laurie's shape)", async () => {
+      seedMembershipAndAppointment({
+        id: APPT_ID, workspace_id: WS_ID, vehicle_id: JAG_ID, metadata: {},
+        updated_at: "2026-10-30T18:00:00.000Z", created_at: "2026-10-30T14:00:00.000Z",
+        starts_at: "2026-10-30T14:00:00.000Z",
+      });
+      db.vehicles = { data: [jaguarRow, crosstrekRow], error: null };
+      db.appointment_items = {
+        data: [
+          { id: "i1", description: "Full Synthetic Oil Change", quantity: 1, unit_price: 133, sort_order: 0, metadata: { vehicle_id: JAG_ID } },
+          { id: "i2", description: "Waste Oil Disposal Fee", quantity: 1, unit_price: 4, sort_order: 1, metadata: { vehicle_id: JAG_ID } },
+          { id: "i3", description: "Full Synthetic Oil Change", quantity: 1, unit_price: 133, sort_order: 0, metadata: { vehicle_id: CROSS_ID } },
+          { id: "i4", description: "Waste Oil Disposal Fee", quantity: 1, unit_price: 4, sort_order: 1, metadata: { vehicle_id: CROSS_ID } },
+        ],
+        error: null,
+      };
+      // The push-created learned rows: the Jaguar's oil fields are NULL;
+      // the Crosstrek's were later settled by the shop.
+      db.vehicle_service_specs = {
+        data: [
+          { vehicle_id: JAG_ID, engine: "2.0L I4", oil_type: null, oil_capacity: null, oil_filter: null, updated_at: "2026-10-30T14:00:00.000Z" },
+          { vehicle_id: CROSS_ID, engine: "2.5L", oil_type: "0W-20", oil_capacity: "4.7 qt", oil_filter: "NAPA Gold 7055", updated_at: "2026-10-30T15:00:00.000Z" },
+        ],
+        error: null,
+      };
+      db.vehicle_specifications = {
+        data: [
+          { year: 2020, make: "Jaguar", model: "F-PACE", engine: "2.0L Turbo", oil_type: "0W-20", oil_capacity: "7.4 qt", oil_filter: "OEM Cartridge" },
+          { year: 2025, make: "Subaru", model: "Crosstrek", engine: "2.5L", oil_type: "0W-16", oil_capacity: "4.4 qt", oil_filter: "15208AA15A" },
+        ],
+        error: null,
+      };
+      db.invoices = { data: [], error: null };
+
+      const res = await appointmentsRouter.request(
+        `/v1/appointments/${APPT_ID}/booking-configuration`,
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const vehicles = body.configuration.vehicles;
+      // The Crosstrek block the detail page used to lose.
+      expect(vehicles).toHaveLength(2);
+      expect(vehicles[0].clientVehicleId).toBe(JAG_ID);
+      expect(vehicles[1].clientVehicleId).toBe(CROSS_ID);
+
+      // Jaguar: learned NULLs fall to the catalog; status says so.
+      expect(vehicles[0].oil).toEqual({
+        engine: "2.0L I4",
+        oilType: "0W-20",
+        oilCapacity: "7.4 qt",
+        oilFilter: "OEM Cartridge",
+        capacitySource: "db",
+      });
+      expect(vehicles[0].specStatus).toBe("from_catalog");
+      expect(vehicles[0].specSources).toEqual({
+        engine: "learned",
+        oilType: "catalog",
+        oilCapacity: "catalog",
+        oilFilter: "catalog",
+      });
+      expect(vehicles[0].services).toHaveLength(2);
+      expect(vehicles[0].services[0]).toEqual({
+        id: "i1", name: "Full Synthetic Oil Change", price: 133, quantity: 1,
+      });
+
+      // Crosstrek: the shop's settled record wins over the catalog.
+      expect(vehicles[1].oil.oilType).toBe("0W-20");
+      expect(vehicles[1].oil.oilFilter).toBe("NAPA Gold 7055");
+      expect(vehicles[1].specStatus).toBe("verified");
+      expect(vehicles[1].services).toHaveLength(2);
+    });
+
+    it("finds a second vehicle that exists only on invoice lines", async () => {
+      seedMembershipAndAppointment({
+        id: APPT_ID, workspace_id: WS_ID, vehicle_id: JAG_ID, metadata: {},
+        updated_at: "2026-10-30T18:00:00.000Z", created_at: "2026-10-30T14:00:00.000Z",
+        starts_at: "2026-10-30T14:00:00.000Z",
+      });
+      db.vehicles = { data: [jaguarRow, crosstrekRow], error: null };
+      // Pre-normalization shape: one unpinned item for the whole job.
+      db.appointment_items = {
+        data: [
+          { id: "i1", description: "Full Synthetic Oil Change", quantity: 1, unit_price: 267.66, sort_order: 0, metadata: {} },
+        ],
+        error: null,
+      };
+      db.invoices = {
+        data: [{ id: INV_ID, metadata: { appointment_id: APPT_ID } }],
+        error: null,
+      };
+      db.invoice_lines = {
+        data: [{ vehicle_id: JAG_ID }, { vehicle_id: CROSS_ID }],
+        error: null,
+      };
+      db.vehicle_service_specs = {
+        data: [
+          { vehicle_id: CROSS_ID, engine: "2.5L", oil_type: "0W-20", oil_capacity: "4.7 qt", oil_filter: "NAPA Gold 7055", updated_at: "2026-10-30T15:00:00.000Z" },
+        ],
+        error: null,
+      };
+      db.vehicle_specifications = { data: [], error: null };
+
+      const res = await appointmentsRouter.request(
+        `/v1/appointments/${APPT_ID}/booking-configuration`,
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const vehicles = body.configuration.vehicles;
+      expect(vehicles).toHaveLength(2);
+      expect(vehicles[1].clientVehicleId).toBe(CROSS_ID);
+      expect(vehicles[1].specStatus).toBe("verified");
+      // Unpinned lines are never assigned to a vehicle by guesswork.
+      expect(vehicles[0].services).toBeUndefined();
+      expect(vehicles[1].services).toBeUndefined();
+    });
+
+    it("merges over a stored snapshot without mutating its extras", async () => {
+      seedMembershipAndAppointment({
+        id: APPT_ID, workspace_id: WS_ID, vehicle_id: SRX_ID,
+        metadata: {
+          booking_configuration: {
+            schemaVersion: 2,
+            capturedAt: "2026-10-31T15:00:00.000Z",
+            vehicles: [
+              {
+                clientVehicleId: SRX_ID,
+                vehicle: { year: "2015", make: "Cadillac", model: "SRX", vin: "3GYFNJE36FS123456" },
+                oil: { engine: "3.6L V6" },
+                tire: {
+                  frontSize: "235/65R18", source: "oe", frontQuantity: 4, rearQuantity: 4,
+                  options: { mountAndBalance: true, tpms: false, disposal: true },
+                },
+              },
+            ],
+          },
+        },
+        updated_at: "2026-10-31T15:00:00.000Z", created_at: "2026-10-31T14:00:00.000Z",
+        starts_at: "2026-10-31T15:00:00.000Z",
+      });
+      db.vehicles = {
+        data: [{ id: SRX_ID, year: 2015, make: "Cadillac", model: "SRX", vin: "3GYFNJE36FS123456", license_plate: "PA-1", mileage: 88123 }],
+        error: null,
+      };
+      db.appointment_items = { data: [], error: null };
+      db.invoices = { data: [], error: null };
+      db.vehicle_service_specs = {
+        data: [
+          { vehicle_id: SRX_ID, engine: "3.6L V6", oil_type: "5W-30", oil_capacity: "6.0 qt", oil_filter: null, updated_at: "2026-10-31T15:30:00.000Z" },
+        ],
+        error: null,
+      };
+      db.vehicle_specifications = {
+        data: [
+          { year: 2015, make: "Cadillac", model: "SRX", engine: "3.6L V6", oil_type: "5W-30 dexos", oil_capacity: "6.0 qt", oil_filter: "PF63E" },
+        ],
+        error: null,
+      };
+
+      const res = await appointmentsRouter.request(
+        `/v1/appointments/${APPT_ID}/booking-configuration`,
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.configuration.capturedAt).toBe("2026-10-31T15:00:00.000Z");
+      const vehicle = body.configuration.vehicles[0];
+      // Booked extras ride along intact; the live mileage fills in.
+      expect(vehicle.tire.frontSize).toBe("235/65R18");
+      expect(vehicle.vehicle.mileage).toBe(88123);
+      // Learned beats catalog on grade; the catalog supplies the filter
+      // the learned record never settled.
+      expect(vehicle.oil.oilType).toBe("5W-30");
+      expect(vehicle.oil.oilFilter).toBe("PF63E");
+      expect(vehicle.specSources.oilFilter).toBe("catalog");
+      expect(vehicle.specStatus).toBe("from_catalog");
+    });
+
+    it("keeps single-vehicle jobs whole: unpinned lines group to the one vehicle", async () => {
+      seedMembershipAndAppointment({
+        id: APPT_ID, workspace_id: WS_ID, vehicle_id: SRX_ID, metadata: {},
+        updated_at: "2026-10-31T15:00:00.000Z", created_at: "2026-10-31T14:00:00.000Z",
+        starts_at: "2026-10-31T15:00:00.000Z",
+      });
+      db.vehicles = {
+        data: [{ id: SRX_ID, year: 2015, make: "Cadillac", model: "SRX", vin: "3GYFNJE36FS123456", license_plate: null, mileage: 88123 }],
+        error: null,
+      };
+      db.appointment_items = {
+        data: [
+          { id: "i1", description: "Full Synthetic Oil Change", quantity: 1, unit_price: 119, sort_order: 0, metadata: {} },
+          { id: "i2", description: "Waste Oil Disposal Fee", quantity: 1, unit_price: 4, sort_order: 1, metadata: {} },
+        ],
+        error: null,
+      };
+      db.invoices = { data: [], error: null };
+      db.vehicle_service_specs = {
+        data: [
+          { vehicle_id: SRX_ID, engine: "3.6L V6", oil_type: "5W-30", oil_capacity: "6.0 qt", oil_filter: "PF63E", updated_at: "2026-10-31T15:30:00.000Z" },
+        ],
+        error: null,
+      };
+      db.vehicle_specifications = { data: [], error: null };
+
+      const res = await appointmentsRouter.request(
+        `/v1/appointments/${APPT_ID}/booking-configuration`,
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.configuration.schemaVersion).toBe(2);
+      expect(body.configuration.vehicles).toHaveLength(1);
+      const vehicle = body.configuration.vehicles[0];
+      expect(vehicle.clientVehicleId).toBe(SRX_ID);
+      expect(vehicle.vehicle.year).toBe("2015");
+      expect(vehicle.specStatus).toBe("verified");
+      expect(vehicle.services).toHaveLength(2);
+      expect(vehicle.services[1].name).toBe("Waste Oil Disposal Fee");
+    });
+
+    it("states needs_verification honestly when no source knows the vehicle", async () => {
+      seedMembershipAndAppointment({
+        id: APPT_ID, workspace_id: WS_ID, vehicle_id: SRX_ID, metadata: {},
+        updated_at: "2026-10-31T15:00:00.000Z", created_at: "2026-10-31T14:00:00.000Z",
+        starts_at: "2026-10-31T15:00:00.000Z",
+      });
+      db.vehicles = {
+        data: [{ id: SRX_ID, year: 1999, make: "Mystery", model: "Van", vin: null, license_plate: null, mileage: null }],
+        error: null,
+      };
+      db.appointment_items = { data: [], error: null };
+      db.invoices = { data: [], error: null };
+      db.vehicle_service_specs = { data: [], error: null };
+      db.vehicle_specifications = { data: [], error: null };
+
+      const res = await appointmentsRouter.request(
+        `/v1/appointments/${APPT_ID}/booking-configuration`,
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const vehicle = body.configuration.vehicles[0];
+      expect(vehicle.oil).toBeUndefined();
+      expect(vehicle.specStatus).toBe("needs_verification");
+      expect(vehicle.specSources).toEqual({});
+    });
+
+    it("returns a null configuration when the job has no vehicle anywhere", async () => {
+      seedMembershipAndAppointment({
+        id: APPT_ID, workspace_id: WS_ID, vehicle_id: null, metadata: {},
+        updated_at: "2026-10-31T15:00:00.000Z", created_at: "2026-10-31T14:00:00.000Z",
+        starts_at: "2026-10-31T15:00:00.000Z",
+      });
+      db.appointment_items = { data: [], error: null };
+      db.invoices = { data: [], error: null };
+
+      const res = await appointmentsRouter.request(
+        `/v1/appointments/${APPT_ID}/booking-configuration`,
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.configuration).toBeNull();
+    });
+  });
+
   describe("Google Calendar auto-sync", () => {
     function seedConnectedUser(action = "created") {
       db["google_calendar_sync_tokens"] = {

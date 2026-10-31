@@ -1,6 +1,7 @@
 import type { VehicleData } from "@/components/booking/VehicleEntry";
 import type { BookingRequirement } from "@/lib/service-category-policy";
 import { hasValidRequestedTireQuantity } from "@/lib/tire-quantity";
+import type { OilSpecSources, VehicleSpecStatus } from "@/lib/vehicle-spec-merge";
 
 export const BOOKING_CONFIGURATION_VERSION = 2 as const;
 
@@ -10,6 +11,14 @@ export interface BookingVehicleConfiguration {
   services?: Array<{ id: string; name: string; price: number; quantity: number }>;
   package?: { id: string; name: string; price: number };
   oil?: { engine?: string; oilType?: string; oilCapacity?: string; oilFilter?: string; capacitySource?: "db" | "ai" | "manual" };
+  /**
+   * B4 (T-2/T-3): response-side enrichment on the booking-configuration
+   * read — the oil group's merge status and per-field provenance, so a
+   * client renders the state instead of inventing a placeholder. Never
+   * part of the stored snapshot (the builder below does not emit them).
+   */
+  specStatus?: VehicleSpecStatus;
+  specSources?: OilSpecSources;
   tire?: {
     frontSize: string; rearSize?: string; source: "oe" | "manual"; frontQuantity: number; rearQuantity: number;
     inventoryItemId?: string; sku?: string; productName?: string; unitPrice?: number;
