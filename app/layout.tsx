@@ -1,8 +1,11 @@
 import type { Metadata, Viewport } from "next";
-// Self-hosted Inter Variable — no render-blocking external font stylesheet.
+// Self-hosted variable fonts — no render-blocking external font stylesheet.
+// Inter Variable (body/UI), Plus Jakarta Sans Variable (display/headings),
+// JetBrains Mono Variable (IDs, VINs, codes). SocialMetric set, Phase 0.
 import "@fontsource-variable/inter";
+import "@fontsource-variable/plus-jakarta-sans";
+import "@fontsource-variable/jetbrains-mono";
 import "../src/index.css";
-import "../src/material-color-system.css";
 import ClientOnlyShell from "../src/ClientOnlyShell";
 
 export const metadata: Metadata = {

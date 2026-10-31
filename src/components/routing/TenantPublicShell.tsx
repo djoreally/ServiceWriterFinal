@@ -53,7 +53,7 @@ export function TenantPublicShell({ children }: { children: ReactNode }) {
     <StrictMode>
       <QueryClientProvider client={queryClient}>
         <AuthProvider authStateSource={supabase.auth}>
-          <ThemeProvider defaultTheme="system" storageKey="servicewriter-ui-theme">
+          <ThemeProvider defaultTheme="light" storageKey="servicewriter-ui-theme">
             <TooltipProvider>
               <TerminologyProvider>
                 <RegionalSettingsProvider>
