@@ -45,6 +45,6 @@ describe('domain canonical financials', () => {
       outstandingCents: 4000,
     };
     expect(deriveSettlementStatus(partial)).toBe('partial');
-    expect(deriveInvoiceStatus(partial)).toBe('partial');
+    expect(deriveInvoiceStatus(partial)).toBe('partially_paid');
   });
 });

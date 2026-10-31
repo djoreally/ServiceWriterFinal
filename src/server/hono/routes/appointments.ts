@@ -40,6 +40,7 @@ import {
 import { technicianJobUrl, withAppointmentContext } from "@/server/messaging/lifecycle-action-urls";
 import { createSupabaseAdminClient, createSupabaseBrowserClient, createSupabaseRequestClient } from "@/lib/supabase";
 import { isWebsiteQuoteLocked } from "@/lib/price-lock";
+import { appointmentStatusView, invoiceStatusView, normalizeAppointmentStatus, paymentStatusView, resolveDispatchStatus, withAppointmentStatusView } from "@/lib/status-vocabulary";
 import { logMutation } from "@/server/audit";
 import { z } from "zod";
 
@@ -61,7 +62,7 @@ appointmentsRouter.get("/v1/appointments", async (c: Context) => {
   const { limit, offset } = paginationSchema.parse(Object.fromEntries(url.searchParams));
   const { data, error } = await supabase.from("appointments").select("*,customers(id,first_name,last_name,email,phone),vehicles(id,customer_id,year,make,model,vin,license_plate,plate_region,color,mileage,notes),locations(id,name)").eq("workspace_id", workspaceId).order("starts_at").range(offset, offset + limit - 1);
   if (error) throw error;
-  return json({ data: data ?? [], pagination: { limit, offset } });
+  return json({ data: (data ?? []).map((row) => withAppointmentStatusView(row)), pagination: { limit, offset } });
 });
 
 appointmentsRouter.post("/v1/appointments", async (c: Context) => {
@@ -249,13 +250,13 @@ appointmentsRouter.get("/v1/appointments/dispatchable", async (c: Context) => {
   const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit") ?? 50) || 50));
   const { data, error } = await (supabase as any)
     .from("appointments")
-    .select("id,status,starts_at,ends_at,metadata")
+    .select("id,status,starts_at,ends_at,dispatch_status,metadata")
     .eq("workspace_id", workspaceId)
     .not("status", "in", '("completed","cancelled")')
     .order("starts_at", { ascending: true })
     .limit(limit);
   if (error) throw error;
-  return json({ data: data ?? [] });
+  return json({ data: (data ?? []).map((row) => withAppointmentStatusView(row)) });
 });
 
 appointmentsRouter.get("/v1/appointments/day-appointments", async (c: Context) => {
@@ -282,7 +283,7 @@ appointmentsRouter.get("/v1/appointments/day-appointments", async (c: Context) =
     .gt("ends_at", start.toISOString())
     .order("starts_at", { ascending: true });
   if (error) throw error;
-  return json({ timezone, appointments: data ?? [] });
+  return json({ timezone, appointments: (data ?? []).map((row) => withAppointmentStatusView(row)) });
 });
 
 // GET /v1/appointments/availability-page — scheduling settings + blackout dates + intake questions.
@@ -347,7 +348,7 @@ appointmentsRouter.get("/v1/appointments/:id{[0-9a-fA-F-]{36}}", async (c: Conte
   }
   const { data, error } = await supabase.from("appointments").select("*,customers(id,first_name,last_name,company_name,email,phone,address_line1,address_line2,city,region,postal_code,notes),vehicles(id,customer_id,year,make,model,vin,license_plate,plate_region,color,mileage,notes)").eq("workspace_id", workspaceId).eq("id", id).single();
   if (error) throw error;
-  return json({ data });
+  return json({ data: withAppointmentStatusView(data) });
 });
 
 appointmentsRouter.patch("/v1/appointments/:id", async (c: Context) => {
@@ -376,12 +377,17 @@ appointmentsRouter.patch("/v1/appointments/:id", async (c: Context) => {
     if (hasOwn(body, key)) metadata[key] = body[key] ?? null;
   }
   if (hasOwn(body, "override_availability")) metadata.override_availability = body.override_availability === true;
-  if (hasOwn(body, "status") && body.status === "in_progress" && current.status !== "in_progress" && !metadata.actual_start_time) metadata.actual_start_time = new Date().toISOString();
+  if (hasOwn(body, "status") && normalizeAppointmentStatus(body.status) === "in_progress" && current.status !== "in_progress" && !metadata.actual_start_time) metadata.actual_start_time = new Date().toISOString();
   const canonicalPatch: Record<string, unknown> = { starts_at: startsAt, ends_at: endsAt, metadata, updated_at: new Date().toISOString() };
   // `source` is deliberately NOT patchable: it is the pricing channel, set once
   // at creation. Rewriting it on edit-save relabelled website bookings as
   // staff bookings and silently destroyed their price lock.
   for (const key of ["customer_id", "vehicle_id", "location_id", "assigned_user_id", "status", "notes"] as const) if (hasOwn(body, key)) canonicalPatch[key] = body[key] ?? null;
+  // B1/T-9: a status written through the API lands in the canonical
+  // vocabulary — synonyms collapse here, so new dialect never gets stored.
+  if (hasOwn(body, "status") && typeof body.status === "string") {
+    canonicalPatch.status = normalizeAppointmentStatus(body.status) ?? body.status;
+  }
   const { data, error } = await supabase.from("appointments").update(canonicalPatch as any).eq("id", id).eq("workspace_id", workspace_id).select("id,workspace_id,customer_id,starts_at,ends_at,status,assigned_user_id,notes,metadata,updated_at,customers(id,first_name,last_name,email),vehicles(id,year,make,model)").single();
   if (error) throw error;
   try {
@@ -405,7 +411,7 @@ appointmentsRouter.patch("/v1/appointments/:id", async (c: Context) => {
     before: current,
     after: data,
   });
-  return json({ data });
+  return json({ data: withAppointmentStatusView(data) });
 });
 
 appointmentsRouter.delete("/v1/appointments/:id", async (c: Context) => {
@@ -438,7 +444,7 @@ appointmentsRouter.delete("/v1/appointments/:id", async (c: Context) => {
   } catch (e) { console.error("[Lifecycle] appointment cancellation email enqueue failed", e); }
   // Google Calendar auto-sync (delete event). Never fails this cancellation.
   await syncAppointmentToGoogleCalendar({ supabase, userId: user.id, appointmentId: id });
-  return json({ data });
+  return json({ data: withAppointmentStatusView(data) });
 });
 
 // ---------------------------------------------------------------------------
@@ -528,7 +534,16 @@ appointmentsRouter.post("/v1/appointments/:id/complete", async (c: Context) => {
     completionEmail = completionEmail.status === "queued" ? completionEmail : { status: "failed", error: message };
     console.error("[Lifecycle] post-service email enqueue failed", dispatchError);
   }
-  return json({ data: { ...closeoutData, stripe_sync: stripeSync, completion_email: completionEmail, completion_summary: completionSummary, support_follow_up: supportFollowUp } });
+  // B1: the closeout receipt carries the invoice/payment statuses the RPC
+  // settled on — emit them canonical, with server-composed label + tone.
+  const closeoutInvoiceView = invoiceStatusView(closeoutData.invoice_status);
+  const closeoutPaymentView = paymentStatusView(closeoutData.payment_status);
+  return json({ data: {
+    ...closeoutData,
+    ...(closeoutInvoiceView.status ? { invoice_status: closeoutInvoiceView.status, invoice_status_label: closeoutInvoiceView.status_label, invoice_status_tone: closeoutInvoiceView.status_tone } : {}),
+    ...(closeoutPaymentView.status ? { payment_status: closeoutPaymentView.status, payment_status_label: closeoutPaymentView.status_label, payment_status_tone: closeoutPaymentView.status_tone } : {}),
+    stripe_sync: stripeSync, completion_email: completionEmail, completion_summary: completionSummary, support_follow_up: supportFollowUp,
+  } });
 });
 
 // ---------------------------------------------------------------------------
@@ -680,10 +695,13 @@ appointmentsRouter.post("/v1/appointments/:id/start", async (c: Context) => {
     entityId: id,
     after: { status: "in_progress", already_started: Boolean(started.already_started), replayed: Boolean(started.replayed) },
   });
+  const startView = appointmentStatusView("in_progress");
   return json({
     data: {
       id,
-      status: "in_progress",
+      status: startView.status,
+      status_label: startView.status_label,
+      status_tone: startView.status_tone,
       already_started: Boolean(started.already_started),
       replayed: Boolean(started.replayed),
       updated_at: started.updated_at ?? null,
@@ -716,7 +734,7 @@ appointmentsRouter.post("/v1/appointments/:id/technician-status", async (c: Cont
 
   const { data: current, error: currentError } = await db
     .from("appointments")
-    .select("id,status,assigned_user_id,metadata")
+    .select("id,status,assigned_user_id,dispatch_status,metadata")
     .eq("workspace_id", workspace_id)
     .eq("id", appointmentId)
     .maybeSingle();
@@ -731,11 +749,11 @@ appointmentsRouter.post("/v1/appointments/:id/technician-status", async (c: Cont
 
   const metadata = metadataObject(current.metadata);
   const now = new Date().toISOString();
-  const nextMetadata: Record<string, unknown> = {
-    ...metadata,
-    dispatch_status: body.status,
-    dispatch_status_updated_at: now,
-  };
+  // T-11: dispatch state has one home — the dispatch_status COLUMN.
+  // Metadata keeps only the location trail; inherited dispatch copies stop here.
+  const nextMetadata: Record<string, unknown> = { ...metadata };
+  delete nextMetadata.dispatch_status;
+  delete nextMetadata.dispatch_status_updated_at;
   if (body.location) {
     nextMetadata.last_dispatch_location = body.location;
     nextMetadata.last_dispatch_location_at = now;
@@ -746,10 +764,10 @@ appointmentsRouter.post("/v1/appointments/:id/technician-status", async (c: Cont
   // which moves a confirmed appointment directly to in_progress.
   const { data, error } = await db
     .from("appointments")
-    .update({ metadata: nextMetadata, updated_at: now })
+    .update({ metadata: nextMetadata, dispatch_status: body.status, updated_at: now })
     .eq("workspace_id", workspace_id)
     .eq("id", appointmentId)
-    .select("id,status,assigned_user_id,metadata,updated_at")
+    .select("id,status,assigned_user_id,dispatch_status,metadata,updated_at")
     .single();
   if (error) throw error;
   logMutation({
@@ -760,7 +778,7 @@ appointmentsRouter.post("/v1/appointments/:id/technician-status", async (c: Cont
     action: "appointment.dispatch_status",
     entityType: "appointment",
     entityId: appointmentId,
-    before: { dispatch_status: metadata.dispatch_status ?? null },
+    before: { dispatch_status: resolveDispatchStatus(current) },
     after: { dispatch_status: body.status },
   });
 
@@ -813,7 +831,7 @@ appointmentsRouter.post("/v1/appointments/:id/technician-status", async (c: Cont
     }
   }
 
-  return json({ data });
+  return json({ data: withAppointmentStatusView(data) });
 });
 
 // ---------------------------------------------------------------------------
@@ -3029,7 +3047,7 @@ appointmentsRouter.get("/v1/dispatch/operational-jobs", async (c: Context) => {
   // which is not in the generated schema).
   const [appointmentsRes, workOrdersRes, membersRes, fleetRes] = await Promise.all([
     db.from("appointments")
-      .select("id,status,starts_at,ends_at,assigned_user_id,updated_at,metadata,customers(first_name,last_name,company_name,phone,address_line1,address_line2,city,region,postal_code),vehicles(year,make,model),locations(address_line1,address_line2,city,region,postal_code,latitude,longitude)")
+      .select("id,status,starts_at,ends_at,assigned_user_id,updated_at,dispatch_status,metadata,customers(first_name,last_name,company_name,phone,address_line1,address_line2,city,region,postal_code),vehicles(year,make,model),locations(address_line1,address_line2,city,region,postal_code,latitude,longitude)")
       .eq("workspace_id", workspaceId)
       .gte("starts_at", startIso)
       .lte("starts_at", endIso)
@@ -3065,7 +3083,7 @@ appointmentsRouter.get("/v1/dispatch/operational-jobs", async (c: Context) => {
 
   return json({
     data: {
-      appointments: appointmentsRes.data ?? [],
+      appointments: (appointmentsRes.data ?? []).map((row: Record<string, unknown>) => withAppointmentStatusView(row)),
       work_orders: workOrdersRes.data ?? [],
       members: membersRes.data ?? [],
       fleet_work_orders: fleetRes.data ?? [],
@@ -3087,7 +3105,7 @@ appointmentsRouter.get("/v1/dispatch/board-staff", async (c: Context) => {
   return json({ data: { members: members ?? [], presence: presence ?? [] } });
 });
 
-const DISPATCHABLE_COLUMNS = "id,starts_at,ends_at,status,assigned_user_id,vehicle_id,customer_id,priority,metadata,location_address,location_lat,location_lng,created_at";
+const DISPATCHABLE_COLUMNS = "id,starts_at,ends_at,status,assigned_user_id,vehicle_id,customer_id,priority,dispatch_status,metadata,location_address,location_lat,location_lng,created_at";
 
 // GET /v1/dispatch/dispatchable-appointments — open appointments with assignment context.
 appointmentsRouter.get("/v1/dispatch/dispatchable-appointments", async (c: Context) => {
@@ -3103,7 +3121,7 @@ appointmentsRouter.get("/v1/dispatch/dispatchable-appointments", async (c: Conte
     .order("starts_at", { ascending: true })
     .limit(limit);
   if (error) throw error;
-  return json({ data: data ?? [] });
+  return json({ data: (data ?? []).map((row) => withAppointmentStatusView(row)) });
 });
 
 // GET /v1/dispatch/settings — dispatch settings for the caller's business profile.
@@ -3229,13 +3247,13 @@ appointmentsRouter.get("/v1/dispatch/mobile-state", async (c: Context) => {
     db.from("workspace_members").select("user_id,role,is_active").eq("workspace_id", workspaceId).eq("user_id", userId).eq("is_active", true).maybeSingle(),
     db.from("technician_presence").select("*").eq("workspace_id", workspaceId).eq("user_id", userId).maybeSingle(),
     db.from("technician_clock_entries").select("*").eq("workspace_id", workspaceId).eq("user_id", userId).gte("clock_in", `${today}T00:00:00`).order("clock_in", { ascending: false }).limit(10),
-    db.from("appointments").select("id,starts_at,ends_at,status,assigned_user_id,vehicle_id,customer_id,priority,metadata,location_address,location_lat,location_lng,customers(id,first_name,last_name,phone,email),vehicles(id,year,make,model,license_plate)").eq("workspace_id", workspaceId).eq("assigned_user_id", userId).not("status", "in", '("completed","cancelled","no_show")').order("starts_at", { ascending: true }).limit(50),
+    db.from("appointments").select("id,starts_at,ends_at,status,assigned_user_id,vehicle_id,customer_id,priority,dispatch_status,metadata,location_address,location_lat,location_lng,customers(id,first_name,last_name,phone,email),vehicles(id,year,make,model,license_plate)").eq("workspace_id", workspaceId).eq("assigned_user_id", userId).not("status", "in", '("completed","cancelled","no_show")').order("starts_at", { ascending: true }).limit(50),
   ]);
   if (memberError) throw memberError;
   if (presenceError) throw presenceError;
   if (clockError) throw clockError;
   if (jobsError) throw jobsError;
-  return json({ data: { member: member ?? null, presence: presence ?? null, clockEntries: clockEntries ?? [], jobs: jobs ?? [] } });
+  return json({ data: { member: member ?? null, presence: presence ?? null, clockEntries: clockEntries ?? [], jobs: (jobs ?? []).map((row: Record<string, unknown>) => withAppointmentStatusView(row)) } });
 });
 
 // POST /v1/dispatch/technician-location — update live location + presence via RPC.

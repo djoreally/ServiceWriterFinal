@@ -232,6 +232,49 @@ describe("documents router", () => {
     });
   });
 
+  describe("B1 invoice vocabulary (T-10)", () => {
+    it("GET list emits partially_paid end-to-end, never the legacy dialect", async () => {
+      db.invoices = {
+        data: [
+          { id: INVOICE_ID, status: "partial" },
+          { id: INVOICE_ID, status: "sent" },
+          { id: INVOICE_ID, status: "paid" },
+        ],
+        error: null,
+      };
+      const res = await documentsRouter.request(
+        `/v1/invoices?workspace_id=${WS_ID}`,
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data[0].status).toBe("partially_paid");
+      expect(body.data[0].status_label).toBe("Partially paid");
+      expect(body.data[0].status_tone).toBe("warning");
+      expect(body.data[1].status).toBe("issued");
+      expect(body.data[1].status_label).toBe("Issued");
+      expect(body.data[2].status).toBe("paid");
+      expect(body.data[2].status_tone).toBe("success");
+    });
+
+    it("PATCH stores partially_paid when the client writes the legacy 'partial'", async () => {
+      db["invoices:single"] = {
+        data: { id: INVOICE_ID, status: "partially_paid", metadata: {} },
+        error: null,
+      };
+      const res = await documentsRouter.request(`/v1/invoices/${INVOICE_ID}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workspace_id: WS_ID, status: "partial" }),
+      });
+      expect(res.status).toBe(200);
+      const patch = calls.updates.find((u) => u.table === "invoices")?.patch as Record<string, unknown>;
+      expect(patch.status).toBe("partially_paid");
+      const body = await res.json();
+      expect(body.data.status).toBe("partially_paid");
+      expect(body.data.status_label).toBe("Partially paid");
+    });
+  });
+
   describe("route registration", () => {
     it("exposes the declined-services tracker", async () => {
       const res = await documentsRouter.request(

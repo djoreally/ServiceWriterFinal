@@ -283,6 +283,105 @@ describe("appointments router", () => {
     });
   });
 
+  describe("B1 canonical status vocabulary", () => {
+    it("GET list composes canonical status + label + tone and collapses synonyms", async () => {
+      db.appointments = {
+        data: [
+          { id: APPT_ID, status: "on_the_way", metadata: { dispatch_status: "on_the_way" } },
+          { id: APPT_ID, status: "weather_hold" },
+          { id: APPT_ID, status: "confirmed", dispatch_status: "arrived", metadata: { dispatch_status: "en_route" } },
+        ],
+        error: null,
+      };
+      const res = await appointmentsRouter.request(
+        `/v1/appointments?workspace_id=${WS_ID}&limit=10&offset=0`,
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      // T-12: on_the_way collapses to en_route on both axes.
+      expect(body.data[0].status).toBe("en_route");
+      expect(body.data[0].status_label).toBe("En route");
+      expect(body.data[0].status_tone).toBe("info");
+      expect(body.data[0].dispatch_status).toBe("en_route");
+      // T-9: an unrecognized status renders as itself, never as Confirmed.
+      expect(body.data[1].status).toBe("weather_hold");
+      expect(body.data[1].status_label).toBe("Weather hold");
+      expect(body.data[1].status_tone).toBe("neutral");
+      // T-11: the dispatch column outranks the metadata copy.
+      expect(body.data[2].dispatch_status).toBe("arrived");
+      expect(body.data[2].dispatch_status_label).toBe("Arrived");
+    });
+
+    it("PATCH stores the canonical status when a synonym is written", async () => {
+      db["appointments:single"] = {
+        data: {
+          id: APPT_ID,
+          workspace_id: WS_ID,
+          customer_id: null,
+          vehicle_id: null,
+          location_id: null,
+          starts_at: "2026-10-01T14:00:00Z",
+          ends_at: "2026-10-01T15:00:00Z",
+          status: "en_route",
+          assigned_user_id: null,
+          metadata: {},
+        },
+        error: null,
+      };
+      db["workspaces:single"] = { data: { timezone: "UTC" }, error: null };
+      const res = await appointmentsRouter.request(
+        `/v1/appointments/${APPT_ID}`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ workspace_id: WS_ID, status: "on_the_way" }),
+        },
+      );
+      expect(res.status).toBe(200);
+      const patch = calls.updates.find((u) => u.table === "appointments")?.patch as Record<string, unknown>;
+      expect(patch.status).toBe("en_route");
+      const body = await res.json();
+      expect(body.data.status).toBe("en_route");
+      expect(body.data.status_label).toBe("En route");
+    });
+
+    it("technician-status writes dispatch to the column, not metadata (T-11)", async () => {
+      db["workspace_members"] = { data: [{ workspace_id: WS_ID }], error: null };
+      db["appointments:single"] = {
+        data: {
+          id: APPT_ID,
+          status: "confirmed",
+          assigned_user_id: "660e8400-e29b-41d4-a716-446655440001",
+          dispatch_status: null,
+          metadata: {
+            dispatch_status: "acknowledged",
+            dispatch_status_updated_at: "2026-10-01T00:00:00Z",
+            keep_me: true,
+          },
+        },
+        error: null,
+      };
+      const res = await appointmentsRouter.request(
+        `/v1/appointments/${APPT_ID}/technician-status`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ workspace_id: WS_ID, status: "en_route" }),
+        },
+      );
+      expect(res.status).toBe(200);
+      const patch = calls.updates.find((u) => u.table === "appointments")?.patch as Record<string, unknown>;
+      expect(patch.dispatch_status).toBe("en_route");
+      const nextMetadata = patch.metadata as Record<string, unknown>;
+      expect(nextMetadata).not.toHaveProperty("dispatch_status");
+      expect(nextMetadata).not.toHaveProperty("dispatch_status_updated_at");
+      expect(nextMetadata.keep_me).toBe(true);
+      const body = await res.json();
+      expect(body.data.status_label).toBe("Confirmed");
+      expect(body.data.status_tone).toBe("info");
+    });
+  });
+
   describe("Google Calendar auto-sync", () => {
     function seedConnectedUser(action = "created") {
       db["google_calendar_sync_tokens"] = {
