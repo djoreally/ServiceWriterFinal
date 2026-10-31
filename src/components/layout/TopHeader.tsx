@@ -12,7 +12,6 @@ import {
 import { Building2, Search, LogOut, Menu, Shield, Settings, ChevronsUpDown } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
 import { useAuth, useRBAC } from "@packages/auth";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import { NotificationBell } from "@/components/notifications";
 import { useWorkspaceSelection } from "@/hooks/useWorkspaceSelection";
 import { OPEN_COMMAND_PALETTE_EVENT } from "./GlobalCommandPalette";
@@ -127,7 +126,6 @@ export const TopHeader = ({ title, onMenuClick, showMenuButton = true }: TopHead
             </DropdownMenu>
           )}
 
-          <ThemeToggle />
           <NotificationBell />
 
           <DropdownMenu>

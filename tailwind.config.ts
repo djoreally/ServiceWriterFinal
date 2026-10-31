@@ -142,6 +142,20 @@ export default {
         },
         success: "hsl(var(--success))",
         warning: "hsl(var(--warning))",
+        // SocialMetric system (redesign Phase 0): the one dark surface and
+        // AA-safe blue text, plus the dashboard module-tile pastels.
+        navy: {
+          DEFAULT: "#0f172a",
+          muted: "#cbd5e1",
+        },
+        "blue-strong": "#0f5fd8",
+        tile: {
+          blue: "#e1ebfd",
+          green: "#e2f5e9",
+          pink: "#fde8ef",
+          purple: "#ede9fe",
+          orange: "#fff1e0",
+        },
         // Attention values (KPIs, "needs attention") — WCAG AA on both themes.
         attention: {
           fg: "hsl(var(--attention-fg))",
@@ -185,7 +199,8 @@ export default {
       },
       borderRadius: {
         // Canonical geometry comes from radius.css (single source of truth).
-        // rounded = sm (4), then 8 / 16 / 24 / 32 / 40 as containers grow.
+        // rounded = sm (8), then 12 / 16 / 20 / 24 as containers grow
+        // (SocialMetric geometry, redesign Phase 0); 3xl is legacy/marketing.
         sm: "var(--radius-sm)",
         DEFAULT: "var(--radius-sm)",
         md: "var(--radius-md)",
@@ -196,7 +211,17 @@ export default {
       },
       fontFamily: {
         sans: ["Inter Variable", "Inter", "ui-sans-serif", "system-ui", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"],
-        display: ["Inter Variable", "Inter", "ui-sans-serif", "system-ui", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"],
+        display: ["Plus Jakarta Sans Variable", "Plus Jakarta Sans", "Inter Variable", "Inter", "ui-sans-serif", "system-ui", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "sans-serif"],
+        mono: ["JetBrains Mono Variable", "JetBrains Mono", "ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
+      },
+      boxShadow: {
+        // SocialMetric blue-tinted elevation (redesign Phase 0).
+        card: "0 8px 22px rgba(29, 78, 124, 0.05)",
+        raised: "0 10px 28px rgba(29, 78, 124, 0.07)",
+        overlay: "0 18px 45px rgba(28, 82, 140, 0.12)",
+        modal: "0 35px 80px rgba(19, 41, 74, 0.26)",
+        button: "0 12px 26px rgba(29, 113, 238, 0.24)",
+        nav: "12px 0 36px rgba(25, 72, 120, 0.06)",
       },
       keyframes: {
         "accordion-down": {
