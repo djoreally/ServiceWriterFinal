@@ -43,6 +43,7 @@ import { isWebsiteQuoteLocked } from "@/lib/price-lock";
 import { appointmentStatusView, invoiceStatusView, normalizeAppointmentStatus, paymentStatusView, resolveDispatchStatus, withAppointmentStatusView } from "@/lib/status-vocabulary";
 import { withAppointmentTitleFields } from "@/lib/appointment-title";
 import { resolvePrimaryServiceNames, resolveWorkspaceTimezone } from "@/server/appointments/title-resolution";
+import { buildBookingConfiguration } from "@/server/appointments/spec-resolution";
 import { logMutation } from "@/server/audit";
 import { z } from "zod";
 
@@ -1431,12 +1432,10 @@ appointmentsRouter.post("/v1/appointments/geocode-backfill", async (c: Context) 
   });
 });
 
-function textOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
-}
-
-// GET /v1/appointments/:id/booking-configuration — immutable booking snapshot with
-// fallback to the canonical appointment → vehicle → service-spec relationship.
+// GET /v1/appointments/:id/booking-configuration — the booking
+// configuration as a server-side merge (B4): the immutable snapshot is
+// one source among learned specs and catalog resolution, never the
+// whole answer, and is never mutated.
 appointmentsRouter.get("/v1/appointments/:id/booking-configuration", async (c: Context) => {
   const id = z.string().uuid().parse(c.req.param("id"));
   const { supabase, user } = await requireAuth(c);
@@ -1448,7 +1447,6 @@ appointmentsRouter.get("/v1/appointments/:id/booking-configuration", async (c: C
   if (membershipError) throw membershipError;
   const workspaceIds = ((memberships ?? []) as Array<{ workspace_id: string }>).map((m) => m.workspace_id);
   if (!workspaceIds.length) throw new ApiError(400, "No active workspace", "no_workspace");
-  const db = supabase as any;
   const { data: appointment, error: appointmentError } = await supabase
     .from("appointments")
     .select("id,workspace_id,vehicle_id,metadata,updated_at,created_at,starts_at")
@@ -1468,102 +1466,16 @@ appointmentsRouter.get("/v1/appointments/:id/booking-configuration", async (c: C
   const configuration = appointmentMetadata.booking_configuration && typeof appointmentMetadata.booking_configuration === "object" && !Array.isArray(appointmentMetadata.booking_configuration)
     ? appointmentMetadata.booking_configuration as { vehicles?: unknown[] }
     : null;
-  if (configuration?.vehicles?.length) {
-    // The stored snapshot is immutable and predates the job, so it carries
-    // no odometer — mileage is entered on the live vehicle record. Enrich
-    // the RESPONSE by VIN (workspace-scoped) so the Vehicle Service
-    // Specifications card shows every entered detail in one block; the
-    // stored snapshot is never mutated.
-    const snapshotVehicles = configuration.vehicles as Array<Record<string, unknown>>;
-    const snapshotVehicleOf = (entry: Record<string, unknown>): Record<string, unknown> | null =>
-      entry?.vehicle && typeof entry.vehicle === "object" && !Array.isArray(entry.vehicle)
-        ? entry.vehicle as Record<string, unknown>
-        : null;
-    const vinsNeedingMileage = Array.from(new Set(
-      snapshotVehicles
-        .map(snapshotVehicleOf)
-        .filter((v): v is Record<string, unknown> => Boolean(v && typeof v.vin === "string" && v.vin.trim() && v.mileage == null))
-        .map((v) => String(v.vin).trim()),
-    ));
-    if (vinsNeedingMileage.length) {
-      const { data: liveVehicles } = await supabase
-        .from("vehicles")
-        .select("vin,mileage")
-        .eq("workspace_id", appointmentRow.workspace_id)
-        .in("vin", vinsNeedingMileage);
-      const mileageByVin = new Map<string, number>();
-      for (const row of (liveVehicles ?? []) as Array<{ vin: unknown; mileage: unknown }>) {
-        const vin = typeof row.vin === "string" ? row.vin.trim().toUpperCase() : "";
-        const mileage = typeof row.mileage === "number" ? row.mileage : Number(row.mileage);
-        if (vin && Number.isFinite(mileage) && mileage > 0) mileageByVin.set(vin, mileage);
-      }
-      if (mileageByVin.size) {
-        return json({
-          configuration: {
-            ...configuration,
-            vehicles: snapshotVehicles.map((entry) => {
-              const vehicle = snapshotVehicleOf(entry);
-              if (!vehicle || vehicle.mileage != null || typeof vehicle.vin !== "string") return entry;
-              const mileage = mileageByVin.get(vehicle.vin.trim().toUpperCase());
-              return mileage ? { ...entry, vehicle: { ...vehicle, mileage } } : entry;
-            }),
-          },
-        });
-      }
-    }
-    return json({ configuration });
-  }
-
-  if (!appointmentRow.vehicle_id) return json({ configuration: null });
-
-  const { data: vehicle, error: vehicleError } = await supabase
-    .from("vehicles")
-    .select("id,year,make,model,vin,license_plate,mileage")
-    .eq("workspace_id", appointmentRow.workspace_id)
-    .eq("id", appointmentRow.vehicle_id)
-    .maybeSingle();
-  if (vehicleError) throw vehicleError;
-  const vehicleRow = vehicle as {
-    id: string; year: unknown; make: unknown; model: unknown; vin: unknown; license_plate: unknown; mileage: unknown;
-  } | null;
-  if (!vehicleRow?.id) return json({ configuration: null });
-
-  const { data: specs, error: specsError } = await db
-    .from("vehicle_service_specs")
-    .select("engine,oil_type,oil_capacity,oil_filter")
-    .eq("workspace_id", appointmentRow.workspace_id)
-    .eq("vehicle_id", String(vehicleRow.id))
-    .maybeSingle();
-  if (specsError) throw specsError;
-  const vehicleMileage = typeof vehicleRow.mileage === "number" ? vehicleRow.mileage : Number(vehicleRow.mileage);
-  const specRow = specs as Record<string, unknown> | null;
-  const oil = specRow && [specRow.engine, specRow.oil_type, specRow.oil_capacity, specRow.oil_filter].some(Boolean)
-    ? {
-        engine: textOrUndefined(specRow.engine),
-        oilType: textOrUndefined(specRow.oil_type),
-        oilCapacity: textOrUndefined(specRow.oil_capacity),
-        oilFilter: textOrUndefined(specRow.oil_filter),
-        capacitySource: "manual" as const,
-      }
-    : undefined;
-  return json({
-    configuration: {
-      schemaVersion: 2,
-      capturedAt: textOrUndefined(appointmentRow.updated_at) || textOrUndefined(appointmentRow.created_at) || textOrUndefined(appointmentRow.starts_at) || new Date(0).toISOString(),
-      vehicles: [{
-        clientVehicleId: String(vehicleRow.id),
-        vehicle: {
-          year: String(vehicleRow.year || ""),
-          make: String(vehicleRow.make || "Unknown"),
-          model: String(vehicleRow.model || "Unknown"),
-          vin: textOrUndefined(vehicleRow.vin),
-          licensePlate: textOrUndefined(vehicleRow.license_plate),
-          ...(Number.isFinite(vehicleMileage) && vehicleMileage > 0 ? { mileage: vehicleMileage } : {}),
-        },
-        ...(oil ? { oil } : {}),
-      }],
-    },
-  });
+  // B4 (T-2/T-3/T-4): the response is a server-side merge — learned
+  // working specs over catalog resolution over the immutable snapshot,
+  // across the union of every vehicle on the job. The stored snapshot
+  // is never mutated; see @/server/appointments/spec-resolution.
+  const mergedConfiguration = await buildBookingConfiguration(
+    supabase,
+    appointmentRow,
+    configuration as Record<string, unknown> | null,
+  );
+  return json({ configuration: mergedConfiguration });
 });
 
 // ---------------------------------------------------------------------------
