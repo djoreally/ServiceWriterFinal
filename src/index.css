@@ -1,8 +1,11 @@
 /* =========================================
    GLOBAL THEME TOKENS
-   Apple-style dark/light foundation
+   SocialMetric light foundation (redesign Phase 0, 2026-10-30).
+   Light is the only shipping theme and the product default; the .dark
+   block below is FROZEN — kept for a possible future dark phase, not
+   maintained. Values: sw-design-tokens-2026-10-30.css (design spec).
 
-   Fonts are self-hosted via @fontsource-variable/inter (imported in
+   Fonts are self-hosted via @fontsource-variable/* (imported in
    app/layout.tsx) — no render-blocking external stylesheet requests.
    ========================================= */
 
@@ -17,42 +20,47 @@
   :root {
     color-scheme: light;
 
-    /* Shadcn-compatible HSL tokens */
-    --background: 240 9% 97%;            /* #f5f5f7 */
-    --foreground: 0 0% 7%;               /* #111111 */
+    /* Shadcn-compatible HSL tokens — SocialMetric values (Phase 0) */
+    --background: 210 100% 98%;          /* #f7fbff */
+    --foreground: 218 59% 15%;           /* #10213f */
 
     --card: 0 0% 100%;                   /* #ffffff */
-    --card-foreground: 0 0% 7%;
+    --card-foreground: 218 59% 15%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 7%;
+    --popover-foreground: 218 59% 15%;
 
-    --primary: 211 100% 52%;             /* #0a84ff */
+    --primary: 215 100% 54%;             /* #1677ff — fills/graphics; small text on light uses --action-text */
     --primary-foreground: 0 0% 100%;
-    --action-text: 211 100% 36%;          /* accessible small blue text on white */
+    --primary-hover: 216 87% 45%;        /* #0f5fd8 — primary button hover (spec §3.1) */
+    --primary-pressed: 216 87% 37%;      /* #0c4eb0 — primary button pressed */
+    --primary-container: 207 100% 95%;   /* #e7f4ff — selected surfaces */
+    --primary-container-soft: 219 100% 97%; /* #eef4ff */
+    --on-primary-container: 216 87% 45%; /* #0f5fd8 */
+    --action-text: 216 87% 45%;          /* #0f5fd8 — accessible small blue text on white (AA) */
 
-    --secondary: 220 20% 95%;            /* #f0f2f5 */
-    --secondary-foreground: 0 0% 7%;
+    --secondary: 214 100% 97%;           /* #f1f7ff */
+    --secondary-foreground: 218 59% 15%;
 
-    --muted: 220 20% 95%;               /* #f0f2f5 */
-    --muted-foreground: 215 16% 38%;
+    --muted: 214 100% 97%;               /* #f1f7ff */
+    --muted-foreground: 221 13% 46%;     /* #667085 */
 
-    --accent: 220 20% 95%;
-    --accent-foreground: 0 0% 7%;
+    --accent: 207 100% 95%;              /* #e7f4ff */
+    --accent-foreground: 216 87% 45%;
 
-    --destructive: 3 100% 61%;           /* #ff453a */
+    --destructive: 0 72% 51%;            /* #dc2626 */
     --destructive-foreground: 0 0% 100%;
 
-    --border: 220 9% 92%;               /* approx rgba(17,17,17,0.08) on white */
-    --input: 220 9% 92%;
-    --ring: 211 100% 52%;
+    --border: 214 56% 91%;               /* #dce7f5 */
+    --input: 214 56% 91%;
+    --ring: 212 95% 64%;                 /* #4c9dfa */
 
     /* Legacy alias of --radius-lg (16px). The canonical radius scale lives in
        components/ui/radius.css — do not define --radius-sm/md/lg here. */
     --radius: 16px;
 
-    --success: 135 62% 37%;             /* semantic green for successful/assigned states */
-    --warning: 36 100% 52%;             /* #ff9f0a */
+    --success: 160 71% 29%;             /* #16805d — semantic green for successful/assigned states */
+    --warning: 38 92% 50%;              /* #f59e0b — graphics; warning text uses status tokens */
     --intent-action: var(--primary);
     --intent-success: var(--success);
     --intent-warning: var(--warning);
@@ -60,16 +68,16 @@
     --intent-info: 205 80% 40%;
 
     /* Attention foreground — WCAG-AA numeric emphasis (KPIs, needs-attention) */
-    --attention-fg: 32 95% 44%;         /* amber-600 equivalent on light */
+    --attention-fg: 26 90% 37%;         /* #b45309 on light */
 
     /* Data-visualization palette — the only allowed non-semantic categorical hues */
-    --chart-1: 211 100% 52%;
-    --chart-2: 174 62% 40%;
-    --chart-3: 262 68% 58%;
-    --chart-4: 36 95% 48%;
-    --chart-5: 3 90% 58%;
-    --chart-trend-up: 135 62% 37%;
-    --chart-trend-down: 3 100% 61%;
+    --chart-1: 215 100% 54%;
+    --chart-2: 252 100% 68%;
+    --chart-3: 181 70% 45%;
+    --chart-4: 159 69% 43%;
+    --chart-5: 351 80% 67%;             /* #ef667d */
+    --chart-trend-up: 160 71% 29%;
+    --chart-trend-down: 0 72% 51%;
 
     /* Overlay elevation scale — chrome and portals own these bands only */
     --z-base: 0;
@@ -92,15 +100,15 @@
        prefer hsl(var(--token)) utilities. */
     --surface: hsl(var(--card));
     --surface-2: hsl(var(--secondary));
-    --surface-3: #e7ebf0;
-    --surface-elevated: rgba(255, 255, 255, 0.82);
+    --surface-3: #e9eef5;
+    --surface-elevated: rgba(255, 255, 255, 0.94);
 
     /* Border system (raw values — deprecated, use border-border / border-strong utility) */
-    --border-raw: rgba(17, 17, 17, 0.08);
-    --border-strong: rgba(17, 17, 17, 0.16);
+    --border-raw: rgba(28, 45, 65, 0.10);
+    --border-strong: rgba(28, 45, 65, 0.18);
 
     /* Text system (raw values — deprecated, use text-foreground / text-muted-foreground) */
-    --text-primary: #0f1720;
+    --text-primary: #10213f;
     --text-secondary: #364152;
     --text-muted: #52606d;
     --text-inverse: #ffffff;
@@ -117,18 +125,18 @@
     --accent-yellow: #ffd60a;
 
     /* State (raw) */
-    --info: #64d2ff;
-    --danger: #ff453a;
+    --info: #1677c8;
+    --danger: #dc2626;
 
-    /* UI effects */
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
-    --shadow-md: 0 2px 8px rgba(15, 23, 32, 0.07);
-    --shadow-lg: 0 12px 32px rgba(15, 23, 32, 0.12);
-    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.06);
-    --shadow-hover: 0 10px 30px rgba(10, 132, 255, 0.12);
-    --shadow-btn: 0 4px 14px rgba(10, 132, 255, 0.3);
+    /* UI effects — blue-tinted elevation (SocialMetric signature, Phase 0) */
+    --shadow-sm: 0 1px 2px rgba(29, 78, 124, 0.06);
+    --shadow-md: 0 2px 8px rgba(29, 78, 124, 0.07);
+    --shadow-lg: 0 18px 45px rgba(28, 82, 140, 0.12);
+    --shadow-card: 0 8px 22px rgba(29, 78, 124, 0.05);
+    --shadow-hover: 0 10px 28px rgba(29, 78, 124, 0.07);
+    --shadow-btn: 0 12px 26px rgba(29, 113, 238, 0.24);
 
-    --ring-glow: 0 0 0 3px rgba(10, 132, 255, 0.22);
+    --ring-glow: 0 0 0 3px rgba(76, 157, 250, 0.25);
     --space-1: 0.25rem;
     --space-2: 0.5rem;
     --space-3: 0.75rem;
@@ -145,9 +153,12 @@
     --container-max: 1280px;
     --nav-height: 72px;
 
-    /* Typography — Inter Variable is self-hosted via @fontsource-variable/inter */
+    /* Typography — self-hosted via @fontsource-variable/* (app/layout.tsx).
+       Display/headings: Plus Jakarta Sans. Body/UI: Inter Variable.
+       Mono (IDs, VINs, codes): JetBrains Mono. SocialMetric split, Phase 0. */
     --font-sans: 'Inter Variable', Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    --font-display: 'Inter Variable', Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-display: 'Plus Jakarta Sans Variable', 'Plus Jakarta Sans', 'Inter Variable', Inter, ui-sans-serif, system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
     /* Hero / stage */
     --hero-bg: radial-gradient(circle at top center, rgba(255,255,255,0.55) 0%, rgba(255,255,255,0) 40%), linear-gradient(180deg, #fbfbfc 0%, #f1f2f5 100%);
@@ -157,38 +168,38 @@
     --device-bezel: #b9c0cb;
 
     /* Financial System */
-    --revenue-positive-bg: 135 60% 95%;
-    --revenue-positive-text: 135 62% 27%;
-    --revenue-positive-border: 135 62% 51%;
+    --revenue-positive-bg: 141 84% 93%;
+    --revenue-positive-text: 143 64% 24%;
+    --revenue-positive-border: 159 69% 43%;
 
-    --revenue-neutral-bg: 220 20% 95%;
-    --revenue-neutral-text: 0 0% 30%;
+    --revenue-neutral-bg: 214 100% 97%;
+    --revenue-neutral-text: 209 14% 37%;
 
-    --revenue-negative-bg: 3 86% 97%;
-    --revenue-negative-text: 3 72% 35%;
-    --revenue-negative-accent: 3 100% 61%;
+    --revenue-negative-bg: 0 86% 97%;
+    --revenue-negative-text: 0 74% 42%;
+    --revenue-negative-accent: 0 72% 51%;
 
     /* Operational Status */
-    --status-scheduled-bg: 211 100% 95%;
-    --status-scheduled-text: 211 100% 40%;
+    --status-scheduled-bg: 219 100% 97%;
+    --status-scheduled-text: 216 87% 45%;
 
-    --status-inprogress-bg: 211 100% 93%;
-    --status-inprogress-text: 211 100% 30%;
+    --status-inprogress-bg: 48 96% 89%;
+    --status-inprogress-text: 23 82% 31%;
 
-    --status-completed-bg: 135 60% 95%;
-    --status-completed-text: 135 62% 27%;
+    --status-completed-bg: 141 84% 93%;
+    --status-completed-text: 143 64% 24%;
 
-    --status-awaiting-bg: 36 93% 92%;
-    --status-awaiting-text: 36 80% 30%;
+    --status-awaiting-bg: 48 96% 89%;
+    --status-awaiting-text: 23 82% 31%;
 
-    --status-po-pending-bg: 36 100% 96%;
-    --status-po-pending-text: 36 80% 30%;
+    --status-po-pending-bg: 48 96% 89%;
+    --status-po-pending-text: 23 82% 31%;
 
-    --status-payment-captured-bg: 135 60% 93%;
-    --status-payment-captured-text: 135 62% 22%;
+    --status-payment-captured-bg: 141 84% 93%;
+    --status-payment-captured-text: 143 64% 24%;
 
-    --status-payment-failed-bg: 3 94% 94%;
-    --status-payment-failed-text: 3 63% 31%;
+    --status-payment-failed-bg: 0 86% 97%;
+    --status-payment-failed-text: 0 74% 42%;
 
     /* Dispatch & Logistics */
     --logistics-van-assigned: 211 60% 94%;
@@ -200,22 +211,22 @@
     --stripe-accent: 244 100% 68%;
 
     /* Alert System */
-    --alert-info-bg: 211 100% 93%;
-    --alert-info-text: 211 100% 30%;
-    --alert-warning-bg: 36 93% 89%;
-    --alert-warning-text: 36 80% 30%;
-    --alert-critical-bg: 3 94% 94%;
-    --alert-critical-text: 3 63% 31%;
+    --alert-info-bg: 207 100% 95%;
+    --alert-info-text: 216 87% 45%;
+    --alert-warning-bg: 48 96% 89%;
+    --alert-warning-text: 23 82% 31%;
+    --alert-critical-bg: 352 100% 97%;
+    --alert-critical-text: 350 67% 42%;
 
     /* Sidebar */
     --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 0 0% 7%;
-    --sidebar-primary: 211 100% 52%;
+    --sidebar-foreground: 218 59% 15%;
+    --sidebar-primary: 215 100% 54%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 20% 95%;
-    --sidebar-accent-foreground: 0 0% 7%;
-    --sidebar-border: 220 9% 92%;
-    --sidebar-ring: 211 100% 52%;
+    --sidebar-accent: 207 100% 95%;
+    --sidebar-accent-foreground: 216 87% 45%;
+    --sidebar-border: 214 56% 91%;
+    --sidebar-ring: 212 95% 64%;
   }
 
   .dark {
@@ -507,7 +518,7 @@
    ========================================= */
 
 ::selection {
-  background: rgba(10, 132, 255, 0.24);
+  background: rgba(22, 119, 255, 0.24);
   color: var(--text-primary);
 }
 
@@ -548,11 +559,35 @@
    ========================================= */
 
 .glow-blue {
-  box-shadow: 0 0 0 1px rgba(10, 132, 255, 0.18), 0 0 30px rgba(10, 132, 255, 0.12);
+  box-shadow: 0 0 0 1px rgba(22, 119, 255, 0.18), 0 0 30px rgba(22, 119, 255, 0.12);
 }
 
 .glow-red {
-  box-shadow: 0 0 0 1px rgba(255, 69, 58, 0.18), 0 0 30px rgba(255, 69, 58, 0.12);
+  box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.18), 0 0 30px rgba(220, 38, 38, 0.12);
+}
+
+/* =========================================
+   RELOCATED FROM material-color-system.css (retired in Phase 0).
+   These were the only non-token rules in that sheet; they move here
+   verbatim so retiring the override layer changes no behavior.
+   ========================================= */
+
+/* Reusable tonal selected surface for cards, rows and segmented controls. */
+.surface-selected {
+  background: hsl(var(--primary-container));
+  color: hsl(var(--on-primary-container));
+  border-color: hsl(var(--primary) / 0.35);
+}
+
+.surface-selected-soft {
+  background: hsl(var(--primary-container-soft));
+  border-color: hsl(var(--primary) / 0.18);
+}
+
+/* Make focus treatment consistent across native and composed controls. */
+:where(button, a, input, select, textarea, [role="button"], [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px hsl(var(--ring) / 0.22);
 }
 
 /* =========================================

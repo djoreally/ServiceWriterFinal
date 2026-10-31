@@ -36,6 +36,36 @@
   --type-semibold: 600;
 }
 
+/* Redesign Phase 0 (2026-10-30, SocialMetric system) — the SM type scale,
+ * added alongside the five-size system above. Screens adopt these tokens as
+ * they are reworked (Phases 1–6); the .type-* utilities are unchanged here.
+ * Source: sw-design-tokens-2026-10-30.css (--sw-type-* set). */
+:root {
+  --sw-type-display: 3.5rem;      /* 56px — marketing/public heroes only */
+  --sw-type-h1: 1.5625rem;        /* 25px — page titles */
+  --sw-type-h2: 1.25rem;          /* 20px — section titles */
+  --sw-type-h3: 1rem;             /* 16px — card titles */
+  --sw-type-body: 0.9375rem;      /* 15px — body (SM app base) */
+  --sw-type-body-sm: 0.875rem;    /* 14px — secondary body, table cells */
+  --sw-type-caption: 0.8125rem;   /* 13px — captions, meta, chip labels */
+  --sw-type-micro: 0.75rem;       /* 12px — smallest allowed text */
+  --sw-type-label: 0.6875rem;     /* 11px — uppercase overline labels ONLY */
+  --sw-type-kpi: 1.75rem;         /* 28px — KPI / stat values */
+  --sw-type-money: 1.25rem;       /* 20px — prices on cards */
+
+  --sw-weight-regular: 400;
+  --sw-weight-medium: 500;
+  --sw-weight-semibold: 600;
+  --sw-weight-bold: 700;
+  --sw-weight-extrabold: 800;     /* buttons, KPI values, brand */
+
+  --sw-leading-tight: 1.15;
+  --sw-leading-body: 1.55;
+  --sw-leading-caption: 1.45;
+  --sw-tracking-display: -0.03em;
+  --sw-tracking-label: 0.08em;
+}
+
 /* Size utilities — the only sizes that exist. */
 .type-xs { font-size: var(--type-xs); line-height: 1.5; }
 .type-sm { font-size: var(--type-sm); line-height: 1.5; }
