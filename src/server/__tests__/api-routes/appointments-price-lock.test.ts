@@ -398,3 +398,153 @@ describe("appointment service lines — website quote lock (Hono router)", () =>
     expect(body.error.code).toBe("price_locked");
   });
 });
+
+describe("booking-link client quote lock — route guards", () => {
+  const CLIENT_LOCKED_METADATA = {
+    pricing_state: "client_quote_locked",
+    estimated_cost: 137,
+    client_estimated_cost: 137,
+    tax_amount: 0,
+    service_catalog_id: CATALOG_A,
+  };
+
+  const clientRow = (overrides: Record<string, unknown> = {}) => ({
+    id: APPOINTMENT_ID,
+    workspace_id: WS_ID,
+    customer_id: CUSTOMER_ID,
+    vehicle_id: null,
+    location_id: null,
+    starts_at: "2026-11-02T14:00:00.000Z",
+    ends_at: "2026-11-02T15:00:00.000Z",
+    status: "confirmed",
+    source: "public_booking",
+    assigned_user_id: null,
+    metadata: { ...CLIENT_LOCKED_METADATA },
+    updated_at: "2026-10-31T21:00:00.000Z",
+    ...overrides,
+  });
+
+  async function capturePatchPayload(current: Record<string, unknown>, body: Record<string, unknown>) {
+    const supabase = withExtraChains(
+      makeSupabaseClient({
+        workspaces: { data: { name: "Shop", timezone: "UTC" }, error: null },
+        customers: { data: { id: CUSTOMER_ID, status: "active" }, error: null },
+        service_catalog: { data: { id: CATALOG_B }, error: null },
+      }),
+    );
+    const builders: Builder[] = [];
+    const baseImpl = (supabase.from as jest.Mock).getMockImplementation() as (table: string) => unknown;
+    let appointmentReads = 0;
+    (supabase.from as jest.Mock).mockImplementation((table: string) => {
+      if (table === "appointments") {
+        appointmentReads += 1;
+        const result =
+          appointmentReads === 1
+            ? { data: current, error: null }
+            : { data: { ...current, updated_at: "2026-11-02T15:05:00.000Z" }, error: null };
+        const builder = makeQueryBuilder(result);
+        (builder as unknown as Record<string, unknown>).not = jest.fn(() => builder);
+        (builder as unknown as Record<string, unknown>).or = jest.fn(() => builder);
+        builders.push(builder);
+        return builder;
+      }
+      return baseImpl(table);
+    });
+    stubWorkspaceMember(api, supabase);
+    const { status } = await readJson(
+      await appointmentPatch(
+        makeRequest(`/api/v1/appointments/${APPOINTMENT_ID}`, { method: "PATCH", body }),
+        contextWithParams({ id: APPOINTMENT_ID }),
+      ),
+    );
+    const updateBuilder = builders.find((b) => (b.update as jest.Mock).mock.calls.length > 0);
+    const payload = updateBuilder
+      ? ((updateBuilder.update as jest.Mock).mock.calls[0][0] as Record<string, unknown>)
+      : null;
+    return { status, payload };
+  }
+
+  it("PATCH keeps the locked link quote when the staff edit-save re-prices", async () => {
+    const { status, payload } = await capturePatchPayload(clientRow(), {
+      workspace_id: WS_ID,
+      source: "staff",
+      estimated_cost: 119,
+      tax_amount: 0,
+      service_catalog_id: CATALOG_B,
+      notes: "Gate code 4321",
+    });
+    expect(status).toBe(200);
+    expect(payload).not.toBeNull();
+    expect(payload).not.toHaveProperty("source");
+    expect(payload?.notes).toBe("Gate code 4321");
+    const metadata = payload?.metadata as Record<string, unknown>;
+    expect(metadata.estimated_cost).toBe(137);
+    expect(metadata.tax_amount).toBe(0);
+    expect(metadata.service_catalog_id).toBe(CATALOG_A);
+    expect(metadata.pricing_state).toBe("client_quote_locked");
+  });
+
+  it("PUT /v1/appointment-items is a no-op for a client-locked appointment", async () => {
+    const supabase = makeSupabaseClient({
+      appointments: {
+        data: { id: APPOINTMENT_ID, source: "public_booking", metadata: { ...CLIENT_LOCKED_METADATA } },
+        error: null,
+      },
+    });
+    stubWorkspaceMember(api, supabase);
+    const { status, body } = await readJson(
+      await itemsPut(
+        makeRequest("/api/v1/appointment-items", {
+          method: "PUT",
+          body: { workspace_id: WS_ID, appointment_id: APPOINTMENT_ID, service_catalog_id: CATALOG_B },
+        }),
+      ),
+    );
+    expect(status).toBe(200);
+    expect(body.data).toBeNull();
+    expect(body.price_locked).toBe(true);
+    const tables = (supabase.from as jest.Mock).mock.calls.map((call) => call[0] as string);
+    expect(tables).not.toContain("appointment_items");
+    expect(tables).not.toContain("service_catalog");
+  });
+
+  it("rejects adding a service line to a client-locked appointment with 409 price_locked", async () => {
+    const client = makeSupabaseClient();
+    const baseImpl = (client.from as jest.Mock).getMockImplementation() as (table: string) => unknown;
+    const queues: Record<string, Array<{ data: unknown; error: unknown }>> = {
+      workspace_members: [
+        { data: [{ workspace_id: WS_ID }], error: null },
+        { data: { role: "owner" }, error: null },
+      ],
+      appointments: [
+        { data: { source: "public_booking", metadata: { ...CLIENT_LOCKED_METADATA } }, error: null },
+      ],
+    };
+    (client.from as jest.Mock).mockImplementation((table: string) => {
+      const queue = queues[table];
+      if (queue && queue.length) {
+        const result = queue.shift() as { data: unknown; error: unknown };
+        return makeQueryBuilder({ data: result.data, error: result.error });
+      }
+      return baseImpl(table);
+    });
+    stubRequireUser(api, client);
+    const { status, body } = await readJson(
+      await app.request(`/v1/appointments/${APPOINTMENT_ID}/services?selected_workspace_id=${WS_ID}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          service_catalog_id: CATALOG_B,
+          name: "Full Synthetic Oil Change",
+          description: null,
+          price: 119,
+          quantity: 1,
+          is_prepaid: false,
+          added_at_service: false,
+        }),
+      }),
+    );
+    expect(status).toBe(409);
+    expect(body.error.code).toBe("price_locked");
+  });
+});

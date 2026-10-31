@@ -210,3 +210,58 @@ describe("POST /v1/payments — website quote lock (Next)", () => {
     expect(body.data.id).toBe(CREATED_PAYMENT_ID);
   });
 });
+
+describe("POST /v1/payments — booking-link client quote lock (Next)", () => {
+  const CLIENT_LOCKED_METADATA = {
+    pricing_state: "client_quote_locked",
+    estimated_cost: 137,
+    client_estimated_cost: 137,
+    tax_amount: 0,
+  };
+
+  function clientLockedSupabase(paymentsQueue: Array<{ data: unknown; error: unknown }>, amountPaid = 0) {
+    return sequencedSupabase({
+      appointments: [
+        { data: { source: "public_booking", metadata: { ...CLIENT_LOCKED_METADATA } }, error: null },
+      ],
+      invoices: [{ data: [{ amount_paid: amountPaid }], error: null }],
+      payments: paymentsQueue,
+    });
+  }
+
+  it("rejects the quote plus a recomputed waste fee, naming the booking-link quote", async () => {
+    const supabase = clientLockedSupabase([noDuplicate]);
+    stubAddon(supabase);
+    // $141.00 is the $137.00 link quote with the $4 waste fee added on top —
+    // the double-count the client quote lock exists to prevent.
+    const { status, body } = await readJson(
+      await paymentsPost(makeRequest("/api/v1/payments", { method: "POST", body: postBody(141) })),
+    );
+    expect(status).toBe(409);
+    expect(body.error.code).toBe("price_lock_amount_mismatch");
+    expect(body.error.expected_amount).toBe(137);
+    expect(body.error.message).toContain("booking-link quote");
+    expect(body.error.message).toContain("$137.00");
+    expect(body.data).toBeUndefined();
+  });
+
+  it("accepts exactly the locked link quote when nothing has been paid", async () => {
+    const supabase = clientLockedSupabase([noDuplicate, createdPayment]);
+    stubAddon(supabase);
+    const { status, body } = await readJson(
+      await paymentsPost(makeRequest("/api/v1/payments", { method: "POST", body: postBody(137) })),
+    );
+    expect(status).toBe(201);
+    expect(body.data.id).toBe(CREATED_PAYMENT_ID);
+  });
+
+  it("accepts only the remaining balance once part of the link quote is paid", async () => {
+    const supabase = clientLockedSupabase([noDuplicate, createdPayment], 50);
+    stubAddon(supabase);
+    const { status, body } = await readJson(
+      await paymentsPost(makeRequest("/api/v1/payments", { method: "POST", body: postBody(87) })),
+    );
+    expect(status).toBe(201);
+    expect(body.data.id).toBe(CREATED_PAYMENT_ID);
+  });
+});

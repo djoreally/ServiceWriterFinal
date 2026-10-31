@@ -1,5 +1,9 @@
 import {
+  clientQuoteTotal,
+  isClientQuoteLocked,
+  isQuoteLocked,
   isWebsiteQuoteLocked,
+  lockedQuoteTotal,
   websiteQuoteAmountDue,
   websiteQuoteTotal,
 } from "./price-lock";
@@ -123,5 +127,66 @@ describe("websiteQuoteTotal", () => {
   it("returns null for unlocked rows", () => {
     expect(websiteQuoteTotal({ source: "staff", metadata: lockedMetadata })).toBeNull();
     expect(websiteQuoteTotal(null)).toBeNull();
+  });
+});
+
+describe("booking-link client quote lock", () => {
+  const clientLockedMetadata = {
+    pricing_state: "client_quote_locked",
+    estimated_cost: 137,
+    client_estimated_cost: 137,
+    tax_amount: 0,
+  };
+
+  it("locks a link booking carrying the client_quote_locked marker", () => {
+    expect(isClientQuoteLocked({ source: "public_booking", metadata: clientLockedMetadata })).toBe(true);
+  });
+
+  it("does not lock a link booking still pending canonical items", () => {
+    expect(
+      isClientQuoteLocked({
+        source: "public_booking",
+        metadata: { pricing_state: "pending_canonical_items", estimated_cost: 0, client_estimated_cost: 137 },
+      }),
+    ).toBe(false);
+  });
+
+  it("does not lock other channels carrying the client marker", () => {
+    expect(isClientQuoteLocked({ source: "moms_website", metadata: clientLockedMetadata })).toBe(false);
+    expect(isClientQuoteLocked({ source: "staff", metadata: clientLockedMetadata })).toBe(false);
+  });
+
+  it("does not lock missing or malformed rows", () => {
+    expect(isClientQuoteLocked(null)).toBe(false);
+    expect(isClientQuoteLocked(undefined)).toBe(false);
+    expect(isClientQuoteLocked({ source: "public_booking", metadata: null })).toBe(false);
+    expect(isClientQuoteLocked({})).toBe(false);
+  });
+
+  it("isQuoteLocked covers either channel's lock and nothing else", () => {
+    expect(isQuoteLocked({ source: "moms_website", metadata: lockedMetadata })).toBe(true);
+    expect(isQuoteLocked({ source: "public_booking", metadata: clientLockedMetadata })).toBe(true);
+    expect(isQuoteLocked({ source: "staff", metadata: {} })).toBe(false);
+    expect(isQuoteLocked(null)).toBe(false);
+  });
+
+  it("clientQuoteTotal returns the locked quote from estimated_cost", () => {
+    expect(clientQuoteTotal({ source: "public_booking", metadata: clientLockedMetadata })).toBe(137);
+  });
+
+  it("clientQuoteTotal falls back to client_estimated_cost", () => {
+    const { estimated_cost: _dropped, ...rest } = clientLockedMetadata;
+    expect(clientQuoteTotal({ source: "public_booking", metadata: rest })).toBe(137);
+  });
+
+  it("clientQuoteTotal returns null for unlocked rows", () => {
+    expect(clientQuoteTotal({ source: "public_booking", metadata: {} })).toBeNull();
+    expect(clientQuoteTotal({ source: "staff", metadata: clientLockedMetadata })).toBeNull();
+  });
+
+  it("lockedQuoteTotal reads the quote for whichever lock the row carries", () => {
+    expect(lockedQuoteTotal({ source: "moms_website", metadata: lockedMetadata })).toBe(122.57);
+    expect(lockedQuoteTotal({ source: "public_booking", metadata: clientLockedMetadata })).toBe(137);
+    expect(lockedQuoteTotal({ source: "staff", metadata: {} })).toBeNull();
   });
 });

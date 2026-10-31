@@ -4,8 +4,13 @@
  * Pricing channel rule (Ty, 2026-10-29): the price source follows the booking
  * channel.
  *
- * - Bookings created through the Service Writer booking link or by staff are
- *   priced natively in Service Writer (service catalog + workspace settings).
+ * - Bookings created by staff are priced natively in Service Writer
+ *   (service catalog + workspace settings).
+ * - Bookings created through the Service Writer booking link carry the
+ *   total the booking page showed the customer, locked at creation —
+ *   the client quote lock below (Ty, 2026-10-31; this supersedes the
+ *   2026-10-29 line that grouped link bookings with native pricing,
+ *   whose later catalog-priced insert step proved unreliable).
  * - Bookings pushed from the MOMS website carry the website's quoted total.
  *   That quote is locked: no Service Writer edit, service-line change, status
  *   transition, or invoice sync may re-price it — including website-only deal
@@ -26,6 +31,20 @@
  * payment creation, and the mobile appointment card) must check
  * `isWebsiteQuoteLocked` first and leave a locked appointment's money exactly
  * as the website quoted it.
+ *
+ * Booking-link client quote lock (Ty, 2026-10-31): the same lock, carried by
+ * the link channel. A booking made through the Service Writer booking link
+ * shows the customer a total before creation (services, extras and fees as
+ * computed by the booking page); that shown total is the price. The v3
+ * create RPC now writes it at insert — `source = 'public_booking'`,
+ * `pricing_state = 'client_quote_locked'`, `estimated_cost` (mirrored to
+ * `client_estimated_cost`) holding the quote, one `appointment_items` row
+ * whose unit price is the quote (price_source 'client_quote') — because the
+ * previous design delegated the money to a later catalog-priced insert
+ * step that could fail or be skipped, leaving $0 invoices behind a real
+ * quote (INV-97). Recompute paths must check `isClientQuoteLocked` (or the
+ * combined `isQuoteLocked`) alongside the website lock and leave a locked
+ * link booking's money exactly as the customer was shown it.
  */
 
 export const WEBSITE_QUOTE_SOURCE = "moms_website";
@@ -101,4 +120,38 @@ export function websiteQuoteAmountDue(
   if (quote === null) return null;
   const paid = Number.isFinite(amountPaid) && amountPaid > 0 ? amountPaid : 0;
   return Math.max(0, roundToCents(quote - paid));
+}
+
+export const CLIENT_QUOTE_SOURCE = "public_booking";
+export const CLIENT_QUOTE_PRICING_STATE = "client_quote_locked";
+
+/**
+ * True when the appointment is a booking-link booking whose shown total is
+ * locked. Unlike the website lock there is no secondary marker: the v3
+ * create writes `pricing_state` atomically with the appointment, and the
+ * invoice sync's write-back preserves it, so the state alone is the mark.
+ */
+export function isClientQuoteLocked(row: PriceLockRow | null | undefined): boolean {
+  if (!row || row.source !== CLIENT_QUOTE_SOURCE) return false;
+  const metadata = lockMetadata(row);
+  return metadata.pricing_state === CLIENT_QUOTE_PRICING_STATE;
+}
+
+/** True when the appointment carries either channel's quote lock. */
+export function isQuoteLocked(row: PriceLockRow | null | undefined): boolean {
+  return isWebsiteQuoteLocked(row) || isClientQuoteLocked(row);
+}
+
+/** The locked booking-link quote in dollars, or null when not locked. */
+export function clientQuoteTotal(row: PriceLockRow | null | undefined): number | null {
+  if (!isClientQuoteLocked(row)) return null;
+  const metadata = lockMetadata(row);
+  const raw = metadata.estimated_cost ?? metadata.client_estimated_cost ?? row?.estimated_cost;
+  const value = typeof raw === "number" ? raw : Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+/** The locked quote in dollars for either channel, or null when not locked. */
+export function lockedQuoteTotal(row: PriceLockRow | null | undefined): number | null {
+  return websiteQuoteTotal(row) ?? clientQuoteTotal(row);
 }
