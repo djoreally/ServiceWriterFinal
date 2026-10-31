@@ -1,7 +1,6 @@
-
 import { useState, useMemo } from 'react';
 import { Appointment, BusinessHours } from "@/shared/types";
-import { format, parseISO, isToday, isPast, isSameDay, isSameMonth, addDays, subDays, addMonths, subMonths, addWeeks, subWeeks, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval } from 'date-fns';
+import { format, isToday, isPast, isSameDay, isSameMonth, addDays, addMonths, subMonths, addWeeks, subWeeks, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval } from 'date-fns';
 // ⚡ Native groupBy - avoids lodash dependency (not installed in prod)
 const groupBy = <T,>(arr: T[], key: keyof T): Record<string, T[]> =>
   arr.reduce((acc, item) => {
@@ -9,16 +8,15 @@ const groupBy = <T,>(arr: T[], key: keyof T): Record<string, T[]> =>
     (acc[group] = acc[group] || []).push(item);
     return acc;
   }, {} as Record<string, T[]>);
-import { Plus, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
+import { Plus, ChevronLeft, ChevronRight } from 'lucide-react';
 
-import { MobileAppointmentCard } from './MobileAppointmentCard';
+import { JobRow } from './JobRow';
 import type { ScheduleResource } from '@/components/schedule/CurbeeScheduleBoard';
 import { Button } from '@/components/ui/button';
-import { SegmentedControl } from '@/components/ui/setting-controls';
+import { ViewSegmentedControl } from '@/components/ui/ViewSegmentedControl';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
-import { Badge } from '@/components/ui/badge';
-import { getAppointmentStatusStyle } from './statusStyles';
+import { resolveStatusChip, statusToneClasses } from '@/lib/status-tone';
 import { combineDateAndTime, formatDateLabel } from '@/lib/datetime';
 
 type ViewMode = 'today' | 'week' | 'month';
@@ -40,22 +38,31 @@ interface MobileAppointmentViewProps {
   scheduleResources?: ScheduleResource[];
 }
 
-const FilterPill = ({ label, isActive, onClick }: { label: string, isActive: boolean, onClick: () => void }) => (
-  <Button
-    variant={isActive ? 'default' : 'outline'}
-    size="sm"
-    className={`rounded-md h-8 px-4 text-sm transition-all ${isActive ? 'bg-primary text-primary-foreground shadow' : 'bg-card/60 text-muted-foreground border-border/30 hover:bg-muted/30'}`}
+/**
+ * Status filter chip (design system §3.1): selected = navy fill, white
+ * text; unselected = white with a hairline border. One row, always visible,
+ * and it filters EVERY view (the old build only filtered Today).
+ */
+const FilterChip = ({ label, isActive, onClick }: { label: string; isActive: boolean; onClick: () => void }) => (
+  <button
+    type="button"
+    aria-pressed={isActive}
     onClick={onClick}
+    className={cn(
+      'h-9 shrink-0 rounded-full border px-3.5 text-sm font-semibold transition-colors',
+      isActive
+        ? 'border-navy bg-navy text-primary-foreground'
+        : 'border-border bg-card text-muted-foreground hover:text-foreground',
+    )}
   >
     {label}
-  </Button>
+  </button>
 );
 
 export const MobileAppointmentView = ({
   appointments,
   onSelectAppointment,
   onAddAppointment,
-  onEditAppointment,
   onDateChange,
   currentDate,
   onCompleteAppointment,
@@ -76,24 +83,27 @@ export const MobileAppointmentView = ({
     }
   };
 
+  const matchesFilter = (a: Appointment) => filterMode === 'all' || a.status === filterMode;
+
   // The list-shaped views are date-scoped by the switcher: Today shows
-  // today's appointments (the status chips then filter inside today),
-  // Week shows the week containing currentDate. Month renders its own grid.
+  // today's appointments, Week shows the week containing currentDate.
+  // The status filter applies inside BOTH (it previously applied to Today
+  // only, so Week silently ignored it). Month renders its own grid and
+  // applies the same filter per day.
   const listAppointments = useMemo(() => {
     if (viewMode === 'week') {
       const weekStart = startOfWeek(currentDate, { weekStartsOn: 0 });
       const weekEnd = endOfWeek(currentDate, { weekStartsOn: 0 });
       return appointments.filter(a => {
         const date = combineDateAndTime(a.scheduled_date, null);
-        return date !== null && date >= weekStart && date <= weekEnd;
+        return date !== null && date >= weekStart && date <= weekEnd && matchesFilter(a);
       });
     }
-    const todays = appointments.filter(a => {
+    return appointments.filter(a => {
       const date = combineDateAndTime(a.scheduled_date, null);
-      return date ? isToday(date) : false;
+      return date ? isToday(date) && matchesFilter(a) : false;
     });
-    if (filterMode === 'all') return todays;
-    return todays.filter(a => a.status === filterMode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [appointments, viewMode, filterMode, currentDate]);
 
   const groupedAppointments = useMemo(() => {
@@ -129,37 +139,28 @@ export const MobileAppointmentView = ({
   }, [groupedAppointments]);
 
   const renderAppointmentList = (emptyMessage = "No appointments found for this filter.") => {
-    const dayColors = [
-      'border-red-400', 'border-sky-400', 'border-green-400', 'border-yellow-400', 'border-indigo-400', 'border-purple-400', 'border-pink-400',
-    ];
-    const dayBgColors = [
-      'bg-red-400/10', 'bg-sky-400/10', 'bg-green-400/10', 'bg-yellow-400/10', 'bg-indigo-400/10', 'bg-purple-400/10', 'bg-pink-400/10',
-    ];
-
     return (
       <div className="pb-[calc(var(--mobile-nav-height)+env(safe-area-inset-bottom)+1rem)] md:max-h-[calc(100dvh-220px)] md:overflow-y-auto md:pb-4">
-        <div className="p-4 space-y-6">
+        <div className="space-y-6 p-4">
           {sortedGroupKeys.length > 0 ? (
             sortedGroupKeys.map(date => {
               const parsedDate = combineDateAndTime(date, null);
               if (!parsedDate) return null;
-              const dayOfMonth = parsedDate.getDate();
-              const colorClass = dayColors[dayOfMonth % dayColors.length];
-              const bgColorClass = dayBgColors[dayOfMonth % dayBgColors.length];
+              const count = groupedAppointments[date].length;
 
               return (
-                <div key={date} className={`p-4 rounded-lg ${bgColorClass} border-l-4 ${colorClass}`}>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="text-lg font-semibold tracking-wide text-card-foreground">
-                      {formatDateLabel(parsedDate, "EEEE, MMM d", "Date unavailable")}
+                <section key={date}>
+                  <div className="mb-3 flex items-baseline justify-between gap-3">
+                    <h3 className="font-display text-base font-bold text-foreground">
+                      {isToday(parsedDate) ? 'Today · ' : ''}{formatDateLabel(parsedDate, "EEE, MMM d", "Date unavailable")}
                     </h3>
                     <span className="text-sm text-muted-foreground">
-                      {groupedAppointments[date].length} Appointments
+                      {count} {count === 1 ? 'appointment' : 'appointments'}
                     </span>
                   </div>
-                  <div className="space-y-4">
+                  <div className="space-y-3">
                     {groupedAppointments[date].map((app: Appointment) => (
-                      <MobileAppointmentCard
+                      <JobRow
                         key={app.id}
                         appointment={app}
                         onClick={onSelectAppointment}
@@ -168,11 +169,11 @@ export const MobileAppointmentView = ({
                       />
                     ))}
                   </div>
-                </div>
+                </section>
               );
             })
           ) : (
-            <div className="text-center py-20">
+            <div className="py-20 text-center">
               <p className="text-muted-foreground">{emptyMessage}</p>
             </div>
           )}
@@ -180,22 +181,45 @@ export const MobileAppointmentView = ({
       </div>
     );
   };
-  
+
    const renderWeekView = () => {
      const weekStart = startOfWeek(currentDate, { weekStartsOn: 0 });
      const weekEnd = endOfWeek(currentDate, { weekStartsOn: 0 });
+     const weekDays = eachDayOfInterval({ start: weekStart, end: weekEnd });
      return (
-       <div className="flex flex-col h-full">
-         <div className="flex items-center justify-between p-4 border-b border-border/50">
-           <Button variant="ghost" size="icon" onClick={() => onDateChange(subWeeks(currentDate, 1))}>
+       <div className="flex h-full flex-col">
+         <div className="flex items-center justify-between border-b border-border p-4">
+           <Button variant="ghost" size="icon" onClick={() => onDateChange(subWeeks(currentDate, 1))} aria-label="Previous week">
              <ChevronLeft />
            </Button>
-           <h2 className="text-lg font-semibold">
+           <h2 className="font-display text-lg font-bold">
              {format(weekStart, "MMM d")} – {format(weekEnd, "MMM d, yyyy")}
            </h2>
-           <Button variant="ghost" size="icon" onClick={() => onDateChange(addWeeks(currentDate, 1))}>
+           <Button variant="ghost" size="icon" onClick={() => onDateChange(addWeeks(currentDate, 1))} aria-label="Next week">
              <ChevronRight />
            </Button>
+         </div>
+         <div className="grid grid-cols-7 gap-1 border-b border-border px-3 py-2">
+           {weekDays.map(day => {
+             const selected = isSameDay(day, currentDate);
+             const today = isToday(day);
+             return (
+               <button
+                 key={day.toISOString()}
+                 type="button"
+                 onClick={() => onDateChange(day)}
+                 aria-pressed={selected}
+                 className={cn(
+                   'flex flex-col items-center gap-0.5 rounded-xl py-1.5 text-xs font-semibold transition-colors',
+                   selected ? 'bg-primary-action text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+                   !selected && today && 'text-primary ring-1 ring-inset ring-primary',
+                 )}
+               >
+                 <span>{format(day, "EEE")[0]}</span>
+                 <span className="font-display text-sm font-bold">{format(day, "d")}</span>
+               </button>
+             );
+           })}
          </div>
          <div className="flex-1 overflow-y-auto">
            {renderAppointmentList("No appointments this week.")}
@@ -206,7 +230,6 @@ export const MobileAppointmentView = ({
 
    const renderMonthView = () => {
      const monthStart = startOfMonth(currentDate);
-     const monthEnd = endOfMonth(currentDate);
      const calendarStart = startOfWeek(monthStart, { weekStartsOn: 0 });
      const calendarDays = eachDayOfInterval({ start: calendarStart, end: endOfMonth(currentDate) });
      // Extend to fill complete weeks
@@ -217,23 +240,23 @@ export const MobileAppointmentView = ({
 
      const getAppointmentsForDay = (date: Date) => {
        const dateStr = format(date, "yyyy-MM-dd");
-       return appointments.filter(a => a.scheduled_date === dateStr);
+       return appointments.filter(a => a.scheduled_date === dateStr && matchesFilter(a));
      };
 
      return (
-       <div className="flex flex-col h-full">
-         <div className="flex items-center justify-between p-4 border-b border-border/50">
-           <Button variant="ghost" size="icon" onClick={() => onDateChange(subMonths(currentDate, 1))}>
+       <div className="flex h-full flex-col">
+         <div className="flex items-center justify-between border-b border-border p-4">
+           <Button variant="ghost" size="icon" onClick={() => onDateChange(subMonths(currentDate, 1))} aria-label="Previous month">
              <ChevronLeft />
            </Button>
-           <h2 className="text-lg font-semibold">{format(currentDate, "MMMM yyyy")}</h2>
-           <Button variant="ghost" size="icon" onClick={() => onDateChange(addMonths(currentDate, 1))}>
+           <h2 className="font-display text-lg font-bold">{format(currentDate, "MMMM yyyy")}</h2>
+           <Button variant="ghost" size="icon" onClick={() => onDateChange(addMonths(currentDate, 1))} aria-label="Next month">
              <ChevronRight />
            </Button>
          </div>
-         <div className="grid grid-cols-7 border-b border-border/50">
+         <div className="grid grid-cols-7 border-b border-border">
            {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(day => (
-             <div key={day} className="text-center text-xs font-medium text-muted-foreground py-2">
+             <div key={day} className="py-2 text-center text-xs font-semibold text-muted-foreground">
                {day}
              </div>
            ))}
@@ -249,9 +272,9 @@ export const MobileAppointmentView = ({
                  <div
                    key={day.toISOString()}
                    className={cn(
-                     "min-h-[80px] p-1 border-b border-r border-border/30 cursor-pointer hover:bg-muted/30 transition-colors",
-                     !isCurrentMonth && "opacity-40 bg-muted/10",
-                     isDayToday && "ring-2 ring-primary ring-inset"
+                     "min-h-20 cursor-pointer border-b border-r border-border/50 p-1 transition-colors hover:bg-secondary/60",
+                     !isCurrentMonth && "bg-secondary/40 opacity-40",
+                     isDayToday && "ring-2 ring-inset ring-primary"
                    )}
                    onClick={() => {
                      onDateChange(day);
@@ -259,36 +282,35 @@ export const MobileAppointmentView = ({
                    }}
                  >
                    <div className={cn(
-                     "text-xs font-medium mb-1",
-                     isDayToday && "text-primary font-bold"
+                     "mb-1 text-xs font-medium",
+                     isDayToday && "font-bold text-primary"
                    )}>
                      {format(day, "d")}
                    </div>
                    <div className="space-y-0.5">
-                     {dayAppts.slice(0, 2).map(a => (
-                      (() => {
-                        const statusStyle = getAppointmentStatusStyle(a.status);
-                        return (
-                       <div
-                         key={a.id}
-                         className={cn(
-                           "text-[10px] leading-tight px-1 py-0.5 rounded truncate",
-                           statusStyle.chipClass
-                         )}
-                         onClick={(e) => {
-                           e.stopPropagation();
-                           onSelectAppointment(a);
-                         }}
-                       >
-                         {a.scheduled_time?.slice(0, 5)} {a.title}
-                       </div>
-                        );
-                      })()
-                     ))}
+                     {dayAppts.slice(0, 2).map(a => {
+                       const chip = resolveStatusChip(a);
+                       const name = a.customer?.name || a.guest_name || 'Appointment';
+                       return (
+                         <div
+                           key={a.id}
+                           className={cn(
+                             "truncate rounded px-1 py-0.5 text-[11px] font-medium leading-tight",
+                             statusToneClasses(chip.tone).chip
+                           )}
+                           onClick={(e) => {
+                             e.stopPropagation();
+                             onSelectAppointment(a);
+                           }}
+                         >
+                           {a.scheduled_time?.slice(0, 5)} {name}
+                         </div>
+                       );
+                     })}
                      {dayAppts.length > 2 && (
-                       <Badge variant="secondary" className="text-[9px] h-4 px-1">
-                         +{dayAppts.length - 2}
-                       </Badge>
+                       <span className="inline-block rounded bg-secondary px-1 text-[11px] font-semibold text-muted-foreground">
+                         +{dayAppts.length - 2} more
+                       </span>
                      )}
                    </div>
                  </div>
@@ -301,15 +323,14 @@ export const MobileAppointmentView = ({
    };
 
   return (
-    <div className="h-full flex flex-col bg-background">
-      {/* View toggle + add — the page H1 lives in the app TopHeader; no duplicate header here. */}
-      <div className="flex shrink-0 items-center gap-2 bg-card/20 p-2">
+    <div className="flex h-full flex-col bg-background">
+      {/* View switcher + add — the page H1 lives in the app TopHeader; no duplicate header here. */}
+      <div className="flex shrink-0 items-center gap-2 p-2">
         <div className="min-w-0 flex-1">
-          <SegmentedControl
+          <ViewSegmentedControl
             label="Appointment view"
             value={viewMode}
             onChange={setViewMode}
-            selectedClassName="bg-primary text-primary-foreground shadow"
             options={[
               { value: "today", label: "Today" },
               { value: "week", label: "Week" },
@@ -317,27 +338,25 @@ export const MobileAppointmentView = ({
             ]}
           />
         </div>
-        <Button size="icon" onClick={() => onAddAppointment()} className="shrink-0 rounded-md" aria-label="Add appointment">
+        <Button size="icon" onClick={() => onAddAppointment()} className="shrink-0" aria-label="Add appointment">
           <Plus />
         </Button>
       </div>
-      
-      {viewMode === 'today' && (
-        <div className="shrink-0 border-b border-border/50 p-2">
-            <ScrollArea className="w-full whitespace-nowrap">
-                <div className="flex gap-2 pb-2 items-center">
-                  {(['all', 'confirmed', 'completed', 'cancelled'] as FilterMode[]).map(filter => (
-                    <FilterPill
-                      key={filter}
-                      label={filter.charAt(0).toUpperCase() + filter.slice(1)}
-                      isActive={filterMode === filter}
-                      onClick={() => setFilterMode(filter)}
-                    />
-                  ))}
-                </div>
-            </ScrollArea>
-        </div>
-      )}
+
+      <div className="shrink-0 border-b border-border px-2 pb-2">
+        <ScrollArea className="w-full whitespace-nowrap">
+          <div className="flex items-center gap-2 pb-1">
+            {(['all', 'confirmed', 'completed', 'cancelled'] as FilterMode[]).map(filter => (
+              <FilterChip
+                key={filter}
+                label={filter.charAt(0).toUpperCase() + filter.slice(1)}
+                isActive={filterMode === filter}
+                onClick={() => setFilterMode(filter)}
+              />
+            ))}
+          </div>
+        </ScrollArea>
+      </div>
 
       <div className="flex-1">
         {viewMode === 'today' ? renderAppointmentList() : viewMode === 'month' ? renderMonthView() : renderWeekView()}

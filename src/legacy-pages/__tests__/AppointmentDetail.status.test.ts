@@ -1,65 +1,65 @@
-import { resolveAppointmentStatusStyle } from "@/legacy-pages/AppointmentDetail";
-import { statusBadgeClasses } from "@/lib/statusStyles";
+import { resolveStatusChip } from "@/lib/status-tone";
 
-// Redesign map A1 / friction F-6: the appointment detail page must never
-// present an unrecognized status as a real one. It previously defaulted
-// unknown statuses to "Confirmed", so a live in_progress job displayed as
-// Confirmed. These tests pin the truthful behavior until B1 lands the
-// canonical API-provided status labels.
+// Redesign map A1 / friction F-6, carried into Phase 1: the appointment
+// detail page must never present an unrecognized status as a real one. It
+// previously defaulted unknown statuses to "Confirmed", so a live
+// in_progress job displayed as Confirmed.
+//
+// A1 pinned that behavior to a page-local resolver. B1 has since landed
+// the canonical vocabulary (status_label + status_tone composed by the
+// server), and Phase 1 retired the local map: the detail header now
+// resolves through resolveStatusChip (@/lib/status-tone), which prefers
+// the server's composed fields and falls back to B1's own view. These
+// tests pin the same truthful claims against the new path.
 
-const REAL_LABELS = ["Pending Approval", "Confirmed", "Completed", "Cancelled", "No Show"];
+const REAL_LABELS = ["Pending", "Confirmed", "Completed", "Cancelled", "No-show"];
 
-describe("resolveAppointmentStatusStyle — known statuses keep their own label and tone", () => {
-  it("pending renders Pending Approval with the awaiting tone", () => {
-    const style = resolveAppointmentStatusStyle("pending");
-    expect(style.label).toBe("Pending Approval");
-    expect(style.className).toBe(`${statusBadgeClasses.awaiting} animate-pulse`);
+describe("detail status chip — known statuses keep their own label and tone", () => {
+  it("pending renders Pending with the warning tone", () => {
+    expect(resolveStatusChip({ status: "pending" })).toEqual({ label: "Pending", tone: "warning" });
   });
 
-  it("confirmed renders Confirmed with the scheduled tone", () => {
-    const style = resolveAppointmentStatusStyle("confirmed");
-    expect(style.label).toBe("Confirmed");
-    expect(style.className).toBe(statusBadgeClasses.scheduled);
+  it("confirmed renders Confirmed with the info tone", () => {
+    expect(resolveStatusChip({ status: "confirmed" })).toEqual({ label: "Confirmed", tone: "info" });
   });
 
-  it("completed renders Completed with the completed tone", () => {
-    const style = resolveAppointmentStatusStyle("completed");
-    expect(style.label).toBe("Completed");
-    expect(style.className).toBe(statusBadgeClasses.completed);
+  it("completed renders Completed with the success tone", () => {
+    expect(resolveStatusChip({ status: "completed" })).toEqual({ label: "Completed", tone: "success" });
   });
 
-  it("cancelled renders Cancelled with the critical tone", () => {
-    const style = resolveAppointmentStatusStyle("cancelled");
-    expect(style.label).toBe("Cancelled");
-    expect(style.className).toBe(statusBadgeClasses.critical);
+  it("cancelled renders Cancelled with the danger tone", () => {
+    expect(resolveStatusChip({ status: "cancelled" })).toEqual({ label: "Cancelled", tone: "danger" });
   });
 
-  it("no_show renders No Show with the awaiting tone", () => {
-    const style = resolveAppointmentStatusStyle("no_show");
-    expect(style.label).toBe("No Show");
-    expect(style.className).toBe(statusBadgeClasses.awaiting);
+  it("no_show renders No-show with the neutral tone", () => {
+    expect(resolveStatusChip({ status: "no_show" })).toEqual({ label: "No-show", tone: "neutral" });
+  });
+
+  it("the server's composed label and tone win over the raw status", () => {
+    expect(
+      resolveStatusChip({ status: "in_progress", status_label: "In progress", status_tone: "warning" }),
+    ).toEqual({ label: "In progress", tone: "warning" });
   });
 });
 
-describe("resolveAppointmentStatusStyle — unknown statuses render as themselves", () => {
-  it.each(["in_progress", "arrived", "en_route", "on_the_way", "some_future_status"])(
-    "%s renders its raw status as the label, never a real status label",
-    (status) => {
-      const style = resolveAppointmentStatusStyle(status);
-      expect(style.label).toBe(status);
-      expect(REAL_LABELS).not.toContain(style.label);
-    },
-  );
-
-  it("an in_progress job does NOT render as Confirmed (the live F-6 defect)", () => {
-    const style = resolveAppointmentStatusStyle("in_progress");
-    expect(style.label).not.toBe("Confirmed");
-    expect(style.className).not.toBe(statusBadgeClasses.scheduled);
+describe("detail status chip — unknown statuses render as themselves", () => {
+  it.each([
+    ["arrived", "Arrived"],
+    ["en_route", "En route"],
+    ["some_future_status", "Some future status"],
+  ])("%s renders as %s, never as a real status label", (status, label) => {
+    const chip = resolveStatusChip({ status });
+    expect(chip.label).toBe(label);
+    if (status === "some_future_status") {
+      expect(REAL_LABELS).not.toContain(chip.label);
+      expect(chip.tone).toBe("neutral");
+    }
   });
 
-  it("unknown statuses use the neutral muted tone, not any status tone", () => {
-    const style = resolveAppointmentStatusStyle("in_progress");
-    expect(style.className).toBe("bg-muted text-muted-foreground");
-    expect(Object.values(statusBadgeClasses)).not.toContain(style.className);
+  it("an in_progress job does NOT render as Confirmed (the live F-6 defect)", () => {
+    const chip = resolveStatusChip({ status: "in_progress" });
+    expect(chip.label).toBe("In progress");
+    expect(chip.label).not.toBe("Confirmed");
+    expect(chip.tone).toBe("warning");
   });
 });

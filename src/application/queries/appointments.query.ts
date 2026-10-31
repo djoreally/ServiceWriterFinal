@@ -4,6 +4,7 @@ import type { Appointment, BusinessHours, Customer, ServiceCatalogItem, Vehicle 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { nextApi } from "@/lib/nextApiClient";
+import { appointmentStatusView } from "@/lib/status-vocabulary";
 
 const customerApiSchema = z.object({
   id: z.string(), first_name: z.string().nullable().optional(), last_name: z.string().nullable().optional(),
@@ -28,6 +29,9 @@ const appointmentApiSchema = z.object({
   // B2/T-1: server-composed title fields (see @/lib/appointment-title).
   display_title: z.string().nullable().optional(), primary_service_name: z.string().nullable().optional(),
   confirmation_code: z.string().nullable().optional(),
+  // B1/T-9: server-composed status presentation (see @/lib/status-vocabulary).
+  status_label: z.string().nullable().optional(),
+  status_tone: z.enum(["neutral", "info", "success", "warning", "danger"]).nullable().optional(),
   customers: z.union([customerApiSchema, z.array(customerApiSchema)]).nullable().optional(),
 }).passthrough();
 
@@ -95,8 +99,13 @@ function mapAppointment(row: AppointmentApiRow, customerMap: Map<string, Custome
   // B2/T-1: the title is the server's composition (display_title) — the
   // client-side synthesis that used to live here is retired.
   const title = optionalString(row.display_title) ?? "Appointment";
+  // B1/T-9: the server's composed status presentation wins; B1's own pure
+  // view of the raw status is the fallback so label/tone can never drift.
+  const statusView = appointmentStatusView(row.status);
   return { id: row.id, title, display_title: title, primary_service_name: optionalString(row.primary_service_name) ?? null,
     confirmation_code: optionalString(row.confirmation_code) ?? null,
+    status_label: optionalString(row.status_label) ?? statusView.status_label,
+    status_tone: row.status_tone ?? statusView.status_tone,
     scheduled_date: start.date, scheduled_time: start.time, duration_minutes: duration, status: row.status,
     customer, vehicle, guest_name: guestName ?? customer?.name ?? null, guest_email: optionalString(metadata.guest_email) ?? customer?.email ?? null,
     guest_phone: optionalString(metadata.guest_phone) ?? customer?.phone ?? null, notes: row.notes ?? optionalString(metadata.notes),

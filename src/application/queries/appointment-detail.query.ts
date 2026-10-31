@@ -8,6 +8,7 @@ import { apiClient } from "@/lib/api-client";
 import { getCurrentAuthUser as resolveCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { nextApi } from "@/lib/nextApiClient";
+import { appointmentStatusView } from "@/lib/status-vocabulary";
 
 export async function getCurrentAuthUser() {
   const { data: { user } } = await resolveCurrentAuthUser();
@@ -36,6 +37,7 @@ export async function fetchAppointmentWithRelations(id: string, _userId: string)
     const row = response.data as Record<string, any> | null;
     if (!row) return { data: null, error: new Error("Appointment not found.") };
     const metadata = object(row.metadata);
+    const statusView = appointmentStatusView(row.status);
     const bookingOil = bookingOilSnapshot(metadata);
     const customerRow = one<Record<string, any>>(row.customers);
     const vehicleRow = one<Record<string, any>>(row.vehicles);
@@ -91,6 +93,10 @@ export async function fetchAppointmentWithRelations(id: string, _userId: string)
       // metadata synthesis that used to live here is retired.
       title: text(row.display_title) || "Appointment",
       display_title: text(row.display_title),
+      // B1/T-9: server-composed status presentation, with B1's own view of
+      // the raw status as the fallback (same table — no drift).
+      status_label: text(row.status_label) || statusView.status_label,
+      status_tone: text(row.status_tone) || statusView.status_tone,
       primary_service_name: text(row.primary_service_name),
       confirmation_code: text(row.confirmation_code),
       description: text(metadata.description) || row.notes || undefined,
