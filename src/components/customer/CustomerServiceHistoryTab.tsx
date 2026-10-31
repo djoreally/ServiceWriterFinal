@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { formatMoney } from "@/lib/financialMath";
+import { cleanHumanNotes } from "@/lib/human-notes";
 import { Button } from "@/components/ui/button";
 
 type ServiceRecord = CustomerServiceRecord;
@@ -108,6 +109,10 @@ export function CustomerServiceHistoryTab({ account }: Props) {
           {records.map((record) => {
             const date = parseISO(record.scheduled_date);
             const isExpanded = expandedId === record.id;
+            // Notes shown to the customer are the customer's words only —
+            // never system text stored on older records (website-push
+            // provenance, composed descriptions).
+            const humanNotes = cleanHumanNotes(record.notes);
 
             return (
               <Card key={record.id} className="border-border/50">
@@ -195,12 +200,12 @@ export function CustomerServiceHistoryTab({ account }: Props) {
                         </div>
                       )}
 
-                      {record.notes && (
+                      {humanNotes && (
                         <div>
                           <p className="text-sm font-medium text-muted-foreground mb-1">
                             Notes
                           </p>
-                          <p className="text-sm">{record.notes}</p>
+                          <p className="text-sm">{humanNotes}</p>
                         </div>
                       )}
 

@@ -48,6 +48,7 @@ import { AppointmentStatusChip } from "@/components/appointments/StatusToneChip"
 import { PaymentStateBand } from "@/components/appointments/PaymentStateBand";
 import { resolveStatusChip, statusToneClasses } from "@/lib/status-tone";
 import { realCustomerEmail } from "@/lib/contact-display";
+import { cleanHumanNotes } from "@/lib/human-notes";
 import {
   ArrowLeft,
   MapPin,
@@ -101,36 +102,6 @@ interface AppointmentDetailProps {
   overrideUserId?: string;
   technicianId?: string;
   allowDelete?: boolean;
-}
-
-function cleanHumanNotes(value?: string | null) {
-  if (!value) return "";
-  const lines = value.split(/\r?\n/);
-  const kept: string[] = [];
-  let suppressFilterBlock = false;
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) {
-      if (kept.length && kept[kept.length - 1] !== "") kept.push("");
-      continue;
-    }
-
-    if (/^(vehicles?|services?|payment):/i.test(line)) continue;
-    // System provenance from the website push ("Pushed from MOMS website
-    // booking <id>. Source: website. Website payment status: ...") is not a
-    // customer note — the Notes card shows customer notes only.
-    if (/^pushed from .*website booking\b/i.test(line)) continue;
-    if (/^filter match\s*\(/i.test(line)) {
-      suppressFilterBlock = true;
-      continue;
-    }
-    if (suppressFilterBlock && (/^•?\s*oil filter:/i.test(line) || /^\d{4}\s+/.test(line))) continue;
-    suppressFilterBlock = false;
-    kept.push(rawLine);
-  }
-
-  return kept.join("\n").trim();
 }
 
 /** 12px uppercase eyebrow — establishes context above a heading, never carries content alone. */
@@ -478,7 +449,11 @@ export const AppointmentDetail = ({
   const displayEmail = realCustomerEmail(customerEmail);
   const customerPhone = appointment.customer?.phone || appointment.guest_phone || null;
   const address = resolvedAddress || appointment.customer?.address || null;
-  const humanNotes = cleanHumanNotes(appointment.notes || appointment.description);
+  // Notes are the customer's words only (Ty's standing rule): clean the
+  // stored notes, and when nothing customer-written remains the Notes
+  // card simply doesn't render — the composed description ("… — booked
+  // on the MOMS website.") is system text and is never shown as a note.
+  const humanNotes = cleanHumanNotes(appointment.notes);
   // Website quote lock: for a website-pushed appointment the stored quote is
   // the total — no fee or tax recompute may move the displayed/charged amount
   // (see @/lib/price-lock).

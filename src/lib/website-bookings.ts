@@ -69,6 +69,11 @@ export interface WebsiteBooking {
   service: string;
   source_channel: string | null;
   status: string;
+  /** What the customer typed in the website booking form's notes field
+   * (the backend's bookings.notes — free-form customer text). This is the
+   * ONLY text a push may put in the appointment's notes. Absent/null when
+   * the customer wrote nothing or the backend payload predates the field. */
+  notes?: string | null;
   vehicle: WebsiteBookingVehicle | null;
   /** Every job on the booking. The top-level `service` / `vehicle` /
    * `quoted_total_usd` remain the first job's + the booking total. May be
@@ -354,10 +359,18 @@ export function appointmentDescription(booking: WebsiteBooking): string {
   return `${booking.service} for ${vehicleLabel(booking.vehicle)} — booked on the MOMS website.`;
 }
 
-export function staffNote(booking: WebsiteBooking): string {
-  const channel = booking.source_channel ?? "website";
-  const payment = booking.payment ?? "unknown";
-  return `Pushed from MOMS website booking ${booking.id}. Source: ${channel}. Website payment status: ${payment}.`;
+/**
+ * The appointment notes for a pushed booking: exactly what the customer
+ * entered on the website, trimmed — or null when they entered nothing.
+ * System provenance (booking id, source channel, website payment status)
+ * is NEVER written into notes; the push RPC records it in the
+ * appointment's metadata (website_booking_id / source_channel /
+ * website_payment_status) instead. (Ty's standing rule: notes are the
+ * customer's words only.)
+ */
+export function customerNotes(booking: WebsiteBooking): string | null {
+  const notes = (booking.notes ?? "").trim();
+  return notes ? notes : null;
 }
 
 // ---------------------------------------------------------------------------

@@ -243,6 +243,35 @@ describe("executeAutoPush (auto-push pipeline)", () => {
     expect(recordFailure).not.toHaveBeenCalled();
   });
 
+  it("push writes ONLY the customer's own notes into the appointment (Ty's rule)", async () => {
+    const b = booking({ notes: "  Gate code is 4242. Dog is friendly.  " });
+    const state = baseState({ unpushed: [b] });
+    const { supabase, rpcCalls } = wireState(state);
+
+    const result = await executeAutoPush(supabase, WS_ID, b.id);
+
+    expect(result.status).toBe("created");
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0].args.p_notes).toBe("Gate code is 4242. Dog is friendly.");
+  });
+
+  it("push writes NO notes when the customer entered none — never the provenance line", async () => {
+    const b = booking();
+    const state = baseState({ unpushed: [b] });
+    const { supabase, rpcCalls } = wireState(state);
+
+    const result = await executeAutoPush(supabase, WS_ID, b.id);
+
+    expect(result.status).toBe("created");
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0].args.p_notes).toBeNull();
+    expect(JSON.stringify(rpcCalls[0].args)).not.toMatch(/pushed from/i);
+    // Provenance still reaches the RPC as its own params (stored in
+    // appointment metadata by the RPC), just never as notes.
+    expect(rpcCalls[0].args.p_website_booking_id).toBe(b.id);
+    expect(rpcCalls[0].args.p_payment_status).toBe("paid");
+  });
+
   it("duplicate trigger (webhook retry): the second call returns already_pushed and creates nothing", async () => {
     const b = booking();
     const state = baseState({ unpushed: [b] });
