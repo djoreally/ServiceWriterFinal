@@ -89,6 +89,73 @@ describe("booking-link client quote lock migration", () => {
     });
   });
 
+  describe("survival under the invoice-sync triggers", () => {
+    // Production evidence (Bolton repair, 2026-10-31): AFTER triggers on
+    // appointments and appointment_items re-run the invoice sync on ANY
+    // write, and a non-locked appointment is re-priced to quote + fees
+    // with pricing_state forced to 'canonical'. These assertions pin why
+    // the locked representation survives every re-fire.
+    const lifecycleSql = readFileSync(
+      resolve(process.cwd(), "supabase/migrations/20260910110000_appointment_invoice_lifecycle_v1.sql"),
+      "utf8",
+    );
+
+    it("both sync triggers call sync_appointment_invoice_v1 by name (the function this migration replaces)", () => {
+      expect(lifecycleSql).toContain(
+        "create trigger appointments_sync_invoice_v1\nafter insert or update of customer_id, vehicle_id, starts_at, status, metadata",
+      );
+      expect(lifecycleSql).toContain(
+        "create trigger appointment_items_sync_invoice_v1\nafter insert or update or delete on public.appointment_items",
+      );
+      expect(lifecycleSql).toContain("perform public.sync_appointment_invoice_v1(new.id);");
+      expect(lifecycleSql).toContain(
+        "perform public.sync_appointment_invoice_v1(coalesce(new.appointment_id,old.appointment_id));",
+      );
+    });
+
+    it("the appointment carries the lock in its INSERT, so the insert-fired sync already sees it", () => {
+      // The appointments trigger fires on INSERT, before the bundled item
+      // exists; the lock must be in the inserted metadata itself.
+      const appointmentInsertAt = createSection.indexOf("insert into public.appointments(");
+      const itemInsertAt = createSection.indexOf("insert into public.appointment_items(");
+      expect(appointmentInsertAt).toBeGreaterThanOrEqual(0);
+      expect(itemInsertAt).toBeGreaterThan(appointmentInsertAt);
+      const appointmentInsert = createSection.slice(appointmentInsertAt, itemInsertAt);
+      expect(appointmentInsert).toContain("'client_quote_locked'");
+      expect(appointmentInsert).toContain("'estimated_cost', case when v_quote > 0 then v_quote else 0 end");
+    });
+
+    it("the locked money branch runs before the item-count branch, so the total is the quote even with zero items", () => {
+      const lockedBranch = syncSection.indexOf("if v_locked or v_client_locked then");
+      const itemsBranch = syncSection.indexOf("elsif v_item_count>0 then");
+      expect(lockedBranch).toBeGreaterThanOrEqual(0);
+      expect(itemsBranch).toBeGreaterThan(lockedBranch);
+    });
+
+    it("fee lines can never be generated for a locked appointment (fee variables are zeroed in the lock branch)", () => {
+      const lockBlock = syncSection.slice(
+        syncSection.indexOf("if v_locked or v_client_locked then"),
+        syncSection.indexOf("elsif v_item_count>0 then"),
+      );
+      expect(lockBlock).toContain("v_waste_fee:=0;");
+      expect(lockBlock).toContain("v_shop_fee:=0;");
+      expect(lockBlock).toContain("v_surcharge:=0;");
+      expect(lockBlock).toContain("v_tax:=0;");
+    });
+
+    it("the write-back is byte-stable under the lock, so the metadata-fired re-sync terminates", () => {
+      // The sync writes metadata only when it differs; under the lock the
+      // recomputed values equal the stored ones (estimated_cost = quote,
+      // tax 0, state preserved), so a subsequent appointment update
+      // re-fires the sync and lands on exactly the same invoice.
+      expect(syncSection).toContain("'estimated_cost',v_total");
+      expect(syncSection).toContain("'tax_amount',v_tax");
+      expect(syncSection).toContain(
+        "if coalesce(v_appt.metadata,'{}'::jsonb) is distinct from v_metadata then",
+      );
+    });
+  });
+
   describe("public_booking_record_payment_intent_v3", () => {
     it("reads the lock state and quote from the appointment", () => {
       expect(intentSection).toContain("a.metadata->>'pricing_state'");
