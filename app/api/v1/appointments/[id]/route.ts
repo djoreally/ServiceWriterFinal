@@ -7,7 +7,7 @@ import { syncAppointmentToGoogleCalendar } from "@/server/google-calendar/sync";
 import { after } from "next/server";
 import { z } from "zod";
 import { createHonoApp } from "@/server/hono/app";
-import { isWebsiteQuoteLocked } from "@/lib/price-lock";
+import { isQuoteLocked } from "@/lib/price-lock";
 
 const patchSchema = z.object({
   workspace_id: z.string().uuid(),
@@ -246,10 +246,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       ? current.metadata as Record<string, unknown>
       : {};
     const metadata = { ...existing };
-    // Website quote lock: on a locked appointment the price-bearing metadata
-    // keys are not writable through PATCH — the website quote stays the price
-    // (see @/lib/price-lock). Schedule, status, notes and guest fields still are.
-    const priceLocked = isWebsiteQuoteLocked(current);
+    // Quote lock (website push or booking-link client quote): on a locked
+    // appointment the price-bearing metadata keys are not writable through
+    // PATCH — the locked quote stays the price (see @/lib/price-lock).
+    // Schedule, status, notes and guest fields still are.
+    const priceLocked = isQuoteLocked(current);
     for (const key of compatibilityKeys) {
       if (priceLocked && (key === "estimated_cost" || key === "tax_amount" || key === "service_catalog_id")) continue;
       if (hasOwn(body, key)) metadata[key] = body[key] ?? null;

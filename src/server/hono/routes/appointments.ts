@@ -39,7 +39,7 @@ import {
 } from "@/server/payments/provider-sync";
 import { technicianJobUrl, withAppointmentContext } from "@/server/messaging/lifecycle-action-urls";
 import { createSupabaseAdminClient, createSupabaseBrowserClient, createSupabaseRequestClient } from "@/lib/supabase";
-import { isWebsiteQuoteLocked } from "@/lib/price-lock";
+import { isQuoteLocked } from "@/lib/price-lock";
 import { appointmentStatusView, invoiceStatusView, normalizeAppointmentStatus, paymentStatusView, resolveDispatchStatus, withAppointmentStatusView } from "@/lib/status-vocabulary";
 import { withAppointmentTitleFields } from "@/lib/appointment-title";
 import { resolvePrimaryServiceNames, resolveWorkspaceTimezone } from "@/server/appointments/title-resolution";
@@ -391,7 +391,7 @@ appointmentsRouter.patch("/v1/appointments/:id", async (c: Context) => {
   // Website quote lock: on a locked appointment the price-bearing metadata
   // keys are not writable through PATCH — the website quote stays the price
   // (see @/lib/price-lock). Schedule, status, notes and guest fields still are.
-  const priceLocked = isWebsiteQuoteLocked(current);
+  const priceLocked = isQuoteLocked(current);
   for (const key of compatibilityKeys) {
     if (priceLocked && (key === "estimated_cost" || key === "tax_amount" || key === "service_catalog_id")) continue;
     if (hasOwn(body, key)) metadata[key] = body[key] ?? null;
@@ -913,11 +913,12 @@ appointmentsRouter.put("/v1/appointment-items", async (c: Context) => {
     throw appointmentError ?? new Error("Appointment was not found in this workspace.");
   }
 
-  // Website quote lock: the appointment's single service line already carries
-  // the locked website quote. Never delete or supplement it with a
-  // catalog-priced line — that re-price is the edit-save inflation bug
-  // (see @/lib/price-lock). The sync is a no-op for locked appointments.
-  if (isWebsiteQuoteLocked(appointment)) {
+  // Quote lock (website push or booking-link client quote): the
+  // appointment's single service line already carries the locked quote.
+  // Never delete or supplement it with a catalog-priced line — that
+  // re-price is the edit-save inflation bug (see @/lib/price-lock). The
+  // sync is a no-op for locked appointments.
+  if (isQuoteLocked(appointment)) {
     return json({ data: null, price_locked: true });
   }
 
@@ -2748,12 +2749,12 @@ const appointmentServiceWriteSchema = z.object({
   added_at_service: z.boolean(),
 });
 
-// Website quote lock guard for the service-line write endpoints below: a
+// Quote lock guard for the service-line write endpoints below: a
 // locked appointment's service lines define its price, so they cannot be
 // added, edited, or removed in Service Writer (see @/lib/price-lock).
 function priceLockedError() {
   return json(
-    { error: { code: "price_locked", message: "This appointment carries a locked website quote, so its service lines cannot be changed in Service Writer." } },
+    { error: { code: "price_locked", message: "This appointment carries a locked quote, so its service lines cannot be changed in Service Writer." } },
     { status: 409 },
   );
 }
@@ -2765,7 +2766,7 @@ async function appointmentIsPriceLocked(db: any, workspaceId: string, appointmen
     .eq("workspace_id", workspaceId)
     .eq("id", appointmentId)
     .maybeSingle();
-  return Boolean(data && isWebsiteQuoteLocked(data));
+  return Boolean(data && isQuoteLocked(data));
 }
 
 // POST /v1/appointments/:id/services — add a service line to an appointment.

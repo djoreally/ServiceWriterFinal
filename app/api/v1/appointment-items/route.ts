@@ -1,5 +1,5 @@
 import { errorResponse, json, requireWorkspaceMember } from "@/server/api";
-import { isWebsiteQuoteLocked } from "@/lib/price-lock";
+import { isQuoteLocked } from "@/lib/price-lock";
 import { z } from "zod";
 
 const syncPrimaryServiceSchema = z.object({
@@ -53,11 +53,12 @@ export async function PUT(request: Request) {
       throw appointmentError ?? new Error("Appointment was not found in this workspace.");
     }
 
-    // Website quote lock: the appointment's single service line already
-    // carries the locked website quote. Never delete or supplement it with a
-    // catalog-priced line — that re-price is the edit-save inflation bug
-    // (see @/lib/price-lock). The sync is a no-op for locked appointments.
-    if (isWebsiteQuoteLocked(appointment)) {
+    // Quote lock (website push or booking-link client quote): the
+    // appointment's single service line already carries the locked quote.
+    // Never delete or supplement it with a catalog-priced line — that
+    // re-price is the edit-save inflation bug (see @/lib/price-lock). The
+    // sync is a no-op for locked appointments.
+    if (isQuoteLocked(appointment)) {
       return json({ data: null, price_locked: true });
     }
 
