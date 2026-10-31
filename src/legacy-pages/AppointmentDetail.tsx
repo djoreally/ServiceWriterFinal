@@ -100,6 +100,21 @@ const STATUS_STYLES: Record<string, { className: string; label: string }> = {
   no_show: { className: statusBadgeClasses.awaiting, label: "No Show" },
 };
 
+const UNKNOWN_STATUS_CLASSNAME = "bg-muted text-muted-foreground";
+
+/**
+ * Resolves the badge presentation for an appointment status. A known status
+ * renders its curated label and tone; an unrecognized status renders as
+ * itself — the raw status as its label, in a neutral tone — and never as
+ * another status. (Redesign map A1 / friction F-6: this page previously
+ * defaulted unknown statuses to "Confirmed", so a live in_progress or
+ * arrived job displayed as Confirmed. Canonical API-provided labels are
+ * B1's job; until then the truthful minimum is to show the status itself.)
+ */
+export function resolveAppointmentStatusStyle(status: string): { className: string; label: string } {
+  return STATUS_STYLES[status] ?? { className: UNKNOWN_STATUS_CLASSNAME, label: status };
+}
+
 interface AppointmentDetailProps {
   embedded?: boolean;
   overrideUserId?: string;
@@ -473,7 +488,7 @@ export const AppointmentDetail = ({
     );
   }
 
-  const statusStyle = STATUS_STYLES[appointment.status] || STATUS_STYLES.confirmed;
+  const statusStyle = resolveAppointmentStatusStyle(appointment.status);
   const customerName = appointment.guest_name || appointment.customer?.name || "Customer";
   const customerEmail = appointment.customer?.email || appointment.guest_email || null;
   const customerPhone = appointment.customer?.phone || appointment.guest_phone || null;
