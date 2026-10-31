@@ -1,7 +1,12 @@
 import { bankersRound, dollarsToCents, toDollars, type Cents } from "@/lib/financialMath";
 
 export type LedgerPaymentStatus = "pending" | "processing" | "succeeded" | "paid" | "failed" | "refunded" | "partially_refunded" | string;
-export type LedgerInvoiceStatus = "none" | "draft" | "issued" | "partial" | "paid" | "void";
+// B1/T-10: the invoice axis speaks the canonical API vocabulary
+// (@/lib/status-vocabulary) — "partially_paid", never the legacy "partial".
+// "none" is the domain-only marker for "no invoice exists"; it is not a
+// stored or API-emitted invoice status. (LedgerSettlementStatus below is a
+// DIFFERENT axis — settlement composition — and keeps its own values.)
+export type LedgerInvoiceStatus = "none" | "draft" | "issued" | "partially_paid" | "paid" | "void";
 export type LedgerSettlementStatus = "unpaid" | "partial" | "paid" | "refunded";
 
 export interface LedgerPayment {
@@ -71,6 +76,6 @@ export function deriveSettlementStatus(summary: FinancialSummary): LedgerSettlem
 export function deriveInvoiceStatus(summary: FinancialSummary): LedgerInvoiceStatus {
   if (summary.invoicedCents <= 0) return "none";
   if (summary.collectedCents <= 0) return "issued";
-  if (summary.outstandingCents > 0) return "partial";
+  if (summary.outstandingCents > 0) return "partially_paid";
   return "paid";
 }

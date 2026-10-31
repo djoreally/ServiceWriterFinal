@@ -14,6 +14,7 @@
  */
 import { z } from "zod";
 import { json } from "@/server/api";
+import { normalizeAppointmentStatus } from "@/lib/status-vocabulary";
 
 // ---------------------------------------------------------------------------
 // Input schema — identical to the former route-local appointmentSchema.
@@ -325,7 +326,8 @@ export async function bookAppointmentCore(
       starts_at: body.starts_at,
       ends_at: body.ends_at,
       source: body.source,
-      status: body.status as any,
+      // B1/T-9: bookings land in the canonical vocabulary at creation.
+      status: (normalizeAppointmentStatus(body.status) ?? body.status) as any,
       notes: body.notes ?? null,
       created_by: opts.createdBy ?? null,
       metadata: compatibilityMetadata(body),

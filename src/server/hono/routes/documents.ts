@@ -18,6 +18,7 @@ import { ApiError, json, paginationSchema } from "@/server/api";
 import type { Database } from "@/integrations/supabase/types.production";
 import { requireAuth, requireWorkspaceAuth } from "@/server/hono/middleware/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase";
+import { normalizeInvoiceStatus, withInvoiceStatusView } from "@/lib/status-vocabulary";
 import { logMutation } from "@/server/audit";
 import { buildInvoiceSendEmailHtml } from "@/server/messaging/invoice-email";
 import { dispatchInvoiceTransition } from "@/server/messaging/invoice-events";
@@ -134,7 +135,7 @@ documentsRouter.get("/v1/invoices", async (c) => {
     .order("created_at", { ascending: false })
     .range(offset, offset + limit - 1);
   if (error) throw error;
-  return json({ data: data ?? [], pagination: { limit, offset } });
+  return json({ data: (data ?? []).map((row) => withInvoiceStatusView(row)), pagination: { limit, offset } });
 });
 
 documentsRouter.post("/v1/invoices", async (c) => {
@@ -221,7 +222,7 @@ documentsRouter.post("/v1/invoices", async (c) => {
     entityId: id,
     after: invoice,
   });
-  return json({ data: invoice }, { status: 201 });
+  return json({ data: withInvoiceStatusView(invoice) }, { status: 201 });
 });
 
 // ---------------------------------------------------------------------------
@@ -621,11 +622,11 @@ function isoOptionalDateTime(value?: string | null): string | null | undefined {
   return value ? new Date(`${value}T00:00:00.000Z`).toISOString() : null;
 }
 
-function canonicalStatus(value?: z.infer<typeof invoiceStatusInputSchema>) {
-  if (value === "sent") return "issued";
-  if (value === "partial") return "partially_paid";
-  return value;
-}
+// B1/T-10: the dialect collapse lives in the shared vocabulary module
+// (src/lib/status-vocabulary.ts) — `sent`→`issued`, `partial`→`partially_paid`.
+// (Undefined stays undefined: the PATCH handler treats it as "not provided".)
+const canonicalStatus = (value?: z.infer<typeof invoiceStatusInputSchema>) =>
+  normalizeInvoiceStatus(value) ?? undefined;
 
 function mergeMetadata(current: unknown, patch: Record<string, unknown>) {
   const base = current && typeof current === "object" && !Array.isArray(current) ? current as Record<string, unknown> : {};
@@ -699,7 +700,7 @@ documentsRouter.get("/v1/invoices/:id", async (c) => {
     .eq("workspace_id", workspaceId)
     .single();
   if (error) throw error;
-  return json({ data });
+  return json({ data: withInvoiceStatusView(data) });
 });
 
 documentsRouter.patch("/v1/invoices/:id", async (c) => {
@@ -765,7 +766,7 @@ documentsRouter.patch("/v1/invoices/:id", async (c) => {
       before: current,
       after: data,
     });
-    return json({ data });
+    return json({ data: withInvoiceStatusView(data) });
   }
 
   const { data, error } = await supabase.from("invoices")
@@ -787,7 +788,7 @@ documentsRouter.patch("/v1/invoices/:id", async (c) => {
     before: current,
     after: data,
   });
-  return json({ data });
+  return json({ data: withInvoiceStatusView(data) });
 });
 
 documentsRouter.delete("/v1/invoices/:id", async (c) => {
@@ -819,7 +820,7 @@ documentsRouter.delete("/v1/invoices/:id", async (c) => {
     before,
     after: data,
   });
-  return json({ data });
+  return json({ data: withInvoiceStatusView(data) });
 });
 
 // ---------------------------------------------------------------------------
@@ -843,10 +844,10 @@ documentsRouter.post("/v1/invoices/:id/send", async (c) => {
   const lines = [...(invoice.invoice_lines ?? [])].sort((a, b) => Number(a.sort_order ?? 0) - Number(b.sort_order ?? 0)); const lineText = lines.length ? lines.map((line) => `${line.description} — ${line.quantity} × ${formatMoney(line.unit_price, currency)} = ${formatMoney(lineAmount(line.quantity, line.unit_price), currency)}`).join("\n") : "No line items"; const paymentSummary = isPaid ? `Paid: ${formatMoney(paid, currency)}\nBalance due: ${formatMoney(0, currency)}\nStatus: PAID IN FULL` : isPartial ? `Paid: ${formatMoney(paid, currency)}\nBalance due: ${formatMoney(balance, currency)}` : `Balance due: ${formatMoney(balance, currency)}`; const dueText = !isPaid && invoice.due_at ? `\nDue: ${new Date(invoice.due_at).toLocaleDateString("en-US")}` : ""; const plainText = `${intro}\n\nInvoice ${invoice.invoice_number}\n${lineText}\n\nSubtotal: ${formatMoney(invoice.subtotal, currency)}\nTax: ${formatMoney(invoice.tax_total, currency)}\nTotal: ${formatMoney(total, currency)}\n${paymentSummary}${dueText}`;
   const html = buildInvoiceSendEmailHtml({ businessName: workspace.name, intro, invoiceNumber: String(invoice.invoice_number), lines: lines.map((line) => ({ description: String(line.description ?? ""), quantity: String(line.quantity ?? ""), unitPrice: formatMoney(line.unit_price, currency), amount: formatMoney(lineAmount(line.quantity, line.unit_price), currency) })), subtotal: formatMoney(invoice.subtotal, currency), tax: formatMoney(invoice.tax_total, currency), total: formatMoney(total, currency), paid: formatMoney(paid, currency), balanceDue: formatMoney(isPaid ? 0 : balance, currency), isPaid });
   const sent = await sendLifecycleEmail({ workspaceId: body.workspace_id, recipientEmail: recipient, customerId: customer?.id ?? null, templateKey: isPaid ? "invoice_and_payment_sequence.payment_received" : "invoice_and_payment_sequence.invoice_created", idempotencyKey: `invoice-send:${invoice.id}:${Date.now()}:${crypto.randomUUID()}`, variables: { "business.name": workspace.name, "invoice.number": invoice.invoice_number, "invoice.total": formatMoney(total, currency), "invoice.balance_due": formatMoney(balance, currency), "invoice.status": String(invoice.status), "customer.full_name": customerName }, metadata: { invoiceId: invoice.id, source: "invoice_send_dialog", invoiceStatus: String(invoice.status), amountPaid: paid.toFixed(2), balanceDue: balance.toFixed(2) }, renderedOverride: { subject, text: plainText, html, purpose: "transactional", fromName: workspace.name } });
-  if (sent.status === "suppressed") return json({ data: { recipient, delivery_status: "suppressed", provider: sent.providerName, provider_message_id: sent.providerMessageId, invoice_status: invoice.status, amount_paid: paid, balance_due: balance } });
+  if (sent.status === "suppressed") return json({ data: { recipient, delivery_status: "suppressed", provider: sent.providerName, provider_message_id: sent.providerMessageId, invoice_status: normalizeInvoiceStatus(invoice.status) ?? invoice.status, amount_paid: paid, balance_due: balance } });
   const sentAt = new Date().toISOString(); const nextStatus = invoice.status === "draft" ? "issued" : invoice.status; const nextMetadata = { ...metadata, last_sent_at: sentAt, last_sent_to: recipient.toLowerCase(), last_sent_provider: sent.providerName, last_sent_provider_message_id: sent.providerMessageId }; const invoicePatch: Record<string, unknown> = { status: nextStatus, metadata: nextMetadata, updated_at: sentAt }; if (invoice.status === "draft") invoicePatch.issued_at = sentAt;
   const { error: invoiceUpdateError } = await (supabase.from("invoices") as any).update(invoicePatch).eq("workspace_id", body.workspace_id).eq("id", invoice.id); if (invoiceUpdateError) console.error("[invoice-send] email sent but invoice delivery state update failed", invoiceUpdateError);
-  return json({ data: { recipient, delivery_status: sent.status, provider: sent.providerName, provider_message_id: sent.providerMessageId, invoice_status: nextStatus, amount_paid: paid, balance_due: balance } });
+  return json({ data: { recipient, delivery_status: sent.status, provider: sent.providerName, provider_message_id: sent.providerMessageId, invoice_status: normalizeInvoiceStatus(nextStatus) ?? nextStatus, amount_paid: paid, balance_due: balance } });
 });
 
 // ---------------------------------------------------------------------------

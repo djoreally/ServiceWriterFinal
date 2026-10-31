@@ -70,7 +70,7 @@ export type JobRuntime = {
     paidCents: number
     refundedCents: number
     balanceCents: number
-    invoiceStatus: 'none' | 'draft' | 'issued' | 'partial' | 'paid' | 'void'
+    invoiceStatus: 'none' | 'draft' | 'issued' | 'partially_paid' | 'paid' | 'void'
     paymentStatus: 'unpaid' | 'partial' | 'paid' | 'refunded'
   }
 
