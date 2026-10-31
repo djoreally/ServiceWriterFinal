@@ -25,6 +25,9 @@ const appointmentApiSchema = z.object({
   id: z.string(), customer_id: z.string().nullable().optional(), vehicle_id: z.string().nullable().optional(),
   starts_at: z.string(), ends_at: z.string(), status: z.string(), assigned_user_id: z.string().nullable().optional(),
   source: z.string(), notes: z.string().nullable().optional(), metadata: z.unknown().optional(),
+  // B2/T-1: server-composed title fields (see @/lib/appointment-title).
+  display_title: z.string().nullable().optional(), primary_service_name: z.string().nullable().optional(),
+  confirmation_code: z.string().nullable().optional(),
   customers: z.union([customerApiSchema, z.array(customerApiSchema)]).nullable().optional(),
 }).passthrough();
 
@@ -89,9 +92,12 @@ function mapAppointment(row: AppointmentApiRow, customerMap: Map<string, Custome
   const start = localDateTime(row.starts_at, timezone);
   const duration = Math.max(15, Math.round((Date.parse(row.ends_at) - Date.parse(row.starts_at)) / 60000));
   const guestName = optionalString(metadata.guest_name);
-  const vehicleLabel = vehicle ? `${vehicle.year} ${vehicle.make} ${vehicle.model}` : "Vehicle";
-  const title = optionalString(metadata.title) ?? optionalString(metadata.service_name) ?? (guestName ? `${guestName} — ${vehicleLabel}` : customer ? `${customer.name} — ${vehicleLabel}` : vehicleLabel);
-  return { id: row.id, title, scheduled_date: start.date, scheduled_time: start.time, duration_minutes: duration, status: row.status,
+  // B2/T-1: the title is the server's composition (display_title) — the
+  // client-side synthesis that used to live here is retired.
+  const title = optionalString(row.display_title) ?? "Appointment";
+  return { id: row.id, title, display_title: title, primary_service_name: optionalString(row.primary_service_name) ?? null,
+    confirmation_code: optionalString(row.confirmation_code) ?? null,
+    scheduled_date: start.date, scheduled_time: start.time, duration_minutes: duration, status: row.status,
     customer, vehicle, guest_name: guestName ?? customer?.name ?? null, guest_email: optionalString(metadata.guest_email) ?? customer?.email ?? null,
     guest_phone: optionalString(metadata.guest_phone) ?? customer?.phone ?? null, notes: row.notes ?? optionalString(metadata.notes),
     description: optionalString(metadata.description) ?? row.notes ?? undefined, assigned_technician_id: row.assigned_user_id ?? null,

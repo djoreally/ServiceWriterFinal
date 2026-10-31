@@ -382,6 +382,83 @@ describe("appointments router", () => {
     });
   });
 
+  describe("B2 server-composed display_title (T-1)", () => {
+    const APPT_ID_2 = "990e8400-e29b-41d4-a716-446655440002";
+
+    it("GET list composes display_title + primary_service_name + confirmation_code per row", async () => {
+      db["workspaces:single"] = { data: { timezone: "America/New_York" }, error: null };
+      db.appointments = {
+        data: [
+          {
+            id: APPT_ID,
+            status: "confirmed",
+            starts_at: "2026-10-30T14:00:00.000Z",
+            confirmation_code: "78361AF6",
+            customers: { first_name: "Laurie", last_name: "Buckman" },
+            vehicles: { year: 2020, make: "Jaguar", model: "F-PACE" },
+            metadata: {},
+          },
+          {
+            id: APPT_ID_2,
+            status: "confirmed",
+            starts_at: "2026-10-31T15:00:00.000Z",
+            customers: null,
+            vehicles: { year: 2015, make: "Cadillac", model: "SRX" },
+            metadata: { guest_name: "Micheal Holmes", service_name: "Full Synthetic Oil Change" },
+          },
+        ],
+        error: null,
+      };
+      // The primary service is the FIRST service line per appointment.
+      db.appointment_items = {
+        data: [
+          { appointment_id: APPT_ID, description: "Full Synthetic Oil Change", sort_order: 0 },
+          { appointment_id: APPT_ID, description: "Wiper Blade Replacement", sort_order: 1 },
+        ],
+        error: null,
+      };
+      const res = await appointmentsRouter.request(
+        `/v1/appointments?workspace_id=${WS_ID}&limit=10&offset=0`,
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      // The truth table's canonical composition, in the workspace timezone.
+      expect(body.data[0].display_title).toBe("Laurie Buckman — Fri, Oct 30 · 10:00 AM");
+      expect(body.data[0].primary_service_name).toBe("Full Synthetic Oil Change");
+      expect(body.data[0].confirmation_code).toBe("78361AF6");
+      // Guest job: guest name wins over the vehicle; service from metadata
+      // when the job has no service lines.
+      expect(body.data[1].display_title).toBe("Micheal Holmes — Sat, Oct 31 · 11:00 AM");
+      expect(body.data[1].primary_service_name).toBe("Full Synthetic Oil Change");
+      expect(body.data[1].confirmation_code).toBeNull();
+    });
+
+    it("GET detail composes the title fields and never a UUID headline", async () => {
+      db["workspaces:single"] = { data: { timezone: "America/New_York" }, error: null };
+      db["appointments:single"] = {
+        data: {
+          id: APPT_ID,
+          status: "completed",
+          starts_at: "2026-10-30T14:00:00.000Z",
+          confirmation_code: "78361AF6",
+          customers: { first_name: "Laurie", last_name: "Buckman" },
+          vehicles: { year: 2025, make: "Subaru", model: "Crosstrek" },
+          metadata: { title: "STORED TITLE THAT MUST NOT WIN" },
+        },
+        error: null,
+      };
+      const res = await appointmentsRouter.request(
+        `/v1/appointments/${APPT_ID}?workspace_id=${WS_ID}`,
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.display_title).toBe("Laurie Buckman — Fri, Oct 30 · 10:00 AM");
+      expect(body.data.confirmation_code).toBe("78361AF6");
+      expect(body.data.display_title).not.toContain("STORED TITLE");
+      expect(body.data.display_title).not.toContain("990E8400");
+    });
+  });
+
   describe("Google Calendar auto-sync", () => {
     function seedConnectedUser(action = "created") {
       db["google_calendar_sync_tokens"] = {

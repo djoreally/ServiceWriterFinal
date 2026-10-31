@@ -87,7 +87,12 @@ export async function fetchAppointmentWithRelations(id: string, _userId: string)
 
     return { data: {
       ...row,
-      title: text(metadata.title) || text(metadata.service_name) || "Appointment",
+      // B2/T-1: the title is the server's composition (display_title) — the
+      // metadata synthesis that used to live here is retired.
+      title: text(row.display_title) || "Appointment",
+      display_title: text(row.display_title),
+      primary_service_name: text(row.primary_service_name),
+      confirmation_code: text(row.confirmation_code),
       description: text(metadata.description) || row.notes || undefined,
       scheduled_date: start.date, scheduled_time: start.time, duration_minutes: durationMinutes,
       customer, vehicle, service_catalog: serviceCatalog,

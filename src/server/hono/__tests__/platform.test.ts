@@ -188,6 +188,60 @@ describe("platform router", () => {
     });
   });
 
+  describe("GET /v1/platform/dashboard/cockpit-rows (B2/T-1)", () => {
+    it("composes display_title + confirmation_code on the cockpit's appointment rows", async () => {
+      db.workspace_members = {
+        data: [
+          { workspace_id: WS_ID, role: "owner", is_active: true, workspaces: { id: WS_ID, is_active: true } },
+        ],
+        error: null,
+      };
+      db["workspaces:single"] = { data: { timezone: "America/New_York" }, error: null };
+      db.appointments = {
+        data: [
+          {
+            id: "990e8400-e29b-41d4-a716-446655440001",
+            status: "confirmed",
+            starts_at: "2026-10-30T14:00:00.000Z",
+            confirmation_code: "78361AF6",
+            customers: { first_name: "Laurie", last_name: "Buckman" },
+            metadata: { title: "COCKPIT PRIVATE TITLE" },
+          },
+        ],
+        error: null,
+      };
+      db.service_records = { data: [], error: null };
+      db.invoices = { data: [], error: null };
+      db.appointment_items = {
+        data: [
+          { appointment_id: "990e8400-e29b-41d4-a716-446655440001", description: "Full Synthetic Oil Change", sort_order: 0 },
+        ],
+        error: null,
+      };
+      const bounds = new URLSearchParams({
+        today_start: "2026-10-30T04:00:00.000Z",
+        today_end: "2026-10-31T04:00:00.000Z",
+        yesterday_start: "2026-10-29T04:00:00.000Z",
+        yesterday_end: "2026-10-30T04:00:00.000Z",
+        week_start: "2026-10-26T04:00:00.000Z",
+        month_start: "2026-10-01T04:00:00.000Z",
+        year_start: "2026-01-01T05:00:00.000Z",
+        next7_end: "2026-11-07T05:00:00.000Z",
+        prev_month_start: "2026-09-01T04:00:00.000Z",
+        prev_month_mtd_end: "2026-09-30T04:00:00.000Z",
+      });
+      const res = await platformRouter.request(
+        `/v1/platform/dashboard/cockpit-rows?${bounds.toString()}`,
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.todayApptRows[0].display_title).toBe("Laurie Buckman — Fri, Oct 30 · 10:00 AM");
+      expect(body.todayApptRows[0].primary_service_name).toBe("Full Synthetic Oil Change");
+      expect(body.todayApptRows[0].confirmation_code).toBe("78361AF6");
+      expect(body.todayApptRows[0].display_title).not.toContain("COCKPIT PRIVATE TITLE");
+    });
+  });
+
   describe("route registration", () => {
     it("exposes the audit log endpoint", async () => {
       const res = await platformRouter.request(

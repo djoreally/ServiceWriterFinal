@@ -58,6 +58,12 @@ export interface ServiceCatalogItem {
 export interface Appointment {
   id: string;
   title: string;
+  // B2/T-1: server-composed job title fields (see @/lib/appointment-title).
+  // `title` mirrors `display_title` on mapped rows; the composed fields are
+  // the canonical source.
+  display_title?: string | null;
+  primary_service_name?: string | null;
+  confirmation_code?: string | null;
   scheduled_date: string;
   scheduled_time: string;
   duration_minutes: number;

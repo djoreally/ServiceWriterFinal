@@ -11,7 +11,10 @@ describe("Phase 3 Journey — Appointments & Dispatch", () => {
     });
 
     await waitFor(() => {
-      const elements = screen.getAllByText(/Full Synthetic Oil Change/i);
+      // B2 (redesign truth T-1): list rows lead with the server-composed
+      // display_title ("Jane Doe — <date> · <time>"), not the retired
+      // stored-title synthesis that surfaced the service name here.
+      const elements = screen.getAllByText(/Jane Doe/);
       expect(elements.length).toBeGreaterThan(0);
     }, { timeout: 8_000 });
 
