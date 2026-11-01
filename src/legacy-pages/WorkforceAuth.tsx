@@ -5,10 +5,13 @@ import { ChevronRight, LogIn, UserPlus } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { signInWithPassword, signUpWithEmail } from "@/application/commands/auth.command";
+import { provisionOwnerWorkspace } from "@/application/commands/workspace-provisioning.command";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PRIVACY_POLICY_PATH, TERMS_OF_SERVICE_PATH } from "@/lib/legal";
 import { supabase } from "@/integrations/supabase/client";
 import { useStartupRoutingStore } from "@/stores/startupRoutingStore";
 import { safeNextPath } from "@/lib/auth/next-path";
@@ -79,13 +82,16 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
   const [loading, setLoading] = useState(false);
   const [memberships, setMemberships] = useState<WorkforceMembership[] | null>(null);
   const [roleMismatch, setRoleMismatch] = useState(false);
+  const [noWorkspace, setNoWorkspace] = useState(false);
+  const [businessName, setBusinessName] = useState("");
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const [identityError, setIdentityError] = useState<string | null>(null);
 
   const isSignup = intent === "signup";
   const copy = VARIANT_COPY[variant];
   const autoRouteRef = useRef(false);
 
-  const activateWorkspace = useCallback(async (membership: WorkforceMembership) => {
+  const activateWorkspace = useCallback(async (membership: WorkforceMembership, destination?: string) => {
     const selected = await selectActiveWorkspace(membership.workspaceUserId, membership.role);
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
@@ -99,7 +105,7 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
         }));
       });
     }
-    navigate(nextPath ?? landingPathFor(selected), { replace: true });
+    navigate(destination ?? nextPath ?? landingPathFor(selected), { replace: true });
   }, [memberships, navigate, nextPath, queryClient]);
 
   const routeIdentity = useCallback(async () => {
@@ -107,6 +113,21 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
     await withOperationTimeout(
       (async () => {
         const identity = await fetchWorkforceIdentity();
+        if (identity.length === 0) {
+          // Authenticated, but this account belongs to no workspace at
+          // all. On the business door that is a self-serve owner whose
+          // provisioning never ran (an account created before self-serve
+          // activation, or a signup whose provisioning step was
+          // interrupted) — offer workspace creation instead of the
+          // role-mismatch dead end. Other doors keep the mismatch
+          // guidance: their roles are invited, never self-created.
+          if (variant === "business") {
+            setNoWorkspace(true);
+          } else {
+            setRoleMismatch(true);
+          }
+          return;
+        }
         const eligible = filterByVariant(identity, variant);
         if (eligible.length === 0) {
           setRoleMismatch(true);
@@ -147,8 +168,28 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
     const releaseAuthLock = beginAuthInteraction();
     try {
       if (isSignup) {
-        const result = await signUpWithEmail(email, password);
+        // Confirmation links land on the business sign-in door, where a
+        // confirmed-but-unprovisioned account is offered workspace
+        // creation — not on /dashboard, which has no workspace to open
+        // for the account yet.
+        const result = await signUpWithEmail(email, password, "/login/business");
         if (result.error) throw new Error(result.error);
+        const { data: { session: newSession } } = await supabase.auth.getSession();
+        if (!newSession) {
+          // Email confirmation is still pending. Provisioning runs at
+          // first sign-in through the create-workspace door.
+          toast.success("Business account created. Check your email to confirm it, then sign in to set up your workspace.");
+          navigate("/login/business", { replace: true });
+          return;
+        }
+        try {
+          await provisionOwnerWorkspace(businessName);
+        } catch (provisionError) {
+          console.error("[workforce-auth] workspace provisioning failed after signup", provisionError);
+          toast.error("Your account was created, but workspace setup didn't finish. Sign in to complete it.");
+          navigate("/login/business", { replace: true });
+          return;
+        }
         setIntendedPath("/settings?tab=business&setup=1");
         toast.success("Business account created. Add your business settings to continue.");
         navigate("/settings?tab=business&setup=1", { replace: true });
@@ -208,8 +249,41 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
     }
   };
 
+  const createWorkspace = async () => {
+    setLoading(true);
+    const releaseAuthLock = beginAuthInteraction();
+    try {
+      await withOperationTimeout(
+        provisionOwnerWorkspace(businessName),
+        IDENTITY_RESOLUTION_TIMEOUT_MS,
+        "Workspace setup took too long to respond.",
+      );
+      toast.success("Your workspace is ready. Add your business settings to continue.");
+      const identity = await fetchWorkforceIdentity();
+      const mine = identity.find((membership) => membership.role === "owner") ?? identity[0];
+      if (!mine) throw new Error("Workspace was created but could not be opened.");
+      setNoWorkspace(false);
+      await activateWorkspace(mine, "/settings?tab=business&setup=1");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Workspace setup didn't finish. Please try again.");
+    } finally {
+      releaseAuthLock();
+      setLoading(false);
+    }
+  };
+
+  const termsCheckbox = (
+    <div className="flex items-start gap-2">
+      <Checkbox id="workforce-terms" checked={termsAccepted} onCheckedChange={(checked) => setTermsAccepted(checked === true)} disabled={loading} />
+      <Label htmlFor="workforce-terms" className="text-sm font-normal leading-snug">
+        I agree to the <Link className="font-medium text-primary hover:underline" to={TERMS_OF_SERVICE_PATH}>Terms of Service</Link> and <Link className="font-medium text-primary hover:underline" to={PRIVACY_POLICY_PATH}>Privacy Policy</Link>.
+      </Label>
+    </div>
+  );
+
   if (identityError) return <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4"><Card className="w-full max-w-md"><CardHeader className="text-center"><CardTitle>We couldn&apos;t confirm your role</CardTitle><CardDescription>{identityError} For your security, Service Writer did not open a dashboard without a verified workspace role.</CardDescription></CardHeader><CardContent className="space-y-3"><Button className="w-full" disabled={loading} onClick={() => void retryIdentity()}>{loading ? "Checking…" : "Retry role check"}</Button><Button className="w-full" variant="outline" disabled={loading} onClick={() => { setIdentityError(null); void supabase.auth.signOut(); }}>Use a different account</Button></CardContent></Card></main>;
+  if (noWorkspace) return <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4"><Card className="w-full max-w-md"><CardHeader className="text-center"><CardTitle>Create your workspace</CardTitle><CardDescription>This account doesn&apos;t belong to a workspace yet. Create yours to get started — it starts on the free Basic plan, no card required.</CardDescription></CardHeader><CardContent className="space-y-4"><div className="space-y-2"><Label htmlFor="workforce-business-name-door">Business name</Label><Input id="workforce-business-name-door" type="text" autoComplete="organization" value={businessName} onChange={(event) => setBusinessName(event.target.value)} required /></div>{termsCheckbox}<Button className="w-full" disabled={loading || !termsAccepted || !businessName.trim()} onClick={() => void createWorkspace()}>{loading ? "Creating…" : "Create workspace"}</Button><Button className="w-full" variant="outline" disabled={loading} onClick={() => { setNoWorkspace(false); void supabase.auth.signOut(); }}>Use a different account</Button></CardContent></Card></main>;
   if (roleMismatch) return <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4"><Card className="w-full max-w-md"><CardHeader className="text-center"><CardTitle>Wrong sign-in for this account</CardTitle><CardDescription>This account isn't set up as {copy.badge}. Pick the option that matches your role and sign in there.</CardDescription></CardHeader><CardContent className="space-y-3"><Button className="w-full" onClick={() => navigate("/login")}>Choose a different role</Button><Button className="w-full" variant="outline" disabled={loading} onClick={() => { setRoleMismatch(false); void supabase.auth.signOut(); }}>Use a different account</Button></CardContent></Card></main>;
   if (memberships) return <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4"><Card className="w-full max-w-md"><CardHeader className="text-center"><CardTitle>Choose a workspace</CardTitle><CardDescription>You belong to more than one workspace. Choose where you want to work.</CardDescription></CardHeader><CardContent className="space-y-3">{memberships.map((membership) => <Button key={`${membership.workspaceUserId}-${membership.role}`} className="h-auto w-full justify-between p-4 text-left" variant="outline" disabled={loading} onClick={() => void chooseWorkspace(membership)}><span><span className="block font-semibold">{membership.workspaceName}</span><span className="text-xs capitalize text-muted-foreground">{membership.role}</span></span><ChevronRight className="h-4 w-4" /></Button>)}</CardContent></Card></main>;
-  return <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4"><Card className="w-full max-w-md"><CardHeader className="text-center"><div className="mx-auto mb-2 inline-flex items-center justify-center rounded-md bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-primary">{copy.badge}</div><div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">{isSignup ? <UserPlus className="h-6 w-6" /> : <LogIn className="h-6 w-6" />}</div><CardTitle>{isSignup ? "Create your business account" : copy.title}</CardTitle><CardDescription>{isSignup ? "For business owners creating a new Service Writer workspace." : copy.description}</CardDescription></CardHeader><CardContent>{!isSignup && <><Button className="w-full" type="button" variant="outline" disabled={loading} onClick={handleGoogleSignIn}>Continue with Google</Button><div className="my-4 flex items-center gap-3"><div className="h-px flex-1 bg-border" /><span className="text-xs uppercase text-muted-foreground">or</span><div className="h-px flex-1 bg-border" /></div></>}{!isSignup && DEMO_LOGIN_ENABLED && DEMO_EMAIL && DEMO_PASSWORD && <Button className="mb-4 w-full" type="button" variant="secondary" disabled={loading} onClick={() => { setEmail(DEMO_EMAIL); setPassword(DEMO_PASSWORD); toast.info("Demo credentials loaded. Press Sign in to continue."); }}>Use demo credentials</Button>}<form onSubmit={submit} className="space-y-4"><div className="space-y-2"><Label htmlFor="workforce-email">Email</Label><Input id="workforce-email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></div><div className="space-y-2"><Label htmlFor="workforce-password">Password</Label><Input id="workforce-password" type="password" autoComplete={isSignup ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} required minLength={isSignup ? 6 : undefined} /></div><Button className="w-full" type="submit" disabled={loading} aria-busy={loading} aria-live="polite">{loading ? "Please wait…" : isSignup ? "Create account" : "Sign in"}</Button></form>{!isSignup && <div className="mt-3 flex items-center justify-between text-sm"><Link className="text-primary hover:underline" to="/login/magic-link">Email me a magic link</Link><Link className="text-primary hover:underline" to="/forgot-password">Forgot password?</Link></div>}<div className="mt-4 text-center text-xs text-muted-foreground"><Link to="/login" className="hover:underline">← Choose a different role</Link></div><div className="mt-6 border-t pt-4 text-center text-sm text-muted-foreground">{isSignup ? <>Already have an account? <Link className="font-medium text-primary" to="/login">Sign in</Link></> : <>New business owner? <Link className="font-medium text-primary" to="/signup">Create an account</Link></>}</div></CardContent></Card></main>;
+  return <main className="flex min-h-screen items-center justify-center bg-muted/30 p-4"><Card className="w-full max-w-md"><CardHeader className="text-center"><div className="mx-auto mb-2 inline-flex items-center justify-center rounded-md bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-primary">{copy.badge}</div><div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">{isSignup ? <UserPlus className="h-6 w-6" /> : <LogIn className="h-6 w-6" />}</div><CardTitle>{isSignup ? "Create your business account" : copy.title}</CardTitle><CardDescription>{isSignup ? "For business owners creating a new Service Writer workspace." : copy.description}</CardDescription></CardHeader><CardContent>{!isSignup && <><Button className="w-full" type="button" variant="outline" disabled={loading} onClick={handleGoogleSignIn}>Continue with Google</Button><div className="my-4 flex items-center gap-3"><div className="h-px flex-1 bg-border" /><span className="text-xs uppercase text-muted-foreground">or</span><div className="h-px flex-1 bg-border" /></div></>}{!isSignup && DEMO_LOGIN_ENABLED && DEMO_EMAIL && DEMO_PASSWORD && <Button className="mb-4 w-full" type="button" variant="secondary" disabled={loading} onClick={() => { setEmail(DEMO_EMAIL); setPassword(DEMO_PASSWORD); toast.info("Demo credentials loaded. Press Sign in to continue."); }}>Use demo credentials</Button>}<form onSubmit={submit} className="space-y-4">{isSignup && <div className="space-y-2"><Label htmlFor="workforce-business-name">Business name</Label><Input id="workforce-business-name" type="text" autoComplete="organization" value={businessName} onChange={(event) => setBusinessName(event.target.value)} required /></div>}<div className="space-y-2"><Label htmlFor="workforce-email">Email</Label><Input id="workforce-email" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></div><div className="space-y-2"><Label htmlFor="workforce-password">Password</Label><Input id="workforce-password" type="password" autoComplete={isSignup ? "new-password" : "current-password"} value={password} onChange={(event) => setPassword(event.target.value)} required minLength={isSignup ? 6 : undefined} /></div>{isSignup && termsCheckbox}<Button className="w-full" type="submit" disabled={loading || (isSignup && (!termsAccepted || !businessName.trim()))} aria-busy={loading} aria-live="polite">{loading ? "Please wait…" : isSignup ? "Create account" : "Sign in"}</Button></form>{!isSignup && <div className="mt-3 flex items-center justify-between text-sm"><Link className="text-primary hover:underline" to="/login/magic-link">Email me a magic link</Link><Link className="text-primary hover:underline" to="/forgot-password">Forgot password?</Link></div>}<div className="mt-4 text-center text-xs text-muted-foreground"><Link to="/login" className="hover:underline">← Choose a different role</Link></div><div className="mt-6 border-t pt-4 text-center text-sm text-muted-foreground">{isSignup ? <>Already have an account? <Link className="font-medium text-primary" to="/login">Sign in</Link></> : <>New business owner? <Link className="font-medium text-primary" to="/signup">Create an account</Link></>}</div></CardContent></Card></main>;
 }

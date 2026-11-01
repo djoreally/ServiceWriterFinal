@@ -599,6 +599,37 @@ platformRouter.post("/v1/invitations/:id", async (c) => {
   return json({ data });
 });
 
+const provisionOwnerWorkspaceSchema = z.object({
+  businessName: z.string().trim().min(1).max(160),
+  timezone: z.string().trim().min(1).max(100).optional(),
+  termsVersion: z.string().trim().min(1).max(50).optional(),
+  privacyVersion: z.string().trim().min(1).max(50).optional(),
+});
+
+// Self-serve owner signup (P0-1): create the caller's own workspace.
+// The RPC reads auth.uid() internally, so it must run with the caller's
+// session — mirroring the authenticated browser client, exactly like
+// invitation acceptance above. The RPC is idempotent per owner.
+platformRouter.post("/v1/platform/workspaces/provision-owner", async (c) => {
+  const { supabase } = await requireAuth(c);
+  const body = provisionOwnerWorkspaceSchema.parse(await c.req.json());
+
+  const { data, error } = await (supabase as any).rpc("provision_owner_workspace_v1", {
+    p_business_name: body.businessName,
+    p_timezone: body.timezone ?? null,
+    p_terms_version: body.termsVersion ?? null,
+    p_privacy_version: body.privacyVersion ?? null,
+  });
+  if (error) {
+    const message = error.message ?? "Workspace could not be created";
+    if (/authentication required/i.test(message)) throw new ApiError(401, message, "not_authenticated");
+    if (/business name is required/i.test(message)) throw new ApiError(400, message, "business_name_required");
+    throw error;
+  }
+
+  return json({ data });
+});
+
 platformRouter.post("/v1/invitations/:id/resend", async (c) => {
   const id = invitationIdSchema.parse(c.req.param("id"));
   const admin = createSupabaseAdminClient();

@@ -66,13 +66,17 @@ export function getSafeSignInError(error: SignInError): string {
   return error.message || "Unable to sign in with those credentials.";
 }
 
-export async function signUpWithEmail(email: string, password: string): Promise<{ error?: string }> {
+export async function signUpWithEmail(
+  email: string,
+  password: string,
+  redirectPath = "/dashboard",
+): Promise<{ error?: string }> {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const normalizedEmail = email.trim().toLowerCase();
   const { error } = await authSupabase.auth.signUp({
     email: normalizedEmail,
     password,
-    options: { emailRedirectTo: `${origin}/dashboard` },
+    options: { emailRedirectTo: `${origin}${redirectPath}` },
   });
   return error ? { error: error.message } : {};
 }
