@@ -15,7 +15,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { OilUsageTab } from "@/components/inventory/OilUsageTab";
 import { OIL_SEED_ITEMS, OIL_SEED_DEFAULT_QUANTITY } from "@/lib/inventorySeeds";
 import { toast } from "@/components/ui/sonner";
-import { LegacyStatCard as StatCard } from "@/components/dashboard/LegacyStatCard";
+import { StatCard } from "@/components/dashboard/StatCard";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -422,9 +422,9 @@ const Inventory = () => {
             <>
             {/* Stats */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <StatCard title="Total Items" value={items.length} icon={Package} trend="+5 this month" iconBgColor="bg-primary/10" iconColor="text-primary" />
-              <StatCard title="Low Stock Items" value={lowStockItems.length} icon={AlertTriangle} subtitle={lowStockItems.length > 0 ? "Needs attention" : "All stocked"} iconBgColor="bg-yellow-500/10" iconColor="text-yellow-600" />
-              <StatCard title="Total Value" value={formatCurrency(totalValue)} icon={Package} subtitle="At cost" iconBgColor="bg-gray-500/10" iconColor="text-gray-600" />
+              <StatCard label="Total Items" value={String(items.length)} />
+              <StatCard label="Low Stock Items" value={String(lowStockItems.length)} hint={lowStockItems.length > 0 ? "Needs attention" : "All stocked"} />
+              <StatCard label="Total Value" value={formatCurrency(totalValue)} hint="At cost" />
             </div>
 
             {/* Search */}
