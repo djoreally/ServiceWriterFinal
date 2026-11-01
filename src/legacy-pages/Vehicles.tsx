@@ -21,11 +21,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Plus, Search, Car, Wrench, Edit, Trash2, UserX, Eye, Loader2, Download } from "lucide-react";
+import { Plus, Search, Car, Edit, Trash2, UserX, Eye, Loader2, Download } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "@/components/ui/sonner";
 import { useTerminology } from "@/contexts/TerminologyContext";
-import { LegacyStatCard as StatCard } from "@/components/dashboard/LegacyStatCard";
+import { StatCard } from "@/components/dashboard/StatCard";
 import { vehicleSchema, getFirstError } from "@/lib/validation";
 import { useDebounce } from "@/hooks/useDebounce";
 import { VinLookup } from "@/components/vehicles/VinLookup";
@@ -399,8 +399,8 @@ const Vehicles = () => {
 
         {/* Stats */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <StatCard title={`Total ${terms.vehicle}s`} value={vehicles.length} icon={Car} iconBgColor="bg-primary/10" iconColor="text-primary" />
-          <StatCard title="Currently In Shop" value={inShopCount} icon={Wrench} iconBgColor="bg-yellow-500/10" iconColor="text-yellow-600" />
+          <StatCard label={`Total ${terms.vehicle}s`} value={String(vehicles.length)} />
+          <StatCard label="Currently In Shop" value={String(inShopCount)} />
         </div>
 
         {/* Search + YMM Filter */}

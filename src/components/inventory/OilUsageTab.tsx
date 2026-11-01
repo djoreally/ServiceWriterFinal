@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { format } from "date-fns";
-import { Droplets, Gauge, Wrench, Trophy, Download, Search, X } from "lucide-react";
+import { Download, Search, X } from "lucide-react";
 import { DateRange } from "react-day-picker";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import { Card, CardContent } from "@/components/ui/card";
@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { LegacyStatCard as StatCard } from "@/components/dashboard/LegacyStatCard";
+import { StatCard } from "@/components/dashboard/StatCard";
 import { DateRangeFilter, getDateRangeFromPreset, type DateRangePreset } from "@/components/dashboard/DateRangeFilter";
 import { OilUsageReconcileButton } from "@/components/inventory/OilUsageReconcileButton";
 import { toast } from "@/components/ui/sonner";
@@ -70,7 +70,12 @@ export function OilUsageTab() {
       {hasFilters && <Button variant="ghost" size="sm" className="gap-1" onClick={() => { setItemId(ALL); setSource(ALL); setSearch(""); }}><X className="h-3 w-3" /> Clear</Button>}
     </div>
 
-    <div className="grid grid-cols-2 gap-4 md:grid-cols-4"><StatCard title="Total Quarts" value={loading ? "…" : (totals?.total_qt ?? 0).toFixed(2)} icon={Droplets} subtitle="Completed service usage" iconBgColor="bg-primary/10" iconColor="text-primary" /><StatCard title="Total Gallons" value={loading ? "…" : (totals?.total_gal ?? 0).toFixed(2)} icon={Gauge} subtitle="qt ÷ 4" iconBgColor="bg-blue-500/10" iconColor="text-blue-600" /><StatCard title="Services" value={loading ? "…" : (totals?.service_count ?? 0)} icon={Wrench} subtitle="Jobs with oil quantity" iconBgColor="bg-emerald-500/10" iconColor="text-emerald-600" /><StatCard title="Top Oil" value={loading ? "…" : (totals?.top_item_name ?? "—")} icon={Trophy} subtitle={totals?.top_item_qt ? `${totals.top_item_qt.toFixed(2)} qt` : "No usage yet"} iconBgColor="bg-amber-500/10" iconColor="text-amber-600" /></div>
+    <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+      <StatCard label="Total Quarts" value={loading ? "…" : (totals?.total_qt ?? 0).toFixed(2)} hint="Completed service usage" />
+      <StatCard label="Total Gallons" value={loading ? "…" : (totals?.total_gal ?? 0).toFixed(2)} hint="qt ÷ 4" />
+      <StatCard label="Services" value={loading ? "…" : String(totals?.service_count ?? 0)} hint="Jobs with oil quantity" />
+      <StatCard label="Top Oil" value={loading ? "…" : (totals?.top_item_name ?? "—")} hint={totals?.top_item_qt ? `${totals.top_item_qt.toFixed(2)} qt` : "No usage yet"} />
+    </div>
 
     <Card><CardContent className="p-4"><p className="mb-3 text-sm font-medium">Quarts consumed per day</p><div className="h-64">{data?.byDay.length ? <ResponsiveContainer width="100%" height="100%"><BarChart data={data.byDay}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="day" tickFormatter={(d) => format(new Date(d), "MMM d")} fontSize={12} /><YAxis fontSize={12} /><Tooltip labelFormatter={(d) => format(new Date(d as string), "M/d/yyyy")} formatter={(v: number) => [`${Number(v).toFixed(2)} qt`, "Used"]} /><Bar dataKey="qty_qt" fill="hsl(var(--primary))" radius={[4,4,0,0]} onClick={(d: any) => setDrillDay(d.day)} /></BarChart></ResponsiveContainer> : <div className="flex h-full items-center justify-center text-sm text-muted-foreground">{loading ? "Loading…" : "No completed jobs with oil entered in this range"}</div>}</div></CardContent></Card>
 

@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Plus, Search, Truck, MapPin, Package, Users, Grid3X3, Map } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
-import { LegacyStatCard as StatCard } from "@/components/dashboard/LegacyStatCard";
+import { StatCard } from "@/components/dashboard/StatCard";
 import { Badge } from "@/components/ui/badge";
 import { useNavigate } from "react-router-dom";
 import { PullToRefreshContainer } from "@/components/ui/pull-to-refresh";
@@ -166,9 +166,9 @@ const Fleet = () => {
 
           {/* Stats */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <StatCard title="Total Vans" value={vans.length} icon={Truck} iconBgColor="bg-primary/10" iconColor="text-primary" />
-            <StatCard title="Active Vans" value={activeVans} icon={Users} subtitle={`${vans.length - activeVans} inactive`} iconBgColor="bg-gray-500/10" iconColor="text-gray-600" />
-            <StatCard title="Zip Codes Covered" value={totalTerritories} icon={MapPin} iconBgColor="bg-blue-500/10" iconColor="text-blue-600" />
+            <StatCard label="Total Vans" value={String(vans.length)} />
+            <StatCard label="Active Vans" value={String(activeVans)} hint={`${vans.length - activeVans} inactive`} />
+            <StatCard label="Zip Codes Covered" value={String(totalTerritories)} />
           </div>
 
           {/* Grid / Map View Toggle */}

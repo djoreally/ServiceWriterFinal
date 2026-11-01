@@ -5,10 +5,12 @@
  *
  * Contract (sw-homepage-spec-2026-10-31 §A3.1): there is deliberately NO
  * chart, sparkline, or trend-series prop. A number rendered here is a
- * fact from the payload, never a decoration — the legacy card's
- * fabricated rising fallback sparkline is exactly what this contract
- * bans (that component survives only as LegacyStatCard for screens not
- * yet reworked). Callers format values; money arrives pre-formatted.
+ * fact from the payload, never a decoration — the fabricated rising
+ * fallback sparkline the pre-redesign card invented when no data was
+ * passed is exactly what this contract bans; that card was deleted
+ * 2026-10-31 once its last screens (Fleet, Inventory, Services,
+ * Vehicles, OilUsageTab) moved here. Callers format values; money
+ * arrives pre-formatted.
  */
 import { memo } from "react";
 import { Link } from "react-router-dom";

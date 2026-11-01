@@ -13,14 +13,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Search, Calendar, Wrench, AlertCircle, Zap, FileText, Edit, Trash2, Eye, Download } from "lucide-react";
+import { Plus, Search, FileText, Edit, Trash2, Eye, Download } from "lucide-react";
 import ServiceInvoice from "@/components/ServiceInvoice";
 import { ServiceRecordForm } from "@/components/services/ServiceRecordForm";
 import { toast } from "@/components/ui/sonner";
 import { useTerminology } from "@/contexts/TerminologyContext";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { getServiceStatusBadgeClass, getServiceStatusLabel } from "@/lib/statusStyles";
-import { LegacyStatCard as StatCard } from "@/components/dashboard/LegacyStatCard";
+import { StatCard } from "@/components/dashboard/StatCard";
 import { WorkflowStatusIndicator } from "@/components/workflow/WorkflowStatusIndicator";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { TableSkeleton } from "@/components/loading/PageSkeletons";
@@ -175,10 +175,10 @@ const Services = () => {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <StatCard title="Total Services" value={services.length} icon={Wrench} />
-            <StatCard title="Pending" value={services.filter(s=>s.status === 'pending').length} icon={AlertCircle} />
-            <StatCard title="In Progress" value={services.filter(s=>s.status.includes('progress')).length} icon={Zap} />
-            <StatCard title="Completed" value={services.filter(s=>s.status === 'completed').length} icon={Calendar} />
+            <StatCard label="Total Services" value={String(services.length)} />
+            <StatCard label="Pending" value={String(services.filter(s=>s.status === 'pending').length)} />
+            <StatCard label="In Progress" value={String(services.filter(s=>s.status.includes('progress')).length)} />
+            <StatCard label="Completed" value={String(services.filter(s=>s.status === 'completed').length)} />
           </div>
 
           <Card className="border border-border/50">
