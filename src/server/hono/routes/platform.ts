@@ -2555,8 +2555,16 @@ platformRouter.get("/v1/platform/dashboard/cockpit-rows", async (c) => {
   // + B2 title fields) carrying server-composed T-14 job money; the day
   // aggregates (T-19), the week-ahead aggregates, and the attention queue
   // (M-1) are composed here — the client never assembles them.
+  // Production-schema-safe column set: production's appointments table
+  // has no duration_minutes, location_address, actual_start_time or
+  // estimated_cost column (deploys run no migrations; the production
+  // types in types.production.ts are the served schema). Selecting any
+  // of them makes PostgREST 42703 every appointment query and takes
+  // Home down. estimated_cost lives in metadata in production, and the
+  // money composition below already reads it from there first. Pinned
+  // by cockpit-production-schema.test.ts.
   const appointmentCols =
-    "id,starts_at,ends_at,duration_minutes,status,source,metadata,confirmation_code,customer_id,vehicle_id,assigned_user_id,location_address,actual_start_time,estimated_cost,customers(first_name,last_name,company_name,phone),vehicles(year,make,model)";
+    "id,starts_at,ends_at,status,source,metadata,confirmation_code,customer_id,vehicle_id,assigned_user_id,customers(first_name,last_name,company_name,phone),vehicles(year,make,model)";
   const [
     todayAppts, weekAppts, inProgress, completedToday, completedMonth, openInvoices, feeSettingsRes, profileRes,
   ] = await Promise.all([
