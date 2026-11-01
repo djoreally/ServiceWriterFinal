@@ -70,6 +70,10 @@ import {
 } from "@/lib/retention/automation-templates";
 import { zonedDateTimeParts, zonedLocalDateTimeToUtc } from "@/server/scheduling/timezone";
 import { withAppointmentTitleFields } from "@/lib/appointment-title";
+import { withAppointmentStatusView } from "@/lib/status-vocabulary";
+import { lockedQuoteTotal } from "@/lib/price-lock";
+import { computeAppointmentTotal } from "@/lib/appointmentTotal";
+import { formatMoney } from "@/lib/financialMath";
 import { resolvePrimaryServiceNames, resolveWorkspaceTimezone } from "@/server/appointments/title-resolution";
 import { dollarsToCents as dollarsToCents360, toDollars as toDollars360 } from "@/lib/money";
 import type { Cents as Cents360 } from "@/lib/money";
@@ -2530,7 +2534,7 @@ platformRouter.get("/v1/platform/dashboard/reporting", async (c) => {
 });
 
 platformRouter.get("/v1/platform/dashboard/cockpit-rows", async (c) => {
-  const { supabase, workspaceId } = await requirePlatformWorkspace(c);
+  const { supabase, user, workspaceId } = await requirePlatformWorkspace(c);
   const url = new URL(c.req.url);
   const bounds = z.object({
     today_start: z.string().datetime(),
@@ -2545,16 +2549,29 @@ platformRouter.get("/v1/platform/dashboard/cockpit-rows", async (c) => {
     prev_month_mtd_end: z.string().datetime(),
   }).parse(Object.fromEntries(url.searchParams));
   const db = supabase as any;
+
+  // Home (Total Redesign Part A): this payload is the screen's ONE data
+  // source. Appointment rows ship as canonical view-models (B1 status view
+  // + B2 title fields) carrying server-composed T-14 job money; the day
+  // aggregates (T-19), the week-ahead aggregates, and the attention queue
+  // (M-1) are composed here — the client never assembles them.
+  const appointmentCols =
+    "id,starts_at,ends_at,duration_minutes,status,source,metadata,confirmation_code,customer_id,vehicle_id,assigned_user_id,location_address,actual_start_time,estimated_cost,customers(first_name,last_name,company_name,phone),vehicles(year,make,model)";
   const [
-    todayAppts, upcoming7, inProgress, completedToday, completedMonth, invoices,
+    todayAppts, weekAppts, inProgress, completedToday, completedMonth, openInvoices, feeSettingsRes, profileRes,
   ] = await Promise.all([
-    db.from("appointments").select("id,starts_at,status,metadata,confirmation_code,customers(first_name,last_name,company_name)").eq("workspace_id", workspaceId)
+    // H-2: the whole day's book — every status except cancelled. The old
+    // confirmed/in_progress filter hid requested/pending/arrived work and
+    // undercounted the day.
+    db.from("appointments").select(appointmentCols).eq("workspace_id", workspaceId)
       .gte("starts_at", bounds.today_start).lt("starts_at", bounds.today_end)
-      .in("status", ["confirmed", "in_progress"]).order("starts_at", { ascending: true }),
-    db.from("appointments").select("id,starts_at,status,metadata,confirmation_code,customers(first_name,last_name,company_name)").eq("workspace_id", workspaceId)
+      .neq("status", "cancelled").order("starts_at", { ascending: true }),
+    // H-3: the full week window (tomorrow .. +7d), aggregated per day
+    // below — no limit(10) row pull for the client to bucket partially.
+    db.from("appointments").select(appointmentCols).eq("workspace_id", workspaceId)
       .gt("starts_at", bounds.today_end).lt("starts_at", bounds.next7_end)
-      .eq("status", "confirmed").order("starts_at", { ascending: true }).limit(10),
-    db.from("appointments").select("id,starts_at,customer_id,vehicle_id,metadata,confirmation_code,customers(first_name,last_name),vehicles(year,make,model)")
+      .neq("status", "cancelled").order("starts_at", { ascending: true }),
+    db.from("appointments").select(appointmentCols)
       .eq("workspace_id", workspaceId).eq("status", "in_progress")
       .order("starts_at", { ascending: false }).limit(20),
     db.from("service_records").select("appointment_id").eq("workspace_id", workspaceId)
@@ -2562,33 +2579,353 @@ platformRouter.get("/v1/platform/dashboard/cockpit-rows", async (c) => {
     db.from("service_records").select("id,total_amount,completed_at,metadata").eq("workspace_id", workspaceId)
       .eq("status", "completed").gte("completed_at", bounds.month_start)
       .order("completed_at", { ascending: true }),
-    db.from("invoices").select("id,total,amount_paid,status").eq("workspace_id", workspaceId)
+    db.from("invoices").select("id,total,amount_paid,status,issued_at,due_at,created_at,metadata").eq("workspace_id", workspaceId)
       .in("status", ["issued", "partially_paid", "past_due"]),
+    // Best-effort: the workspace fee settings drive the same total math
+    // the client runs (computeAppointmentTotal); no row means no fees.
+    db.from("workspace_settings")
+      .select("waste_oil_fee_enabled,waste_oil_fee,shop_fee_enabled,shop_fee_type,shop_fee_value,shop_fee_description,surcharge_enabled,surcharge_type,surcharge_value,surcharge_description,tax_rate")
+      .eq("workspace_id", workspaceId).maybeSingle(),
+    // Best-effort: the greeting names the signed-in user (H-13), never
+    // the business-settings owner name.
+    db.from("profiles").select("display_name").eq("id", user.id).maybeSingle(),
   ]);
-  for (const result of [todayAppts, upcoming7, inProgress, completedToday, completedMonth, invoices]) {
+  for (const result of [todayAppts, weekAppts, inProgress, completedToday, completedMonth, openInvoices]) {
     if (result.error) throw result.error;
   }
-  // B2/T-1: the cockpit's appointment rows carry the server-composed title
-  // fields — the client's private CockpitAppointment title synthesis retires.
+  const feeSettings = feeSettingsRes.error ? null : (feeSettingsRes.data ?? null);
+  const userDisplayName = profileRes.error
+    ? null
+    : ((profileRes.data as { display_name?: unknown } | null)?.display_name as string | null | undefined) ?? null;
+
+  const asRecord = (value: unknown): Record<string, unknown> =>
+    value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  const asNumber = (value: unknown): number | null => {
+    if (value == null) return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  const rawToday = (todayAppts.data ?? []) as Array<Record<string, any>>;
+  const rawWeek = (weekAppts.data ?? []) as Array<Record<string, any>>;
+  const rawInProgress = (inProgress.data ?? []) as Array<Record<string, any>>;
+  const allRows = [...rawToday, ...rawWeek, ...rawInProgress];
+  const appointmentIds = [...new Set(allRows.map((row) => row.id as string))];
+
+  // Each appointment's invoice, linked by invoices.metadata.appointment_id
+  // (written by the invoice sync) or by the sync's invoice_id write-back
+  // on the appointment itself. The latest non-void invoice wins.
+  const invoiceIdHints = new Map<string, string>();
+  for (const row of allRows) {
+    const hint = asRecord(row.metadata).invoice_id;
+    if (typeof hint === "string" && hint) invoiceIdHints.set(hint, row.id as string);
+  }
+  const linkedInvoices = new Map<string, Record<string, any>>();
+  if (appointmentIds.length > 0) {
+    const [byAppointment, byId] = await Promise.all([
+      db.from("invoices")
+        .select("id,total,amount_paid,status,created_at,metadata")
+        .eq("workspace_id", workspaceId)
+        .filter("metadata->>appointment_id", "in", `(${appointmentIds.join(",")})`),
+      invoiceIdHints.size > 0
+        ? db.from("invoices")
+            .select("id,total,amount_paid,status,created_at,metadata")
+            .eq("workspace_id", workspaceId)
+            .in("id", [...invoiceIdHints.keys()])
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (byAppointment.error) throw byAppointment.error;
+    if (byId.error) throw byId.error;
+    const candidates = [
+      ...((byAppointment.data ?? []) as Array<Record<string, any>>),
+      ...((byId.data ?? []) as Array<Record<string, any>>),
+    ];
+    for (const invoice of candidates) {
+      if (invoice.status === "void") continue;
+      const linked = asRecord(invoice.metadata).appointment_id;
+      const appointmentId = (typeof linked === "string" && linked) || invoiceIdHints.get(invoice.id as string);
+      if (!appointmentId) continue;
+      const existing = linkedInvoices.get(appointmentId);
+      if (!existing || String(invoice.created_at ?? "") > String(existing.created_at ?? "")) {
+        linkedInvoices.set(appointmentId, invoice);
+      }
+    }
+  }
+
+  // Priced service lines per appointment — the same { price, quantity }
+  // shape the appointments service-lines endpoint feeds the total math.
+  const itemsByAppointment = new Map<string, Array<{ price: number; quantity: number }>>();
+  if (appointmentIds.length > 0) {
+    const { data: itemRows, error: itemsError } = await db
+      .from("appointment_items")
+      .select("appointment_id,quantity,unit_price")
+      .eq("workspace_id", workspaceId)
+      .in("appointment_id", appointmentIds);
+    if (itemsError) throw itemsError;
+    for (const item of (itemRows ?? []) as Array<Record<string, any>>) {
+      const list = itemsByAppointment.get(item.appointment_id as string) ?? [];
+      list.push({ price: Number(item.unit_price ?? 0), quantity: Number(item.quantity ?? 1) });
+      itemsByAppointment.set(item.appointment_id as string, list);
+    }
+  }
+
+  // T-14 row money — ONE composition: the invoice total when the job is
+  // invoiced; the locked quote verbatim when a channel locked it; else the
+  // same fee-loaded total JobRow computes from the service lines.
+  // job_due is the invoice-fact interim for the B5 seam (never a
+  // ledger-grade claim): invoiced jobs owe total - amount_paid;
+  // uninvoiced jobs owe their total at service.
+  const jobMoney = (row: Record<string, any>): { total: number; due: number } => {
+    const invoice = linkedInvoices.get(row.id as string);
+    if (invoice) {
+      const total = Number(invoice.total ?? 0);
+      return { total, due: Math.max(total - Number(invoice.amount_paid ?? 0), 0) };
+    }
+    const metadata = asRecord(row.metadata);
+    const locked = lockedQuoteTotal({
+      source: row.source as string | null | undefined,
+      metadata: row.metadata,
+      estimated_cost: row.estimated_cost,
+    });
+    if (locked != null) return { total: locked, due: locked };
+    const total = computeAppointmentTotal(
+      {
+        estimated_cost: asNumber(metadata.estimated_cost) ?? asNumber(row.estimated_cost),
+        tax_amount: asNumber(metadata.tax_amount) ?? asNumber(metadata.client_tax_amount),
+        appointment_services: itemsByAppointment.get(row.id as string) ?? [],
+      },
+      feeSettings,
+    );
+    return { total, due: total };
+  };
+
+  // B2/T-1 + B1/T-9: rows carry the server-composed title and status
+  // fields — no client-side title or status synthesis anywhere in Home.
   const [timezone, primaryServiceNames] = await Promise.all([
     resolveWorkspaceTimezone(db, workspaceId),
-    resolvePrimaryServiceNames(db, workspaceId, [
-      ...((todayAppts.data ?? []) as Array<{ id: string }>).map((row) => row.id),
-      ...((upcoming7.data ?? []) as Array<{ id: string }>).map((row) => row.id),
-      ...((inProgress.data ?? []) as Array<{ id: string }>).map((row) => row.id),
-    ]),
+    resolvePrimaryServiceNames(db, workspaceId, appointmentIds),
   ]);
-  const withTitles = (rows: unknown) =>
-    ((rows ?? []) as Array<Record<string, unknown>>).map((row) =>
-      withAppointmentTitleFields(row, { timezone, primaryServiceName: primaryServiceNames.get(row.id as string) }),
+  const composeRow = (row: Record<string, any>): Record<string, any> => {
+    const money = jobMoney(row);
+    return {
+      ...withAppointmentTitleFields(withAppointmentStatusView(row), {
+        timezone,
+        primaryServiceName: primaryServiceNames.get(row.id as string),
+      }),
+      job_total: money.total,
+      job_due: money.due,
+    };
+  };
+  const todayRows = rawToday.map(composeRow);
+  const weekRows = rawWeek.map(composeRow);
+  const inProgressRows = rawInProgress.map(composeRow);
+
+  // Outstanding (S2) — invoice facts only (issued / partially_paid /
+  // past_due totals minus recorded payments). Until the composed
+  // payment_state (T-5) lands, the card is labeled "Outstanding" and
+  // claims nothing beyond these facts.
+  const openInvoiceRows = (openInvoices.data ?? []) as Array<Record<string, any>>;
+  const outstanding = {
+    count: openInvoiceRows.length,
+    total: openInvoiceRows.reduce(
+      (sum, invoice) => sum + Math.max(Number(invoice.total ?? 0) - Number(invoice.amount_paid ?? 0), 0),
+      0,
+    ),
+  };
+
+  // T-19 day aggregates, composed from the day's composed rows.
+  const day = {
+    jobsToday: todayRows.length,
+    jobsInProgress: inProgressRows.length,
+    jobsToGo: todayRows.filter((row) => !["completed", "in_progress", "no_show"].includes(String(row.status))).length,
+    bookedToday: todayRows.reduce((sum, row) => sum + Number(row.job_total ?? 0), 0),
+  };
+
+  // Week ahead (S5): per-day aggregates over the full window — the
+  // client renders these cells verbatim, no bucketing of a partial list.
+  const dayKey = (parts: { year: number; month: number; day: number }) =>
+    `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+  const todayParts = zonedDateTimeParts(new Date(), timezone);
+  const weekAhead: Array<{ date: string; jobs: number; booked: number }> = [];
+  const weekBuckets = new Map<string, { date: string; jobs: number; booked: number }>();
+  for (let offset = 1; offset <= 7; offset += 1) {
+    const date = new Date(Date.UTC(todayParts.year, todayParts.month - 1, todayParts.day + offset));
+    const bucket = {
+      date: dayKey({ year: date.getUTCFullYear(), month: date.getUTCMonth() + 1, day: date.getUTCDate() }),
+      jobs: 0,
+      booked: 0,
+    };
+    weekAhead.push(bucket);
+    weekBuckets.set(bucket.date, bucket);
+  }
+  for (const row of weekRows) {
+    const startsAt = new Date(String(row.starts_at));
+    if (!Number.isFinite(startsAt.getTime())) continue;
+    const bucket = weekBuckets.get(dayKey(zonedDateTimeParts(startsAt, timezone)));
+    if (bucket) {
+      bucket.jobs += 1;
+      bucket.booked += Number(row.job_total ?? 0);
+    }
+  }
+
+  // Needs Attention (S3) — the M-1 queue, composed here from the same
+  // payload's facts, ranked money-at-risk first. Presentation (the
+  // 3-visible cap) is the client's; composition never is.
+  const plural = (count: number, singular: string) => (count === 1 ? singular : `${singular}s`);
+  const nowMs = Date.now();
+  const attention: Array<{
+    id: string;
+    tone: "warning" | "danger";
+    title: string;
+    detail: string;
+    actionLabel: string;
+    href: string;
+  }> = [];
+
+  // Unpaid invoices aged past the aging threshold (D-A2: 7 days past the
+  // due reference — due date, else issue date, else creation date).
+  const AGING_THRESHOLD_DAYS = 7;
+  const agedReference = (invoice: Record<string, any>) => invoice.due_at ?? invoice.issued_at ?? invoice.created_at;
+  const agedInvoices = openInvoiceRows.filter((invoice) => {
+    const reference = agedReference(invoice);
+    if (!reference) return false;
+    const at = new Date(String(reference)).getTime();
+    return Number.isFinite(at) && at <= nowMs - AGING_THRESHOLD_DAYS * 86_400_000;
+  });
+  if (agedInvoices.length > 0) {
+    const agedTotal = agedInvoices.reduce(
+      (sum, invoice) => sum + Math.max(Number(invoice.total ?? 0) - Number(invoice.amount_paid ?? 0), 0),
+      0,
     );
+    const oldestDays = Math.max(
+      ...agedInvoices.map((invoice) => Math.floor((nowMs - new Date(String(agedReference(invoice))).getTime()) / 86_400_000)),
+    );
+    attention.push({
+      id: "unpaid-aged",
+      tone: "warning",
+      title: `${agedInvoices.length} unpaid ${plural(agedInvoices.length, "invoice")} over ${AGING_THRESHOLD_DAYS} days old`,
+      detail: `$${formatMoney(agedTotal)} outstanding · oldest ${oldestDays} days`,
+      actionLabel: "Review invoices",
+      href: "/invoices",
+    });
+  }
+
+  // Provider sync failures (payment_provider_records in a failed state),
+  // scoped through the workspace's appointments — the provider-sync
+  // summary endpoint's access pattern. Best-effort: when the records
+  // cannot be read, the item is omitted rather than failing Home.
+  try {
+    const workspaceAppointmentIds = await listWorkspaceAppointmentIds(db, workspaceId);
+    const failedSyncs = await listSyncRecordsForAppointments(db, workspaceAppointmentIds, {
+      status: "failed",
+      limit: 500,
+    });
+    if (failedSyncs.length > 0) {
+      attention.push({
+        id: "sync-failed",
+        tone: "danger",
+        title: "Payment sync failed",
+        detail: `${failedSyncs.length} ${plural(failedSyncs.length, "record")} did not reach the payment provider`,
+        actionLabel: "Review sync status",
+        href: "/settings",
+      });
+    }
+  } catch (error) {
+    console.error("[cockpit] sync attention composition failed", error);
+  }
+
+  // Today's jobs with nobody assigned.
+  const unassignedToday = todayRows.filter(
+    (row) => !row.assigned_user_id && !["completed", "no_show"].includes(String(row.status)),
+  );
+  if (unassignedToday.length > 0) {
+    const first = unassignedToday[0];
+    const firstTime = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    }).format(new Date(String(first.starts_at)));
+    attention.push({
+      id: "unassigned-today",
+      tone: "warning",
+      title: `${unassignedToday.length} ${plural(unassignedToday.length, "job")} today with no tech assigned`,
+      detail: unassignedToday.length === 1 ? String(first.display_title ?? "") : `First at ${firstTime}`,
+      actionLabel: "Open schedule",
+      href: "/appointments",
+    });
+  }
+
+  // Unconfirmed work inside the next 48 hours (pending / requested).
+  const horizonMs = nowMs + 48 * 3_600_000;
+  const unconfirmed = [...todayRows, ...weekRows].filter((row) => {
+    const at = new Date(String(row.starts_at)).getTime();
+    return Number.isFinite(at) && at > nowMs && at <= horizonMs && ["pending", "requested"].includes(String(row.status));
+  });
+  if (unconfirmed.length > 0) {
+    attention.push({
+      id: "unconfirmed-48h",
+      tone: "warning",
+      title: `${unconfirmed.length} unconfirmed ${plural(unconfirmed.length, "job")} in the next 48 hours`,
+      detail: `$${formatMoney(unconfirmed.reduce((sum, row) => sum + Number(row.job_total ?? 0), 0))} booked`,
+      actionLabel: "Review schedule",
+      href: "/appointments",
+    });
+  }
+
+  // Low stock, derived exactly like the inventory overview endpoint
+  // (warehouse quantity vs the item's threshold) — the old LowStockAlert
+  // banner's data, as a queue item. Best-effort like the sync item.
+  try {
+    const [itemsRes, locationsRes, stockRes] = await Promise.all([
+      db.from("inventory_items").select("id,name,low_stock_threshold").eq("workspace_id", workspaceId).eq("is_active", true),
+      db.from("inventory_locations").select("id,location_type").eq("workspace_id", workspaceId).eq("is_active", true),
+      db.from("inventory_stock").select("inventory_item_id,location_id,quantity").eq("workspace_id", workspaceId),
+    ]);
+    if (!itemsRes.error && !locationsRes.error && !stockRes.error) {
+      const warehouseIds = new Set(
+        ((locationsRes.data ?? []) as Array<Record<string, any>>)
+          .filter((location) => location.location_type === "warehouse")
+          .map((location) => location.id as string),
+      );
+      const warehouseQty = new Map<string, number>();
+      for (const stock of (stockRes.data ?? []) as Array<Record<string, any>>) {
+        if (warehouseIds.has(stock.location_id as string)) {
+          const itemId = stock.inventory_item_id as string;
+          warehouseQty.set(itemId, (warehouseQty.get(itemId) ?? 0) + Number(stock.quantity ?? 0));
+        }
+      }
+      const lowItems = ((itemsRes.data ?? []) as Array<Record<string, any>>).filter(
+        (item) => (warehouseQty.get(item.id as string) ?? 0) <= Number(item.low_stock_threshold ?? 0),
+      );
+      if (lowItems.length > 0) {
+        const names = lowItems.slice(0, 3).map((item) => String(item.name ?? "")).filter(Boolean);
+        attention.push({
+          id: "low-stock",
+          tone: "warning",
+          title: `${lowItems.length} ${plural(lowItems.length, "item")} at or below reorder level`,
+          detail: names.length > 0
+            ? names.join(", ") + (lowItems.length > names.length ? ` +${lowItems.length - names.length} more` : "")
+            : "",
+          actionLabel: "View inventory",
+          href: "/inventory",
+        });
+      }
+    }
+  } catch (error) {
+    console.error("[cockpit] low-stock attention composition failed", error);
+  }
+
   return json({
-    todayApptRows: withTitles(todayAppts.data),
-    upcoming7Rows: withTitles(upcoming7.data),
-    inProgressRows: withTitles(inProgress.data),
+    todayApptRows: todayRows,
+    inProgressRows,
     completedTodayRows: completedToday.data ?? [],
     completedMonthRows: completedMonth.data ?? [],
-    invoiceRows: invoices.data ?? [],
+    attention,
+    weekAhead,
+    day,
+    outstanding,
+    userDisplayName,
   });
 });
 
@@ -2629,7 +2966,9 @@ platformRouter.get("/v1/platform/command-palette/search", async (c) => {
 // Replicates the original client-side query logic server-side against the
 // user-scoped client (identical RLS semantics to the browser); the client
 // module becomes a thin `apiClient` wrapper with byte-identical exports.
-// Consumed by the dashboard `LowStockAlert` via `low-stock.query.ts`.
+// Consumed by the inventory screens via `inventory.query.ts`. Home's
+// low-stock attention item (cockpit-rows, above) derives from the same
+// tables with the same warehouse-quantity rule this endpoint uses.
 // ---------------------------------------------------------------------------
 
 platformRouter.get("/v1/platform/inventory/overview", async (c) => {

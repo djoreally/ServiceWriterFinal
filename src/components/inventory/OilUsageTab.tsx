@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { StatCard } from "@/components/dashboard/StatCard";
+import { LegacyStatCard as StatCard } from "@/components/dashboard/LegacyStatCard";
 import { DateRangeFilter, getDateRangeFromPreset, type DateRangePreset } from "@/components/dashboard/DateRangeFilter";
 import { OilUsageReconcileButton } from "@/components/inventory/OilUsageReconcileButton";
 import { toast } from "@/components/ui/sonner";

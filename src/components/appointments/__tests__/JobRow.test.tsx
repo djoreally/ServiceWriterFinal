@@ -55,4 +55,17 @@ describe("JobRow", () => {
     render(<JobRow appointment={holmes} onClick={() => undefined} />);
     expect(screen.queryByText(/bbde8fb5/)).not.toBeInTheDocument();
   });
+
+  it("prefers the server-composed job_due over the quote fallback", () => {
+    const partiallyPaid = { ...holmes, job_total: 137.28, job_due: 37.28 } as unknown as Appointment;
+    render(<JobRow appointment={partiallyPaid} onClick={() => undefined} />);
+    expect(screen.getByText("Due $37.28")).toBeInTheDocument();
+    expect(screen.queryByText("Due $137.28")).not.toBeInTheDocument();
+  });
+
+  it("shows no amount due when the composed job_due is zero (paid in full)", () => {
+    const paidInFull = { ...holmes, job_total: 137.28, job_due: 0 } as unknown as Appointment;
+    render(<JobRow appointment={paidInFull} onClick={() => undefined} />);
+    expect(screen.getByText("No amount due")).toBeInTheDocument();
+  });
 });

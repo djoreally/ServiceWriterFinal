@@ -14,7 +14,9 @@ describe("Phase 1 Journey — Auth and Routing Spine", () => {
       expect(getCurrentPath()).toBe("/dashboard");
     });
 
-    const elements = await screen.findAllByText(/Dashboard/i);
+    // D-A1 (Home spec, 2026-10-31): the screen's header title is "Home"
+    // now — the route stays /dashboard.
+    const elements = await screen.findAllByText(/Home/i);
     expect(elements.length).toBeGreaterThan(0);
     expectNoConsoleErrors();
     expectNoPlumbingError();

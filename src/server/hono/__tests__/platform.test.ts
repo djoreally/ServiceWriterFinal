@@ -240,6 +240,126 @@ describe("platform router", () => {
       expect(body.todayApptRows[0].confirmation_code).toBe("78361AF6");
       expect(body.todayApptRows[0].display_title).not.toContain("COCKPIT PRIVATE TITLE");
     });
+
+    // Home (Total Redesign Part A): the extended payload — T-14 job money
+    // on the rows, server day aggregates, outstanding invoice facts, the
+    // composed attention queue, week-ahead aggregates, and the signed-in
+    // user's name for the greeting.
+    const APPT_ID = "990e8400-e29b-41d4-a716-446655440002";
+    const homeBounds = () => new URLSearchParams({
+      today_start: "2026-10-30T04:00:00.000Z",
+      today_end: "2026-10-31T04:00:00.000Z",
+      yesterday_start: "2026-10-29T04:00:00.000Z",
+      yesterday_end: "2026-10-30T04:00:00.000Z",
+      week_start: "2026-10-26T04:00:00.000Z",
+      month_start: "2026-10-01T04:00:00.000Z",
+      year_start: "2026-01-01T05:00:00.000Z",
+      next7_end: "2026-11-07T05:00:00.000Z",
+      prev_month_start: "2026-09-01T04:00:00.000Z",
+      prev_month_mtd_end: "2026-09-30T04:00:00.000Z",
+    });
+    const seedHomeWorkspace = () => {
+      db.workspace_members = {
+        data: [
+          { workspace_id: WS_ID, role: "owner", is_active: true, workspaces: { id: WS_ID, is_active: true } },
+        ],
+        error: null,
+      };
+      db["workspaces:single"] = { data: { timezone: "America/New_York" }, error: null };
+      db.service_records = { data: [], error: null };
+      db.appointment_items = { data: [], error: null };
+    };
+
+    it("composes T-14 job money from the locked website quote and counts the whole day", async () => {
+      seedHomeWorkspace();
+      db.appointments = {
+        data: [
+          {
+            id: APPT_ID,
+            status: "requested",
+            source: "moms_website",
+            starts_at: "2026-10-30T14:00:00.000Z",
+            confirmation_code: "ABC12345",
+            customers: { first_name: "Ronnie", last_name: "Bolton" },
+            metadata: { pricing_state: "website_quote_locked", estimated_cost: 137 },
+          },
+        ],
+        error: null,
+      };
+      db.invoices = { data: [], error: null };
+      const res = await platformRouter.request(
+        `/v1/platform/dashboard/cockpit-rows?${homeBounds().toString()}`,
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      // H-2 surface: a requested (not confirmed/in_progress) job is in the
+      // day set with the canonical B1 status view fields.
+      expect(body.todayApptRows).toHaveLength(1);
+      expect(body.todayApptRows[0].status_label).toBe("Requested");
+      expect(body.todayApptRows[0].status_tone).toBe("neutral");
+      // The locked quote is the row's total and its amount due, verbatim.
+      expect(body.todayApptRows[0].job_total).toBe(137);
+      expect(body.todayApptRows[0].job_due).toBe(137);
+      // T-19 day aggregates composed server-side from the same rows.
+      expect(body.day.jobsToday).toBe(1);
+      expect(body.day.bookedToday).toBe(137);
+      expect(body.outstanding).toEqual({ count: 0, total: 0 });
+      // Week ahead: seven server-aggregated day cells, dates consecutive.
+      expect(body.weekAhead).toHaveLength(7);
+      expect(body.weekAhead.every((d: any) => typeof d.date === "string" && d.jobs >= 0 && d.booked >= 0)).toBe(true);
+    });
+
+    it("composes job money, outstanding, and the aged-unpaid attention item from invoice facts", async () => {
+      seedHomeWorkspace();
+      db.appointments = {
+        data: [
+          {
+            id: APPT_ID,
+            status: "confirmed",
+            source: "manual",
+            starts_at: "2026-10-30T14:00:00.000Z",
+            customers: { first_name: "Ronnie", last_name: "Bolton" },
+            metadata: {},
+          },
+        ],
+        error: null,
+      };
+      db.invoices = {
+        data: [
+          {
+            id: "inv-home-1",
+            total: 200,
+            amount_paid: 50,
+            status: "issued",
+            issued_at: new Date(Date.now() - 30.5 * 86_400_000).toISOString(),
+            created_at: new Date(Date.now() - 30.5 * 86_400_000).toISOString(),
+            metadata: { appointment_id: APPT_ID },
+          },
+        ],
+        error: null,
+      };
+      db["profiles:single"] = { data: { display_name: "Ty Burton" }, error: null };
+      const res = await platformRouter.request(
+        `/v1/platform/dashboard/cockpit-rows?${homeBounds().toString()}`,
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      // Invoiced job: the invoice total is the T-14 money; due is the
+      // invoice-fact remainder.
+      expect(body.todayApptRows[0].job_total).toBe(200);
+      expect(body.todayApptRows[0].job_due).toBe(150);
+      expect(body.day.bookedToday).toBe(200);
+      // Outstanding = invoice facts only.
+      expect(body.outstanding).toEqual({ count: 1, total: 150 });
+      // M-1: the queue is composed server-side, money-at-risk first:
+      // the aged unpaid invoice, then today's unassigned job.
+      expect(body.attention.map((item: any) => item.id)).toEqual(["unpaid-aged", "unassigned-today"]);
+      expect(body.attention[0].detail).toContain("$150.00 outstanding");
+      expect(body.attention[0].detail).toContain("oldest 30 days");
+      expect(body.attention[0].href).toBe("/invoices");
+      // H-13: the greeting name is the signed-in user's, from profiles.
+      expect(body.userDisplayName).toBe("Ty Burton");
+    });
   });
 
   describe("route registration", () => {

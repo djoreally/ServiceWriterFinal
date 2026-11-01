@@ -1,11 +1,11 @@
 {
-  "recordedAt": "2026-10-31",
+  "recordedAt": "2026-11-01",
   "phase": "Phase 6 — program close (static inline styles only; arbitrary values reduced via token migrations)",
   "meaning": "Legacy design-token bypass counts across src/**/*.tsx. check-frontend-ui-contract.mjs fails the build when any count EXCEEDS these numbers; counts may only stay flat or go down. Re-record deliberately per refactor phase with --update.",
   "metrics": {
     "directLightDarkClasses": 230,
     "inlineStyles": 63,
-    "arbitraryValueClasses": 1514,
+    "arbitraryValueClasses": 1502,
     "gradientFiles": 8,
     "pastedHexColors": 202
   }

@@ -1,15 +1,23 @@
 /**
- * Dashboard Cockpit Query
+ * Home Cockpit Query (Total Redesign Part A)
  *
- * Owner dashboard data from canonical production tables only:
- * payments -> collected cash, invoices -> A/R, service_records -> completed/in-progress work,
- * appointments -> schedule. All reads are explicitly workspace scoped.
+ * Home is fed by ONE payload: the extended cockpit-rows endpoint composes
+ * the day's canonical job rows (with server-composed T-14 job money), the
+ * day aggregates, the week-ahead aggregates, the outstanding-invoice
+ * facts, and the Needs Attention queue server-side. This module adds only
+ * the collected-cash series (payments net_collected_cents, bucketed from
+ * one YTD fetch) and maps job rows into the canonical Appointment shape
+ * the shared JobRow renders. It never assembles attention items, day
+ * counts, or week buckets from raw facts — that composition is the
+ * server's (truth table T-14/T-19, friction M-1).
  */
 import { apiClient } from '@/lib/api-client';
 import { fetchBusinessSettings, resolveCurrentWorkspace } from '@/application/queries/settings.query';
 import { zonedDateTimeParts, zonedLocalDateTimeToUtc } from '@/server/scheduling/timezone';
 import { fetchCanonicalCashReceipts } from '@/application/queries/canonical-cash-receipts.query';
 import { safeParseDate } from '@/lib/datetime';
+import { appointmentStatusView } from '@/lib/status-vocabulary';
+import type { Appointment, Customer, Vehicle } from '@/shared/types';
 import {
   format,
   addDays,
@@ -18,22 +26,22 @@ import {
   startOfYear,
 } from 'date-fns';
 
-export interface CockpitAppointment {
+/** One server-composed Needs Attention item (see AttentionQueue). */
+export interface AttentionItem {
   id: string;
+  tone: 'warning' | 'danger';
   title: string;
-  scheduled_date: string;
-  scheduled_time: string | null;
-  status: string;
-  guest_name: string | null;
-  estimated_cost: number | null;
+  detail: string;
+  actionLabel: string;
+  href: string;
 }
 
-export interface CockpitJobInProgress {
-  id: string;
-  service_type: string;
-  customer_name: string;
-  vehicle: string | null;
-  started_at: string | null;
+/** One server-aggregated week-ahead day cell (S5). */
+export interface WeekAheadDay {
+  /** Local date, yyyy-MM-dd, in the workspace timezone. */
+  date: string;
+  jobs: number;
+  booked: number;
 }
 
 export interface CockpitServiceTypeRev {
@@ -42,22 +50,35 @@ export interface CockpitServiceTypeRev {
   count: number;
 }
 
+/** A canonical appointment row for Home's job list (rendered by JobRow). */
+export interface CockpitJob extends Appointment {
+  starts_at: string;
+  vehicles?: Vehicle[] | null;
+}
+
 export interface CockpitData {
-  revenueToday: number;
-  revenueWeek: number;
-  revenueMonth: number;
-  revenueYTD: number;
-  revenueTodayPrev: number;
-  revenueMonthPrev: number;
-  outstandingAR: number;
+  /** Signed-in user's display name (server payload); null when unset. */
+  userDisplayName: string | null;
+  /** Shop name from business settings — the greeting's fallback. */
+  shopName: string | null;
+  timeZone: string;
+  collectedToday: number;
+  collectedYesterday: number;
+  collectedWeek: number;
+  collectedMonth: number;
+  collectedYTD: number;
+  collectedPrevMonthMTD: number;
+  bookedToday: number;
+  jobsToday: number;
   jobsInProgress: number;
+  jobsToGo: number;
   jobsCompletedToday: number;
-  appointmentsToday: number;
-  unpaidInvoices: number;
-  todaysAppointments: CockpitAppointment[];
-  upcomingNext7: CockpitAppointment[];
-  jobsInProgressList: CockpitJobInProgress[];
-  serviceTypeRevenueMTD: CockpitServiceTypeRev[];
+  outstandingCount: number;
+  outstandingTotal: number;
+  attention: AttentionItem[];
+  todaysJobs: CockpitJob[];
+  weekAhead: WeekAheadDay[];
+  serviceMixMTD: CockpitServiceTypeRev[];
 }
 
 function object(value: unknown): Record<string, unknown> {
@@ -70,28 +91,119 @@ function sumNetCollectedDollars(rows: Array<{ net_collected_cents: number | null
   return (rows || []).reduce((sum, row) => sum + (Number(row.net_collected_cents) || 0), 0) / 100;
 }
 
-function mapAppointment(row: {
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value ? value : undefined;
+}
+
+interface CockpitRowPayload {
   id: string;
   starts_at: string;
+  ends_at?: string | null;
+  duration_minutes?: number | null;
   status: string;
-  metadata: unknown;
-  display_title?: unknown;
-}, timeZone: string): CockpitAppointment {
+  source?: string | null;
+  metadata?: unknown;
+  confirmation_code?: string | null;
+  customer_id?: string | null;
+  vehicle_id?: string | null;
+  assigned_user_id?: string | null;
+  location_address?: string | null;
+  estimated_cost?: number | string | null;
+  display_title?: string | null;
+  primary_service_name?: string | null;
+  status_label?: string | null;
+  status_tone?: Appointment['status_tone'];
+  job_total?: number | null;
+  job_due?: number | null;
+  customers?: {
+    first_name?: string | null;
+    last_name?: string | null;
+    company_name?: string | null;
+    phone?: string | null;
+  } | Array<{
+    first_name?: string | null;
+    last_name?: string | null;
+    company_name?: string | null;
+    phone?: string | null;
+  }> | null;
+  vehicles?: {
+    year?: number | null;
+    make?: string | null;
+    model?: string | null;
+  } | Array<{
+    year?: number | null;
+    make?: string | null;
+    model?: string | null;
+  }> | null;
+}
+
+/**
+ * Map a server-composed cockpit row into the canonical Appointment shape
+ * — the same mapping discipline as the appointments list mapper: titles
+ * and status presentation come from the server's composed fields, never
+ * from client-side synthesis.
+ */
+function mapJobRow(row: CockpitRowPayload, timeZone: string): CockpitJob {
   const metadata = object(row.metadata);
-  // safeParseDate returns null for null/undefined/malformed input instead of
-  // an Invalid Date (or epoch for null), so downstream formatting never throws.
+  const customerRel = Array.isArray(row.customers) ? row.customers[0] : row.customers;
+  const customer: Customer | null = customerRel
+    ? {
+        id: row.customer_id ?? '',
+        name: [customerRel.first_name, customerRel.last_name].filter(Boolean).join(' ')
+          || customerRel.company_name
+          || 'Customer',
+        phone: customerRel.phone ?? '',
+        email: '',
+      }
+    : null;
+  const vehicleRel = Array.isArray(row.vehicles) ? row.vehicles[0] : row.vehicles;
+  const vehicle: Vehicle | null = vehicleRel
+    ? {
+        id: row.vehicle_id ?? '',
+        make: vehicleRel.make || 'Unknown',
+        model: vehicleRel.model || 'Unknown',
+        year: Number(vehicleRel.year || new Date().getFullYear()),
+      }
+    : null;
   const startsAt = safeParseDate(row.starts_at);
   const local = startsAt ? zonedDateTimeParts(startsAt, timeZone) : null;
+  const duration = row.duration_minutes
+    ?? (startsAt && row.ends_at
+      ? Math.max(15, Math.round((Date.parse(row.ends_at) - startsAt.getTime()) / 60000))
+      : 60);
+  const statusView = appointmentStatusView(row.status);
+  const title = optionalString(row.display_title) ?? 'Appointment';
+  const estimatedCost = metadata.estimated_cost == null
+    ? (row.estimated_cost == null ? undefined : Number(row.estimated_cost))
+    : Number(metadata.estimated_cost);
   return {
     id: row.id,
-    // B2/T-1: the title is the server's composition (display_title) — the
-    // cockpit's private metadata synthesis is retired.
-    title: typeof row.display_title === 'string' && row.display_title ? row.display_title : 'Appointment',
+    title,
+    display_title: title,
+    primary_service_name: optionalString(row.primary_service_name) ?? null,
+    confirmation_code: optionalString(row.confirmation_code) ?? null,
+    status_label: optionalString(row.status_label) ?? statusView.status_label,
+    status_tone: row.status_tone ?? statusView.status_tone,
     scheduled_date: local ? `${local.year}-${String(local.month).padStart(2, '0')}-${String(local.day).padStart(2, '0')}` : '',
-    scheduled_time: local ? `${String(local.hour).padStart(2, '0')}:${String(local.minute).padStart(2, '0')}` : null,
+    scheduled_time: local ? `${String(local.hour).padStart(2, '0')}:${String(local.minute).padStart(2, '0')}` : '',
+    duration_minutes: duration,
     status: row.status,
-    guest_name: metadata.guest_name == null ? null : String(metadata.guest_name),
-    estimated_cost: metadata.estimated_cost == null ? null : Number(metadata.estimated_cost),
+    customer,
+    vehicle,
+    vehicles: vehicle ? [vehicle] : [],
+    guest_name: optionalString(metadata.guest_name) ?? customer?.name ?? null,
+    guest_email: optionalString(metadata.guest_email),
+    guest_phone: optionalString(metadata.guest_phone) ?? customer?.phone ?? null,
+    location_address: optionalString(row.location_address),
+    notes: optionalString(metadata.notes),
+    description: optionalString(metadata.description),
+    estimated_cost: Number.isFinite(estimatedCost) ? estimatedCost : undefined,
+    assigned_technician_id: row.assigned_user_id ?? null,
+    source: row.source ?? undefined,
+    intake_responses: metadata,
+    job_total: row.job_total == null ? undefined : Number(row.job_total),
+    job_due: row.job_due == null ? undefined : Number(row.job_due),
+    starts_at: row.starts_at,
   };
 }
 
@@ -128,12 +240,15 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
   ] = await Promise.all([
     fetchCanonicalCashReceipts({ workspaceId, from: yearStart }),
     apiClient.get<{
-      todayApptRows: any[];
-      upcoming7Rows: any[];
-      inProgressRows: any[];
-      completedTodayRows: any[];
-      completedMonthRows: any[];
-      invoiceRows: any[];
+      todayApptRows: CockpitRowPayload[];
+      inProgressRows: CockpitRowPayload[];
+      completedTodayRows: Array<{ appointment_id?: string | null }>;
+      completedMonthRows: Array<{ total_amount?: number | null; metadata?: unknown }>;
+      attention: AttentionItem[];
+      weekAhead: WeekAheadDay[];
+      day: { jobsToday: number; jobsInProgress: number; jobsToGo: number; bookedToday: number };
+      outstanding: { count: number; total: number };
+      userDisplayName: string | null;
     }>('/v1/platform/dashboard/cockpit-rows', {
       query: {
         selected_workspace_id: workspaceId,
@@ -153,45 +268,26 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
 
   if (allReceipts.error) throw allReceipts.error;
 
-  // Bucket the single YTD fetch into the date ranges the dashboard needs.
-  // This replaces 6 separate API calls with 1.
+  // Bucket the single YTD fetch into the date ranges Home needs.
   const receipts = allReceipts.data;
   const inRange = (from: string, to?: string) =>
     receipts.filter((r) => {
       const t = r.collected_at;
       return t >= from && (to == null || t <= to);
     });
-  const payToday = { data: inRange(todayStart, todayEnd) };
-  const payYesterday = { data: inRange(yesterdayStart, yesterdayEnd) };
-  const payWeek = { data: inRange(weekStart) };
-  const payMonth = { data: inRange(monthStart) };
-  const payYtd = { data: receipts };
-  const payPrevMonth = { data: inRange(prevMonthStart, prevMonthMtdEnd) };
 
-  const { todayApptRows, upcoming7Rows, inProgressRows, completedTodayRows, completedMonthRows, invoiceRows } = cockpitRows;
+  const {
+    todayApptRows, inProgressRows, completedTodayRows, completedMonthRows,
+    attention, weekAhead, day, outstanding, userDisplayName,
+  } = cockpitRows;
 
-  const outstandingRows = invoiceRows ?? [];
-  const outstandingAR = outstandingRows.reduce(
-    (sum, invoice) => sum + Math.max(Number(invoice.total ?? 0) - Number(invoice.amount_paid ?? 0), 0),
-    0,
-  );
-
-  const jobsInProgressList: CockpitJobInProgress[] = (inProgressRows ?? []).map((row) => {
-    const metadata = object(row.metadata);
-    const customer = Array.isArray(row.customers) ? row.customers[0] : row.customers;
-    const vehicleRow = Array.isArray(row.vehicles) ? row.vehicles[0] : row.vehicles;
-    const customerName = [customer?.first_name, customer?.last_name].filter(Boolean).join(' ');
-    const vehicleParts = [vehicleRow?.year, vehicleRow?.make, vehicleRow?.model]
-      .filter((value) => value != null && String(value).trim())
-      .map(String);
-    return {
-      id: row.id,
-      service_type: String(metadata.service_type ?? metadata.service_name ?? metadata.title ?? 'Service'),
-      customer_name: customerName || String(metadata.customer_name ?? metadata.guest_name ?? 'Customer'),
-      vehicle: vehicleParts.length ? vehicleParts.join(' ') : null,
-      started_at: row.starts_at ?? null,
-    };
-  });
+  const todayJobs = (todayApptRows ?? []).map((row) => mapJobRow(row, timeZone));
+  const inProgressJobs = (inProgressRows ?? []).map((row) => mapJobRow(row, timeZone));
+  // The day list is today's rows plus any still-running job that started
+  // earlier (it belongs to the Now group), merged by id and time-ordered.
+  const todayIds = new Set(todayJobs.map((job) => job.id));
+  const todaysJobs = [...inProgressJobs.filter((job) => !todayIds.has(job.id)), ...todayJobs]
+    .sort((a, b) => a.starts_at.localeCompare(b.starts_at));
 
   const serviceTypeMap = new Map<string, { revenue: number; count: number }>();
   for (const row of completedMonthRows ?? []) {
@@ -202,29 +298,31 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
     current.count += 1;
     serviceTypeMap.set(type, current);
   }
-  const serviceTypeRevenueMTD = Array.from(serviceTypeMap.entries())
+  const serviceMixMTD = Array.from(serviceTypeMap.entries())
     .map(([type, values]) => ({ type, ...values }))
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 6);
 
-  const todaysAppointments = (todayApptRows ?? []).map((row) => mapAppointment(row, timeZone));
-  const upcomingNext7 = (upcoming7Rows ?? []).map((row) => mapAppointment(row, timeZone));
-
   return {
-    revenueToday: sumNetCollectedDollars(payToday.data),
-    revenueWeek: sumNetCollectedDollars(payWeek.data),
-    revenueMonth: sumNetCollectedDollars(payMonth.data),
-    revenueYTD: sumNetCollectedDollars(payYtd.data),
-    revenueTodayPrev: sumNetCollectedDollars(payYesterday.data),
-    revenueMonthPrev: sumNetCollectedDollars(payPrevMonth.data),
-    outstandingAR,
-    jobsInProgress: jobsInProgressList.length,
+    userDisplayName: userDisplayName ?? null,
+    shopName: settings?.business_name || null,
+    timeZone,
+    collectedToday: sumNetCollectedDollars(inRange(todayStart, todayEnd)),
+    collectedYesterday: sumNetCollectedDollars(inRange(yesterdayStart, yesterdayEnd)),
+    collectedWeek: sumNetCollectedDollars(inRange(weekStart)),
+    collectedMonth: sumNetCollectedDollars(inRange(monthStart)),
+    collectedYTD: sumNetCollectedDollars(receipts),
+    collectedPrevMonthMTD: sumNetCollectedDollars(inRange(prevMonthStart, prevMonthMtdEnd)),
+    bookedToday: Number(day?.bookedToday ?? 0),
+    jobsToday: Number(day?.jobsToday ?? todayJobs.length),
+    jobsInProgress: Number(day?.jobsInProgress ?? inProgressJobs.length),
+    jobsToGo: Number(day?.jobsToGo ?? 0),
     jobsCompletedToday: new Set((completedTodayRows ?? []).map((row) => row.appointment_id).filter(Boolean)).size,
-    appointmentsToday: todaysAppointments.length,
-    unpaidInvoices: outstandingRows.length,
-    todaysAppointments,
-    upcomingNext7,
-    jobsInProgressList,
-    serviceTypeRevenueMTD,
+    outstandingCount: Number(outstanding?.count ?? 0),
+    outstandingTotal: Number(outstanding?.total ?? 0),
+    attention: attention ?? [],
+    todaysJobs,
+    weekAhead: weekAhead ?? [],
+    serviceMixMTD,
   };
 }

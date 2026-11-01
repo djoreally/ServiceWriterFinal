@@ -51,15 +51,20 @@ function metadataText(appointment: AppointmentWithSource, key: string): string |
  * composed fields (display_title / primary_service_name), never a UUID and
  * never a client-synthesized title.
  *
- * Money seam: list rows carry no invoice/payment facts until B5/B6 land;
- * the amount shown is the same price-lock-aware estimate the old card
- * showed (locked website quote verbatim, else the fee-loaded total) — the
- * dot marks "amount due on this job", nothing more.
+ * Money seam: when the payload carries the server-composed job_due
+ * (Home's cockpit rows do — invoice / locked-quote / service-line facts
+ * composed server-side), it wins verbatim, including 0 for a job paid in
+ * full. List rows carry no such facts until B5/B6 land, so they fall back
+ * to the same price-lock-aware estimate the old card showed (locked
+ * website quote verbatim, else the fee-loaded total) — the dot marks
+ * "amount due on this job", nothing more.
  */
 export const JobRow = memo(function JobRow({ appointment, onClick, onComplete, onStatusChange }: JobRowProps) {
   const { feeSettings } = useFeeSettings();
   const lockedQuote = websiteQuoteTotal(appointment);
-  const totalDue = lockedQuote ?? computeAppointmentTotal(appointment, feeSettings);
+  const totalDue = typeof appointment.job_due === "number" && Number.isFinite(appointment.job_due)
+    ? appointment.job_due
+    : lockedQuote ?? computeAppointmentTotal(appointment, feeSettings);
   const chip = resolveStatusChip(appointment);
   const tone = statusToneClasses(chip.tone);
 

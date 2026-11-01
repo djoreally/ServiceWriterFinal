@@ -20,7 +20,7 @@ import { toast } from "@/components/ui/sonner";
 import { useTerminology } from "@/contexts/TerminologyContext";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { getServiceStatusBadgeClass, getServiceStatusLabel } from "@/lib/statusStyles";
-import { StatCard } from "@/components/dashboard/StatCard";
+import { LegacyStatCard as StatCard } from "@/components/dashboard/LegacyStatCard";
 import { WorkflowStatusIndicator } from "@/components/workflow/WorkflowStatusIndicator";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { TableSkeleton } from "@/components/loading/PageSkeletons";
