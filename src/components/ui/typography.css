@@ -72,6 +72,8 @@
 .type-md { font-size: var(--type-md); line-height: 1.3; }
 .type-lg { font-size: var(--type-lg); line-height: 1.1; letter-spacing: -0.02em; }
 .type-xl { font-size: var(--type-xl); line-height: 1.1; letter-spacing: -0.02em; }
+/* KPI values (StatCard) — adopts the Phase 0 --sw-type-kpi token. */
+.type-kpi { font-size: var(--sw-type-kpi); line-height: 1.1; letter-spacing: -0.02em; font-weight: var(--sw-weight-extrabold); font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
 
 /* Color utilities — three, not ten. */
 .type-primary { color: var(--type-primary); }

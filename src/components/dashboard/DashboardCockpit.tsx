@@ -1,21 +1,23 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { addDays } from 'date-fns';
+import { Link, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 import { useRegionalSettings } from '@/contexts/RegionalSettingsContext';
+import { useTerminology } from '@/contexts/TerminologyContext';
 import {
   fetchDashboardCockpit,
   type CockpitData,
+  type CockpitJob,
 } from '@/application/queries/dashboard-cockpit.query';
 import { getSelectedWorkspaceId } from '@/application/queries/workspaces.selection';
 import { useTeamRole } from '@/hooks/useTeamRole';
 import { canAccessRoute, canWrite } from '@/domain/auth/access-policy';
-import { fetchBusinessSettings } from '@/application/queries/settings.query';
+import { StatCard } from '@/components/dashboard/StatCard';
+import { AttentionQueue } from '@/components/dashboard/AttentionQueue';
+import { JobRow } from '@/components/appointments/JobRow';
 
 const DASHBOARD_CACHE_TTL_MS = 15 * 1000;
 const dashboardCache = new Map<string, { value: CockpitData | null; expiresAt: number }>();
@@ -39,104 +41,30 @@ function loadDashboardCockpit(): Promise<CockpitData | null> {
   return request;
 }
 
-/**
- * One of four KPIs. Mono numeral + label. Clickable when the role can reach
- * the target route — every KPI drills into its filtered list.
- * Signal (primary) is reserved for today's revenue, the single key metric.
- */
-function Kpi({
-  label,
-  value,
-  hint,
-  to,
-  accent = false,
-  attention = false,
-}: {
-  label: string;
-  value: string | number;
-  hint: string;
-  to?: string;
-  accent?: boolean;
-  attention?: boolean;
-}) {
-  const navigate = useNavigate();
-  const { role } = useTeamRole();
-  const clickable = to != null && canAccessRoute(role, to);
-
-  const inner = (
-    <div className="p-4">
-      <p className="type-label text-muted-foreground">{label}</p>
-      <p
-        className={cn(
-          'type-xl type-semibold type-tabular mt-1.5 font-mono',
-          accent && 'text-primary',
-          attention && 'text-attention-fg',
-        )}
-      >
-        {value}
-      </p>
-      <p className="mt-1.5 text-xs text-muted-foreground">{hint}</p>
-    </div>
-  );
-
-  if (clickable) {
-    return (
-      <Card className="border-border/70 shadow-sm transition-colors hover:border-primary/40">
-        <button
-          type="button"
-          onClick={() => navigate(to!)}
-          className="block w-full rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-          aria-label={`${label}: ${value}. Open details.`}
-        >
-          {inner}
-        </button>
-      </Card>
-    );
-  }
-
-  return (
-    <Card className="border-border/70 shadow-sm">
-      {inner}
-    </Card>
-  );
-}
-
-/** Pastel status pill — categorization only, one hue per status family. */
-function statusPillClass(status: string): string {
-  const key = status.toLowerCase().replace(/[\s-]+/g, '_');
-  const map: Record<string, string> = {
-    scheduled: 'bg-sky-500/10 text-sky-600 dark:text-sky-400',
-    confirmed: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-    in_progress: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
-    on_site: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
-    en_route: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
-    completed: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-    done: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-    cancelled: 'bg-red-500/10 text-red-600 dark:text-red-400',
-    no_show: 'bg-red-500/10 text-red-600 dark:text-red-400',
-    pending: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
-    unconfirmed: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
-  };
-  return map[key] ?? 'bg-muted text-muted-foreground';
-}
-
 function pluralize(count: number, singular: string, plural?: string): string {
   return count === 1 ? singular : (plural ?? `${singular}s`);
 }
 
-interface DashboardCockpitProps {
-  ownerName?: string | null;
-}
-
-export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
+/**
+ * Home (Total Redesign Part A) — the day screen, composed only from the
+ * canonical component set over ONE server-composed payload:
+ * S1 day header (header-card pattern) · S2 money strip (StatCard) ·
+ * S3 Needs Attention (AttentionQueue, absent when the server composes
+ * nothing) · S4 Today's Jobs (JobRow) · S5 Week Ahead (server per-day
+ * aggregates) · S6 Money detail (financial-summary rows, collapsed).
+ * No section fetches on its own; no number is assembled client-side.
+ */
+export function DashboardCockpit() {
   const navigate = useNavigate();
   const { role } = useTeamRole();
-  const { formatCurrency, formatTime } = useRegionalSettings();
+  const { terms } = useTerminology();
+  const { formatCurrency } = useRegionalSettings();
   const [data, setData] = useState<CockpitData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  const [timeZone, setTimeZone] = useState<string>('America/New_York');
+  const [doneOpen, setDoneOpen] = useState(false);
+  const [moneyOpen, setMoneyOpen] = useState(false);
 
   const reload = () => {
     setLoading(true);
@@ -146,16 +74,13 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
 
   useEffect(() => {
     let active = true;
-    Promise.all([loadDashboardCockpit(), fetchBusinessSettings()])
-      .then(([d, settings]) => {
-        if (active) {
-          setData(d);
-          setTimeZone(settings?.timezone || 'America/New_York');
-        }
+    loadDashboardCockpit()
+      .then((d) => {
+        if (active) setData(d);
       })
       .catch((e) => {
         console.error('Cockpit fetch error:', e);
-        if (active) setError(e instanceof Error ? e.message : 'Dashboard data could not be loaded.');
+        if (active) setError(e instanceof Error ? e.message : 'Home data could not be loaded.');
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -164,8 +89,10 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
   }, [reloadKey]);
 
   if (loading) {
+    // Home-shaped skeleton (spec P-2): S1 band, four stat blocks, the
+    // attention strip, then the two-column body — never a spinner.
     return (
-      <div className="space-y-5" aria-busy="true" aria-label="Loading dashboard">
+      <div className="space-y-5" aria-busy="true" aria-label="Loading home">
         <div>
           <Skeleton className="h-3 w-40" />
           <Skeleton className="mt-2 h-6 w-3/4 max-w-md" />
@@ -179,10 +106,12 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
             <Skeleton key={i} className="h-28 rounded-lg" />
           ))}
         </div>
-        <Skeleton className="h-24 rounded-lg" />
-        <div className="grid gap-4 xl:grid-cols-2">
-          <Skeleton className="h-64 rounded-lg" />
-          <Skeleton className="h-64 rounded-lg" />
+        <div className="grid gap-5 xl:grid-cols-3">
+          <div className="space-y-5 xl:col-span-2">
+            <Skeleton className="h-24 rounded-lg" />
+            <Skeleton className="h-64 rounded-lg" />
+          </div>
+          <Skeleton className="h-40 rounded-lg" />
         </div>
       </div>
     );
@@ -194,7 +123,7 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
         <CardContent className="flex flex-col items-start gap-3 p-5">
           <div className="flex items-center gap-2 text-destructive">
             <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-current text-xs font-bold">!</span>
-            <p className="text-sm font-medium">Dashboard data could not be loaded.</p>
+            <p className="text-sm font-medium">Home data could not be loaded.</p>
           </div>
           <p className="text-sm text-muted-foreground">
             Check your connection and try again. Your data is safe.
@@ -210,396 +139,295 @@ export function DashboardCockpit({ ownerName }: DashboardCockpitProps) {
     return (
       <Card>
         <CardContent className="p-5 text-sm text-muted-foreground">
-          No dashboard data is available for this workspace.
+          No home data is available for this workspace.
         </CardContent>
       </Card>
     );
   }
 
+  const timeZone = data.timeZone;
   const todayLabel = new Intl.DateTimeFormat(undefined, {
     weekday: 'long',
     month: 'long',
     day: 'numeric',
     timeZone,
   }).format(new Date());
-  const firstName = ownerName?.split(' ')[0] || 'Shop';
 
-  const revenueTrend = data.revenueTodayPrev > 0
-    ? ((data.revenueToday - data.revenueTodayPrev) / data.revenueTodayPrev) * 100
-    : 0;
+  // S1 greeting: the signed-in user (payload), shop name as fallback —
+  // never the business-settings owner name (H-13).
+  const greetingName = data.userDisplayName?.split(' ')[0] || data.shopName || null;
 
-  // Next 7 days lookahead — same cockpit payload (upcomingNext7), previously
-  // fetched but never rendered. Seven stable day buckets starting tomorrow,
-  // client-side grouping only; no additional requests.
-  const next7DayKeys: string[] = (() => {
-    const keyFormat = new Intl.DateTimeFormat('en-CA', { timeZone });
-    return Array.from({ length: 7 }, (_, index) => keyFormat.format(addDays(new Date(), index + 1)));
-  })();
-  const dayLoad = new Map<string, { jobs: number; estimated: number }>(
-    next7DayKeys.map((key) => [key, { jobs: 0, estimated: 0 }]),
-  );
-  for (const appointment of data.upcomingNext7) {
-    const bucket = dayLoad.get(appointment.scheduled_date);
-    if (bucket) {
-      bucket.jobs += 1;
-      bucket.estimated += appointment.estimated_cost ?? 0;
-    }
-  }
-
-  const unconfirmedUpcoming = data.upcomingNext7.filter((appointment) => {
-    const status = appointment.status.toLowerCase();
-    return status === 'pending' || status === 'unconfirmed';
-  });
-  const unconfirmedEstimated = unconfirmedUpcoming.reduce(
-    (sum, appointment) => sum + (appointment.estimated_cost ?? 0),
-    0,
-  );
-
-  // Attention queue, ranked: money at risk first.
-  const attentionItems = data.unpaidInvoices > 0
-    ? [
-        {
-          id: 'unpaid-invoices',
-          severity: 'warning' as const,
-          title: `${data.unpaidInvoices} unpaid ${pluralize(data.unpaidInvoices, 'invoice')}`,
-          detail: `${formatCurrency(data.outstandingAR)} outstanding`,
-          to: '/invoices',
-          actionLabel: 'Review invoices',
-        },
-      ]
-    : [];
-  if (unconfirmedUpcoming.length > 0) {
-    attentionItems.push({
-      id: 'unconfirmed-upcoming',
-      severity: 'warning' as const,
-      title: `${unconfirmedUpcoming.length} unconfirmed upcoming ${pluralize(unconfirmedUpcoming.length, 'appointment')}`,
-      detail: `next 7 days${unconfirmedEstimated > 0 ? ` · ${formatCurrency(unconfirmedEstimated)} estimated` : ''}`,
-      to: '/appointments',
-      actionLabel: 'Review schedule',
-    });
-  }
-
+  // S1 pulse: T-19 day aggregates as one sentence. When the attention
+  // queue is empty, the pulse carries the clean-day line (S3's empty
+  // state renders no card at all).
   const pulseSegments = [
-    `${data.appointmentsToday} ${pluralize(data.appointmentsToday, 'appointment')} today`,
+    `${data.jobsToday} ${pluralize(data.jobsToday, 'appointment')} today`,
     `${data.jobsInProgress} in progress`,
-    `${formatCurrency(data.revenueToday)} collected`,
-    data.unpaidInvoices > 0
-      ? `${data.unpaidInvoices} ${pluralize(data.unpaidInvoices, 'invoice')} outstanding`
-      : 'no invoices outstanding',
+    `${formatCurrency(data.collectedToday)} collected`,
+    `${formatCurrency(data.bookedToday)} booked`,
   ];
+  if (data.attention.length === 0) pulseSegments.push('Nothing needs your attention');
 
   const canOpenAppointments = canAccessRoute(role, '/appointments');
+  const openJob = (job: CockpitJob) => navigate(`/appointments/${job.id}`);
+  const newAppointment = () => navigate('/appointments', { state: { openNewAppointment: true } });
+
+  // S4 groups, in urgency order: running now, the rest of the day by
+  // start time, then what is done (collapsed below).
+  const nowJobs = data.todaysJobs.filter((job) => job.status === 'in_progress');
+  const doneJobs = data.todaysJobs.filter((job) => job.status === 'completed');
+  const upNextJobs = data.todaysJobs.filter(
+    (job) => job.status !== 'in_progress' && job.status !== 'completed',
+  );
+
+  const collectedLine = (label: string, value: number, sub?: string) => (
+    <li key={label} className="flex items-baseline justify-between gap-3 py-2.5">
+      <div className="min-w-0">
+        <p className="text-sm font-medium">{label}</p>
+        {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
+      </div>
+      <p className="shrink-0 text-sm font-semibold tabular-nums">{formatCurrency(value)}</p>
+    </li>
+  );
 
   return (
     <div className="space-y-5">
-      {/* Pulse — how's today going, in one sentence. The TopHeader owns the H1. */}
+      {/* S1 · Day header — date, greeting + pulse, the ONE primary action. */}
       <div>
         <p className="type-label text-muted-foreground">
           Today · {todayLabel}
         </p>
         <p className="mt-1.5 max-w-2xl text-base text-foreground tabular-nums">
-          {firstName}, here&rsquo;s the day: {pulseSegments.join(' · ')}.
+          {greetingName ? `${greetingName}, here’s the day: ` : 'Here’s the day: '}
+          {pulseSegments.join(' · ')}.
         </p>
         <div className="mt-3 flex flex-wrap gap-2">
           {canWrite(role, 'appointments') && (
-            <Button size="sm" onClick={() => navigate('/appointments', { state: { openNewAppointment: true } })}>
+            <Button className="bg-primary-action shadow-button" onClick={newAppointment}>
               New Appointment
             </Button>
           )}
-          {canAccessRoute(role, '/appointments') && (
-            <Button size="sm" variant="secondary" onClick={() => navigate('/appointments')}>
-              Appointments
+          {canWrite(role, 'quotes') && (
+            <Button variant="ghost" onClick={() => navigate('/quotes')}>
+              New {terms.quote}
             </Button>
           )}
-          {canAccessRoute(role, '/invoices') && (
-            <Button size="sm" variant="secondary" onClick={() => navigate('/invoices')}>
-              Invoices
+          {canWrite(role, 'customers') && (
+            <Button variant="ghost" onClick={() => navigate('/customers')}>
+              Add {terms.customer}
             </Button>
           )}
         </div>
       </div>
 
-      {/* KPI strip — four max, mono numerals, each drills into its list. */}
+      {/* S2 · Money strip — four facts, each drilling into its own screen. */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi
-          label="Today's revenue"
-          value={formatCurrency(data.revenueToday)}
-          hint={`Yesterday ${formatCurrency(data.revenueTodayPrev)}`}
-          to="/financials"
-          accent
+        <StatCard
+          label="Collected today"
+          value={formatCurrency(data.collectedToday)}
+          hint={`Yesterday ${formatCurrency(data.collectedYesterday)}`}
+          tone="accent"
+          href={canAccessRoute(role, '/financials') ? '/financials' : undefined}
         />
-        <Kpi
-          label="Appointments today"
-          value={data.appointmentsToday}
-          hint={`${data.jobsCompletedToday} completed`}
-          to="/appointments"
+        <StatCard
+          label="Booked today"
+          value={formatCurrency(data.bookedToday)}
+          href={canOpenAppointments ? '/appointments' : undefined}
         />
-        <Kpi
-          label="Jobs in progress"
-          value={data.jobsInProgress}
-          hint="Currently on the shop floor"
-          to="/operations"
+        <StatCard
+          label="Jobs today"
+          value={String(data.jobsToday)}
+          hint={`${data.jobsCompletedToday} completed · ${data.jobsToGo} to go`}
+          href={canOpenAppointments ? '/appointments' : undefined}
         />
-        <Kpi
-          label="Outstanding invoices"
-          value={data.unpaidInvoices}
-          hint={formatCurrency(data.outstandingAR)}
-          to="/invoices"
-          attention={data.unpaidInvoices > 0}
+        <StatCard
+          label="Outstanding"
+          value={formatCurrency(data.outstandingTotal)}
+          hint={`${data.outstandingCount} open ${pluralize(data.outstandingCount, 'invoice')}`}
+          tone={data.outstandingTotal > 0 ? 'attention' : 'default'}
+          href={canAccessRoute(role, '/invoices') ? '/invoices' : undefined}
         />
       </div>
 
-      {/* Next 7 days — the week ahead, from the same cockpit payload. */}
-      <section aria-labelledby="next7-heading">
-        <h2 id="next7-heading" className="type-lg type-semibold">
-          Next 7 days
-        </h2>
-        <Card className="mt-2 border-border/70 shadow-sm">
-          <CardContent className="grid grid-cols-7 gap-1 p-2 sm:gap-2 sm:p-3">
-            {next7DayKeys.map((key) => {
-              const bucket = dayLoad.get(key) ?? { jobs: 0, estimated: 0 };
-              // Noon pin keeps weekday/day rendering stable around DST shifts.
-              const day = new Date(`${key}T12:00:00`);
-              return (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => navigate('/appointments')}
-                  className="flex flex-col items-center gap-0.5 rounded-md border border-transparent px-1 py-2 text-center transition-colors hover:border-border hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                >
-                  <span className="type-label text-muted-foreground">
-                    {day.toLocaleDateString('en-US', { weekday: 'short' })}
-                  </span>
-                  <span className="text-base font-semibold tabular-nums">{day.getDate()}</span>
-                  <span
-                    className={
-                      bucket.jobs > 0
-                        ? 'text-sm font-semibold tabular-nums leading-tight'
-                        : 'text-sm tabular-nums leading-tight text-muted-foreground/50'
-                    }
-                  >
-                    {bucket.jobs > 0 ? bucket.jobs : '—'}
-                  </span>
-                  <span className="type-label hidden font-mono text-muted-foreground tabular-nums sm:block">
-                    {bucket.estimated > 0 ? formatCurrency(bucket.estimated) : ''}
-                  </span>
-                </button>
-              );
-            })}
-          </CardContent>
-        </Card>
-      </section>
+      <div className="grid gap-5 xl:grid-cols-3">
+        <div className="min-w-0 space-y-5 xl:col-span-2">
+          {/* S3 · Needs Attention — absent entirely when nothing composes. */}
+          <AttentionQueue items={data.attention} />
 
-      {/* Attention — what needs you right now, ranked. */}
-      <section aria-labelledby="attention-heading">
-        <h2 id="attention-heading" className="type-lg type-semibold">
-          Needs attention
-        </h2>
-        <Card className="mt-2 border-border/70 shadow-sm">
-          <CardContent className="p-2">
-            {attentionItems.length === 0 ? (
-              <div className="flex items-center gap-2.5 p-3">
-                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-500 text-xs font-bold">✓</span>
-                <p className="text-sm text-muted-foreground">
-                  Nothing needs your attention. The day is running clean.
+          {/* S4 · Today's Jobs — one card, Now / Up next / Done. */}
+          <Card aria-label="Today's jobs">
+            <CardHeader className="flex-row items-start justify-between gap-3 space-y-0">
+              <div>
+                <CardTitle>Today&rsquo;s jobs</CardTitle>
+                <p className="mt-1 text-sm text-muted-foreground tabular-nums">
+                  {data.jobsToday} {pluralize(data.jobsToday, 'job')} · {formatCurrency(data.bookedToday)} booked · {formatCurrency(data.collectedToday)} collected
                 </p>
               </div>
-            ) : (
-              attentionItems.map((item) => {
-                const canOpen = canAccessRoute(role, item.to);
-                const row = (
-                  <div className="flex items-center justify-between gap-3 p-3">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <span
-                        className="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-500"
-                        aria-hidden="true"
-                      />
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium">{item.title}</p>
-                        <p className="font-mono text-sm text-muted-foreground tabular-nums">{item.detail}</p>
-                      </div>
-                    </div>
-                    {canOpen && (
-                      <span className="flex shrink-0 items-center gap-1 text-sm font-medium text-primary">
-                        {item.actionLabel}
-                        <span aria-hidden="true">›</span>
-                      </span>
-                    )}
-                  </div>
-                );
-                return canOpen ? (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => navigate(item.to)}
-                    className="block w-full rounded-lg text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                  >
-                    {row}
-                  </button>
-                ) : (
-                  <div key={item.id}>{row}</div>
-                );
-              })
-            )}
-          </CardContent>
-        </Card>
-      </section>
-
-      {/* Today's work — summary first, tap a row to drill down. */}
-      <section aria-labelledby="today-heading">
-        <h2 id="today-heading" className="type-lg type-semibold">
-          Today&rsquo;s work
-        </h2>
-        <div className="mt-2 grid gap-4 xl:grid-cols-2">
-          <Card className="border-border/70 shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-lg font-semibold">Appointments</CardTitle>
+              {canOpenAppointments && (
+                <Link
+                  to="/appointments"
+                  className="shrink-0 rounded-lg px-2 py-1 text-sm font-semibold text-primary transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  View all
+                </Link>
+              )}
             </CardHeader>
-            <CardContent className="space-y-1.5 pt-0">
-              {data.todaysAppointments.length === 0 ? (
-                <p className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">
-                  Nothing scheduled today. The book is open.
-                </p>
-              ) : data.todaysAppointments.map((a) => {
-                const row = (
-                  <div className="flex items-center justify-between gap-3 rounded-lg border border-transparent p-2.5 text-sm">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <span className="w-16 shrink-0 font-mono text-sm text-muted-foreground tabular-nums">
-                        {a.scheduled_time ? formatTime(a.scheduled_time) : '—'}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="truncate font-medium">{a.title}</p>
-                        {a.guest_name && (
-                          <p className="truncate text-sm text-muted-foreground">{a.guest_name}</p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      {a.estimated_cost != null && (
-                        <span className="font-mono text-sm text-muted-foreground tabular-nums">
-                          {formatCurrency(a.estimated_cost)}
-                        </span>
-                      )}
-                      <Badge variant="outline" className={cn('border-0 text-xs font-medium', statusPillClass(a.status))}>
-                        {a.status.replace(/_/g, ' ')}
-                      </Badge>
-                    </div>
-                  </div>
-                );
-                return canOpenAppointments ? (
-                  <button
-                    key={a.id}
-                    type="button"
-                    onClick={() => navigate('/appointments')}
-                    className="block w-full rounded-lg text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                    aria-label={`${a.title}, ${a.guest_name ?? ''} ${a.status.replace(/_/g, ' ')}. Open appointments.`}
-                  >
-                    {row}
-                  </button>
-                ) : (
-                  <div key={a.id}>{row}</div>
-                );
-              })}
-            </CardContent>
-          </Card>
-
-          <Card className="border-border/70 shadow-sm">
-            <CardHeader>
-              <CardTitle className="text-lg font-semibold">On the floor now</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-1.5 pt-0">
-              {data.jobsInProgressList.length === 0 ? (
-                <p className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">
-                  No jobs in progress. The floor is quiet.
-                </p>
-              ) : data.jobsInProgressList.map((job) => (
-                <div key={job.id} className="rounded-lg border border-transparent p-2.5 text-sm">
-                  <p className="font-medium">{job.service_type}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {job.customer_name}{job.vehicle ? ` · ${job.vehicle}` : ''}
-                  </p>
+            <CardContent>
+              {data.todaysJobs.length === 0 ? (
+                <div className="rounded-lg bg-muted/40 p-4">
+                  <p className="text-sm text-muted-foreground">Nothing scheduled today. The book is open.</p>
+                  {canWrite(role, 'appointments') && (
+                    <Button size="sm" className="mt-3 bg-primary-action shadow-button" onClick={newAppointment}>
+                      New Appointment
+                    </Button>
+                  )}
                 </div>
-              ))}
+              ) : (
+                <div className="space-y-4">
+                  {nowJobs.length > 0 && (
+                    <div>
+                      <p className="type-label mb-2 text-muted-foreground">Now</p>
+                      <div className="space-y-2">
+                        {nowJobs.map((job) => (
+                          <JobRow key={job.id} appointment={job} onClick={openJob} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {upNextJobs.length > 0 && (
+                    <div>
+                      <p className="type-label mb-2 text-muted-foreground">Up next</p>
+                      <div className="space-y-2">
+                        {upNextJobs.map((job) => (
+                          <JobRow key={job.id} appointment={job} onClick={openJob} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {doneJobs.length > 0 && (
+                    <Collapsible open={doneOpen} onOpenChange={setDoneOpen}>
+                      <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-lg py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                        <span className="type-label text-muted-foreground">
+                          Done · {doneJobs.length} {pluralize(doneJobs.length, 'job')}
+                        </span>
+                        <span className={cn('text-muted-foreground transition-transform', doneOpen && 'rotate-180')} aria-hidden="true">⌄</span>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="pt-2">
+                        <div className="space-y-2">
+                          {doneJobs.map((job) => (
+                            <JobRow key={job.id} appointment={job} onClick={openJob} />
+                          ))}
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
-      </section>
 
-      {/* Revenue detail — progressive disclosure, everything else lives here. */}
-      <section aria-labelledby="revenue-heading">
-        <Collapsible>
-          <h2 id="revenue-heading">
-            <CollapsibleTrigger className="group flex w-full items-center gap-1.5 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-              <span className="text-lg font-semibold tracking-tight">Revenue detail</span>
-              <span className="text-muted-foreground transition-transform group-data-[state=open]:rotate-180" aria-hidden="true">⌄</span>
-            </CollapsibleTrigger>
-          </h2>
-          <CollapsibleContent className="pt-2">
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <Card className="border-border/70 shadow-sm">
-                <CardContent className="p-4">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">This week</p>
-                  <p className="mt-1.5 font-mono text-lg font-semibold tabular-nums">{formatCurrency(data.revenueWeek)}</p>
-                </CardContent>
-              </Card>
-              <Card className="border-border/70 shadow-sm">
-                <CardContent className="p-4">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">This month</p>
-                  <p className="mt-1.5 font-mono text-lg font-semibold tabular-nums">{formatCurrency(data.revenueMonth)}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Prev month {formatCurrency(data.revenueMonthPrev)}
-                  </p>
-                </CardContent>
-              </Card>
-              <Card className="border-border/70 shadow-sm">
-                <CardContent className="p-4">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Year to date</p>
-                  <p className="mt-1.5 font-mono text-lg font-semibold tabular-nums">{formatCurrency(data.revenueYTD)}</p>
-                </CardContent>
-              </Card>
-              <Card className="border-border/70 shadow-sm">
-                <CardContent className="p-4">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Today vs yesterday</p>
-                  <p className={cn(
-                    'mt-1.5 font-mono text-lg font-semibold tabular-nums',
-                    revenueTrend >= 0 ? 'text-chart-trend-up' : 'text-chart-trend-down',
-                  )}>
-                    {revenueTrend >= 0 ? '+' : ''}{revenueTrend.toFixed(1)}%
-                  </p>
-                </CardContent>
-              </Card>
-            </div>
-            <Card className="mt-3 border-border/70 shadow-sm">
-              <CardHeader>
-                <CardTitle className="text-lg font-semibold">Service mix · month to date</CardTitle>
+        <div className="min-w-0 space-y-5">
+          {/* S5 · Week Ahead — server per-day aggregates, rendered verbatim. */}
+          <Card aria-label="Week ahead">
+            <CardHeader className="pb-0">
+              <CardTitle>Week ahead</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-7 gap-1">
+                {data.weekAhead.map((dayCell) => {
+                  // Noon pin keeps weekday/day rendering stable around DST shifts.
+                  const day = new Date(`${dayCell.date}T12:00:00`);
+                  const cell = (
+                    <>
+                      <span className="type-label text-muted-foreground">
+                        {day.toLocaleDateString('en-US', { weekday: 'short' })}
+                      </span>
+                      <span className="text-base font-semibold tabular-nums">{day.getDate()}</span>
+                      <span
+                        className={
+                          dayCell.jobs > 0
+                            ? 'text-sm font-semibold leading-tight tabular-nums'
+                            : 'text-sm leading-tight text-muted-foreground/50 tabular-nums'
+                        }
+                      >
+                        {dayCell.jobs > 0 ? dayCell.jobs : '—'}
+                      </span>
+                      <span className="hidden text-xs text-muted-foreground tabular-nums sm:block">
+                        {dayCell.booked > 0 ? formatCurrency(dayCell.booked) : ''}
+                      </span>
+                    </>
+                  );
+                  const cellClass = 'flex flex-col items-center gap-0.5 rounded-md px-1 py-2 text-center';
+                  return canOpenAppointments ? (
+                    <button
+                      key={dayCell.date}
+                      type="button"
+                      onClick={() => navigate('/appointments')}
+                      className={`${cellClass} transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
+                      aria-label={`${day.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}: ${dayCell.jobs} ${pluralize(dayCell.jobs, 'job')}, ${formatCurrency(dayCell.booked)} booked. Open appointments.`}
+                    >
+                      {cell}
+                    </button>
+                  ) : (
+                    <div key={dayCell.date} className={cellClass}>
+                      {cell}
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* S6 · Money detail — collapsed; collected cash + labeled mix. */}
+          <Collapsible open={moneyOpen} onOpenChange={setMoneyOpen}>
+            <Card>
+              <CardHeader className="pb-0">
+                <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  <CardTitle>Money</CardTitle>
+                  <span className={cn('text-muted-foreground transition-transform', moneyOpen && 'rotate-180')} aria-hidden="true">⌄</span>
+                </CollapsibleTrigger>
               </CardHeader>
-              <CardContent className="pt-0">
-                {data.serviceTypeRevenueMTD.length === 0 ? (
-                  <p className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">
-                    No completed services recorded this month.
-                  </p>
-                ) : (
-                  <ul className="divide-y divide-border/60">
-                    {data.serviceTypeRevenueMTD.map((row) => (
-                      <li key={row.type} className="flex items-center justify-between gap-3 py-2.5">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">{row.type}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {row.count} {pluralize(row.count, 'job')}
-                          </p>
-                        </div>
-                        <p className="shrink-0 font-mono text-sm font-semibold tabular-nums">
-                          {formatCurrency(row.revenue)}
-                        </p>
-                      </li>
-                    ))}
+              <CollapsibleContent>
+                <CardContent>
+                  <ul className="divide-y divide-border">
+                    {collectedLine('Collected this week', data.collectedWeek)}
+                    {collectedLine(
+                      'Collected this month',
+                      data.collectedMonth,
+                      `Prev month to date ${formatCurrency(data.collectedPrevMonthMTD)}`,
+                    )}
+                    {collectedLine('Collected year to date', data.collectedYTD)}
                   </ul>
-                )}
-              </CardContent>
+                  <p className="type-label mt-4 text-muted-foreground">Service mix · month to date</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">Completed work — what the shop did, not cash collected.</p>
+                  {data.serviceMixMTD.length === 0 ? (
+                    <p className="mt-2 rounded-lg bg-muted/40 p-3 text-sm text-muted-foreground">
+                      No completed services recorded this month.
+                    </p>
+                  ) : (
+                    <ul className="mt-1 divide-y divide-border">
+                      {data.serviceMixMTD.map((row) => (
+                        <li key={row.type} className="flex items-center justify-between gap-3 py-2.5">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">{row.type}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {row.count} {pluralize(row.count, 'job')}
+                            </p>
+                          </div>
+                          <p className="shrink-0 text-sm font-semibold tabular-nums">
+                            {formatCurrency(row.revenue)}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </CardContent>
+              </CollapsibleContent>
             </Card>
-          </CollapsibleContent>
-        </Collapsible>
-      </section>
+          </Collapsible>
+        </div>
+      </div>
     </div>
   );
 }

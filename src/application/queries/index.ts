@@ -123,8 +123,9 @@ export {
 export {
   fetchDashboardCockpit,
   type CockpitData,
-  type CockpitAppointment,
-  type CockpitJobInProgress,
+  type CockpitJob,
+  type AttentionItem,
+  type WeekAheadDay,
   type CockpitServiceTypeRev,
 } from './dashboard-cockpit.query';
 

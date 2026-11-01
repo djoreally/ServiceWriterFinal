@@ -25,7 +25,7 @@ import { Plus, Search, Car, Wrench, Edit, Trash2, UserX, Eye, Loader2, Download 
 import { useNavigate } from "react-router-dom";
 import { toast } from "@/components/ui/sonner";
 import { useTerminology } from "@/contexts/TerminologyContext";
-import { StatCard } from "@/components/dashboard/StatCard";
+import { LegacyStatCard as StatCard } from "@/components/dashboard/LegacyStatCard";
 import { vehicleSchema, getFirstError } from "@/lib/validation";
 import { useDebounce } from "@/hooks/useDebounce";
 import { VinLookup } from "@/components/vehicles/VinLookup";

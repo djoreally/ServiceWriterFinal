@@ -89,6 +89,12 @@ export interface Appointment {
   notes?: string;
   estimated_cost?: number;
   tax_amount?: number;
+  // Server-composed T-14 job money (Home cockpit payload): the job's total
+  // and the amount due on it, composed from the invoice / locked quote /
+  // service lines by the server. Present only where a payload composes
+  // them; the B5 composed payment_state supersedes job_due when it lands.
+  job_total?: number;
+  job_due?: number;
   // Pricing channel, set once at creation ('staff', 'public_booking',
   // 'moms_website', ...). Website-pushed appointments carry a locked quote —
   // see @/lib/price-lock.

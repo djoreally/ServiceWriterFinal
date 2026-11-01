@@ -15,7 +15,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { OilUsageTab } from "@/components/inventory/OilUsageTab";
 import { OIL_SEED_ITEMS, OIL_SEED_DEFAULT_QUANTITY } from "@/lib/inventorySeeds";
 import { toast } from "@/components/ui/sonner";
-import { StatCard } from "@/components/dashboard/StatCard";
+import { LegacyStatCard as StatCard } from "@/components/dashboard/LegacyStatCard";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
