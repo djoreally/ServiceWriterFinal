@@ -698,6 +698,19 @@ describe("payments/actions (POST)", () => {
     return refundsCreate;
   }
 
+  // Collect the payloads of every .update()/.insert() call made against the
+  // mocked query builders during a request.
+  function paymentWritePayloads(method: "update" | "insert"): Record<string, unknown>[] {
+    const builders = (supabase.from as jest.Mock).mock.results.map(
+      (result: { value: unknown }) => result.value as Record<string, jest.Mock>,
+    );
+    return builders.flatMap((builder) =>
+      (builder[method].mock.calls as unknown[][]).map(
+        (call) => call[0] as Record<string, unknown>,
+      ),
+    );
+  }
+
   beforeEach(() => {
     supabase = makeSupabaseClient({
       payments: {
@@ -835,7 +848,7 @@ describe("payments/actions (POST)", () => {
     );
   });
 
-  it("manual_payment: returns 409 when waivers are embedded", async () => {
+  it("manual_payment: returns 409 when fee or tax waivers are embedded", async () => {
     const { status, body } = await readJson(
       await paymentActionsPost(
         makeRequest("/api/v1/payments/actions", {
@@ -846,6 +859,117 @@ describe("payments/actions (POST)", () => {
     );
     expect(status).toBe(409);
     expect(body.error.code).toBe("adjustment_required");
+  });
+
+  it("manual_payment: cash close-out records the received amount and waives the rest as a labeled adjustment", async () => {
+    supabase = makeSupabaseClient({
+      payments: {
+        data: { id: PAYMENT_ID, invoice_id: INVOICE_ID, customer_id: CUSTOMER_ID, status: "pending", amount: 137.28, currency_code: "USD", metadata: {} },
+        error: null,
+      },
+    });
+    paymentsAddonResolve(supabase);
+    const { status, body } = await readJson(
+      await paymentActionsPost(
+        makeRequest("/api/v1/payments/actions", {
+          method: "POST",
+          body: { action: "manual_payment", workspace_id: WS_ID, payment_id: PAYMENT_ID, amount: 13000, payment_method: "cash", waive_remaining: true },
+        }),
+      ),
+    );
+    expect(status).toBe(200);
+    expect(body.data).toMatchObject({ success: true, payment_id: PAYMENT_ID, waived_amount: 7.28 });
+
+    const updates = paymentWritePayloads("update");
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).toMatchObject({
+      amount: 130,
+      status: "succeeded",
+      metadata: { cash_closeout: { waived_amount: 7.28, waive_reason: "cash_discount_fee_waive" } },
+    });
+
+    const inserts = paymentWritePayloads("insert");
+    expect(inserts).toHaveLength(1);
+    expect(inserts[0]).toMatchObject({
+      workspace_id: WS_ID,
+      invoice_id: INVOICE_ID,
+      customer_id: CUSTOMER_ID,
+      amount: 7.28,
+      status: "succeeded",
+      provider: null,
+      metadata: {
+        source: "manual_adjustment",
+        adjustment_type: "cash_discount_fee_waive",
+        related_payment_id: PAYMENT_ID,
+      },
+    });
+  });
+
+  it("manual_payment: returns 409 for a lesser amount without waive_remaining (no partial payments)", async () => {
+    supabase = makeSupabaseClient({
+      payments: {
+        data: { id: PAYMENT_ID, invoice_id: INVOICE_ID, status: "pending", amount: 100, metadata: {} },
+        error: null,
+      },
+    });
+    paymentsAddonResolve(supabase);
+    const { status, body } = await readJson(
+      await paymentActionsPost(
+        makeRequest("/api/v1/payments/actions", {
+          method: "POST",
+          body: { action: "manual_payment", workspace_id: WS_ID, payment_id: PAYMENT_ID, amount: 9000, payment_method: "cash" },
+        }),
+      ),
+    );
+    expect(status).toBe(409);
+    expect(body.error.code).toBe("amount_mismatch");
+    expect(paymentWritePayloads("update")).toHaveLength(0);
+    expect(paymentWritePayloads("insert")).toHaveLength(0);
+  });
+
+  it("manual_payment: returns 409 when the amount exceeds the finalized balance", async () => {
+    supabase = makeSupabaseClient({
+      payments: {
+        data: { id: PAYMENT_ID, invoice_id: INVOICE_ID, status: "pending", amount: 100, metadata: {} },
+        error: null,
+      },
+    });
+    paymentsAddonResolve(supabase);
+    const { status, body } = await readJson(
+      await paymentActionsPost(
+        makeRequest("/api/v1/payments/actions", {
+          method: "POST",
+          body: { action: "manual_payment", workspace_id: WS_ID, payment_id: PAYMENT_ID, amount: 10001, payment_method: "cash", waive_remaining: true },
+        }),
+      ),
+    );
+    expect(status).toBe(409);
+    expect(body.error.code).toBe("amount_mismatch");
+  });
+
+  it("manual_payment: waive_remaining with the exact amount records no adjustment row", async () => {
+    supabase = makeSupabaseClient({
+      payments: {
+        data: { id: PAYMENT_ID, invoice_id: INVOICE_ID, customer_id: CUSTOMER_ID, status: "pending", amount: 100, metadata: {} },
+        error: null,
+      },
+    });
+    paymentsAddonResolve(supabase);
+    const { status, body } = await readJson(
+      await paymentActionsPost(
+        makeRequest("/api/v1/payments/actions", {
+          method: "POST",
+          body: { action: "manual_payment", workspace_id: WS_ID, payment_id: PAYMENT_ID, amount: 10000, payment_method: "cash", waive_remaining: true },
+        }),
+      ),
+    );
+    expect(status).toBe(200);
+    expect(body.data).toMatchObject({ success: true, payment_id: PAYMENT_ID });
+    expect(body.data.waived_amount).toBeUndefined();
+    const updates = paymentWritePayloads("update");
+    expect(updates).toHaveLength(1);
+    expect(updates[0].metadata as Record<string, unknown>).not.toHaveProperty("cash_closeout");
+    expect(paymentWritePayloads("insert")).toHaveLength(0);
   });
 
   it("payment_link: syncs the invoice to Stripe and dispatches the request email", async () => {
