@@ -817,13 +817,13 @@ billingRouter.post("/v1/payments/actions", async (c) => {
   }
 
   if (body.action === "manual_payment") {
-    if (body.waive_fees || body.waive_tax || body.waive_remaining) {
-      return json({ error: { code: "adjustment_required", message: "Fee, tax, and remaining-balance waivers require the adjustment workflow and cannot be embedded in a payment receipt." } }, { status: 409 });
+    if (body.waive_fees || body.waive_tax) {
+      return json({ error: { code: "adjustment_required", message: "Fee and tax waivers require the adjustment workflow and cannot be embedded in a payment receipt." } }, { status: 409 });
     }
 
     const { data: current, error: currentError } = await supabase
       .from("payments")
-      .select("id,invoice_id,customer_id,status,amount,metadata")
+      .select("id,invoice_id,customer_id,status,amount,currency_code,metadata")
       .eq("workspace_id", body.workspace_id)
       .eq("id", body.payment_id)
       .single();
@@ -832,13 +832,25 @@ billingRouter.post("/v1/payments/actions", async (c) => {
       return json({ error: { code: "invalid_payment_state", message: "A refunded payment cannot be re-recorded as a manual payment." } }, { status: 409 });
     }
 
-    const amountDollars = Number((body.amount / 100).toFixed(2));
-    if (amountDollars <= 0) {
+    // Cash close-out: the amount received at the door settles the ticket.
+    // With waive_remaining, any shortfall against the finalized balance is
+    // waived as a labeled cash adjustment (adjustment row below) so the
+    // invoice ends PAID — partial payments are never recorded.
+    const receivedCents = Math.round(body.amount);
+    const dueCents = Math.round(Number(current.amount || 0) * 100);
+    if (receivedCents <= 0) {
       return json({ error: { code: "invalid_amount", message: "Payment amount must be greater than zero." } }, { status: 400 });
     }
-    if (Math.abs(amountDollars - Number(current.amount || 0)) > 0.009) {
-      return json({ error: { code: "amount_mismatch", message: "In-person closeout must settle the finalized balance exactly." } }, { status: 409 });
+    if (receivedCents > dueCents) {
+      return json({ error: { code: "amount_mismatch", message: "Payment amount cannot exceed the finalized balance." } }, { status: 409 });
     }
+    const waivedCents = dueCents - receivedCents;
+    if (waivedCents > 0 && !body.waive_remaining) {
+      return json({ error: { code: "amount_mismatch", message: "In-person closeout must settle the finalized balance exactly, or waive the remaining balance as a cash close-out." } }, { status: 409 });
+    }
+    const amountDollars = Number((receivedCents / 100).toFixed(2));
+    const waivedDollars = Number((waivedCents / 100).toFixed(2));
+    const cashCloseout = waivedCents > 0;
 
     const metadata = object(current.metadata);
     if (current.status === "succeeded") {
@@ -874,6 +886,7 @@ billingRouter.post("/v1/payments/actions", async (c) => {
           received_in_person: true,
           stripe_out_of_band_sync_status: stripeSync.status,
           ...(stripeSync.status === "failed" ? { stripe_out_of_band_sync_error: stripeSync.error } : {}),
+          ...(cashCloseout ? { cash_closeout: { waived_amount: waivedDollars, waive_reason: "cash_discount_fee_waive" } } : {}),
         },
       })
       .eq("workspace_id", body.workspace_id)
@@ -882,7 +895,35 @@ billingRouter.post("/v1/payments/actions", async (c) => {
       .single();
     if (error) throw error;
 
-    return json({ data: { success: true, payment_id: data.id, amount: data.amount, status: data.status, stripe_sync: stripeSync } });
+    let adjustmentPaymentId: string | null = null;
+    if (cashCloseout) {
+      // The reconcile trigger derives the invoice balance from succeeded
+      // payment rows, so the waived difference is recorded as its own
+      // succeeded adjustment row: cash row + adjustment row = invoice PAID.
+      const { data: adjustment, error: adjustmentError } = await (supabase.from("payments") as any)
+        .insert({
+          workspace_id: body.workspace_id,
+          invoice_id: current.invoice_id,
+          customer_id: current.customer_id,
+          amount: waivedDollars,
+          currency_code: current.currency_code ?? "USD",
+          status: "succeeded",
+          provider: null,
+          paid_at: paidAt,
+          metadata: {
+            source: "manual_adjustment",
+            adjustment_type: "cash_discount_fee_waive",
+            related_payment_id: data.id,
+            notes: body.notes ?? null,
+          },
+        })
+        .select("id")
+        .single();
+      if (adjustmentError) throw adjustmentError;
+      adjustmentPaymentId = adjustment.id;
+    }
+
+    return json({ data: { success: true, payment_id: data.id, amount: data.amount, status: data.status, stripe_sync: stripeSync, ...(cashCloseout ? { waived_amount: waivedDollars, adjustment_payment_id: adjustmentPaymentId } : {}) } });
   }
 
   if (body.action === "payment_link" || body.action === "send_invoice") {
