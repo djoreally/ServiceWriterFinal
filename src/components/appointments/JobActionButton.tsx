@@ -111,7 +111,7 @@ export function JobActionButton({ appointment, onUpdated, className }: JobAction
             <DialogTitle>Service Inspection</DialogTitle>
             <DialogDescription>{current ? `${current.templateName} is required for this vehicle. ` : ""}Complete required checks early so recommendations can be sent while the original work continues.</DialogDescription>
           </DialogHeader>
-          <InspectionPerformer appointmentId={appointment.id} vehicleId={current?.vehicleId ?? appointment.vehicle?.id} onComplete={async () => { await refreshGate(); setShowInspection(false); }} />
+          <InspectionPerformer appointmentId={appointment.id} vehicleId={current?.vehicleId ?? appointment.vehicle?.id} requiredTemplateId={current?.templateId} requiredTemplateName={current?.templateName} onComplete={async () => { await refreshGate(); setShowInspection(false); }} />
         </DialogContent>
       </Dialog>
     </>;

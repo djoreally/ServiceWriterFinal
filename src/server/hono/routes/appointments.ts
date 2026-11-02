@@ -2403,6 +2403,37 @@ appointmentsRouter.delete("/v1/inspections/items/:id", async (c: Context) => {
   return json({ data: { id } });
 });
 
+// Workspace ids where the caller holds an ACTIVE membership — the same
+// membership rule requireWorkspaceMember enforces per workspace. Used to
+// resolve the catalog-linked inspection templates the appointment gate can
+// require for a workspace's jobs, which may be owned by another user.
+async function callerActiveWorkspaceIds(db: any, userId: string): Promise<string[]> {
+  const { data, error } = await db
+    .from("workspace_members")
+    .select("workspace_id")
+    .eq("user_id", userId)
+    .eq("is_active", true);
+  if (error) throw error;
+  return Array.from(new Set(((data ?? []) as Array<{ workspace_id: string }>).map((row) => row.workspace_id)));
+}
+
+// Template ids linked from the service catalog of any of the given
+// workspaces (service_catalog.inspection_template_id).
+async function catalogLinkedTemplateIds(db: any, workspaceIds: string[]): Promise<string[]> {
+  if (workspaceIds.length === 0) return [];
+  const { data, error } = await db
+    .from("service_catalog")
+    .select("inspection_template_id")
+    .in("workspace_id", workspaceIds)
+    .not("inspection_template_id", "is", null);
+  if (error) throw error;
+  return Array.from(new Set(
+    ((data ?? []) as Array<{ inspection_template_id: string | null }>)
+      .map((row) => row.inspection_template_id)
+      .filter((id): id is string => Boolean(id)),
+  ));
+}
+
 // GET /v1/inspections/items — items for one template.
 appointmentsRouter.get("/v1/inspections/items", async (c: Context) => {
   const { supabase, user } = await requireAuth(c);
@@ -2410,12 +2441,19 @@ appointmentsRouter.get("/v1/inspections/items", async (c: Context) => {
   const db = supabase as any;
   const { data: template, error: templateError } = await db
     .from("inspection_templates")
-    .select("id")
-    .eq("user_id", user.id)
+    .select("id, user_id")
     .eq("id", templateId)
     .maybeSingle();
   if (templateError) throw templateError;
   if (!template) throw new ApiError(404, "Template not found.", "not_found");
+  // Readable by the template's owner, or by any active member of a
+  // workspace whose service catalog links this template — the gate can
+  // require it for that workspace's jobs even when another user owns it.
+  // Templates with no owner match and no such link stay 404.
+  if ((template as { user_id: string }).user_id !== user.id) {
+    const linkedIds = await catalogLinkedTemplateIds(db, await callerActiveWorkspaceIds(db, user.id));
+    if (!linkedIds.includes(templateId)) throw new ApiError(404, "Template not found.", "not_found");
+  }
   const { data, error } = await db
     .from("inspection_items")
     .select("*")
@@ -2461,7 +2499,29 @@ appointmentsRouter.get("/v1/inspections/performer-data", async (c: Context) => {
   const [templatesRes, pastRes] = await Promise.all([templatesPromise, pastQuery]);
   if (templatesRes.error) throw templatesRes.error;
   if (pastRes.error) throw pastRes.error;
-  return json({ data: { templates: templatesRes.data ?? [], pastInspections: pastRes.data ?? [] } });
+
+  // The appointment gate requires templates from the workspace's service
+  // catalog, and those templates may be owned by a different user than the
+  // performer. Add the catalog-linked ACTIVE templates of every workspace
+  // the caller actively belongs to, so the gated checklist can always load
+  // for a workspace member.
+  type PerformerTemplateOption = { id: string; name: string; description: string | null; category: string | null };
+  const templatesById = new Map<string, PerformerTemplateOption>();
+  for (const row of (templatesRes.data ?? []) as PerformerTemplateOption[]) templatesById.set(row.id, row);
+  const linkedIds = (await catalogLinkedTemplateIds(db, await callerActiveWorkspaceIds(db, user.id)))
+    .filter((id) => !templatesById.has(id));
+  if (linkedIds.length > 0) {
+    const { data: linkedTemplates, error: linkedError } = await db
+      .from("inspection_templates")
+      .select("id, name, description, category")
+      .in("id", linkedIds)
+      .eq("is_active", true)
+      .order("name");
+    if (linkedError) throw linkedError;
+    for (const row of (linkedTemplates ?? []) as PerformerTemplateOption[]) templatesById.set(row.id, row);
+  }
+  const templates = Array.from(templatesById.values()).sort((a, b) => a.name.localeCompare(b.name));
+  return json({ data: { templates, pastInspections: pastRes.data ?? [] } });
 });
 
 // GET /v1/inspections/appointment-gate — required inspections for an appointment,

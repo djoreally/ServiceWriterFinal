@@ -44,6 +44,7 @@ import {
   db,
   resetHarness,
   CUSTOMER_ID,
+  USER_ID,
   WS_ID,
 } from "../test-support/state";
 
@@ -950,6 +951,94 @@ describe("appointments router", () => {
     it("returns 404 for unknown paths", async () => {
       const res = await appointmentsRouter.request("/v1/appointments-zzz");
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe("inspections: performer-data + items workspace access", () => {
+    const LINKED_TEMPLATE_ID = "aa0e8400-e29b-41d4-a716-446655440020";
+    const OTHER_USER_ID = "880e8400-e29b-41d4-a716-446655440001";
+
+    it("performer-data returns the workspace's catalog-linked template (deduped)", async () => {
+      // The gate's required template is linked from the workspace catalog;
+      // the handler merges the caller's own templates with the linked ones.
+      // (Grey-box harness: table-level canned results, so this asserts the
+      // endpoint contract — the linked template surfaces exactly once.)
+      db.workspace_members = { data: [{ workspace_id: WS_ID }], error: null };
+      db.service_catalog = {
+        data: [{ inspection_template_id: LINKED_TEMPLATE_ID }],
+        error: null,
+      };
+      db.inspection_templates = {
+        data: [
+          {
+            id: LINKED_TEMPLATE_ID,
+            name: "MOMS Basic 8-Point Inspection",
+            description: null,
+            category: null,
+          },
+        ],
+        error: null,
+      };
+      db.service_inspections = { data: [], error: null };
+      const res = await appointmentsRouter.request("/v1/inspections/performer-data");
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data.templates).toHaveLength(1);
+      expect(body.data.templates[0].id).toBe(LINKED_TEMPLATE_ID);
+      expect(body.data.templates[0].name).toBe("MOMS Basic 8-Point Inspection");
+      expect(body.data.pastInspections).toEqual([]);
+    });
+
+    it("items are readable for a catalog-linked template owned by another user", async () => {
+      db["inspection_templates:single"] = {
+        data: { id: LINKED_TEMPLATE_ID, user_id: OTHER_USER_ID },
+        error: null,
+      };
+      db.workspace_members = { data: [{ workspace_id: WS_ID }], error: null };
+      db.service_catalog = {
+        data: [{ inspection_template_id: LINKED_TEMPLATE_ID }],
+        error: null,
+      };
+      db.inspection_items = {
+        data: [
+          { id: "item-1", template_id: LINKED_TEMPLATE_ID, name: "Oil level", sort_order: 0 },
+        ],
+        error: null,
+      };
+      const res = await appointmentsRouter.request(
+        `/v1/inspections/items?template_id=${LINKED_TEMPLATE_ID}`,
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0].name).toBe("Oil level");
+    });
+
+    it("items still 404 for another user's template with no catalog link", async () => {
+      db["inspection_templates:single"] = {
+        data: { id: LINKED_TEMPLATE_ID, user_id: OTHER_USER_ID },
+        error: null,
+      };
+      db.workspace_members = { data: [{ workspace_id: WS_ID }], error: null };
+      db.service_catalog = { data: [], error: null };
+      const res = await appointmentsRouter.request(
+        `/v1/inspections/items?template_id=${LINKED_TEMPLATE_ID}`,
+      );
+      expect(res.status).toBe(404);
+      expect((await res.json()).error.code).toBe("not_found");
+    });
+
+    it("items stay readable for the template owner without any catalog link", async () => {
+      db["inspection_templates:single"] = {
+        data: { id: LINKED_TEMPLATE_ID, user_id: USER_ID },
+        error: null,
+      };
+      db.service_catalog = { data: [], error: null };
+      db.inspection_items = { data: [], error: null };
+      const res = await appointmentsRouter.request(
+        `/v1/inspections/items?template_id=${LINKED_TEMPLATE_ID}`,
+      );
+      expect(res.status).toBe(200);
     });
   });
 });

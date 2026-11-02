@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   saveInspection,
   fetchInspectionPerformerData,
@@ -16,13 +16,17 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { ClipboardCheck, CheckCircle2, XCircle, AlertTriangle, Minus, Play, Save } from "lucide-react";
+import { ClipboardCheck, CheckCircle2, XCircle, AlertTriangle, Minus, Play, Save, RefreshCw } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
 
 interface InspectionPerformerProps {
   serviceId?: string;
   vehicleId?: string;
   appointmentId?: string;
+  /** Gate requirement: when set, the performer opens directly on this
+   * template's checklist instead of the template picker. */
+  requiredTemplateId?: string;
+  requiredTemplateName?: string;
   onComplete?: () => void;
 }
 
@@ -33,7 +37,7 @@ const STATUS_OPTIONS = [
   { value: "not_applicable", label: "N/A", icon: Minus, color: "text-muted-foreground" },
 ];
 
-export function InspectionPerformer({ serviceId, vehicleId, appointmentId, onComplete }: InspectionPerformerProps) {
+export function InspectionPerformer({ serviceId, vehicleId, appointmentId, requiredTemplateId, requiredTemplateName, onComplete }: InspectionPerformerProps) {
   const [templates, setTemplates] = useState<InspectionTemplateOption[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<InspectionTemplateOption | null>(null);
   const [items, setItems] = useState<InspectionItemOption[]>([]);
@@ -44,39 +48,74 @@ export function InspectionPerformer({ serviceId, vehicleId, appointmentId, onCom
   const [showPerform, setShowPerform] = useState(false);
   const [pastInspections, setPastInspections] = useState<PastInspection[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [itemsLoading, setItemsLoading] = useState(false);
+  const [itemsError, setItemsError] = useState<string | null>(null);
+  const autoSelectAttemptedRef = useRef<string | null>(null);
 
+  const isGated = Boolean(requiredTemplateId);
 
   const fetchData = useCallback(async () => {
-    const data = await fetchInspectionPerformerData(serviceId, vehicleId);
-    setTemplates(data.templates);
-    setPastInspections(data.pastInspections);
-    setLoading(false);
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const data = await fetchInspectionPerformerData(serviceId, vehicleId);
+      setTemplates(data.templates);
+      setPastInspections(data.pastInspections);
+    } catch (error) {
+      console.error("Failed to load inspection data:", error);
+      setLoadError(error instanceof Error && error.message ? error.message : "Failed to load inspection data.");
+    } finally {
+      setLoading(false);
+    }
   }, [serviceId, vehicleId]);
 
   useEffect(() => {
     void Promise.resolve().then(() => fetchData());
   }, [fetchData, serviceId, vehicleId]);
 
-  const handleSelectTemplate = async (templateId: string) => {
+  const handleSelectTemplate = useCallback(async (templateId: string) => {
     const template = templates.find((t) => t.id === templateId);
     if (!template) return;
 
     setSelectedTemplate(template);
-    const itemsData = await fetchInspectionItems(templateId);
-    setItems(itemsData);
+    setItemsError(null);
+    setItemsLoading(true);
+    try {
+      const itemsData = await fetchInspectionItems(templateId);
+      setItems(itemsData);
 
-    const initialResults: Record<string, InspectionResultData> = {};
-    itemsData.forEach((item) => {
-      initialResults[item.id] = {
-        item_name: item.name,
-        item_category: item.category,
-        status: "not_checked",
-        notes: "",
-        sort_order: item.sort_order,
-      };
-    });
-    setResults(initialResults);
-  };
+      const initialResults: Record<string, InspectionResultData> = {};
+      itemsData.forEach((item) => {
+        initialResults[item.id] = {
+          item_name: item.name,
+          item_category: item.category,
+          status: "not_checked",
+          notes: "",
+          sort_order: item.sort_order,
+        };
+      });
+      setResults(initialResults);
+    } catch (error) {
+      console.error("Failed to load inspection items:", error);
+      setItems([]);
+      setResults({});
+      setItemsError(error instanceof Error && error.message ? error.message : "Failed to load the inspection checklist.");
+    } finally {
+      setItemsLoading(false);
+    }
+  }, [templates]);
+
+  // Gated flow: once the template list is loaded, open the required
+  // template's checklist directly — no home screen or template picking.
+  useEffect(() => {
+    if (!requiredTemplateId || loading || loadError) return;
+    if (selectedTemplate?.id === requiredTemplateId) return;
+    if (autoSelectAttemptedRef.current === requiredTemplateId) return;
+    if (!templates.some((t) => t.id === requiredTemplateId)) return;
+    autoSelectAttemptedRef.current = requiredTemplateId;
+    void Promise.resolve().then(() => handleSelectTemplate(requiredTemplateId));
+  }, [requiredTemplateId, loading, loadError, templates, selectedTemplate, handleSelectTemplate]);
 
   const handleStatusChange = (itemId: string, status: string) => {
     setResults((prev) => ({ ...prev, [itemId]: { ...prev[itemId], status } }));
@@ -145,12 +184,196 @@ export function InspectionPerformer({ serviceId, vehicleId, appointmentId, onCom
     return acc;
   }, {} as Record<string, InspectionItemOption[]>);
 
-  if (loading) {
+  const renderSpinner = () => (
+    <div className="flex items-center justify-center h-32">
+      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+    </div>
+  );
+
+  const renderChecklist = () => {
+    if (!selectedTemplate) return null;
     return (
-      <div className="flex items-center justify-center h-32">
-        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h4 className="font-medium">{selectedTemplate.name}</h4>
+            <p className="text-sm text-muted-foreground">{items.length} items to inspect</p>
+          </div>
+          {!isGated && (
+            <Button variant="outline" size="sm" onClick={() => setSelectedTemplate(null)}>
+              Change Template
+            </Button>
+          )}
+        </div>
+
+        {itemsError ? (
+          <Card>
+            <CardContent className="py-6 text-center space-y-3">
+              <p className="text-sm text-destructive">{itemsError}</p>
+              <Button variant="outline" size="sm" className="gap-2" onClick={() => void handleSelectTemplate(selectedTemplate.id)}>
+                <RefreshCw className="h-4 w-4" />
+                Retry
+              </Button>
+            </CardContent>
+          </Card>
+        ) : itemsLoading ? (
+          renderSpinner()
+        ) : (
+          <>
+            <div className="grid grid-cols-4 gap-2 text-center text-sm">
+              <div className="p-2 bg-gray-500/10 rounded">
+                <div className="font-bold text-gray-600">{getStatusStats().pass}</div>
+                <div className="text-muted-foreground">Pass</div>
+              </div>
+              <div className="p-2 bg-red-500/10 rounded">
+                <div className="font-bold text-red-600">{getStatusStats().fail}</div>
+                <div className="text-muted-foreground">Fail</div>
+              </div>
+              <div className="p-2 bg-yellow-500/10 rounded">
+                <div className="font-bold text-yellow-600">{getStatusStats().warning}</div>
+                <div className="text-muted-foreground">Warning</div>
+              </div>
+              <div className="p-2 bg-muted rounded">
+                <div className="font-bold">{getStatusStats().unchecked}</div>
+                <div className="text-muted-foreground">Unchecked</div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Inspector Name (optional)</Label>
+              <Input
+                value={inspectorName}
+                onChange={(e) => setInspectorName(e.target.value)}
+                placeholder="Enter your name"
+              />
+            </div>
+
+            <div className="space-y-4">
+              {Object.entries(groupedItems).map(([category, catItems]) => (
+                <div key={category}>
+                  <h5 className="font-medium text-sm text-muted-foreground uppercase mb-2 capitalize">
+                    {category}
+                  </h5>
+                  <div className="space-y-3">
+                    {catItems.map((item) => (
+                      <div key={item.id} className="border rounded-lg p-3 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-sm flex-1">
+                            {item.name}
+                            {item.is_required && (
+                              <span className="text-destructive ml-1">*</span>
+                            )}
+                          </span>
+                        </div>
+                        {item.description && (
+                          <p className="text-xs text-muted-foreground">{item.description}</p>
+                        )}
+                        <RadioGroup
+                          value={results[item.id]?.status || "not_checked"}
+                          onValueChange={(v) => handleStatusChange(item.id, v)}
+                          className="flex gap-2"
+                        >
+                          {STATUS_OPTIONS.map((opt) => (
+                            <div key={opt.value} className="flex items-center">
+                              <RadioGroupItem
+                                value={opt.value}
+                                id={`${item.id}-${opt.value}`}
+                                className="sr-only peer"
+                              />
+                              <label
+                                htmlFor={`${item.id}-${opt.value}`}
+                                className={`flex items-center gap-1 px-2 py-1 rounded border cursor-pointer text-xs peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/10 ${opt.color}`}
+                              >
+                                <opt.icon className="h-3 w-3" />
+                                {opt.label}
+                              </label>
+                            </div>
+                          ))}
+                        </RadioGroup>
+                        <Input
+                          placeholder="Notes (optional)"
+                          value={results[item.id]?.notes || ""}
+                          onChange={(e) => handleNotesChange(item.id, e.target.value)}
+                          className="text-sm h-8"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="space-y-2">
+              <Label>Overall Notes (optional)</Label>
+              <Textarea
+                value={overallNotes}
+                onChange={(e) => setOverallNotes(e.target.value)}
+                placeholder="Any additional observations..."
+              />
+            </div>
+
+            <Button onClick={handleSaveInspection} disabled={saving} className="w-full gap-2">
+              <Save className="h-4 w-4" />
+              {saving ? "Saving..." : "Save Inspection"}
+            </Button>
+          </>
+        )}
       </div>
     );
+  };
+
+  if (loading) {
+    return renderSpinner();
+  }
+
+  if (loadError) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center space-y-3">
+          <ClipboardCheck className="h-12 w-12 mx-auto opacity-50" />
+          <p className="text-sm text-destructive">{loadError}</p>
+          <Button variant="outline" size="sm" className="gap-2" onClick={() => void fetchData()}>
+            <RefreshCw className="h-4 w-4" />
+            Retry
+          </Button>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (isGated) {
+    if (selectedTemplate) {
+      return <div className="space-y-4">{renderChecklist()}</div>;
+    }
+    if (!templates.some((t) => t.id === requiredTemplateId)) {
+      return (
+        <Card>
+          <CardContent className="py-8 text-center space-y-3">
+            <ClipboardCheck className="h-12 w-12 mx-auto opacity-50" />
+            <p className="font-medium">Required inspection template unavailable</p>
+            <p className="text-sm text-muted-foreground">
+              {requiredTemplateName
+                ? `The ${requiredTemplateName} checklist could not be loaded for your account.`
+                : "The checklist required for this job could not be loaded for your account."}
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => {
+                autoSelectAttemptedRef.current = null;
+                void fetchData();
+              }}
+            >
+              <RefreshCw className="h-4 w-4" />
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+      );
+    }
+    // Required template is present; the auto-select effect is opening it.
+    return renderSpinner();
   }
 
   return (
@@ -193,114 +416,7 @@ export function InspectionPerformer({ serviceId, vehicleId, appointmentId, onCom
                 </div>
               </div>
             ) : (
-              <div className="space-y-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="font-medium">{selectedTemplate.name}</h4>
-                    <p className="text-sm text-muted-foreground">{items.length} items to inspect</p>
-                  </div>
-                  <Button variant="outline" size="sm" onClick={() => setSelectedTemplate(null)}>
-                    Change Template
-                  </Button>
-                </div>
-
-                <div className="grid grid-cols-4 gap-2 text-center text-sm">
-                  <div className="p-2 bg-gray-500/10 rounded">
-                    <div className="font-bold text-gray-600">{getStatusStats().pass}</div>
-                    <div className="text-muted-foreground">Pass</div>
-                  </div>
-                  <div className="p-2 bg-red-500/10 rounded">
-                    <div className="font-bold text-red-600">{getStatusStats().fail}</div>
-                    <div className="text-muted-foreground">Fail</div>
-                  </div>
-                  <div className="p-2 bg-yellow-500/10 rounded">
-                    <div className="font-bold text-yellow-600">{getStatusStats().warning}</div>
-                    <div className="text-muted-foreground">Warning</div>
-                  </div>
-                  <div className="p-2 bg-muted rounded">
-                    <div className="font-bold">{getStatusStats().unchecked}</div>
-                    <div className="text-muted-foreground">Unchecked</div>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Inspector Name (optional)</Label>
-                  <Input
-                    value={inspectorName}
-                    onChange={(e) => setInspectorName(e.target.value)}
-                    placeholder="Enter your name"
-                  />
-                </div>
-
-                <div className="space-y-4">
-                  {Object.entries(groupedItems).map(([category, catItems]) => (
-                    <div key={category}>
-                      <h5 className="font-medium text-sm text-muted-foreground uppercase mb-2 capitalize">
-                        {category}
-                      </h5>
-                      <div className="space-y-3">
-                        {catItems.map((item) => (
-                          <div key={item.id} className="border rounded-lg p-3 space-y-2">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium text-sm flex-1">
-                                {item.name}
-                                {item.is_required && (
-                                  <span className="text-destructive ml-1">*</span>
-                                )}
-                              </span>
-                            </div>
-                            {item.description && (
-                              <p className="text-xs text-muted-foreground">{item.description}</p>
-                            )}
-                            <RadioGroup
-                              value={results[item.id]?.status || "not_checked"}
-                              onValueChange={(v) => handleStatusChange(item.id, v)}
-                              className="flex gap-2"
-                            >
-                              {STATUS_OPTIONS.map((opt) => (
-                                <div key={opt.value} className="flex items-center">
-                                  <RadioGroupItem
-                                    value={opt.value}
-                                    id={`${item.id}-${opt.value}`}
-                                    className="sr-only peer"
-                                  />
-                                  <label
-                                    htmlFor={`${item.id}-${opt.value}`}
-                                    className={`flex items-center gap-1 px-2 py-1 rounded border cursor-pointer text-xs peer-data-[state=checked]:border-primary peer-data-[state=checked]:bg-primary/10 ${opt.color}`}
-                                  >
-                                    <opt.icon className="h-3 w-3" />
-                                    {opt.label}
-                                  </label>
-                                </div>
-                              ))}
-                            </RadioGroup>
-                            <Input
-                              placeholder="Notes (optional)"
-                              value={results[item.id]?.notes || ""}
-                              onChange={(e) => handleNotesChange(item.id, e.target.value)}
-                              className="text-sm h-8"
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Overall Notes (optional)</Label>
-                  <Textarea
-                    value={overallNotes}
-                    onChange={(e) => setOverallNotes(e.target.value)}
-                    placeholder="Any additional observations..."
-                  />
-                </div>
-
-                <Button onClick={handleSaveInspection} disabled={saving} className="w-full gap-2">
-                  <Save className="h-4 w-4" />
-                  {saving ? "Saving..." : "Save Inspection"}
-                </Button>
-              </div>
+              renderChecklist()
             )}
           </DialogContent>
         </Dialog>
