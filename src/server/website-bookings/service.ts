@@ -773,6 +773,51 @@ async function recordAutoPushFailureBestEffort(
   }
 }
 
+/**
+ * The appointment's customer-portal management token (metadata), minted
+ * at insert by ensure_appointment_management_token_v1 for public_booking
+ * and moms_website sources. Read the same way verifyStoredTotal reads
+ * appointment metadata. Best-effort by design: any failure or absence
+ * returns null — a missing token must never fail a push.
+ */
+async function fetchAppointmentManagementToken(
+  supabase: any,
+  appointmentId: string,
+): Promise<string | null> {
+  try {
+    const { data } = await supabase
+      .from("appointments")
+      .select("metadata")
+      .eq("id", appointmentId)
+      .maybeSingle();
+    const token = (data?.metadata as Record<string, unknown> | null)?.management_token;
+    return typeof token === "string" && token.length > 0 ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Stamp the website booking as pushed, carrying the appointment's
+ * management token when it has one (the website backend stores it as
+ * bookings.sw_management_token for its customer manage page). When the
+ * appointment has no token, the stamp goes out in its original
+ * three-argument form — the token is an addition, never a gate.
+ */
+async function stampPushedWithManagementToken(
+  config: WebsiteBookingsConfig,
+  bookingId: string,
+  appointmentId: string,
+  supabase: any,
+): Promise<void> {
+  const managementToken = await fetchAppointmentManagementToken(supabase, appointmentId);
+  if (managementToken) {
+    await stampWebsiteBookingPushed(config, bookingId, appointmentId, managementToken);
+  } else {
+    await stampWebsiteBookingPushed(config, bookingId, appointmentId);
+  }
+}
+
 export async function executePushes(
   supabase: any,
   workspaceId: string,
@@ -817,7 +862,7 @@ export async function executePushes(
         continue;
       }
       try {
-        await stampWebsiteBookingPushed(config, bookingId, linkId);
+        await stampPushedWithManagementToken(config, bookingId, linkId, supabase);
         results.push({
           booking_id: bookingId,
           status: "linked",
@@ -904,7 +949,7 @@ export async function executePushes(
       // the automatic flow has no one to ask, and a twin is never right.)
       const linkId = resolution.duplicate_candidates[0].appointment_id;
       try {
-        await stampWebsiteBookingPushed(config, bookingId, linkId);
+        await stampPushedWithManagementToken(config, bookingId, linkId, supabase);
         results.push({
           booking_id: bookingId,
           status: "linked",
@@ -1007,7 +1052,7 @@ export async function executePushes(
     }
 
     try {
-      await stampWebsiteBookingPushed(config, bookingId, createdId);
+      await stampPushedWithManagementToken(config, bookingId, createdId, supabase);
       await notifyShopOfPushedBooking(supabase, ctx, booking, createdId);
       results.push({
         booking_id: bookingId,
