@@ -6,8 +6,9 @@
  * `src/server/hono/routes/billing.ts`), which are otherwise duplicated.
  *
  * Rule: when a payment references a quote-locked appointment (via
- * `metadata.appointment_id`) — either a website-quote lock or a
- * booking-link client quote lock (see @/lib/price-lock) — the amount that
+ * `metadata.appointment_id`) — a website-quote lock, a booking-link
+ * client quote lock, or a staff manual quote lock (see
+ * @/lib/price-lock) — the amount that
  * may be collected is exactly the remaining locked balance — the stored
  * quote minus the amount already paid on the appointment's invoice
  * (`invoices.amount_paid`, the canonical financial record) — read from the
@@ -18,6 +19,7 @@
  */
 import {
   isClientQuoteLocked,
+  isManualQuoteLocked,
   isWebsiteQuoteLocked,
   lockedQuoteTotal,
   roundToCents,
@@ -32,7 +34,7 @@ export interface LockedQuoteExpectation {
   amountPaid: number;
   expectedAmount: number;
   /** Human label for the lock's channel, used in the mismatch message. */
-  quoteLabel: "website quote" | "booking-link quote";
+  quoteLabel: "website quote" | "booking-link quote" | "custom price";
 }
 
 export type QuoteExpectation = LockedQuoteExpectation | { locked: false };
@@ -68,12 +70,19 @@ export async function resolveLockedQuoteExpectation(
     .maybeSingle();
   if (appointmentError) throw appointmentError;
   const row = firstRow(appointment);
-  if (!row || (!isWebsiteQuoteLocked(row) && !isClientQuoteLocked(row))) return { locked: false };
+  if (
+    !row ||
+    (!isWebsiteQuoteLocked(row) && !isClientQuoteLocked(row) && !isManualQuoteLocked(row))
+  ) {
+    return { locked: false };
+  }
   const quote = lockedQuoteTotal(row);
   if (quote === null) return { locked: false };
   const quoteLabel: LockedQuoteExpectation["quoteLabel"] = isWebsiteQuoteLocked(row)
     ? "website quote"
-    : "booking-link quote";
+    : isClientQuoteLocked(row)
+      ? "booking-link quote"
+      : "custom price";
 
   // The invoice is the canonical financial record for the appointment; its
   // amount_paid is what has already been collected against the quote.

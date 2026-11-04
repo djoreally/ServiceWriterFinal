@@ -15,6 +15,7 @@
 import { z } from "zod";
 import { json } from "@/server/api";
 import { normalizeAppointmentStatus } from "@/lib/status-vocabulary";
+import { MANUAL_QUOTE_PRICING_STATE, roundToCents } from "@/lib/price-lock";
 
 // ---------------------------------------------------------------------------
 // Input schema — identical to the former route-local appointmentSchema.
@@ -44,6 +45,7 @@ export const appointmentBookingSchema = z.object({
   customer_state: z.string().max(120).nullable().optional(),
   customer_postal_code: z.string().max(24).nullable().optional(),
   override_availability: z.boolean().optional().default(false),
+  lock_custom_price: z.boolean().optional().default(false),
 }).superRefine((v, ctx) => {
   if (new Date(v.ends_at) <= new Date(v.starts_at)) {
     ctx.addIssue({ code: "custom", path: ["ends_at"], message: "ends_at must be after starts_at" });
@@ -56,7 +58,22 @@ export type AppointmentBookingInput = z.infer<typeof appointmentBookingSchema>;
 // Helpers — identical to the former route-local functions.
 // ---------------------------------------------------------------------------
 
+/**
+ * The staff manual quote lock total, or null when the lock does not
+ * apply. Staff must explicitly opt in (`lock_custom_price`) with the
+ * custom/flat total carried in `estimated_cost`; a zero or absent total
+ * keeps native catalog pricing, mirroring the $0-quote rule of the
+ * website and booking-link locks (see @/lib/price-lock).
+ */
+export function manualLockedQuote(body: AppointmentBookingInput): number | null {
+  if (body.lock_custom_price !== true) return null;
+  const raw = body.estimated_cost;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return null;
+  return roundToCents(raw);
+}
+
 export function compatibilityMetadata(body: AppointmentBookingInput) {
+  const lockedQuote = manualLockedQuote(body);
   return {
     title: body.title ?? null,
     description: body.description ?? null,
@@ -64,14 +81,65 @@ export function compatibilityMetadata(body: AppointmentBookingInput) {
     guest_email: body.guest_email ?? null,
     guest_phone: body.guest_phone ?? null,
     service_catalog_id: body.service_catalog_id ?? null,
-    estimated_cost: body.estimated_cost ?? null,
-    tax_amount: body.tax_amount ?? null,
+    // Manual quote lock: the typed total IS the price — it is stamped as
+    // the quote with no tax on top, in the same shape the website push
+    // and booking-link create write for their locks.
+    estimated_cost: lockedQuote ?? body.estimated_cost ?? null,
+    tax_amount: lockedQuote !== null ? 0 : (body.tax_amount ?? null),
+    ...(lockedQuote !== null
+      ? { pricing_state: MANUAL_QUOTE_PRICING_STATE, client_estimated_cost: lockedQuote }
+      : {}),
     location_address: body.location_address ?? null,
     customer_city: body.customer_city ?? null,
     customer_state: body.customer_state ?? null,
     customer_postal_code: body.customer_postal_code ?? null,
     override_availability: body.override_availability,
   };
+}
+
+/**
+ * Seed the single billable item that carries a locked staff custom
+ * price, mirroring the website staff-push RPC construction: one row at
+ * unit_price = the locked total (price_source 'manual_quote'), so
+ * item-based totals and the invoice sync agree with the typed total to
+ * the cent. Deliberately NOT the primary-service sync: that path
+ * re-prices at service_catalog.labor_price and would break the lock
+ * (its PUT handler is a no-op for locked appointments).
+ */
+export async function seedManualQuoteItem(
+  supabase: any,
+  body: AppointmentBookingInput,
+  appointmentId: string,
+  lockedQuote: number,
+) {
+  let serviceName: string | null = null;
+  if (body.service_catalog_id) {
+    const { data: service } = await supabase
+      .from("service_catalog")
+      .select("name")
+      .eq("workspace_id", body.workspace_id)
+      .eq("id", body.service_catalog_id)
+      .maybeSingle();
+    serviceName = typeof service?.name === "string" ? service.name : null;
+  }
+  const description = (serviceName || body.title || "Appointment").slice(0, 250);
+  const { error } = await supabase.from("appointment_items").insert({
+    workspace_id: body.workspace_id,
+    appointment_id: appointmentId,
+    service_catalog_id: body.service_catalog_id ?? null,
+    item_type: "service",
+    description,
+    quantity: 1,
+    unit_price: lockedQuote,
+    is_prepaid: false,
+    sort_order: 0,
+    metadata: {
+      ...(body.vehicle_id ? { vehicle_id: body.vehicle_id } : {}),
+      source: "staff",
+      price_source: "manual_quote",
+    },
+  });
+  if (error) throw error;
 }
 
 export function localParts(iso: string, timeZone: string) {
@@ -335,5 +403,10 @@ export async function bookAppointmentCore(
     .select()
     .single();
   if (error) throw error;
+
+  const lockedQuote = manualLockedQuote(body);
+  if (lockedQuote !== null) {
+    await seedManualQuoteItem(supabase, body, (data as { id: string }).id, lockedQuote);
+  }
   return { data };
 }

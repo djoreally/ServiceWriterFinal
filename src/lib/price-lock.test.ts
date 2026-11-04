@@ -1,9 +1,11 @@
 import {
   clientQuoteTotal,
   isClientQuoteLocked,
+  isManualQuoteLocked,
   isQuoteLocked,
   isWebsiteQuoteLocked,
   lockedQuoteTotal,
+  manualQuoteTotal,
   websiteQuoteAmountDue,
   websiteQuoteTotal,
 } from "./price-lock";
@@ -188,5 +190,71 @@ describe("booking-link client quote lock", () => {
     expect(lockedQuoteTotal({ source: "moms_website", metadata: lockedMetadata })).toBe(122.57);
     expect(lockedQuoteTotal({ source: "public_booking", metadata: clientLockedMetadata })).toBe(137);
     expect(lockedQuoteTotal({ source: "staff", metadata: {} })).toBeNull();
+  });
+});
+
+describe("staff manual quote lock", () => {
+  const manualLockedMetadata = {
+    pricing_state: "manual_quote_locked",
+    estimated_cost: 120,
+    client_estimated_cost: 120,
+    tax_amount: 0,
+  };
+
+  it("locks a staff booking carrying the manual_quote_locked marker", () => {
+    expect(isManualQuoteLocked({ source: "staff", metadata: manualLockedMetadata })).toBe(true);
+  });
+
+  it("is keyed on pricing_state alone, with no source condition (mirrors the invoice sync)", () => {
+    expect(isManualQuoteLocked({ source: "manual", metadata: manualLockedMetadata })).toBe(true);
+    expect(isManualQuoteLocked({ metadata: manualLockedMetadata })).toBe(true);
+  });
+
+  it("does not lock other pricing states or unlocked staff rows", () => {
+    expect(
+      isManualQuoteLocked({ source: "staff", metadata: { pricing_state: "canonical", estimated_cost: 120 } }),
+    ).toBe(false);
+    expect(isManualQuoteLocked({ source: "staff", metadata: { estimated_cost: 120 } })).toBe(false);
+    expect(
+      isManualQuoteLocked({ source: "staff", metadata: { pricing_state: "client_quote_locked" } }),
+    ).toBe(false);
+  });
+
+  it("does not lock missing or malformed rows", () => {
+    expect(isManualQuoteLocked(null)).toBe(false);
+    expect(isManualQuoteLocked(undefined)).toBe(false);
+    expect(isManualQuoteLocked({ source: "staff", metadata: null })).toBe(false);
+    expect(isManualQuoteLocked({ source: "staff", metadata: "junk" })).toBe(false);
+    expect(isManualQuoteLocked({})).toBe(false);
+  });
+
+  it("isQuoteLocked covers the manual lock alongside the channel locks", () => {
+    expect(isQuoteLocked({ source: "staff", metadata: manualLockedMetadata })).toBe(true);
+    expect(isQuoteLocked({ source: "staff", metadata: {} })).toBe(false);
+  });
+
+  it("manualQuoteTotal returns the locked total from estimated_cost", () => {
+    expect(manualQuoteTotal({ source: "staff", metadata: manualLockedMetadata })).toBe(120);
+  });
+
+  it("manualQuoteTotal falls back to client_estimated_cost", () => {
+    const { estimated_cost: _dropped, ...rest } = manualLockedMetadata;
+    expect(manualQuoteTotal({ source: "staff", metadata: rest })).toBe(120);
+  });
+
+  it("manualQuoteTotal returns null for unlocked rows", () => {
+    expect(manualQuoteTotal({ source: "staff", metadata: {} })).toBeNull();
+    expect(manualQuoteTotal({ source: "public_booking", metadata: { pricing_state: "client_quote_locked", estimated_cost: 137 } })).toBeNull();
+    expect(manualQuoteTotal(null)).toBeNull();
+  });
+
+  it("lockedQuoteTotal reads the manual lock's total", () => {
+    expect(lockedQuoteTotal({ source: "staff", metadata: manualLockedMetadata })).toBe(120);
+  });
+
+  it("reads the lock and total from UI-shaped rows (intake_responses)", () => {
+    const uiRow = { source: "staff", intake_responses: manualLockedMetadata };
+    expect(isManualQuoteLocked(uiRow)).toBe(true);
+    expect(manualQuoteTotal(uiRow)).toBe(120);
   });
 });

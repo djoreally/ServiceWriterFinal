@@ -69,6 +69,9 @@ export async function bookAppointmentAsAgent(
       // The agent never bypasses availability checks — slots come from
       // getAvailableSlots, and the core re-validates at book time.
       override_availability: false,
+      // The agent never locks a custom price either: its bookings price
+      // natively from the catalog like any unlocked staff booking.
+      lock_custom_price: false,
     },
     { createdBy: null },
   );
