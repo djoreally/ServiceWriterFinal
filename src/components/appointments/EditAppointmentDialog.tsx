@@ -7,6 +7,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { normalizePhoneToE164, formatPhoneInput } from "@/lib/phone";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -58,6 +59,7 @@ export function EditAppointmentDialog({
     guest_email: "",
     guest_phone: "",
     estimated_cost: 0,
+    override_availability: false,
     location_address: "",
   });
 
@@ -76,6 +78,7 @@ export function EditAppointmentDialog({
         guest_email: appointment.guest_email || appointment.customer?.email || "",
         guest_phone: appointment.guest_phone || appointment.customer?.phone || "",
         estimated_cost: appointment.estimated_cost || 0,
+        override_availability: false,
         location_address:
           (apptAny.location_address as string | null | undefined) ||
           customerAddress ||
@@ -153,6 +156,17 @@ export function EditAppointmentDialog({
               />
             </div>
           </div>
+
+          {/* Availability override */}
+          <label className="flex gap-2 text-sm">
+            <Checkbox
+              checked={formData.override_availability}
+              onCheckedChange={(v) =>
+                setFormData({ ...formData, override_availability: v === true })
+              }
+            />
+            Override restricted availability
+          </label>
 
           {/* Duration & Status */}
           <div className="grid grid-cols-2 gap-4">

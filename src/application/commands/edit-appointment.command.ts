@@ -15,6 +15,7 @@ export interface EditAppointmentPayload {
   guest_email: string;
   guest_phone: string;
   estimated_cost: number;
+  override_availability?: boolean;
   location_address?: string | null;
   customer_city?: string | null;
   customer_state?: string | null;

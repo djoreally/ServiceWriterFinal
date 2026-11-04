@@ -31,6 +31,7 @@ import { AppointmentConfigurationSummary } from "@/components/booking/Appointmen
 import { Appointment } from "@/shared/types";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -140,6 +141,7 @@ export const AppointmentDetail = ({
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
   const [rescheduleDate, setRescheduleDate] = useState("");
   const [rescheduleTime, setRescheduleTime] = useState("");
+  const [rescheduleOverride, setRescheduleOverride] = useState(false);
   const [rescheduling, setRescheduling] = useState(false);
   const [feeSettings, setFeeSettings] = useState<{
     waste_oil_fee_enabled: boolean;
@@ -281,7 +283,7 @@ export const AppointmentDetail = ({
     if (!appointment || !rescheduleDate || !rescheduleTime) return;
     setRescheduling(true);
     try {
-      await updateAppointmentSchedule(appointment.id, rescheduleDate, rescheduleTime);
+      await updateAppointmentSchedule(appointment.id, rescheduleDate, rescheduleTime, { overrideAvailability: rescheduleOverride });
       toast.success("Appointment rescheduled");
       setRescheduleOpen(false);
       await fetchAppointment();
@@ -1021,6 +1023,10 @@ export const AppointmentDetail = ({
               <Label htmlFor="reschedule-time">New time</Label>
               <Input id="reschedule-time" type="time" value={rescheduleTime} onChange={(event) => setRescheduleTime(event.target.value)} className="min-h-[56px] text-base" />
             </div>
+            <label className="flex gap-2 text-base">
+              <Checkbox checked={rescheduleOverride} onCheckedChange={(v) => setRescheduleOverride(v === true)} className="mt-1" />
+              Override restricted availability
+            </label>
           </div>
           <div className="flex justify-end gap-3">
             <Button variant="outline" onClick={() => setRescheduleOpen(false)} disabled={rescheduling} className="min-h-[56px] text-base">Cancel</Button>
