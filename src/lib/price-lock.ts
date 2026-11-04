@@ -5,7 +5,9 @@
  * channel.
  *
  * - Bookings created by staff are priced natively in Service Writer
- *   (service catalog + workspace settings).
+ *   (service catalog + workspace settings) — UNLESS staff explicitly lock
+ *   a custom/flat price at creation, the manual quote lock below
+ *   (Ty, 2026-11-03).
  * - Bookings created through the Service Writer booking link carry the
  *   total the booking page showed the customer, locked at creation —
  *   the client quote lock below (Ty, 2026-10-31; this supersedes the
@@ -45,6 +47,25 @@
  * quote (INV-97). Recompute paths must check `isClientQuoteLocked` (or the
  * combined `isQuoteLocked`) alongside the website lock and leave a locked
  * link booking's money exactly as the customer was shown it.
+ *
+ * Staff manual quote lock (Ty, 2026-11-03): the same lock, carried by the
+ * staff channel. When staff create an appointment in Service Writer and
+ * explicitly check "Lock this price" with a custom/flat total (e.g. a
+ * fleet rate), that typed total is the price. The create paths write it
+ * at insert — `pricing_state = 'manual_quote_locked'`,
+ * `estimated_cost` (mirrored to `client_estimated_cost`) holding the
+ * total, `tax_amount = 0`, one `appointment_items` row whose unit price
+ * is the total (price_source 'manual_quote') — because before this lock
+ * existed the primary-service sync re-stamped the line at the catalog
+ * price and the invoice sync rebuilt the total as catalog + fees + tax,
+ * silently discarding the typed number (a $120.00 flat fleet rate became
+ * a $126.14 invoice). The lock is keyed on `pricing_state` ALONE: no
+ * channel marker is needed, because the state is only ever written by
+ * the staff create paths. Recompute paths must check
+ * `isManualQuoteLocked` (or the combined `isQuoteLocked`) alongside the
+ * other locks and leave a locked staff booking's money exactly as it was
+ * typed. Native staff pricing is unchanged whenever the lock is not
+ * explicitly chosen.
  */
 
 export const WEBSITE_QUOTE_SOURCE = "moms_website";
@@ -137,9 +158,33 @@ export function isClientQuoteLocked(row: PriceLockRow | null | undefined): boole
   return metadata.pricing_state === CLIENT_QUOTE_PRICING_STATE;
 }
 
-/** True when the appointment carries either channel's quote lock. */
+export const MANUAL_QUOTE_PRICING_STATE = "manual_quote_locked";
+
+/**
+ * True when the appointment is a staff-created booking whose custom/flat
+ * price was explicitly locked at creation. Keyed on `pricing_state`
+ * alone (mirroring `sync_appointment_invoice_v1`): the state is written
+ * only by the staff create paths, so no source condition is required —
+ * and none is applied, so the lock cannot be lost by a source relabel.
+ */
+export function isManualQuoteLocked(row: PriceLockRow | null | undefined): boolean {
+  if (!row) return false;
+  const metadata = lockMetadata(row);
+  return metadata.pricing_state === MANUAL_QUOTE_PRICING_STATE;
+}
+
+/** The locked staff custom total in dollars, or null when not locked. */
+export function manualQuoteTotal(row: PriceLockRow | null | undefined): number | null {
+  if (!isManualQuoteLocked(row)) return null;
+  const metadata = lockMetadata(row);
+  const raw = metadata.estimated_cost ?? metadata.client_estimated_cost ?? row?.estimated_cost;
+  const value = typeof raw === "number" ? raw : Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+/** True when the appointment carries any channel's quote lock. */
 export function isQuoteLocked(row: PriceLockRow | null | undefined): boolean {
-  return isWebsiteQuoteLocked(row) || isClientQuoteLocked(row);
+  return isWebsiteQuoteLocked(row) || isClientQuoteLocked(row) || isManualQuoteLocked(row);
 }
 
 /** The locked booking-link quote in dollars, or null when not locked. */
@@ -151,7 +196,7 @@ export function clientQuoteTotal(row: PriceLockRow | null | undefined): number |
   return Number.isFinite(value) && value >= 0 ? value : null;
 }
 
-/** The locked quote in dollars for either channel, or null when not locked. */
+/** The locked quote in dollars for any channel, or null when not locked. */
 export function lockedQuoteTotal(row: PriceLockRow | null | undefined): number | null {
-  return websiteQuoteTotal(row) ?? clientQuoteTotal(row);
+  return websiteQuoteTotal(row) ?? clientQuoteTotal(row) ?? manualQuoteTotal(row);
 }

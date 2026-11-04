@@ -1,6 +1,8 @@
 import { json, errorResponse, paginationSchema, requireWorkspaceMember } from "@/server/api";
 import { conflictWindow, validateLocalAvailability } from "@/server/scheduling/appointment-availability";
 import { syncAppointmentToGoogleCalendar } from "@/server/google-calendar/sync";
+import { manualLockedQuote, seedManualQuoteItem } from "@/server/appointments/book-appointment";
+import { MANUAL_QUOTE_PRICING_STATE } from "@/lib/price-lock";
 import { after } from "next/server";
 import { z } from "zod";
 
@@ -28,6 +30,7 @@ const appointmentSchema = z.object({
   customer_state: z.string().max(120).nullable().optional(),
   customer_postal_code: z.string().max(24).nullable().optional(),
   override_availability: z.boolean().optional().default(false),
+  lock_custom_price: z.boolean().optional().default(false),
 }).superRefine((value, ctx) => {
   if (new Date(value.ends_at) <= new Date(value.starts_at)) {
     ctx.addIssue({ code: "custom", path: ["ends_at"], message: "ends_at must be after starts_at" });
@@ -37,6 +40,10 @@ const appointmentSchema = z.object({
 type AppointmentInput = z.infer<typeof appointmentSchema>;
 
 function compatibilityMetadata(body: AppointmentInput) {
+  // Manual quote lock (staff custom/flat price): the typed total is
+  // stamped as the locked quote with no tax on top — see
+  // @/lib/price-lock. Identical semantics to the booking core's copy.
+  const lockedQuote = manualLockedQuote(body);
   return {
     title: body.title ?? null,
     description: body.description ?? null,
@@ -44,8 +51,11 @@ function compatibilityMetadata(body: AppointmentInput) {
     guest_email: body.guest_email ?? null,
     guest_phone: body.guest_phone ?? null,
     service_catalog_id: body.service_catalog_id ?? null,
-    estimated_cost: body.estimated_cost ?? null,
-    tax_amount: body.tax_amount ?? null,
+    estimated_cost: lockedQuote ?? body.estimated_cost ?? null,
+    tax_amount: lockedQuote !== null ? 0 : (body.tax_amount ?? null),
+    ...(lockedQuote !== null
+      ? { pricing_state: MANUAL_QUOTE_PRICING_STATE, client_estimated_cost: lockedQuote }
+      : {}),
     location_address: body.location_address ?? null,
     customer_city: body.customer_city ?? null,
     customer_state: body.customer_state ?? null,
@@ -255,6 +265,12 @@ export async function POST(request: Request) {
       .select()
       .single();
     if (error) throw error;
+    // Manual quote lock: seed the one item that carries the locked total
+    // (the primary-service sync is a no-op for locked appointments).
+    const lockedQuote = manualLockedQuote(body);
+    if (lockedQuote !== null) {
+      await seedManualQuoteItem(supabase, body, (data as { id: string }).id, lockedQuote);
+    }
     // Google Calendar auto-sync runs after the response is on its way; it can
     // never fail the booking (failures are logged + recorded in metadata).
     after(() => {
