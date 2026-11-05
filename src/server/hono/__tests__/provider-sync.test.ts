@@ -184,6 +184,53 @@ describe("POST /v1/platform/provider-sync/request", () => {
     expect(logStatuses).toEqual(["started", "succeeded"]);
   });
 
+  it("accepts the exact payload the client sends for a manual resync (provider: null)", async () => {
+    // Regression (INV-106, 2026-11-05): every client caller omits the
+    // provider, and provider-sync.command serializes that as
+    // `provider: null`. The schema's z.enum(...).optional() rejected the
+    // explicit null — "provider: Invalid option: expected one of
+    // "stripe"|"square"" — so the appointment card's "Sync this
+    // appointment" could never run. The hint is advisory: the workspace's
+    // configured provider governs the sync server-side.
+    seedStripeWorkspace();
+    seedInvoiceAndPayment();
+
+    const res = await platformRouter.request("/v1/platform/provider-sync/request", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        appointment_id: APPT_ID,
+        payment_record_id: null,
+        provider: null,
+        sync_mode: "manual_resync",
+        external_payment_id: null,
+        external_order_id: null,
+        external_transaction_id: null,
+        guest_email: null,
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).status).toBe("succeeded");
+    expect(syncMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("still rejects a provider hint that is not a known provider", async () => {
+    seedStripeWorkspace();
+    seedInvoiceAndPayment();
+
+    const res = await platformRouter.request("/v1/platform/provider-sync/request", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        appointment_id: APPT_ID,
+        provider: "connect",
+        sync_mode: "manual_resync",
+      }),
+    });
+    expect(res.status).toBe(400);
+    expect(syncMock).not.toHaveBeenCalled();
+  });
+
   it("creates the canonical pending payment when the appointment has none yet", async () => {
     seedStripeWorkspace();
     db.invoices = { data: [invoiceRow], error: null };
