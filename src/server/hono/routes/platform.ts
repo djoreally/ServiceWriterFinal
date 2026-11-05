@@ -3558,8 +3558,11 @@ const providerSyncRequestSchema = z.object({
     .enum(["appointment_created", "payment_pending", "payment_succeeded", "manual_resync"])
     .optional(),
   // Accepted for client compatibility; the workspace's configured provider
-  // governs the sync, so this hint is advisory only.
-  provider: z.enum(["stripe", "square"]).optional(),
+  // governs the sync, so this hint is advisory only. Nullable because the
+  // client serializes "no hint" as an explicit null (every current caller
+  // omits the provider) — rejecting null here broke every sync request
+  // with zod's "Invalid option" enum error (INV-106, 2026-11-05).
+  provider: z.enum(["stripe", "square"]).nullable().optional(),
   guest_email: z.string().nullable().optional(),
 });
 

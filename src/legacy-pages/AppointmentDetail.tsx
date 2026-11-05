@@ -721,7 +721,15 @@ export const AppointmentDetail = ({
                     estimatedTotal={totalDue}
                     taxAmount={taxAmount}
                     subtotal={estimatedCost + wasteOilFee + shopFee + surcharge}
+                    // Workspace tax_rate is a PERCENT (6 = 6%) — the tab's
+                    // amount helper relies on that contract.
                     taxRate={feeSettings?.tax_rate || undefined}
+                    // Locked quote: the tab collects exactly the recorded
+                    // balance due (invoice total − paid, else total −
+                    // collected) and never recomputes tax on the quote —
+                    // the same contract CompleteAppointmentDialog uses.
+                    priceLocked={priceLocked}
+                    lockedAmountDue={priceLocked ? summaryBalance : null}
                   />
                 </TabsContent>
 
