@@ -34,6 +34,29 @@ function object(value: unknown): Record<string, unknown> {
 }
 
 /**
+ * What the browser needs to mount Stripe Elements for this intent.
+ * Publishable keys and Connect account ids are public by design (they
+ * ship in client bundles and checkout URLs); they are returned only to
+ * the email-bound guest, at payment time — never in the public page
+ * payload. Direct-mode workspaces keep their publishable key in their
+ * own Stripe dashboard (it is not stored server-side), so both fields
+ * are null there and the client must say so honestly instead of
+ * mounting a broken form.
+ */
+function clientStripeConfig(execution: { mode: string; accountId: string }): {
+  stripe_account_id: string | null;
+  publishable_key: string | null;
+} {
+  if (execution.mode !== "connect") {
+    return { stripe_account_id: null, publishable_key: null };
+  }
+  return {
+    stripe_account_id: execution.accountId,
+    publishable_key: process.env.STRIPE_PUBLISHABLE_KEY?.trim() || null,
+  };
+}
+
+/**
  * Public pay-now, step 1: create (or reuse) a Stripe PaymentIntent for a
  * public booking's outstanding balance.
  *
@@ -113,6 +136,7 @@ export async function POST(
             amount: Number(payment.amount ?? balanceDue),
             currency,
             mode: execution.mode,
+            ...clientStripeConfig(execution),
             reused: true,
           },
         });
@@ -186,6 +210,7 @@ export async function POST(
         amount: balanceDue,
         currency,
         mode: execution.mode,
+        ...clientStripeConfig(execution),
         reused: false,
       },
     });

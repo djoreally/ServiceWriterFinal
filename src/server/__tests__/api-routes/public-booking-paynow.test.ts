@@ -158,6 +158,81 @@ describe("POST payment-intent (create)", () => {
     });
   });
 
+  it("returns the Connect account id and platform publishable key so the browser can mount Elements", async () => {
+    const previousKey = process.env.STRIPE_PUBLISHABLE_KEY;
+    process.env.STRIPE_PUBLISHABLE_KEY = "pk_test_platform";
+    try {
+      installClient(
+        baseTables({
+          payments: [
+            { data: [], error: null },
+            {
+              data: { id: PAYMENT_ID, status: "pending", amount: 112.03, provider: "stripe", provider_payment_id: null, metadata: {} },
+              error: null,
+            },
+            { data: null, error: null },
+          ],
+        }),
+      );
+      const res = await createIntent(
+        makeRequest(`/api/v1/public-booking/${SLUG}/payment-intent`, {
+          method: "POST",
+          body: { appointment_id: APPOINTMENT_ID, email: GUEST_EMAIL },
+        }),
+        contextWithParams({ slug: SLUG }),
+      );
+      const { status, body } = await readJson(res);
+      expect(status).toBe(200);
+      expect(body.data).toMatchObject({
+        mode: "connect",
+        stripe_account_id: "acct_test",
+        publishable_key: "pk_test_platform",
+      });
+    } finally {
+      if (previousKey === undefined) delete process.env.STRIPE_PUBLISHABLE_KEY;
+      else process.env.STRIPE_PUBLISHABLE_KEY = previousKey;
+    }
+  });
+
+  it("returns null Stripe client config in direct mode (publishable key is not stored server-side)", async () => {
+    installClient(
+      baseTables({
+        workspace_settings: [
+          { data: { workspace_id: WS_ID }, error: null },
+          { data: { operational_settings: { stripe_payment_mode: "direct", stripe_direct_account_id: "acct_direct" } }, error: null },
+        ],
+        payments: [
+          { data: [], error: null },
+          {
+            data: { id: PAYMENT_ID, status: "pending", amount: 112.03, provider: "stripe", provider_payment_id: null, metadata: {} },
+            error: null,
+          },
+          { data: null, error: null },
+        ],
+      }),
+    );
+    (resolveStripeWorkspaceExecution as jest.Mock).mockReturnValue({
+      mode: "direct",
+      accountId: "acct_direct",
+      stripe: { paymentIntents: { create: paymentIntentsCreate, retrieve: paymentIntentsRetrieve } },
+      requestOptions: () => ({}),
+    });
+    const res = await createIntent(
+      makeRequest(`/api/v1/public-booking/${SLUG}/payment-intent`, {
+        method: "POST",
+        body: { appointment_id: APPOINTMENT_ID, email: GUEST_EMAIL },
+      }),
+      contextWithParams({ slug: SLUG }),
+    );
+    const { status, body } = await readJson(res);
+    expect(status).toBe(200);
+    expect(body.data).toMatchObject({
+      mode: "direct",
+      stripe_account_id: null,
+      publishable_key: null,
+    });
+  });
+
   it("returns 402 before touching Stripe when the Payments add-on is inactive", async () => {
     installClient(
       baseTables({

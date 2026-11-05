@@ -221,164 +221,6 @@ export function useBookingSubmit(deps: SubmitDeps) {
     return true;
   }, [bookingRequirements, getVehicleBookingRequirements, vehicles]);
 
-  // ── Pay Now (redirect to Stripe/Square checkout) ────────────────────────
-  const handlePayNow = useCallback(async () => {
-    if (!business) {
-      toast.error("Business information not loaded");
-      return;
-    }
-    if (!business.user_id) {
-      console.error("[SECURITY] Missing tenant context (business.user_id)");
-      toast.error("Booking session invalid. Please refresh and try again.");
-      return;
-    }
-
-    // SECURITY: fail-closed provider resolution (never silently fall back to Stripe)
-    const provider: "stripe" | "square" | "none" =
-      business.payment_provider === "square"
-        ? "square"
-        : business.payment_provider === "stripe"
-          ? "stripe"
-          : "none";
-
-    // ⚡ The RPC already computes stripe_charges_enabled as (enabled AND account_id IS NOT NULL)
-    const paymentsEnabled =
-      provider === "square"
-        ? business.square_charges_enabled && !!business.square_merchant_id
-        : provider === "stripe"
-          ? business.stripe_charges_enabled
-          : false;
-
-    if (!paymentsEnabled) {
-      console.error(`[SECURITY] Payment provider '${provider}' not connected or enabled`);
-      dispatch({
-        type: "SET_CHECKOUT_ERROR",
-        error: {
-          type: "provider_not_enabled" as CheckoutErrorType,
-          message: "Online payments are not yet enabled for this business. Please choose \"Pay at Time of Service\" instead.",
-        },
-      });
-      return;
-    }
-
-    if (!guestEmail || !guestName) {
-      toast.error("Please fill in your contact information first");
-      return;
-    }
-    if (!selectedServices.length && !selectedPackage) {
-      toast.error("Please select at least one service");
-      return;
-    }
-    if (!validateVehicleRequirements()) return;
-    if (selectedTime) {
-      const weather = isWeatherBlocked?.(selectedTime, getTotalDuration() || undefined);
-      if (weather?.blocked) {
-        toast.error(`Selected time is blocked due to weather: ${weather.reasons.join(", ")}`);
-        return;
-      }
-    }
-    // Server-trusted weather pre-flight (defense in depth)
-    if (await enforceWeatherGuard()) return;
-
-    dispatch({ type: "SET_PROCESSING_PAYMENT", processing: true });
-    dispatch({ type: "SET_CHECKOUT_ERROR", error: null });
-
-    const serviceCatalogIds = Object.values(vehicleServiceSelections).flatMap((selection) => selection.package ? selection.package.services.map((service) => service.id) : selection.services.map((service) => service.id));
-
-    const origin = typeof window !== "undefined" ? window.location.origin : "";
-    const activeProvider =
-      business.payment_provider === "square"
-        ? "square"
-        : business.payment_provider === "stripe"
-          ? "stripe"
-          : null;
-
-    if (!activeProvider) {
-      dispatch({
-        type: "SET_CHECKOUT_ERROR",
-        error: {
-          type: "provider_not_enabled" as CheckoutErrorType,
-          message: "Online payments are not available for this business. Please choose \"Pay at Time of Service\" instead.",
-        },
-      });
-      dispatch({ type: "SET_PROCESSING_PAYMENT", processing: false });
-      return;
-    }
-
-    const oilBreakdown = getOilPriceBreakdown();
-    const bookingConfiguration = buildAppointmentBookingConfiguration(vehicles, vehicleServiceSelections);
-    trackCheckoutStarted({
-      organization_id: business.user_id,
-      amount_cents: Math.round((getGrandTotal() ?? 0) * 100),
-      currency: (business.currency ?? "usd").toLowerCase(),
-      provider: activeProvider,
-      service_count: serviceCatalogIds.length,
-    });
-    const result = await startCheckout({
-      tenantId: business.user_id,
-      paymentProvider: activeProvider,
-      serviceCatalogIds,
-      customerEmail: guestEmail,
-      customerName: guestName,
-      customerPhone: normalizePhoneToE164(guestPhone) || guestPhone || undefined,
-      bookingSource: resolveBookingSource(),
-      oilPriceAdjustment: oilBreakdown.total,
-      oilExtraQuarts: oilBreakdown.extraQuarts,
-      oilPricePerQuart: oilBreakdown.pricePerQuart,
-      appointmentData: {
-        scheduledDate: selectedDate ? format(selectedDate, "yyyy-MM-dd") : "",
-        scheduledTime: selectedTime,
-        dropOffOption: "drop-off" as const,
-        customerAddress: [customerAddress, addressLine2, city, state, zipCode].filter(Boolean).join(", "),
-        vehicles: vehicles.map((v) => ({
-          year: v.year,
-          make: v.make,
-          model: v.model,
-          licensePlate: v.licensePlate,
-          vin: v.vin,
-          mileage: v.mileage,
-        })),
-        bookingConfiguration,
-        vehicleServiceAssignments: Object.fromEntries(Object.entries(vehicleServiceSelections).map(([vehicleId, selection]) => [vehicleId, { serviceCatalogIds: selection.package ? selection.package.services.map((service) => service.id) : selection.services.map((service) => service.id), packageId: selection.package?.id || null }])),
-        tireItems: bookingConfiguration.vehicles.flatMap((vehicle) => vehicle.tire?.inventoryItemId ? [{ inventoryItemId: vehicle.tire.inventoryItemId, quantity: vehicle.tire.frontQuantity + vehicle.tire.rearQuantity }] : []),
-        notes: notes || undefined,
-        consent: {
-          transactionalSmsConsent,
-          marketingSmsConsent,
-          marketingEmailConsent,
-          consentTexts: {
-            transactionalSms: TRANSACTIONAL_SMS_CONSENT_TEXT,
-            marketingSms: MARKETING_SMS_CONSENT_TEXT,
-            marketingEmail: MARKETING_EMAIL_CONSENT_TEXT,
-          },
-        },
-      },
-      successUrl: `${origin}/booking-success?session_id={CHECKOUT_SESSION_ID}`,
-      cancelUrl: `${origin}?payment=cancelled`,
-    });
-
-    if (result.success && result.redirectUrl) {
-      if (typeof window !== "undefined") {
-        window.location.href = result.redirectUrl;
-      }
-    } else if (result.error) {
-      const errorTypeMap: Record<string, CheckoutErrorType> = {
-        tenant_not_found: "unknown",
-        payment_provider_not_enabled: "provider_not_enabled",
-        validation_error: "unknown",
-        rate_limited: "rate_limit",
-        network_error: "network_error",
-        unknown: "unknown",
-      };
-      dispatch({
-        type: "SET_CHECKOUT_ERROR",
-        error: { type: errorTypeMap[result.error.type] || "unknown", message: result.error.message },
-      });
-    }
-
-    dispatch({ type: "SET_PROCESSING_PAYMENT", processing: false });
-  }, [business, guestEmail, guestName, guestPhone, selectedServices, selectedPackage, vehicleServiceSelections, selectedDate, selectedTime, customerAddress, addressLine2, city, state, zipCode, vehicles, notes, transactionalSmsConsent, marketingSmsConsent, marketingEmailConsent, getOilPriceBreakdown, getTotalDuration, getGrandTotal, dispatch, isWeatherBlocked, enforceWeatherGuard, validateVehicleRequirements]);
-
   // ── Pay Later (book directly) ──────────────────────────────────────────
   const handleSubmit = useCallback(async () => {
     const correlationId = generateCorrelationId();
@@ -921,6 +763,19 @@ export function useBookingSubmit(deps: SubmitDeps) {
         // Best-effort cleanup; storage may be unavailable in private browsing.
       }
 
+      // Pay-now (Stripe): the booking exists and its invoice was created
+      // by the invoice triggers, so hand the payment phase to step 6 —
+      // BookingCardPayment collects the card there and only a
+      // server-verified settle completes the flow. (Square pay-now never
+      // reaches handleSubmit; it stays on the hosted checkout path.)
+      if (paymentChoice === "pay_now" && appointmentId) {
+        dispatch({
+          type: "SET_PAYNOW_PENDING",
+          appointmentId: String(appointmentId),
+          email: validationResult.data.email,
+        });
+      }
+
       dispatch({ type: "RECORD_SUBMISSION" });
       dispatch({ type: "BOOKING_SUCCESS" });
     } catch (error) {
@@ -952,6 +807,178 @@ export function useBookingSubmit(deps: SubmitDeps) {
       dispatch({ type: "SET_SUBMITTING", submitting: false });
     }
   }, [business, slug, selectedServices, selectedPackage, vehicleServiceSelections, selectedDate, selectedTime, vehicles, guestName, guestEmail, guestPhone, notes, paymentChoice, transactionalSmsConsent, marketingSmsConsent, marketingEmailConsent, customerAddress, addressLine2, city, state, zipCode, customerCoords, bookingContextId, submissionCount, lastSubmissionTime, taxData, selectedRewardInstanceId, storageKey, getTotalDuration, getGrandTotal, getPreTaxTotal, getOilPriceBreakdown, fetchBookedSlots, dispatch, isWeatherBlocked, enforceWeatherGuard, validateVehicleRequirements]);
+
+  // ── Pay Now (Stripe: book + in-page card payment; Square: hosted checkout) ──
+  const handlePayNow = useCallback(async () => {
+    if (!business) {
+      toast.error("Business information not loaded");
+      return;
+    }
+    if (!business.user_id) {
+      console.error("[SECURITY] Missing tenant context (business.user_id)");
+      toast.error("Booking session invalid. Please refresh and try again.");
+      return;
+    }
+
+    // SECURITY: fail-closed provider resolution (never silently fall back to Stripe)
+    const provider: "stripe" | "square" | "none" =
+      business.payment_provider === "square"
+        ? "square"
+        : business.payment_provider === "stripe"
+          ? "stripe"
+          : "none";
+
+    // ⚡ The RPC already computes stripe_charges_enabled as (enabled AND account_id IS NOT NULL)
+    const paymentsEnabled =
+      provider === "square"
+        ? business.square_charges_enabled && !!business.square_merchant_id
+        : provider === "stripe"
+          ? business.stripe_charges_enabled
+          : false;
+
+    if (!paymentsEnabled) {
+      console.error(`[SECURITY] Payment provider '${provider}' not connected or enabled`);
+      dispatch({
+        type: "SET_CHECKOUT_ERROR",
+        error: {
+          type: "provider_not_enabled" as CheckoutErrorType,
+          message: "Online payments are not yet enabled for this business. Please choose \"Pay at Time of Service\" instead.",
+        },
+      });
+      return;
+    }
+
+    if (!guestEmail || !guestName) {
+      toast.error("Please fill in your contact information first");
+      return;
+    }
+    if (!selectedServices.length && !selectedPackage) {
+      toast.error("Please select at least one service");
+      return;
+    }
+    if (!validateVehicleRequirements()) return;
+    if (selectedTime) {
+      const weather = isWeatherBlocked?.(selectedTime, getTotalDuration() || undefined);
+      if (weather?.blocked) {
+        toast.error(`Selected time is blocked due to weather: ${weather.reasons.join(", ")}`);
+        return;
+      }
+    }
+    // Server-trusted weather pre-flight (defense in depth)
+    if (await enforceWeatherGuard()) return;
+
+    dispatch({ type: "SET_PROCESSING_PAYMENT", processing: true });
+    dispatch({ type: "SET_CHECKOUT_ERROR", error: null });
+
+    const serviceCatalogIds = Object.values(vehicleServiceSelections).flatMap((selection) => selection.package ? selection.package.services.map((service) => service.id) : selection.services.map((service) => service.id));
+
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const activeProvider =
+      business.payment_provider === "square"
+        ? "square"
+        : business.payment_provider === "stripe"
+          ? "stripe"
+          : null;
+
+    if (!activeProvider) {
+      dispatch({
+        type: "SET_CHECKOUT_ERROR",
+        error: {
+          type: "provider_not_enabled" as CheckoutErrorType,
+          message: "Online payments are not available for this business. Please choose \"Pay at Time of Service\" instead.",
+        },
+      });
+      dispatch({ type: "SET_PROCESSING_PAYMENT", processing: false });
+      return;
+    }
+
+    // Stripe pay-now: book first through the canonical submit path, then
+    // collect the card in-page on step 6 (BookingCardPayment) against the
+    // booking's server-side invoice balance — the payment-intent pair
+    // needs the appointment and its invoice to exist. handleSubmit sets
+    // the payNow state (SET_PAYNOW_PENDING) before BOOKING_SUCCESS; if the
+    // booking itself fails it surfaces its own errors and step 6 never
+    // renders. The legacy hosted-checkout path below remains only for
+    // Square, which has no in-page payment pair.
+    if (activeProvider === "stripe") {
+      await handleSubmit();
+      dispatch({ type: "SET_PROCESSING_PAYMENT", processing: false });
+      return;
+    }
+
+    const oilBreakdown = getOilPriceBreakdown();
+    const bookingConfiguration = buildAppointmentBookingConfiguration(vehicles, vehicleServiceSelections);
+    trackCheckoutStarted({
+      organization_id: business.user_id,
+      amount_cents: Math.round((getGrandTotal() ?? 0) * 100),
+      currency: (business.currency ?? "usd").toLowerCase(),
+      provider: activeProvider,
+      service_count: serviceCatalogIds.length,
+    });
+    const result = await startCheckout({
+      tenantId: business.user_id,
+      paymentProvider: activeProvider,
+      serviceCatalogIds,
+      customerEmail: guestEmail,
+      customerName: guestName,
+      customerPhone: normalizePhoneToE164(guestPhone) || guestPhone || undefined,
+      bookingSource: resolveBookingSource(),
+      oilPriceAdjustment: oilBreakdown.total,
+      oilExtraQuarts: oilBreakdown.extraQuarts,
+      oilPricePerQuart: oilBreakdown.pricePerQuart,
+      appointmentData: {
+        scheduledDate: selectedDate ? format(selectedDate, "yyyy-MM-dd") : "",
+        scheduledTime: selectedTime,
+        dropOffOption: "drop-off" as const,
+        customerAddress: [customerAddress, addressLine2, city, state, zipCode].filter(Boolean).join(", "),
+        vehicles: vehicles.map((v) => ({
+          year: v.year,
+          make: v.make,
+          model: v.model,
+          licensePlate: v.licensePlate,
+          vin: v.vin,
+          mileage: v.mileage,
+        })),
+        bookingConfiguration,
+        vehicleServiceAssignments: Object.fromEntries(Object.entries(vehicleServiceSelections).map(([vehicleId, selection]) => [vehicleId, { serviceCatalogIds: selection.package ? selection.package.services.map((service) => service.id) : selection.services.map((service) => service.id), packageId: selection.package?.id || null }])),
+        tireItems: bookingConfiguration.vehicles.flatMap((vehicle) => vehicle.tire?.inventoryItemId ? [{ inventoryItemId: vehicle.tire.inventoryItemId, quantity: vehicle.tire.frontQuantity + vehicle.tire.rearQuantity }] : []),
+        notes: notes || undefined,
+        consent: {
+          transactionalSmsConsent,
+          marketingSmsConsent,
+          marketingEmailConsent,
+          consentTexts: {
+            transactionalSms: TRANSACTIONAL_SMS_CONSENT_TEXT,
+            marketingSms: MARKETING_SMS_CONSENT_TEXT,
+            marketingEmail: MARKETING_EMAIL_CONSENT_TEXT,
+          },
+        },
+      },
+      successUrl: `${origin}/booking-success?session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${origin}?payment=cancelled`,
+    });
+
+    if (result.success && result.redirectUrl) {
+      if (typeof window !== "undefined") {
+        window.location.href = result.redirectUrl;
+      }
+    } else if (result.error) {
+      const errorTypeMap: Record<string, CheckoutErrorType> = {
+        tenant_not_found: "unknown",
+        payment_provider_not_enabled: "provider_not_enabled",
+        validation_error: "unknown",
+        rate_limited: "rate_limit",
+        network_error: "network_error",
+        unknown: "unknown",
+      };
+      dispatch({
+        type: "SET_CHECKOUT_ERROR",
+        error: { type: errorTypeMap[result.error.type] || "unknown", message: result.error.message },
+      });
+    }
+
+    dispatch({ type: "SET_PROCESSING_PAYMENT", processing: false });
+  }, [business, guestEmail, guestName, guestPhone, selectedServices, selectedPackage, vehicleServiceSelections, selectedDate, selectedTime, customerAddress, addressLine2, city, state, zipCode, vehicles, notes, transactionalSmsConsent, marketingSmsConsent, marketingEmailConsent, getOilPriceBreakdown, getTotalDuration, getGrandTotal, dispatch, isWeatherBlocked, enforceWeatherGuard, validateVehicleRequirements, handleSubmit]);
 
   // ── Account creation ────────────────────────────────────────────────────
   const handleCreateAccount = useCallback(

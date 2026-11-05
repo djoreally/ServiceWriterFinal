@@ -90,6 +90,37 @@ export const nextApi = {
         `/v1/public-booking/${encodeURIComponent(slug)}/confirmation`,
         { method: "POST", body: JSON.stringify(payload) },
       ),
+    createPaymentIntent: (slug: string, payload: { appointment_id: string; email: string }) =>
+      request<{
+        data: {
+          payment_id: string;
+          client_secret: string;
+          amount: number;
+          currency: string;
+          mode: "connect" | "direct";
+          stripe_account_id: string | null;
+          publishable_key: string | null;
+          reused: boolean;
+        };
+      }>(
+        `/v1/public-booking/${encodeURIComponent(slug)}/payment-intent`,
+        { method: "POST", body: JSON.stringify(payload) },
+      ),
+    confirmPaymentIntent: (slug: string, payload: { appointment_id: string; email: string; payment_intent_id: string }) =>
+      request<{
+        data: {
+          success: boolean;
+          settled: boolean;
+          already_recorded?: boolean;
+          status?: string;
+          payment_id: string;
+          amount_paid?: number;
+          invoice_status?: string;
+        };
+      }>(
+        `/v1/public-booking/${encodeURIComponent(slug)}/payment-intent/confirm`,
+        { method: "POST", body: JSON.stringify(payload) },
+      ),
   },
   workspaces: async (): Promise<WorkspaceMembership[]> => {
     const response = await request<{ data: unknown[] }>("/v1/workspaces");
