@@ -22,7 +22,8 @@ import {
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { format } from "date-fns";
 import { PaymentLinkDialog } from "@/components/payments/PaymentLinkDialog";
-import { centsToDollars, dollarsToCents, toCents, toDollars } from "@/lib/financialMath";
+import { centsToDollars, toCents } from "@/lib/financialMath";
+import { computeAppointmentPaymentAmounts } from "@/lib/appointmentPaymentAmounts";
 
 type PaymentRecord = AppointmentPaymentRow;
 
@@ -34,7 +35,16 @@ interface AppointmentPaymentsTabProps {
   estimatedTotal?: number;
   taxAmount?: number;
   subtotal?: number;
+  /**
+   * Workspace tax_rate — a PERCENT (6 means 6%), exactly as stored in
+   * workspace_settings. Never a fraction; see
+   * @/lib/appointmentPaymentAmounts for the contract.
+   */
   taxRate?: number;
+  /** True when the appointment's quote is locked (see @/lib/price-lock). */
+  priceLocked?: boolean;
+  /** Dollars still to collect on a locked quote (quote − already paid). */
+  lockedAmountDue?: number | null;
 }
 
 export function AppointmentPaymentsTab({
@@ -46,6 +56,8 @@ export function AppointmentPaymentsTab({
   taxAmount = 0,
   subtotal,
   taxRate,
+  priceLocked = false,
+  lockedAmountDue = null,
 }: AppointmentPaymentsTabProps) {
   const { formatCurrency } = useRegionalSettings();
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
@@ -78,25 +90,24 @@ export function AppointmentPaymentsTab({
     
     setCreatingPaymentRecord(true);
     try {
-      // If no tax was explicitly set on the appointment but a tax rate exists, compute it
-      let effectiveTax = taxAmount;
-      let effectiveSubtotal = subtotal;
-      if (effectiveTax === 0 && taxRate && taxRate > 0 && estimatedTotal > 0) {
-        effectiveSubtotal = effectiveSubtotal ?? estimatedTotal;
-        effectiveTax = effectiveSubtotal * taxRate;
-      }
-      const taxInCents = dollarsToCents(toDollars(effectiveTax));
-      const subtotalInCents = effectiveSubtotal != null
-        ? dollarsToCents(toDollars(effectiveSubtotal))
-        : (dollarsToCents(toDollars(estimatedTotal)) - taxInCents);
-      const amountInCents = subtotalInCents + taxInCents;
-      
+      // All amount math lives in one tested helper: a locked quote
+      // collects exactly its remaining balance (no tax recompute), and
+      // the workspace tax rate is a PERCENT, not a fraction.
+      const amounts = computeAppointmentPaymentAmounts({
+        priceLocked,
+        lockedAmountDue,
+        estimatedTotal,
+        taxAmount,
+        subtotal,
+        taxRatePercent: taxRate,
+      });
+
       await createAppointmentPaymentRecord({
         appointmentId,
-        amountCents: amountInCents,
-        subtotalCents: subtotalInCents,
-        taxCents: taxInCents > 0 ? taxInCents : null,
-        taxRate: taxRate || null,
+        amountCents: amounts.amountCents,
+        subtotalCents: amounts.subtotalCents,
+        taxCents: amounts.taxCents,
+        taxRate: amounts.taxRate,
         customerEmail,
         customerName,
       });

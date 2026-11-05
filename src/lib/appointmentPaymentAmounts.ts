@@ -40,12 +40,31 @@ export function computeAppointmentPaymentAmounts(
 ): AppointmentPaymentAmounts {
   const { estimatedTotal, taxAmount = 0, subtotal, taxRatePercent } = input;
 
-  // If no tax was explicitly set on the appointment but a tax rate exists, compute it
+  // Locked quote: the stored quote IS the total. The amount to collect is
+  // the remaining locked balance and no tax or fee is ever recomputed on
+  // top of it — the server rejects anything else
+  // (@/server/payments/locked-quote), and CompleteAppointmentDialog's
+  // closeout path already creates the record exactly this way.
+  if (input.priceLocked) {
+    const dueDollars = input.lockedAmountDue ?? estimatedTotal;
+    const dueCents = dollarsToCents(toDollars(Math.max(0, dueDollars)));
+    return {
+      amountCents: dueCents,
+      subtotalCents: dueCents,
+      taxCents: null,
+      taxRate: null,
+    };
+  }
+
+  // If no tax was explicitly set on the appointment but a tax rate exists,
+  // compute it. taxRatePercent is a PERCENT (6 = 6%), so the tax is
+  // subtotal * rate / 100 — multiplying by the raw value was the INV-106
+  // bug ($133.83 at "rate 6" produced $802.98 of phantom tax).
   let effectiveTax = taxAmount;
   let effectiveSubtotal = subtotal;
   if (effectiveTax === 0 && taxRatePercent && taxRatePercent > 0 && estimatedTotal > 0) {
     effectiveSubtotal = effectiveSubtotal ?? estimatedTotal;
-    effectiveTax = effectiveSubtotal * taxRatePercent;
+    effectiveTax = (effectiveSubtotal * taxRatePercent) / 100;
   }
   const taxInCents = dollarsToCents(toDollars(effectiveTax));
   const subtotalInCents = effectiveSubtotal != null
