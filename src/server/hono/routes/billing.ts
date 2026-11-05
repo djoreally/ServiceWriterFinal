@@ -1937,26 +1937,45 @@ billingRouter.get("/v1/billing/payment-provider", async (c) => {
     db.from("provider_connections")
       .select("provider,external_account_id,status,metadata,last_synced_at")
       .eq("workspace_id", workspaceId)
-      .in("provider", ["stripe", "square"]),
+      .in("provider", ["square"]),
   ]);
   if (settingsError) throw settingsError;
   if (connectionsError) throw connectionsError;
 
   const operational = readOperationalSettings(settings?.operational_settings);
-  const stripeConnection = (connections ?? []).find((row: any) => row.provider === "stripe" && row.status === "connected");
   const squareConnection = (connections ?? []).find((row: any) => row.provider === "square" && row.status === "connected");
-  const stripeMetadata = readOperationalSettings(stripeConnection?.metadata);
   const squareMetadata = readOperationalSettings(squareConnection?.metadata);
+
+  // Stripe status derives from the SAME execution state that charges cards:
+  // resolveStripeWorkspaceExecution over workspace_settings.operational_settings
+  // — the exact resolution invoice sync, payment links and booking pay-now
+  // execute through. provider_connections is written only by the connect edge
+  // function and is no longer consulted for Stripe status: a workspace whose
+  // charges succeed must never render "Not connected" because that record was
+  // never written. The charges/payouts/details flags are the execution
+  // layer's own cached account state, refreshed from Stripe whenever the
+  // execution layer runs (refreshStripeWorkspaceState).
+  let stripeExecution: StripeWorkspaceExecution | null = null;
+  try {
+    stripeExecution = resolveStripeWorkspaceExecution(operational);
+  } catch {
+    stripeExecution = null;
+  }
+  const stripeAccountId =
+    stripeExecution && typeof stripeExecution.accountId === "string" && stripeExecution.accountId
+      ? stripeExecution.accountId
+      : null;
+  const stripeDirect = stripeExecution?.mode === "direct";
 
   return json({
     data: {
       provider: settings?.payment_provider ?? "none",
       stripeStatus: {
-        connected: Boolean(stripeConnection?.external_account_id),
-        chargesEnabled: stripeMetadata.charges_enabled === true && operational.stripe_charges_enabled === true,
-        payoutsEnabled: stripeMetadata.payouts_enabled === true && operational.stripe_payouts_enabled === true,
-        detailsSubmitted: stripeMetadata.details_submitted === true || operational.stripe_details_submitted === true || operational.stripe_onboarding_complete === true,
-        accountId: typeof stripeConnection?.external_account_id === "string" ? stripeConnection.external_account_id : undefined,
+        connected: stripeAccountId !== null,
+        chargesEnabled: stripeAccountId !== null && (stripeDirect ? operational.stripe_direct_charges_enabled === true : operational.stripe_charges_enabled === true),
+        payoutsEnabled: stripeAccountId !== null && (stripeDirect ? operational.stripe_direct_payouts_enabled === true : operational.stripe_payouts_enabled === true),
+        detailsSubmitted: stripeAccountId !== null && (stripeDirect ? operational.stripe_direct_details_submitted === true : operational.stripe_onboarding_complete === true),
+        accountId: stripeAccountId ?? undefined,
       },
       squareStatus: {
         connected: Boolean(squareConnection?.external_account_id),
