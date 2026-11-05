@@ -36,10 +36,24 @@ function publicBookingGet(slug, section = "profile", date) {
   }));
 }
 
+class ApiClientError extends Error {
+  constructor(status, code, message) {
+    super(message);
+    this.name = "ApiClientError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
 module.exports = {
+  ApiClientError,
   nextApi: {
     health: jest.fn(async () => ({ ok: true, version: "test" })),
-    publicBooking: { get: jest.fn(publicBookingGet) },
+    publicBooking: {
+      get: jest.fn(publicBookingGet),
+      createPaymentIntent: jest.fn(),
+      confirmPaymentIntent: jest.fn(),
+    },
     workspaces: jest.fn(async () => [{ workspaceUserId: "00000000-0000-0000-0000-000000000001", workspaceName: "Apex Mobile Auto Care", role: "admin", landingPath: "/dashboard", isDefault: true }]),
     appointments: {
       list: jest.fn(appointmentList),

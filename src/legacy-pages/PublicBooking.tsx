@@ -63,6 +63,7 @@ import { LocationStep } from "@/components/booking/steps/LocationStep";
 import { VehicleStep } from "@/components/booking/steps/VehicleStep";
 import { ServiceSelectionStep, type ServiceCatalogItem } from "@/components/booking/steps/ServiceSelectionStep";
 import { ConfirmationStep } from "@/components/booking/steps/ConfirmationStep";
+import { BookingCardPayment } from "@/components/booking/BookingCardPayment";
 import { DateTimeStep } from "@/components/booking/steps/DateTimeStep";
 import { ContactPaymentStep } from "@/components/booking/steps/ContactPaymentStep";
 import { CheckoutOptionsStep } from "@/components/booking/steps/CheckoutOptionsStep";
@@ -1514,9 +1515,12 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
           />
         )}
 
-        {/* Step 6: Confirmation — pay-later bookings land here (pay-now goes
-            to /booking-success). Fire the Meta Purchase conversion with the
-            appointment total so offline-payment bookings are tracked too. */}
+        {/* Step 6: Confirmation — pay-later bookings land here directly;
+            Stripe pay-now bookings land here too, but render the in-page
+            card payment first (BookingCardPayment) until the payment
+            settles server-side or the guest opts to pay at service.
+            Fire the Meta Purchase conversion with the appointment total
+            so offline-payment bookings are tracked too. */}
         {bs.step === 6 && (
           <>
             {business?.user_id && (
@@ -1526,6 +1530,21 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
                 value={pricing.getGrandTotal()}
               />
             )}
+            {bs.payNow?.status === "awaiting_payment" && business?.payment_provider === "stripe" && slug ? (
+              <BookingCardPayment
+                slug={slug}
+                appointmentId={bs.payNow.appointmentId}
+                email={bs.payNow.email}
+                formatCurrency={pricing.formatCurrency}
+                onSettled={() => {
+                  dispatch({ type: "SET_PAYNOW_STATUS", status: "settled" });
+                  toast.success("Payment received — thank you!");
+                }}
+                onContinueWithoutOnlinePayment={() =>
+                  dispatch({ type: "SET_PAYNOW_STATUS", status: "skipped" })
+                }
+              />
+            ) : (
             <ConfirmationStep
               businessName={business?.business_name || "Auto Shop"}
               guestEmail={bs.guestEmail}
@@ -1542,6 +1561,7 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
               getGrandTotal={pricing.getGrandTotal}
               confirmationEmailStatus={bs.confirmationEmailStatus}
             />
+            )}
           </>
         )}
 
