@@ -331,7 +331,13 @@ export {
 
 export {
   fetchAppointmentPayments,
+  fetchAppointmentPaymentsWithState,
+  isProviderSyncArtifact,
+  sumPendingPaymentsCents,
+  sumSucceededPaymentsCents,
   type AppointmentPaymentRow,
+  type AppointmentPaymentState,
+  type AppointmentPaymentsResult,
 } from './appointment-payments.query';
 
 export {

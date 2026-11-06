@@ -361,7 +361,7 @@ describe("composeAppointmentJobMoney", () => {
     const db = fakeDb({
       invoices: [],
       appointment_items: [
-        { appointment_id: OTHER_APPT_ID, unit_price: 100, quantity: 1 },
+        { appointment_id: OTHER_APPT_ID, workspace_id: WS_ID, unit_price: 100, quantity: 1 },
       ],
       workspace_settings: [],
     });

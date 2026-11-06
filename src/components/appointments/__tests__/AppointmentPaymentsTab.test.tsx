@@ -92,6 +92,9 @@ const paidState: AppointmentPaymentState = {
 };
 
 jest.mock("@/application/queries/appointment-payments.query", () => ({
+  // Real module for the pure helpers (artifact rule, cent sums); only
+  // the network reads are stubbed.
+  ...jest.requireActual("@/application/queries/appointment-payments.query"),
   fetchAppointmentPayments: jest.fn(),
   fetchAppointmentPaymentsWithState: jest.fn(),
 }));

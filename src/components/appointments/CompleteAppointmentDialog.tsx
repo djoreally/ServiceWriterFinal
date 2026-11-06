@@ -19,7 +19,10 @@ import { fetchVehicleSpecifications } from "@/application/queries/vehicle-specif
 import { updateVehicleOilType } from "@/application/commands/vehicles.command";
 import { createAppointmentPaymentRecord, sendAppointmentPaymentLink } from "@/application/commands/appointment-payments.command";
 import { isWebsiteQuoteLocked, websiteQuoteAmountDue } from "@/lib/price-lock";
-import { fetchAppointmentPayments } from "@/application/queries/appointment-payments.query";
+import {
+  fetchAppointmentPaymentsWithState,
+  sumSucceededPaymentsCents,
+} from "@/application/queries/appointment-payments.query";
 import { ManualPaymentDialog } from "@/components/payments/ManualPaymentDialog";
 import { PaymentLinkDialog } from "@/components/payments/PaymentLinkDialog";
 import { dollarsToCents, toCents, toDollars } from "@/lib/financialMath";
@@ -115,12 +118,20 @@ export function CompleteAppointmentDialog({
     let cancelled = false;
     (async () => {
       try {
-        const rows = await fetchAppointmentPayments(appointment.id);
+        // P3: already-collected comes from the COMPOSED payment state
+        // (invoice facts) — the old read summed the metadata-only
+        // payment feed, which hid invoice-bound charges (e.g. a locked
+        // quote paid out-of-band via a direct link), leaving the full
+        // quote "due" at completion: a double-collect. The succeeded-row
+        // sum over the now dual-key-resolved rows is the fallback for
+        // locked jobs with no invoice.
+        const { payments, paymentState } = await fetchAppointmentPaymentsWithState(appointment.id);
         if (cancelled) return;
-        const paidCents = rows
-          .filter((row) => row.status === "succeeded")
-          .reduce((sum, row) => sum + Number(row.amount || 0), 0);
-        setLockedAmountPaid(paidCents / 100);
+        setLockedAmountPaid(
+          paymentState
+            ? paymentState.amount_paid
+            : sumSucceededPaymentsCents(payments) / 100,
+        );
       } catch {
         if (!cancelled) setLockedAmountPaid(0);
       }
