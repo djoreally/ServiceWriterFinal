@@ -530,6 +530,15 @@ export const AppointmentDetail = ({
   const summaryTotal = summaryInvoice ? summaryInvoice.total : totalDue;
   const summaryPaid = summaryInvoice ? summaryInvoice.amount_paid : succeededPaymentTotal;
   const summaryBalance = Math.max(0, roundMoney(summaryTotal - summaryPaid));
+  // P3: the prepaid state follows the SAME invoice precedence as the
+  // summary composition — when an invoice exists, its facts decide
+  // (any amount recorded against it, or a paid status); the succeeded-
+  // payments feed is only the no-invoice fallback. Before this, the
+  // chip and the tab prop read the feed alone and could call a
+  // paid-in-full job "not prepaid".
+  const effectiveIsPrepaid = summaryInvoice
+    ? summaryInvoice.amount_paid > 0 || summaryInvoice.status === "paid"
+    : isPrepaid;
   const isEditable = appointment.status !== "completed" && appointment.status !== "cancelled";
   const canReactivate = appointment.status === "cancelled" || appointment.status === "no_show";
 
@@ -707,7 +716,7 @@ export const AppointmentDetail = ({
                     estimatedCost={appointment.estimated_cost}
                     taxAmount={appointment.tax_amount}
                     serviceCatalogId={appointment.service_catalog_id}
-                    isPrepaid={isPrepaid}
+                    isPrepaid={effectiveIsPrepaid}
                     onTotalChange={(subtotal) => setServicesTotal(subtotal)}
                   />
                 </TabsContent>
@@ -717,7 +726,7 @@ export const AppointmentDetail = ({
                     appointmentId={appointment.id}
                     customerEmail={customerEmail}
                     customerName={customerName}
-                    isPrepaid={isPrepaid}
+                    isPrepaid={effectiveIsPrepaid}
                     estimatedTotal={totalDue}
                     taxAmount={taxAmount}
                     subtotal={estimatedCost + wasteOilFee + shopFee + surcharge}
@@ -769,7 +778,7 @@ export const AppointmentDetail = ({
               <CardHeader>
                 <div className="flex items-center justify-between gap-3">
                   <CardTitle className="font-display text-lg font-bold leading-snug">Financial summary</CardTitle>
-                  {isPrepaid && (
+                  {effectiveIsPrepaid && (
                     <span className={cn("inline-flex shrink-0 items-center rounded-full border px-2.5 py-1 text-xs font-semibold", statusToneClasses("success").chip)}>
                       Prepaid
                     </span>

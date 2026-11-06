@@ -32,6 +32,10 @@ const appointmentApiSchema = z.object({
   // B1/T-9: server-composed status presentation (see @/lib/status-vocabulary).
   status_label: z.string().nullable().optional(),
   status_tone: z.enum(["neutral", "info", "success", "warning", "danger"]).nullable().optional(),
+  // P3: server-composed job money from the invoice facts (see
+  // @/server/appointments/appointment-money) — list cards read job_due
+  // verbatim when present instead of falling back to the locked quote.
+  job_total: z.number().nullable().optional(), job_due: z.number().nullable().optional(),
   customers: z.union([customerApiSchema, z.array(customerApiSchema)]).nullable().optional(),
 }).passthrough();
 
@@ -110,7 +114,8 @@ function mapAppointment(row: AppointmentApiRow, customerMap: Map<string, Custome
     customer, vehicle, guest_name: guestName ?? customer?.name ?? null, guest_email: optionalString(metadata.guest_email) ?? customer?.email ?? null,
     guest_phone: optionalString(metadata.guest_phone) ?? customer?.phone ?? null, notes: row.notes ?? optionalString(metadata.notes),
     description: optionalString(metadata.description) ?? row.notes ?? undefined, assigned_technician_id: row.assigned_user_id ?? null,
-    source: row.source, intake_responses: metadata };
+    source: row.source, intake_responses: metadata,
+    job_total: row.job_total ?? undefined, job_due: row.job_due ?? undefined };
 }
 
 export async function fetchAppointmentsPageData(): Promise<AppointmentsPageData> {

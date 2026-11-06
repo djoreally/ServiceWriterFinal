@@ -43,6 +43,11 @@ import { isQuoteLocked } from "@/lib/price-lock";
 import { appointmentStatusView, invoiceStatusView, normalizeAppointmentStatus, paymentStatusView, resolveDispatchStatus, withAppointmentStatusView } from "@/lib/status-vocabulary";
 import { withAppointmentTitleFields } from "@/lib/appointment-title";
 import { resolvePrimaryServiceNames, resolveWorkspaceTimezone } from "@/server/appointments/title-resolution";
+import {
+  composeAppointmentJobMoney,
+  composeAppointmentPaymentState,
+  resolveAppointmentPaymentRows,
+} from "@/server/appointments/appointment-money";
 import { buildBookingConfiguration } from "@/server/appointments/spec-resolution";
 import { logMutation } from "@/server/audit";
 import { z } from "zod";
@@ -66,12 +71,34 @@ appointmentsRouter.get("/v1/appointments", async (c: Context) => {
   const { data, error } = await supabase.from("appointments").select("*,customers(id,first_name,last_name,email,phone),vehicles(id,customer_id,year,make,model,vin,license_plate,plate_region,color,mileage,notes),locations(id,name)").eq("workspace_id", workspaceId).order("starts_at").range(offset, offset + limit - 1);
   if (error) throw error;
   const rows = data ?? [];
+  // P3: rows also carry the composed job money from the shared
+  // appointment-money helper — the same composition the Home cockpit
+  // ships — so list cards state job_due from the invoice facts instead
+  // of falling back to the locked quote verbatim (a paid job listed as
+  // due in full). A composition failure must not take the list down:
+  // the rows ship without money and JobRow falls back as before.
+  let jobMoney = new Map<string, { total: number; due: number }>();
+  try {
+    jobMoney = await composeAppointmentJobMoney(
+      supabase as any,
+      workspaceId,
+      rows as Array<Record<string, any>>,
+    );
+  } catch (err) {
+    console.error("appointments list: job money composition failed", err);
+  }
   // B2/T-1: every job response carries the server-composed title fields.
   const [timezone, primaryServiceNames] = await Promise.all([
     resolveWorkspaceTimezone(supabase, workspaceId),
     resolvePrimaryServiceNames(supabase, workspaceId, rows.map((row) => row.id)),
   ]);
-  return json({ data: rows.map((row) => withAppointmentTitleFields(withAppointmentStatusView(row), { timezone, primaryServiceName: primaryServiceNames.get(row.id) })), pagination: { limit, offset } });
+  return json({ data: rows.map((row) => {
+    const money = jobMoney.get(row.id);
+    return {
+      ...withAppointmentTitleFields(withAppointmentStatusView(row), { timezone, primaryServiceName: primaryServiceNames.get(row.id) }),
+      ...(money ? { job_total: money.total, job_due: money.due } : {}),
+    };
+  }), pagination: { limit, offset } });
 });
 
 appointmentsRouter.post("/v1/appointments", async (c: Context) => {
@@ -2735,22 +2762,34 @@ appointmentsRouter.get("/v1/appointments/service-catalog-item", async (c: Contex
   return json({ data: data ?? null });
 });
 
-// GET /v1/appointments/:id/payments — payments bound to an appointment via metadata.
+// GET /v1/appointments/:id/payments — the appointment's payment rows
+// plus its composed payment state (P3). Rows resolve through BOTH
+// bindings — the invoice chain (payments.invoice_id → an invoice linked
+// to the appointment) and the metadata shortcut
+// (payments.metadata.appointment_id) — deduped by id, newest first.
+// `payment_state` carries the invoice facts every summary reads; the
+// old metadata-only resolution hid invoice-bound rows (e.g. manual
+// closeouts) and reported paid jobs as unpaid.
 appointmentsRouter.get("/v1/appointments/:id/payments", async (c: Context) => {
   const id = z.string().uuid().parse(c.req.param("id"));
   const url = new URL(c.req.url);
   const status = url.searchParams.get("status");
   const { supabase, workspaceId } = await requireCallerWorkspace(c, selectedWorkspaceHint(url));
-  let query = (supabase as any)
-    .from("payments")
-    .select("id,amount,status,provider,provider_payment_id,created_at,updated_at,metadata")
+  const db = supabase as any;
+  const { data: appointment, error: appointmentError } = await db
+    .from("appointments")
+    .select("id,metadata")
     .eq("workspace_id", workspaceId)
-    .contains("metadata", { appointment_id: id })
-    .order("created_at", { ascending: false });
-  if (status) query = query.eq("status", status);
-  const { data, error } = await query;
-  if (error) throw error;
-  return json({ data: data ?? [] });
+    .eq("id", id)
+    .maybeSingle();
+  if (appointmentError) throw appointmentError;
+  const [paymentState, rows] = await Promise.all([
+    appointment
+      ? composeAppointmentPaymentState(db, workspaceId, appointment)
+      : Promise.resolve(null),
+    resolveAppointmentPaymentRows(db, workspaceId, id, appointment?.metadata, status),
+  ]);
+  return json({ data: rows, payment_state: paymentState });
 });
 
 // GET /v1/appointments/:id/services — appointment service lines + catalog fallback.

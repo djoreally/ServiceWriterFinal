@@ -71,8 +71,7 @@ import {
 import { zonedDateTimeParts, zonedLocalDateTimeToUtc } from "@/server/scheduling/timezone";
 import { withAppointmentTitleFields } from "@/lib/appointment-title";
 import { withAppointmentStatusView } from "@/lib/status-vocabulary";
-import { lockedQuoteTotal } from "@/lib/price-lock";
-import { computeAppointmentTotal } from "@/lib/appointmentTotal";
+import { composeAppointmentJobMoney } from "@/server/appointments/appointment-money";
 import { formatMoney } from "@/lib/financialMath";
 import { resolvePrimaryServiceNames, resolveWorkspaceTimezone } from "@/server/appointments/title-resolution";
 import { dollarsToCents as dollarsToCents360, toDollars as toDollars360 } from "@/lib/money";
@@ -2637,106 +2636,26 @@ platformRouter.get("/v1/platform/dashboard/cockpit-rows", async (c) => {
     ? null
     : ((profileRes.data as { display_name?: unknown } | null)?.display_name as string | null | undefined) ?? null;
 
-  const asRecord = (value: unknown): Record<string, unknown> =>
-    value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-  const asNumber = (value: unknown): number | null => {
-    if (value == null) return null;
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  };
-
   const rawToday = (todayAppts.data ?? []) as Array<Record<string, any>>;
   const rawWeek = (weekAppts.data ?? []) as Array<Record<string, any>>;
   const rawInProgress = (inProgress.data ?? []) as Array<Record<string, any>>;
   const allRows = [...rawToday, ...rawWeek, ...rawInProgress];
   const appointmentIds = [...new Set(allRows.map((row) => row.id as string))];
 
-  // Each appointment's invoice, linked by invoices.metadata.appointment_id
-  // (written by the invoice sync) or by the sync's invoice_id write-back
-  // on the appointment itself. The latest non-void invoice wins.
-  const invoiceIdHints = new Map<string, string>();
-  for (const row of allRows) {
-    const hint = asRecord(row.metadata).invoice_id;
-    if (typeof hint === "string" && hint) invoiceIdHints.set(hint, row.id as string);
-  }
-  const linkedInvoices = new Map<string, Record<string, any>>();
-  if (appointmentIds.length > 0) {
-    const [byAppointment, byId] = await Promise.all([
-      db.from("invoices")
-        .select("id,total,amount_paid,status,created_at,metadata")
-        .eq("workspace_id", workspaceId)
-        .filter("metadata->>appointment_id", "in", `(${appointmentIds.join(",")})`),
-      invoiceIdHints.size > 0
-        ? db.from("invoices")
-            .select("id,total,amount_paid,status,created_at,metadata")
-            .eq("workspace_id", workspaceId)
-            .in("id", [...invoiceIdHints.keys()])
-        : Promise.resolve({ data: [], error: null }),
-    ]);
-    if (byAppointment.error) throw byAppointment.error;
-    if (byId.error) throw byId.error;
-    const candidates = [
-      ...((byAppointment.data ?? []) as Array<Record<string, any>>),
-      ...((byId.data ?? []) as Array<Record<string, any>>),
-    ];
-    for (const invoice of candidates) {
-      if (invoice.status === "void") continue;
-      const linked = asRecord(invoice.metadata).appointment_id;
-      const appointmentId = (typeof linked === "string" && linked) || invoiceIdHints.get(invoice.id as string);
-      if (!appointmentId) continue;
-      const existing = linkedInvoices.get(appointmentId);
-      if (!existing || String(invoice.created_at ?? "") > String(existing.created_at ?? "")) {
-        linkedInvoices.set(appointmentId, invoice);
-      }
-    }
-  }
-
-  // Priced service lines per appointment — the same { price, quantity }
-  // shape the appointments service-lines endpoint feeds the total math.
-  const itemsByAppointment = new Map<string, Array<{ price: number; quantity: number }>>();
-  if (appointmentIds.length > 0) {
-    const { data: itemRows, error: itemsError } = await db
-      .from("appointment_items")
-      .select("appointment_id,quantity,unit_price")
-      .eq("workspace_id", workspaceId)
-      .in("appointment_id", appointmentIds);
-    if (itemsError) throw itemsError;
-    for (const item of (itemRows ?? []) as Array<Record<string, any>>) {
-      const list = itemsByAppointment.get(item.appointment_id as string) ?? [];
-      list.push({ price: Number(item.unit_price ?? 0), quantity: Number(item.quantity ?? 1) });
-      itemsByAppointment.set(item.appointment_id as string, list);
-    }
-  }
-
-  // T-14 row money — ONE composition: the invoice total when the job is
-  // invoiced; the locked quote verbatim when a channel locked it; else the
-  // same fee-loaded total JobRow computes from the service lines.
-  // job_due is the invoice-fact interim for the B5 seam (never a
-  // ledger-grade claim): invoiced jobs owe total - amount_paid;
-  // uninvoiced jobs owe their total at service.
-  const jobMoney = (row: Record<string, any>): { total: number; due: number } => {
-    const invoice = linkedInvoices.get(row.id as string);
-    if (invoice) {
-      const total = Number(invoice.total ?? 0);
-      return { total, due: Math.max(total - Number(invoice.amount_paid ?? 0), 0) };
-    }
-    const metadata = asRecord(row.metadata);
-    const locked = lockedQuoteTotal({
-      source: row.source as string | null | undefined,
-      metadata: row.metadata,
-      estimated_cost: row.estimated_cost,
-    });
-    if (locked != null) return { total: locked, due: locked };
-    const total = computeAppointmentTotal(
-      {
-        estimated_cost: asNumber(metadata.estimated_cost) ?? asNumber(row.estimated_cost),
-        tax_amount: asNumber(metadata.tax_amount) ?? asNumber(metadata.client_tax_amount),
-        appointment_services: itemsByAppointment.get(row.id as string) ?? [],
-      },
-      feeSettings,
-    );
-    return { total, due: total };
-  };
+  // T-14 row money — the shared appointment-money composition (P3):
+  // the invoice total when the job is invoiced; the locked quote
+  // verbatim when a channel locked it; else the same fee-loaded total
+  // JobRow computes from the service lines. job_due is the invoice-fact
+  // interim for the B5 seam (never a ledger-grade claim): invoiced jobs
+  // owe total - amount_paid; uninvoiced jobs owe their total at service.
+  // The payments route and the appointments list read this SAME helper,
+  // so every surface states the same job money. The cockpit passes the
+  // fee settings it already fetched above.
+  const jobMoneyByAppointment = await composeAppointmentJobMoney(db, workspaceId, allRows, {
+    feeSettings,
+  });
+  const jobMoney = (row: Record<string, any>): { total: number; due: number } =>
+    jobMoneyByAppointment.get(row.id as string) ?? { total: 0, due: 0 };
 
   // B2/T-1 + B1/T-9: rows carry the server-composed title and status
   // fields — no client-side title or status synthesis anywhere in Home.
