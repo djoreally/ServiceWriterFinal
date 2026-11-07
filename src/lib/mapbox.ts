@@ -21,6 +21,8 @@ if (rawToken && !token) {
 export const MAPBOX_ACCESS_TOKEN = token;
 
 export const MAPBOX_DEFAULT_STYLE = "mapbox://styles/mapbox/streets-v12";
+/** Satellite imagery with street labels — the property view (roof, driveway, lot). */
+export const MAPBOX_SATELLITE_STYLE = "mapbox://styles/mapbox/satellite-streets-v12";
 
 /** True when a usable public token is configured. */
 export const hasMapboxToken = (): boolean => token.length > 0;

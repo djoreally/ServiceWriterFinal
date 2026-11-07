@@ -1,3 +1,4 @@
+import { formatPhoneDisplay } from "@/lib/phone";
 import { errorMessage } from "@/lib/error-message";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sendReviewRequest } from "@/application/commands/review-request.command";
@@ -645,7 +646,7 @@ export const AppointmentDetail = ({
                         iconClassName="h-5 w-5 text-primary"
                       >
                         <span className="sr-only">Call </span>
-                        {customerPhone}
+                        {formatPhoneDisplay(customerPhone)}
                       </ClickablePhone>
                     )}
 
