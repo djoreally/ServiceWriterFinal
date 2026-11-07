@@ -1,4 +1,5 @@
 import { json, errorResponse, paginationSchema, requireWorkspaceMember } from "@/server/api";
+import { composeAppointmentJobMoney } from "@/server/appointments/appointment-money";
 import { conflictWindow, validateLocalAvailability } from "@/server/scheduling/appointment-availability";
 import { syncAppointmentToGoogleCalendar } from "@/server/google-calendar/sync";
 import { manualLockedQuote, seedManualQuoteItem } from "@/server/appointments/book-appointment";
@@ -163,7 +164,38 @@ export async function GET(request: Request) {
       .order("starts_at")
       .range(offset, offset + limit - 1);
     if (error) throw error;
-    return json({ data: data ?? [], pagination: { limit, offset } });
+    const rows = data ?? [];
+    // NOTE (2026-11-06): this route.ts SHADOWS the Hono router's
+    // GET /v1/appointments (src/server/hono/routes/appointments.ts) —
+    // Next.js gives specific route files precedence over the
+    // app/api/[[...route]] catch-all, so THIS handler is the one
+    // production serves. The job-money composition below mirrors the
+    // Hono handler: list rows carry job_total/job_due composed from
+    // the invoice facts, so a paid job does not list as due in full
+    // via the client's locked-quote fallback. Keep the two handlers
+    // in step until the migration removes this file. A composition
+    // failure must not take the list down: rows ship without money
+    // and the client falls back as before.
+    let jobMoney = new Map<string, { total: number; due: number }>();
+    try {
+      jobMoney = await composeAppointmentJobMoney(
+        supabase as any,
+        workspaceId,
+        rows as Array<Record<string, any>>,
+      );
+    } catch (err) {
+      console.error("appointments list: job money composition failed", err);
+    }
+    return json({
+      data: rows.map((row) => {
+        const money = jobMoney.get(row.id);
+        return {
+          ...row,
+          ...(money ? { job_total: money.total, job_due: money.due } : {}),
+        };
+      }),
+      pagination: { limit, offset },
+    });
   } catch (error) {
     return errorResponse(error);
   }

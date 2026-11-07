@@ -191,6 +191,50 @@ describe("appointments/route (collection)", () => {
       expect(body.data[0].id).toBe(APPOINTMENT_ID);
       expect(body.pagination).toEqual({ limit: 25, offset: 0 });
     });
+
+    it("attaches the composed job_total/job_due — a paid job carries job_due 0", async () => {
+      // Regression lock for the 2026-11-06 shadow-route bug: this route.ts
+      // is the handler production serves for GET /v1/appointments (Next.js
+      // precedence over the Hono catch-all). The Hono twin had the money
+      // composition while this handler shipped rows without it, so paid
+      // jobs listed as due in full via the client's locked-quote fallback.
+      const paidAppointment = {
+        id: APPOINTMENT_ID,
+        workspace_id: WS_ID,
+        source: "moms_website",
+        status: "completed",
+        starts_at: "2026-11-05T20:00:00Z",
+        ends_at: "2026-11-05T20:45:00Z",
+        metadata: {
+          pricing_state: "website_quote_locked",
+          estimated_cost: 133.83,
+          client_estimated_cost: 133.83,
+        },
+      };
+      const paidInvoice = {
+        id: "bb0e8400-e29b-41d4-a716-4466554400bb",
+        workspace_id: WS_ID,
+        invoice_number: 106,
+        total: 133.83,
+        amount_paid: 133.83,
+        status: "paid",
+        created_at: "2026-11-05T16:00:00Z",
+        metadata: { appointment_id: APPOINTMENT_ID },
+      };
+      const supabase = makeSupabaseClient({
+        appointments: { data: [paidAppointment], error: null },
+        invoices: { data: [paidInvoice], error: null },
+        appointment_items: { data: [], error: null },
+      });
+      stubWorkspaceMember(api, supabase);
+      const { status, body } = await readJson(
+        await appointmentsGet(makeRequest(`/api/v1/appointments?workspace_id=${WS_ID}`)),
+      );
+      expect(status).toBe(200);
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0].job_total).toBe(133.83);
+      expect(body.data[0].job_due).toBe(0);
+    });
   });
 
   describe("POST", () => {
