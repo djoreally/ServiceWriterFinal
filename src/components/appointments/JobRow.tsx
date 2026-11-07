@@ -1,3 +1,4 @@
+import { formatPhoneDisplay } from "@/lib/phone";
 import { memo, useRef } from "react";
 import type { Appointment } from "@/shared/types";
 import { Button } from "@/components/ui/button";
@@ -180,7 +181,7 @@ export const JobRow = memo(function JobRow({ appointment, onClick, onComplete, o
           {phone && (
             <p className="mt-0.5 flex items-center gap-1.5 text-sm text-muted-foreground">
               <Phone className="h-3.5 w-3.5 shrink-0" />
-              {phone}
+              {formatPhoneDisplay(phone)}
             </p>
           )}
 

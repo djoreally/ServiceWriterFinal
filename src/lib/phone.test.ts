@@ -70,12 +70,25 @@ describe("isValidE164", () => {
 });
 
 describe("formatPhoneDisplay", () => {
-  it("formats US number as (XXX) XXX-XXXX", () => {
-    expect(formatPhoneDisplay("+15551234567")).toBe("(555) 123-4567");
+  it("formats US number as XXX-XXX-XXXX", () => {
+    expect(formatPhoneDisplay("+15551234567")).toBe("555-123-4567");
   });
 
   it("returns international numbers as-is", () => {
     expect(formatPhoneDisplay("+447911123456")).toBe("+447911123456");
+  });
+
+  it("formats bare 10-digit US numbers (un-normalized stored values)", () => {
+    expect(formatPhoneDisplay("4848867506")).toBe("484-886-7506");
+  });
+
+  it("formats 11-digit US numbers with a leading 1", () => {
+    expect(formatPhoneDisplay("14848867506")).toBe("484-886-7506");
+  });
+
+  it("normalizes already-punctuated US numbers to the dashed display", () => {
+    expect(formatPhoneDisplay("(814) 232-0607")).toBe("814-232-0607");
+    expect(formatPhoneDisplay("814-232-0607")).toBe("814-232-0607");
   });
 
   it("returns empty for empty", () => {

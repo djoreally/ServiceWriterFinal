@@ -67,21 +67,27 @@ export function isValidE164(phone: string): boolean {
 
 /**
  * Format an E.164 number for display.
- * US numbers (+1XXXXXXXXXX) → (XXX) XXX-XXXX
+ * US numbers (+1XXXXXXXXXX) → XXX-XXX-XXXX
  * Others → kept as-is with spaces.
  */
 export function formatPhoneDisplay(e164: string): string {
   if (!e164) return "";
 
-  // US number
-  if (e164.startsWith("+1") && e164.length === 12) {
-    const area = e164.slice(2, 5);
-    const prefix = e164.slice(5, 8);
-    const line = e164.slice(8, 12);
-    return `(${area}) ${prefix}-${line}`;
+  // Stored numbers are not always normalized E.164 (website bookings, imports,
+  // guest checkouts can carry bare digits). Format any US-length number the
+  // same way instead of leaking the raw stored string to the screen.
+  const digits = e164.replace(/\D/g, "");
+  const usDigits =
+    digits.length === 10
+      ? digits
+      : digits.length === 11 && digits.startsWith("1")
+        ? digits.slice(1)
+        : null;
+  if (usDigits) {
+    return `${usDigits.slice(0, 3)}-${usDigits.slice(3, 6)}-${usDigits.slice(6, 10)}`;
   }
 
-  // International — just add spaces for readability
+  // International — kept as-is
   return e164;
 }
 
