@@ -507,6 +507,26 @@ describe("appointments/[id]/route", () => {
       expect(status).toBe(400);
     });
 
+    it("refuses to cancel a completed appointment (409, no lifecycle event)", async () => {
+      const supabase = makeSupabaseClient({
+        appointments: {
+          data: { id: APPOINTMENT_ID, workspace_id: WS_ID, status: "completed" },
+          error: null,
+        },
+        workspaces: { data: { name: "Shop", timezone: "UTC" }, error: null },
+      });
+      stubWorkspaceMember(api, supabase);
+      const { status, body } = await readJson(
+        await appointmentDelete(
+          makeRequest(`/api/v1/appointments/${APPOINTMENT_ID}?workspace_id=${WS_ID}`, { method: "DELETE" }),
+          contextWithParams({ id: APPOINTMENT_ID }),
+        ),
+      );
+      expect(status).toBe(409);
+      expect(body.error.code).toBe("appointment_completed");
+      expect(dispatchAppointmentLifecycle).not.toHaveBeenCalled();
+    });
+
     it("soft-cancels the appointment and dispatches appointmentCancelled", async () => {
       const supabase = makeSupabaseClient({
         appointments: {

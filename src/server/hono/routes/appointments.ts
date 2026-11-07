@@ -472,6 +472,8 @@ appointmentsRouter.delete("/v1/appointments/:id", async (c: Context) => {
     .eq("id", id)
     .eq("workspace_id", workspaceId)
     .maybeSingle();
+  // Same rule as the legacy route: completed jobs are permanent record.
+  if (before?.status === "completed") throw new ApiError(409, "A completed appointment can't be cancelled or deleted. Completed jobs are part of the permanent job record.", "appointment_completed");
   const { data, error } = await supabase.from("appointments").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("id", id).eq("workspace_id", workspaceId).select("id,workspace_id,customer_id,starts_at,ends_at,status,confirmation_code,notes,metadata,updated_at,customers(id,first_name,last_name,email),vehicles(id,year,make,model)").single();
   if (error) throw error;
   logMutation({
