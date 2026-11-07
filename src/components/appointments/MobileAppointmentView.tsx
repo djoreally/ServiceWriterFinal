@@ -11,6 +11,7 @@ const groupBy = <T,>(arr: T[], key: keyof T): Record<string, T[]> =>
 import { Plus, ChevronLeft, ChevronRight } from 'lucide-react';
 
 import { JobRow } from './JobRow';
+import { JobBoard } from './JobBoard';
 import type { ScheduleResource } from '@/components/schedule/CurbeeScheduleBoard';
 import { Button } from '@/components/ui/button';
 import { ViewSegmentedControl } from '@/components/ui/ViewSegmentedControl';
@@ -19,7 +20,7 @@ import { cn } from '@/lib/utils';
 import { resolveStatusChip, statusToneClasses } from '@/lib/status-tone';
 import { combineDateAndTime, formatDateLabel } from '@/lib/datetime';
 
-type ViewMode = 'today' | 'week' | 'month';
+type ViewMode = 'today' | 'week' | 'month' | 'board';
 type FilterMode = 'all' | 'confirmed' | 'completed' | 'cancelled';
 
 interface MobileAppointmentViewProps {
@@ -335,6 +336,7 @@ export const MobileAppointmentView = ({
               { value: "today", label: "Today" },
               { value: "week", label: "Week" },
               { value: "month", label: "Month" },
+              { value: "board", label: "Board" },
             ]}
           />
         </div>
@@ -343,6 +345,7 @@ export const MobileAppointmentView = ({
         </Button>
       </div>
 
+      {viewMode !== 'board' && (
       <div className="shrink-0 border-b border-border px-2 pb-2">
         <ScrollArea className="w-full whitespace-nowrap">
           <div className="flex items-center gap-2 pb-1">
@@ -357,9 +360,18 @@ export const MobileAppointmentView = ({
           </div>
         </ScrollArea>
       </div>
+      )}
 
       <div className="flex-1">
-        {viewMode === 'today' ? renderAppointmentList() : viewMode === 'month' ? renderMonthView() : renderWeekView()}
+        {viewMode === 'board' ? (
+          <JobBoard
+            appointments={appointments}
+            currentDate={currentDate}
+            onSelectAppointment={onSelectAppointment}
+            onStatusChange={onStatusChange}
+            onCompleteAppointment={onCompleteAppointment}
+          />
+        ) : viewMode === 'today' ? renderAppointmentList() : viewMode === 'month' ? renderMonthView() : renderWeekView()}
       </div>
     </div>
   );
