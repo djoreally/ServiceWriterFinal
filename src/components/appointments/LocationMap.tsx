@@ -6,11 +6,16 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 interface LocationMapProps {
   lat: number;
   lng: number;
+  /** Mapbox style URL; switches live via setStyle when it changes. */
+  style?: string;
+  /** Zoom level; satellite property views pass a closer zoom than street maps. */
+  zoom?: number;
 }
 
-const LocationMap = ({ lat, lng }: LocationMapProps) => {
+const LocationMap = ({ lat, lng, style, zoom }: LocationMapProps) => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
+  const appliedStyle = useRef<string>(style ?? MAPBOX_DEFAULT_STYLE);
 
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
@@ -27,9 +32,9 @@ const LocationMap = ({ lat, lng }: LocationMapProps) => {
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
-      style: MAPBOX_DEFAULT_STYLE,
+      style: appliedStyle.current,
       center: [lng, lat],
-      zoom: 14,
+      zoom: zoom ?? 14,
       interactive: false, // Static preview, non-interactive
     });
 
@@ -45,6 +50,20 @@ const LocationMap = ({ lat, lng }: LocationMapProps) => {
       }
     };
   }, [lat, lng]);
+
+  useEffect(() => {
+    const next = style ?? MAPBOX_DEFAULT_STYLE;
+    if (map.current && next !== appliedStyle.current) {
+      appliedStyle.current = next;
+      map.current.setStyle(next); // Markers are DOM overlays and survive a style swap.
+    }
+  }, [style]);
+
+  useEffect(() => {
+    if (map.current && zoom !== undefined) {
+      map.current.setZoom(zoom);
+    }
+  }, [zoom]);
 
   return <div ref={mapContainer} className="w-full h-full" />;
 };

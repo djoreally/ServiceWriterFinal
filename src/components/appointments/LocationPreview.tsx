@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { MapPin, Navigation, ExternalLink, Loader2, Route, Clock } from 'lucide-react';
 import { geocodeAddress, getDrivingRoute } from '@/application/queries/mapbox';
+import { MAPBOX_DEFAULT_STYLE, MAPBOX_SATELLITE_STYLE } from '@/lib/mapbox';
 import { fetchCurrentBusinessBaseCoordinates } from '@/application/queries/business-profile.query';
 
 // Lazy load the map component to avoid bundling issues
@@ -32,6 +33,9 @@ const formatMinutes = (mins: number): string => {
 };
 
 export const LocationPreview = ({ address, className }: LocationPreviewProps) => {
+  // The property view comes first: satellite shows the tech what they are
+  // rolling up to (roof, driveway, lot). Street map is one tap away.
+  const [view, setView] = useState<'satellite' | 'map'>('satellite');
   const [coordinates, setCoordinates] = useState<BaseCoords | null>(null);
   const [baseCoords, setBaseCoords] = useState<BaseCoords | null>(null);
   const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null);
@@ -144,7 +148,25 @@ export const LocationPreview = ({ address, className }: LocationPreviewProps) =>
         )}
 
         {/* Map Preview */}
-        <div className="h-40 rounded-lg overflow-hidden bg-muted relative">
+        <div className="h-56 rounded-lg overflow-hidden bg-muted relative">
+          {coordinates && !error && (
+            <div className="absolute right-2 top-2 z-10 flex overflow-hidden rounded-md border bg-background/90 text-xs shadow-sm">
+              <button
+                type="button"
+                onClick={() => setView('map')}
+                className={view === 'map' ? 'bg-primary px-2.5 py-1 font-medium text-primary-foreground' : 'px-2.5 py-1 hover:bg-muted'}
+              >
+                Map
+              </button>
+              <button
+                type="button"
+                onClick={() => setView('satellite')}
+                className={view === 'satellite' ? 'bg-primary px-2.5 py-1 font-medium text-primary-foreground' : 'px-2.5 py-1 hover:bg-muted'}
+              >
+                Satellite
+              </button>
+            </div>
+          )}
           {isLoading ? (
             <div className="absolute inset-0 flex items-center justify-center">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -159,7 +181,12 @@ export const LocationPreview = ({ address, className }: LocationPreviewProps) =>
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
             }>
-              <LazyMap lat={coordinates.lat} lng={coordinates.lng} />
+              <LazyMap
+                lat={coordinates.lat}
+                lng={coordinates.lng}
+                style={view === 'satellite' ? MAPBOX_SATELLITE_STYLE : MAPBOX_DEFAULT_STYLE}
+                zoom={view === 'satellite' ? 17 : 14}
+              />
             </Suspense>
           ) : null}
         </div>
