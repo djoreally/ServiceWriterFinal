@@ -13,7 +13,7 @@ job needs is folded into this folder plus one foundation migration.
 | File | What |
 |---|---|
 | `../../supabase/migrations/20261106000000_emv_import_foundation.sql` | The only schema the pour needs that prod lacks: `appointment_services` (shape verbatim from the reconciliation addendum's approved bucket-(i) definition) + `emv_archive_vehicle_specifications` (archive-only specs; deliberately NOT the struck `vehicle_specifications` name). Idempotent. |
-| `emv_import.sql` | The pour. Parameterized, single-transaction, self-sourcing (invoice numbers from target MAX in-transaction; all matching by predicate inside the transaction). Emits the full run report. Never begins/commits itself. |
+| `emv_import.sql` | The pour. Parameterized, single-transaction, self-sourcing (all matching by predicate inside the transaction; invoice numbers come from the target's GENERATED ALWAYS identity column). Runs with session_replication_role = 'replica' — user triggers (double-booking guard, inspection gate, payment reconciler) police live app writes, not history imports. Emits the full run report. Never begins/commits itself. |
 | `run-emv-import.sh` | Orchestrates: restore backup → stage 9 tables into target as `emv_staging` → apply foundation migration → run pour → rollback (dry run) or commit (`--commit`). DSNs come from the operator's environment only. |
 | `dry-run-target-schema.sql` | LOCAL VERIFICATION ONLY. A disposable prod-shaped target for proving the pour without touching prod. Never apply to production. |
 

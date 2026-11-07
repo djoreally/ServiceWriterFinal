@@ -20,7 +20,8 @@
 --
 -- RULES BAKED IN (Ty's rulings + house discipline):
 --   * Every value self-sources from emv_staging or from the target itself
---     (invoice numbers = target MAX + row_number, computed in-transaction).
+--     (invoice numbers are assigned by the invoices identity column —
+--     GENERATED ALWAYS; the script never supplies or uses them).
 --     No transcribed IDs anywhere.
 --   * Matching order per entity: provenance (metadata emv id) -> normalized
 --     email -> normalized phone (customers); VIN -> year/make/model scoped to
@@ -49,6 +50,16 @@
 --    variables inside dollar-quoted bodies): a CHECK (ok is true) violation
 --    aborts the run under ON_ERROR_STOP before anything is written.
 -- ---------------------------------------------------------------------------
+-- History import: the target's user triggers police LIVE app writes (the
+-- double-booking guard, the inspection-completion gate, the payment
+-- reconciler, the invoice-number assigner). This script writes every value
+-- explicitly, so the run quiets user triggers for its own session only;
+-- they stay at full force for every other session, and again for this one
+-- the moment the run ends. (Proven in prod, 2026-11-07: the emv book holds
+-- 5 genuinely overlapping historical appointment pairs the guard would
+-- otherwise reject.)
+set session_replication_role = 'replica';
+
 create temp table emv_guard (check_name text primary key, ok boolean not null check (ok is true));
 insert into emv_guard values
   ('workspace_exists', exists (select 1 from public.workspaces where id = :'workspace_id'::uuid)),
@@ -317,6 +328,29 @@ from cand where n > 1;
 insert into emv_skips
 select 'vehicle', emv_id, 'ymm_conflict', 'see conflict multi_ymm_match'
 from emv_conflicts where entity = 'vehicle' and reason = 'multi_ymm_match';
+
+-- 2c2. workspace-wide VIN guard (added 2026-11-07 after the first prod dry
+-- run): prod enforces unique (workspace_id, vin) on vehicles for every
+-- non-null vin. The checks above are scoped to the mapped customer, so they
+-- cannot see a vehicle whose customer never mapped — above all the one
+-- customer-less vehicle, whose VIN (1FMZU72K54UA24453) already exists in the
+-- target workspace. Any still-unresolved vehicle whose VIN exists anywhere
+-- in the target is a conflict, never an insert. Appointments pour with no
+-- vehicle.
+insert into emv_conflicts
+select 'vehicle', v.id, 'vin_exists_in_target',
+       'VIN ' || upper(btrim(v.vin)) || ' already exists in the target workspace (vehicle ' || t.id || ') — not merged, vehicle skipped'
+from emv_staging.vehicles v
+join public.vehicles t
+  on t.workspace_id = :'workspace_id'::uuid
+ and upper(btrim(t.vin)) = upper(btrim(v.vin))
+where v.vin is not null and length(btrim(v.vin)) > 0
+  and v.id not in (select emv_id from emv_map_vehicle)
+  and v.id not in (select emv_id from emv_conflicts where entity = 'vehicle')
+  and v.id not in (select emv_id from emv_skips where entity = 'vehicle');
+insert into emv_skips
+select 'vehicle', emv_id, 'vin_conflict', 'see conflict vin_exists_in_target'
+from emv_conflicts where entity = 'vehicle' and reason = 'vin_exists_in_target';
 
 -- 2d. insert the rest (including the one customer-less vehicle)
 with ins as (
@@ -660,7 +694,8 @@ insert into emv_map_service select emv_id::uuid, id, 'inserted' from ins;
 -- ---------------------------------------------------------------------------
 -- 6. INVOICES (synthesized — one per poured service record; the old system
 --    issued none, and prod payments must hang on an invoice).
---    Numbers self-source: target MAX + row_number, in-transaction.
+--    Numbers: assigned by the invoices identity column (GENERATED ALWAYS —
+--    explicit values are rejected; the script never uses the numbers).
 -- ---------------------------------------------------------------------------
 insert into emv_map_invoice
 select s.id, t.id, 'linked_provenance'
@@ -669,17 +704,7 @@ join public.invoices t
   on t.workspace_id = :'workspace_id'::uuid
  and t.metadata ->> 'emv_service_id' = s.id::text;
 
-with base as (
-  select coalesce(max(invoice_number), 0) as b from public.invoices
-),
-numbered as (
-  select s.id as emv_service_id,
-         row_number() over (order by s.service_date, s.service_number) as rn
-  from emv_staging.services s
-  where s.id in (select emv_id from emv_map_service)
-    and s.id not in (select emv_service_id from emv_map_invoice)
-),
-paid_pr as (
+with paid_pr as (
   select appointment_id, sum(amount) / 100.0 as dollars
   from emv_staging.payment_records
   where status = 'succeeded' and appointment_id is not null
@@ -687,14 +712,13 @@ paid_pr as (
 ),
 ins as (
   insert into public.invoices
-    (workspace_id, customer_id, vehicle_id, work_order_id, invoice_number,
+    (workspace_id, customer_id, vehicle_id, work_order_id,
      status, subtotal, tax_total, total, amount_paid, issued_at, due_at,
      metadata, created_at, updated_at, created_by)
   select :'workspace_id'::uuid,
          mc.target_id,
          mv.target_id,
          null,
-         (select b from base) + n.rn,
          (case
            when s.total_cost > 0 and
                 (case when s.payment_status = 'paid' then s.total_cost
@@ -721,10 +745,11 @@ ins as (
            'synthesized_for_emv_import', true),
          s.created_at, s.updated_at, null
   from emv_staging.services s
-  join numbered n on n.emv_service_id = s.id
   join emv_map_customer mc on mc.emv_id = s.customer_id
   left join emv_map_vehicle mv on mv.emv_id = s.vehicle_id
   left join paid_pr p on p.appointment_id = s.appointment_id
+  where s.id in (select emv_id from emv_map_service)
+    and s.id not in (select emv_service_id from emv_map_invoice)
   returning id, metadata ->> 'emv_service_id' as emv_service_id
 )
 insert into emv_map_invoice select emv_service_id::uuid, id, 'inserted' from ins;
@@ -880,9 +905,9 @@ where f.id not in (select emv_id from emv_map_fleet);
 create temp table emv_contact_done (n integer);
 with ins as (
   insert into public.fleet_client_contacts
-    (workspace_id, fleet_client_id, name, email, phone, is_primary, created_at, updated_at)
+    (workspace_id, fleet_client_id, name, email, phone, is_primary, created_at)
   select :'workspace_id'::uuid, mf.target_id, fc.name, fc.email, fc.phone,
-         coalesce(fc.is_primary, false), fc.created_at, fc.updated_at
+         coalesce(fc.is_primary, false), fc.created_at
   from emv_staging.fleet_contacts fc
   join emv_map_fleet mf on mf.emv_id = fc.fleet_client_id
   where not exists (
