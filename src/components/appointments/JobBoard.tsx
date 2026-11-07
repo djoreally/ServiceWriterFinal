@@ -218,7 +218,7 @@ export function JobBoard({ appointments, currentDate, onSelectAppointment, onSta
           key={column.id}
           aria-label={column.title}
           className={cn(
-            "flex min-h-[180px] flex-col rounded-2xl border border-border/70 bg-muted/20 p-3 transition-colors",
+            "flex min-h-44 flex-col rounded-2xl border border-border/70 bg-muted/20 p-3 transition-colors",
             dropColumn === column.id && "border-primary/60 bg-primary/5",
           )}
           onDragOver={(event) => {
