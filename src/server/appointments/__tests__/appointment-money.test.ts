@@ -16,7 +16,7 @@
  * contains / filter / order) over in-memory rows, so these tests prove
  * resolution semantics, not canned responses.
  */
-import { describe, it, expect } from "@jest/globals";
+import { describe, it, expect, jest } from "@jest/globals";
 import {
   composeAppointmentJobMoney,
   composeAppointmentPaymentState,
@@ -132,6 +132,41 @@ class FakeQuery {
 
 function fakeDb(tables: Record<string, Row[]>) {
   return { from: (table: string) => new FakeQuery(tables[table] ?? []) } as any;
+}
+
+// ---------------------------------------------------------------------------
+// Production-shape fake: on the invoices table, ONLY `.eq` is honored.
+// `.filter(...)` (the old linker's `metadata->>appointment_id in (...)`
+// leg), `.in`, and `.contains` match nothing and error nothing — exactly
+// what the real PostgREST stack did to the old linker in production,
+// where list/cockpit cards rendered paid jobs as "Due" while the
+// appointment tab (which resolves through `.contains` on payments)
+// showed the invoice facts correctly.
+// ---------------------------------------------------------------------------
+
+class EqOnlyInvoicesQuery extends FakeQuery {
+  private forceEmpty(): this {
+    super.eq("__eq_only_no_match__", "__never__");
+    return this;
+  }
+  filter() {
+    return this.forceEmpty();
+  }
+  contains() {
+    return this.forceEmpty();
+  }
+  in() {
+    return this.forceEmpty();
+  }
+}
+
+function fakeProdDb(tables: Record<string, Row[]>) {
+  return {
+    from: (table: string) =>
+      table === "invoices"
+        ? new EqOnlyInvoicesQuery(tables[table] ?? [])
+        : new FakeQuery(tables[table] ?? []),
+  } as any;
 }
 
 // ---------------------------------------------------------------------------
@@ -319,6 +354,112 @@ describe("linkAppointmentInvoices", () => {
     const db = fakeDb({ invoices: [older, inv106, voided] });
     const linked = await linkAppointmentInvoices(db, WS_ID, [cristinaAppointment]);
     expect(linked.get(APPT_ID)?.id).toBe(INV_ID);
+  });
+});
+
+describe("linkAppointmentInvoices — production PostgREST regression", () => {
+  it("links by invoice metadata.appointment_id with only an eq workspace fetch (prod fake)", async () => {
+    // The appointment carries NO invoice_id hint; the only binding is
+    // the invoice's own metadata. The old linker fetched that binding
+    // through `.filter("metadata->>appointment_id", "in", ...)` — under
+    // the prod fake (and in production) that leg returns nothing.
+    const bareAppointment: Row = { id: APPT_ID, workspace_id: WS_ID, metadata: {} };
+    const db = fakeProdDb({ invoices: [inv106] });
+    const linked = await linkAppointmentInvoices(db, WS_ID, [bareAppointment]);
+    expect(linked.get(APPT_ID)?.id).toBe(INV_ID);
+  });
+
+  it("links by the appointment's invoice_id hint (prod fake)", async () => {
+    // The invoice carries NO appointment_id in its own metadata; only
+    // the appointment's write-back hint links it. The old linker's hint
+    // leg fetched by `.in("id", ...)` — also dead under the prod fake.
+    const hintedAppointment: Row = {
+      id: APPT_ID,
+      workspace_id: WS_ID,
+      metadata: { invoice_id: INV_ID },
+    };
+    const db = fakeProdDb({ invoices: [{ ...inv106, metadata: {} }] });
+    const linked = await linkAppointmentInvoices(db, WS_ID, [hintedAppointment]);
+    expect(linked.get(APPT_ID)?.id).toBe(INV_ID);
+  });
+
+  it("skips void invoices and lets the latest non-void invoice win (prod fake)", async () => {
+    const older: Row = {
+      ...inv106,
+      id: "ff0e8400-e29b-41d4-a716-4466554400ff",
+      status: "issued",
+      created_at: "2026-11-04T10:00:00Z",
+    };
+    const voided: Row = {
+      ...inv106,
+      id: "ff0e8400-e29b-41d4-a716-4466554400ee",
+      status: "void",
+      created_at: "2026-11-06T10:00:00Z",
+    };
+    const bareAppointment: Row = { id: APPT_ID, workspace_id: WS_ID, metadata: {} };
+    const db = fakeProdDb({ invoices: [older, inv106, voided] });
+    const linked = await linkAppointmentInvoices(db, WS_ID, [bareAppointment]);
+    expect(linked.get(APPT_ID)?.id).toBe(INV_ID);
+  });
+
+  it("does not link invoices from another workspace (prod fake)", async () => {
+    const bareAppointment: Row = { id: APPT_ID, workspace_id: WS_ID, metadata: {} };
+    const foreign: Row = { ...inv106, workspace_id: "550e8400-e29b-41d4-a716-446655440999" };
+    const db = fakeProdDb({ invoices: [foreign] });
+    const linked = await linkAppointmentInvoices(db, WS_ID, [bareAppointment]);
+    expect(linked.size).toBe(0);
+  });
+
+  it("warns loudly when hints exist but zero invoices link for the call", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const hintedAppointment: Row = {
+        id: APPT_ID,
+        workspace_id: WS_ID,
+        metadata: { invoice_id: "bb0e8400-e29b-41d4-a716-4466554400dd" },
+      };
+      const db = fakeProdDb({ invoices: [inv106] });
+      // The hint points at a missing invoice and inv106's metadata
+      // points at a different (absent) binding under this appointment
+      // set, so nothing links — the recurrence must be visible in logs.
+      const linked = await linkAppointmentInvoices(db, WS_ID, [
+        { ...hintedAppointment, id: OTHER_APPT_ID },
+      ]);
+      expect(linked.size).toBe(0);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0][0])).toContain("0 invoices linked");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("stays silent when invoices link normally (prod fake)", async () => {
+    const warn = jest.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const bareAppointment: Row = { id: APPT_ID, workspace_id: WS_ID, metadata: {} };
+      const db = fakeProdDb({ invoices: [inv106] });
+      const linked = await linkAppointmentInvoices(db, WS_ID, [bareAppointment]);
+      expect(linked.get(APPT_ID)?.id).toBe(INV_ID);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("composeAppointmentJobMoney gives the paid job a due of 0 under the prod fake", async () => {
+    // THE holdout: cristinaAppointment is a locked-quote website job
+    // whose invoice is paid in full. When linking silently returns an
+    // empty map, composition falls back to the locked quote and the
+    // card renders "Due $133.83" — this must not happen.
+    const db = fakeProdDb({
+      invoices: [inv106],
+      appointment_items: [],
+      workspace_settings: [],
+    });
+    const money = await composeAppointmentJobMoney(db, WS_ID, [cristinaAppointment]);
+    expect(money.get(APPT_ID)?.total).toBe(133.83);
+    expect(money.get(APPT_ID)?.due).toBe(0);
+    expect(money.get(APPT_ID)?.invoice?.invoice_id).toBe(INV_ID);
   });
 });
 
