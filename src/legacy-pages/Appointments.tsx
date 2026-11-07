@@ -47,7 +47,7 @@ const AppointmentsPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [userId, setUserId] = useState<string | undefined>();
-  const [viewMode, setViewMode] = useState<"today" | "week" | "month">("today");
+  const [viewMode, setViewMode] = useState<"today" | "week" | "month" | "board">("today");
 
   // Real-time workflow updates
   const { isConnected } = useRealtimeWorkflow({
