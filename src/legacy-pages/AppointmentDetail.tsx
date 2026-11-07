@@ -345,15 +345,15 @@ export const AppointmentDetail = ({
 
   const handleDelete = async () => {
     if (!appointment || !allowDelete) {
-      toast.error("You do not have permission to delete this appointment");
+      toast.error("You do not have permission to cancel this appointment");
       return;
     }
     const { error: deleteError } = await deleteAppointmentQuery(appointment.id);
     if (deleteError) {
-      toast.error("Failed to delete appointment");
+      toast.error("Failed to cancel appointment");
       return;
     }
-    toast.success("Appointment deleted");
+    toast.success("Appointment cancelled");
     navigate("/appointments");
   };
 
@@ -948,25 +948,25 @@ export const AppointmentDetail = ({
                   </>
                 )}
 
-                {allowDelete && (
+                {allowDelete && appointment.status !== "completed" && (
                   <>
                     <Separator className="my-2" />
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button className="min-h-[56px] w-full text-base" variant="ghost">
                           <Trash2 className="mr-2 h-5 w-5 text-destructive" />
-                          <span className="text-destructive">Delete appointment</span>
+                          <span className="text-destructive">Cancel appointment</span>
                         </Button>
                       </AlertDialogTrigger>
                       <AlertDialogContent>
                         <AlertDialogHeader>
-                          <AlertDialogTitle>Delete appointment?</AlertDialogTitle>
-                          <AlertDialogDescription>This will permanently delete the appointment. This action cannot be undone.</AlertDialogDescription>
+                          <AlertDialogTitle>Cancel appointment?</AlertDialogTitle>
+                          <AlertDialogDescription>This cancels the appointment. The customer is notified by email, the calendar event is removed, and the appointment stays on record as Cancelled. It is not permanently deleted.</AlertDialogDescription>
                         </AlertDialogHeader>
                         <AlertDialogFooter>
                           <AlertDialogCancel className="min-h-[56px]">Cancel</AlertDialogCancel>
                           <AlertDialogAction onClick={handleDelete} className="min-h-[56px] bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                            Delete
+                            Cancel appointment
                           </AlertDialogAction>
                         </AlertDialogFooter>
                       </AlertDialogContent>
