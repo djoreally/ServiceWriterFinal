@@ -74,7 +74,16 @@ export function appointmentInvoiceFacts(invoice: Row): AppointmentInvoiceFacts {
  * Each appointment's invoice, linked by invoices.metadata.appointment_id
  * (written by the invoice sync) or by the sync's invoice_id write-back
  * on the appointment itself. The latest non-void invoice wins.
- * (Extracted verbatim from the cockpit route.)
+ *
+ * The workspace's invoices are fetched with a plain `.eq` and matched
+ * IN CODE. The previous implementation filtered server-side with
+ * `.filter("metadata->>appointment_id", "in", "(...)")` plus an
+ * `.in("id", hints)` leg; under the real PostgREST stack both legs
+ * silently matched nothing (no error — the callers' catches never
+ * fired), the linker returned an empty map, and list/cockpit cards
+ * fell back to the locked quote, rendering PAID jobs as "Due". A
+ * workspace carries tens of invoices, so the fetch-all + in-code
+ * match is simple and deterministic.
  */
 export async function linkAppointmentInvoices(
   db: any,
@@ -82,41 +91,39 @@ export async function linkAppointmentInvoices(
   rows: Array<Row>,
 ): Promise<Map<string, Row>> {
   const allRows = rows ?? [];
-  const appointmentIds = [...new Set(allRows.map((row) => row.id as string))];
+  const appointmentIds = new Set(allRows.map((row) => row.id as string));
   const invoiceIdHints = new Map<string, string>();
   for (const row of allRows) {
     const hint = asRecord(row.metadata).invoice_id;
     if (typeof hint === "string" && hint) invoiceIdHints.set(hint, row.id as string);
   }
   const linkedInvoices = new Map<string, Row>();
-  if (appointmentIds.length > 0) {
-    const [byAppointment, byId] = await Promise.all([
-      db.from("invoices")
-        .select(INVOICE_LINK_COLUMNS)
-        .eq("workspace_id", workspaceId)
-        .filter("metadata->>appointment_id", "in", `(${appointmentIds.join(",")})`),
-      invoiceIdHints.size > 0
-        ? db.from("invoices")
-            .select(INVOICE_LINK_COLUMNS)
-            .eq("workspace_id", workspaceId)
-            .in("id", [...invoiceIdHints.keys()])
-        : Promise.resolve({ data: [], error: null }),
-    ]);
-    if (byAppointment.error) throw byAppointment.error;
-    if (byId.error) throw byId.error;
-    const candidates = [
-      ...((byAppointment.data ?? []) as Array<Row>),
-      ...((byId.data ?? []) as Array<Row>),
-    ];
+  if (appointmentIds.size > 0) {
+    const { data, error } = await db
+      .from("invoices")
+      .select(INVOICE_LINK_COLUMNS)
+      .eq("workspace_id", workspaceId);
+    if (error) throw error;
+    const candidates = (data ?? []) as Array<Row>;
     for (const invoice of candidates) {
       if (invoice.status === "void") continue;
       const linked = asRecord(invoice.metadata).appointment_id;
-      const appointmentId = (typeof linked === "string" && linked) || invoiceIdHints.get(invoice.id as string);
+      const appointmentId =
+        (typeof linked === "string" && linked && appointmentIds.has(linked) ? linked : undefined) ??
+        invoiceIdHints.get(invoice.id as string);
       if (!appointmentId) continue;
       const existing = linkedInvoices.get(appointmentId);
       if (!existing || String(invoice.created_at ?? "") > String(existing.created_at ?? "")) {
         linkedInvoices.set(appointmentId, invoice);
       }
+    }
+    if (linkedInvoices.size === 0 && (invoiceIdHints.size > 0 || candidates.length > 0)) {
+      // Appointments expected invoices (hints present, or the
+      // workspace has invoices) yet nothing linked — the silent-empty
+      // failure above must never be silent again.
+      console.warn(
+        `linkAppointmentInvoices: 0 invoices linked (workspace=${workspaceId} appointments=${appointmentIds.size} hints=${invoiceIdHints.size} invoices=${candidates.length})`,
+      );
     }
   }
   return linkedInvoices;
