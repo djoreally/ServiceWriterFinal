@@ -571,13 +571,21 @@ export const AppointmentDetail = ({
                 </h2>
                 <AppointmentStatusChip appointment={appointment} />
                 {appointment.confirmation_code && (
-                  <span className="font-mono text-sm uppercase tracking-wide text-muted-foreground">
+                  <span className="inline-flex items-center rounded-md border border-border bg-muted/40 px-2 py-0.5 font-mono text-xs uppercase tracking-wide text-muted-foreground">
                     Confirmation {appointment.confirmation_code}
                   </span>
                 )}
               </div>
-              <p className="mt-2 font-display text-sm font-semibold text-muted-foreground">
-                {formatDate(appointment.scheduled_date)} at {formatTimeLabel(appointment.scheduled_time, "h:mm a")} · {appointment.duration_minutes} min
+              <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+                <span className="inline-flex items-center gap-1.5">
+                  <Calendar className="h-4 w-4" aria-hidden />
+                  {formatDate(appointment.scheduled_date)} at {formatTimeLabel(appointment.scheduled_time, "h:mm a")}
+                </span>
+                <span aria-hidden="true">·</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <Clock className="h-4 w-4" aria-hidden />
+                  {appointment.duration_minutes} min
+                </span>
               </p>
             </div>
           </div>
@@ -622,7 +630,7 @@ export const AppointmentDetail = ({
               <Card className="mt-4 rounded-2xl shadow-card">
                 <CardContent className="p-0">
                   {/* Customer block */}
-                  <div className="space-y-4 p-6">
+                  <div className="p-6">
                     <div className="flex items-start justify-between gap-4">
                       <div className="min-w-0">
                         <Eyebrow>{terms.customer}</Eyebrow>
@@ -639,10 +647,11 @@ export const AppointmentDetail = ({
                       )}
                     </div>
 
+                    <div className="mt-3 divide-y divide-border/60 border-t border-border/60">
                     {customerPhone && (
                       <ClickablePhone
                         phone={customerPhone}
-                        className="flex min-h-[56px] w-full items-center gap-3 rounded-lg border px-4 font-mono text-[15px] text-foreground no-underline hover:bg-muted/40 hover:text-foreground hover:no-underline"
+                        className="flex min-h-[52px] w-full items-center gap-3 rounded-md px-2 py-2 -mx-2 text-[15px] text-foreground no-underline hover:bg-muted/40 hover:text-foreground hover:no-underline"
                         iconClassName="h-5 w-5 text-primary"
                       >
                         <span className="sr-only">Call </span>
@@ -653,16 +662,16 @@ export const AppointmentDetail = ({
                     {displayEmail ? (
                       <ClickableEmail
                         email={displayEmail}
-                        className="flex min-h-[56px] w-full items-center gap-3 rounded-lg border px-4 text-[15px] text-foreground no-underline hover:bg-muted/40 hover:text-foreground hover:no-underline"
+                        className="flex min-h-[52px] w-full items-center gap-3 rounded-md px-2 py-2 -mx-2 text-[15px] text-foreground no-underline hover:bg-muted/40 hover:text-foreground hover:no-underline"
                         iconClassName="h-5 w-5 text-primary"
                       >
-                        <span className="min-w-0 flex-1 break-all font-mono text-[14px]">
+                        <span className="min-w-0 flex-1 break-all text-[15px]">
                           <span className="sr-only">Email </span>
                           {displayEmail}
                         </span>
                       </ClickableEmail>
                     ) : (
-                      <div className="flex min-h-[56px] w-full items-center gap-3 rounded-lg border border-dashed px-4 text-[15px] text-muted-foreground">
+                      <div className="flex min-h-[52px] w-full items-center gap-3 rounded-md px-2 py-2 -mx-2 text-[15px] text-muted-foreground">
                         <Mail className="h-5 w-5 shrink-0" aria-hidden />
                         No email on file
                       </div>
@@ -671,14 +680,14 @@ export const AppointmentDetail = ({
                     {address ? (
                       <button
                         onClick={openDirections}
-                        className="flex min-h-[56px] w-full items-center gap-3 rounded-lg border px-4 text-left transition-colors hover:bg-muted/40"
+                        className="flex min-h-[52px] w-full items-center gap-3 rounded-md px-2 py-2 -mx-2 text-left transition-colors hover:bg-muted/40"
                       >
                         <MapPin className="h-5 w-5 shrink-0 text-primary" aria-hidden />
-                        <span className="min-w-0 flex-1 break-words font-mono text-[14px]">{address}</span>
+                        <span className="min-w-0 flex-1 break-words text-[15px]">{address}</span>
                         <Navigation className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
                       </button>
                     ) : (
-                      <div className="rounded-lg border border-dashed px-4 py-4">
+                      <div className="rounded-md px-2 py-3 -mx-2">
                         <p className="text-sm text-muted-foreground">
                           No address on file for this job.{" "}
                           <button className="underline underline-offset-2" onClick={() => setEditDialogOpen(true)}>
@@ -688,6 +697,7 @@ export const AppointmentDetail = ({
                         </p>
                       </div>
                     )}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
