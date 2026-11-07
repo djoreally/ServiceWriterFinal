@@ -6,6 +6,7 @@ import { useRealtimeWorkflow } from "@/hooks/useRealtimeWorkflow";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { MobileAppointmentView } from "@/components/appointments/MobileAppointmentView";
 import { CompleteAppointmentDialog } from "@/components/appointments/CompleteAppointmentDialog";
+import { AppointmentTray } from "@/components/appointments/AppointmentTray";
 import { WorkflowStatusIndicator } from "@/components/workflow/WorkflowStatusIndicator";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -85,6 +86,14 @@ const AppointmentsPage = () => {
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  // Section 4: the side tray — a job click opens the tray over the page
+  // instead of navigating away. The tray reads the LIVE row from the list
+  // (falling back to the clicked snapshot) so actions taken in the tray
+  // reflect immediately when the list refetches.
+  const [traySelection, setTraySelection] = useState<Appointment | null>(null);
+  const trayAppointment = traySelection
+    ? appointments.find((a) => a.id === traySelection.id) ?? traySelection
+    : null;
   const [editingAppointment, setEditingAppointment] = useState<AppointmentDraft | null>(null);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [pendingOutboxCount, setPendingOutboxCount] = useState(0);
@@ -214,7 +223,7 @@ const AppointmentsPage = () => {
   }, [fetchData]);
 
   const handleSelectAppointment = (appointment: Appointment) => {
-    navigate(`/appointments/${appointment.id}`);
+    setTraySelection(appointment);
   };
 
   const handleAddAppointment = (date?: Date) => {
@@ -574,6 +583,12 @@ const AppointmentsPage = () => {
         onOpenChange={setCompleteDialogOpen}
         appointment={appointmentToComplete}
         onSuccess={handleCompleteSuccess}
+      />
+      <AppointmentTray
+        appointment={trayAppointment}
+        onOpenChange={(open) => { if (!open) setTraySelection(null); }}
+        onOpenFullRecord={(a) => { setTraySelection(null); navigate(`/appointments/${a.id}`); }}
+        onChanged={() => { void fetchData(); }}
       />
     </AppLayout>
   );
