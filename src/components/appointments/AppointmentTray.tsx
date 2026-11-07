@@ -104,7 +104,7 @@ export function AppointmentTray({ appointment, onOpenChange, onOpenFullRecord, o
                     {phone && (
                       <ClickablePhone
                         phone={phone}
-                        className="flex min-h-[48px] w-full items-center gap-3 rounded-md px-2 py-2 -mx-2 text-[15px] text-foreground no-underline hover:bg-muted/40 hover:text-foreground hover:no-underline"
+                        className="flex min-h-12 w-full items-center gap-3 rounded-md px-2 py-2 -mx-2 text-base text-foreground no-underline hover:bg-muted/40 hover:text-foreground hover:no-underline"
                         iconClassName="h-5 w-5 text-primary"
                       >
                         <span className="sr-only">Call </span>
@@ -114,10 +114,10 @@ export function AppointmentTray({ appointment, onOpenChange, onOpenFullRecord, o
                     {email && (
                       <ClickableEmail
                         email={email}
-                        className="flex min-h-[48px] w-full items-center gap-3 rounded-md px-2 py-2 -mx-2 text-[15px] text-foreground no-underline hover:bg-muted/40 hover:text-foreground hover:no-underline"
+                        className="flex min-h-12 w-full items-center gap-3 rounded-md px-2 py-2 -mx-2 text-base text-foreground no-underline hover:bg-muted/40 hover:text-foreground hover:no-underline"
                         iconClassName="h-5 w-5 text-primary"
                       >
-                        <span className="min-w-0 flex-1 break-all text-[15px]">
+                        <span className="min-w-0 flex-1 break-all text-base">
                           <span className="sr-only">Email </span>
                           {email}
                         </span>
@@ -130,13 +130,13 @@ export function AppointmentTray({ appointment, onOpenChange, onOpenFullRecord, o
                   <section aria-label="Vehicle and service">
                     <SectionLabel>Vehicle &amp; service</SectionLabel>
                     {vehicleLine && (
-                      <p className="mt-1.5 flex items-center gap-2 text-[15px]">
+                      <p className="mt-1.5 flex items-center gap-2 text-base">
                         <Car className="h-5 w-5 shrink-0 text-primary" aria-hidden />
                         {vehicleLine}
                       </p>
                     )}
                     {appointment.primary_service_name && (
-                      <p className="mt-1 text-[15px] text-muted-foreground">{appointment.primary_service_name}</p>
+                      <p className="mt-1 text-base text-muted-foreground">{appointment.primary_service_name}</p>
                     )}
                   </section>
                 )}
@@ -146,7 +146,7 @@ export function AppointmentTray({ appointment, onOpenChange, onOpenFullRecord, o
                     <SectionLabel>Location</SectionLabel>
                     <button
                       onClick={openDirections}
-                      className="mt-1.5 flex w-full items-start gap-2 rounded-md px-2 py-1 -mx-2 text-left text-[15px] transition-colors hover:bg-muted/40"
+                      className="mt-1.5 flex w-full items-start gap-2 rounded-md px-2 py-1 -mx-2 text-left text-base transition-colors hover:bg-muted/40"
                     >
                       <MapPin className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden />
                       <span className="min-w-0 flex-1 break-words">{address}</span>
@@ -157,7 +157,7 @@ export function AppointmentTray({ appointment, onOpenChange, onOpenFullRecord, o
 
                 <section aria-label="Payment">
                   <SectionLabel>Payment</SectionLabel>
-                  <p className="mt-1.5 flex items-baseline justify-between text-[15px]">
+                  <p className="mt-1.5 flex items-baseline justify-between text-base">
                     <span className="text-muted-foreground">Amount due</span>
                     {totalDue > 0 ? (
                       <span className="font-display text-lg font-bold">Due ${formatMoney(totalDue)}</span>
@@ -171,19 +171,19 @@ export function AppointmentTray({ appointment, onOpenChange, onOpenFullRecord, o
               <div className="space-y-3 border-t border-border px-6 py-4">
                 <JobActionButton appointment={appointment} onUpdated={onChanged} className="w-full" />
                 <div className="flex gap-3">
-                  <Button variant="outline" className="min-h-[48px] flex-1 gap-2" onClick={() => setEditOpen(true)}>
+                  <Button variant="outline" className="min-h-12 flex-1 gap-2" onClick={() => setEditOpen(true)}>
                     <Pencil className="h-4 w-4" /> Edit / Reschedule
                   </Button>
                   <Button
                     variant="outline"
-                    className="min-h-[48px] flex-1 gap-2"
+                    className="min-h-12 flex-1 gap-2"
                     onClick={openDirections}
                     disabled={!address}
                   >
                     <Navigation className="h-4 w-4" /> Directions
                   </Button>
                 </div>
-                <Button className="min-h-[48px] w-full gap-2" onClick={() => onOpenFullRecord(appointment)}>
+                <Button className="min-h-12 w-full gap-2" onClick={() => onOpenFullRecord(appointment)}>
                   Open full record <ArrowUpRight className="h-4 w-4" />
                 </Button>
               </div>
