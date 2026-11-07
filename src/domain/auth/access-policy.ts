@@ -89,7 +89,9 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
   { match: "/dispatch-engine", roles: BOARD },
   { match: "/command-center", roles: BOARD },
   { match: "/appointments", roles: SCHEDULING },
-  { match: "/website-bookings", roles: SCHEDULING },
+  // Owner-only per the owner's directive (Nov 6, 2026): the Website Bookings
+  // queue exposes customer names/phones/addresses and push controls.
+  { match: "/website-bookings", roles: ["owner"] },
   { match: "/messages", roles: BOARD },
   { match: "/weather-guard", roles: BOARD },
 
