@@ -34,7 +34,15 @@ const FILTER_LABELS: Record<StatusFilter, string> = {
   paid: "Paid",
 };
 
-const SETTLED = new Set(["paid", "void"]);
+// THE one owed definition (Fix 2 — the same rule the dashboard composes
+// server-side): an invoice is owed when it has been sent and still
+// carries a balance. In this page's status vocabulary: sent / partial /
+// past_due with balance > $0.01. Drafts are not owed — nothing has been
+// asked of the customer yet — and paid/void are settled.
+const OWED_STATUSES = new Set(["sent", "partial", "past_due"]);
+function isOwedInvoice(r: InvoiceListRow): boolean {
+  return OWED_STATUSES.has(r.status) && invoiceBalance(r) > 0.01;
+}
 
 function billToName(r: InvoiceListRow): string {
   return r.bill_to_type === "fleet"
@@ -87,7 +95,7 @@ export function InvoicesTab() {
     for (const r of rows) {
       collectedAmount += Number(r.amount_paid) || 0;
       const balance = invoiceBalance(r);
-      const owed = !SETTLED.has(r.status) && balance > 0.01;
+      const owed = isOwedInvoice(r);
       if (owed) {
         outstandingAmount += balance;
         outstandingCount += 1;
@@ -105,8 +113,7 @@ export function InvoicesTab() {
   const filteredRows = useMemo(() => {
     const q = debouncedSearch.trim().toLowerCase();
     return rows.filter((r) => {
-      const balance = invoiceBalance(r);
-      const owed = !SETTLED.has(r.status) && balance > 0.01;
+      const owed = isOwedInvoice(r);
       if (statusFilter === "outstanding" && !owed) return false;
       if (statusFilter === "overdue" && !isInvoiceOverdue(r)) return false;
       if (statusFilter === "paid" && r.status !== "paid") return false;
@@ -148,7 +155,7 @@ export function InvoicesTab() {
       render: (r) => {
         const balance = invoiceBalance(r);
         const overdue = isInvoiceOverdue(r);
-        const owed = !SETTLED.has(r.status) && balance > 0.01;
+        const owed = isOwedInvoice(r);
         return (
           <span className={cn(
             "font-mono tabular-nums whitespace-nowrap",
@@ -162,7 +169,7 @@ export function InvoicesTab() {
       // One slot for the amount: top right, tabular figures. No label needed.
       cardAmount: (r) => {
         const balance = invoiceBalance(r);
-        const owed = !SETTLED.has(r.status) && balance > 0.01;
+        const owed = isOwedInvoice(r);
         return owed ? formatCurrency(balance) : "Paid";
       },
     },
