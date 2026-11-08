@@ -26,6 +26,6 @@ export function createWorkflowChannel(
   return channel;
 }
 
-export function removeChannel(channel: RealtimeChannel): void {
-  supabase.removeChannel(channel);
+export function removeChannel(channel: RealtimeChannel) {
+  return supabase.removeChannel(channel);
 }
