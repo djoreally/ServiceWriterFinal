@@ -2609,8 +2609,12 @@ platformRouter.get("/v1/platform/dashboard/cockpit-rows", async (c) => {
     db.from("appointments").select(appointmentCols).eq("workspace_id", workspaceId)
       .gt("starts_at", bounds.today_end).lt("starts_at", bounds.next7_end)
       .neq("status", "cancelled").order("starts_at", { ascending: true }),
+    // "Now" means now: only in-progress appointments SCHEDULED FOR TODAY
+    // join Today's Jobs. The unbounded query merged any in_progress row,
+    // so a job started 2025-09-24 and never closed sat in "Now" forever.
     db.from("appointments").select(appointmentCols)
       .eq("workspace_id", workspaceId).eq("status", "in_progress")
+      .gte("starts_at", bounds.today_start).lt("starts_at", bounds.today_end)
       .order("starts_at", { ascending: false }).limit(20),
     db.from("service_records").select("appointment_id").eq("workspace_id", workspaceId)
       .eq("status", "completed").gte("completed_at", bounds.today_start).lt("completed_at", bounds.today_end),
@@ -2678,17 +2682,23 @@ platformRouter.get("/v1/platform/dashboard/cockpit-rows", async (c) => {
   const weekRows = rawWeek.map(composeRow);
   const inProgressRows = rawInProgress.map(composeRow);
 
-  // Outstanding (S2) — invoice facts only (issued / partially_paid /
-  // past_due totals minus recorded payments). Until the composed
-  // payment_state (T-5) lands, the card is labeled "Outstanding" and
-  // claims nothing beyond these facts.
+  // Outstanding (S2) — THE one owed definition, shared by every surface:
+  // an invoice is owed when its status is issued / partially_paid /
+  // past_due (the query above) AND it still carries a balance over
+  // $0.01. The old composition counted by status alone, so an issued
+  // invoice whose balance was actually $0 inflated the card (the Nov 7
+  // counters-disagree finding). Until the composed payment_state (T-5)
+  // lands, the card is labeled "Outstanding" and claims nothing beyond
+  // these facts.
   const openInvoiceRows = (openInvoices.data ?? []) as Array<Record<string, any>>;
+  const invoiceBalance = (invoice: Record<string, any>) =>
+    Math.max(Number(invoice.total ?? 0) - Number(invoice.amount_paid ?? 0), 0);
+  const owedInvoiceRows = openInvoiceRows.filter(
+    (invoice) => invoiceBalance(invoice) > 0.01,
+  );
   const outstanding = {
-    count: openInvoiceRows.length,
-    total: openInvoiceRows.reduce(
-      (sum, invoice) => sum + Math.max(Number(invoice.total ?? 0) - Number(invoice.amount_paid ?? 0), 0),
-      0,
-    ),
+    count: owedInvoiceRows.length,
+    total: owedInvoiceRows.reduce((sum, invoice) => sum + invoiceBalance(invoice), 0),
   };
 
   // T-19 day aggregates, composed from the day's composed rows.
@@ -2744,7 +2754,7 @@ platformRouter.get("/v1/platform/dashboard/cockpit-rows", async (c) => {
   // due reference — due date, else issue date, else creation date).
   const AGING_THRESHOLD_DAYS = 7;
   const agedReference = (invoice: Record<string, any>) => invoice.due_at ?? invoice.issued_at ?? invoice.created_at;
-  const agedInvoices = openInvoiceRows.filter((invoice) => {
+  const agedInvoices = owedInvoiceRows.filter((invoice) => {
     const reference = agedReference(invoice);
     if (!reference) return false;
     const at = new Date(String(reference)).getTime();
@@ -2752,7 +2762,7 @@ platformRouter.get("/v1/platform/dashboard/cockpit-rows", async (c) => {
   });
   if (agedInvoices.length > 0) {
     const agedTotal = agedInvoices.reduce(
-      (sum, invoice) => sum + Math.max(Number(invoice.total ?? 0) - Number(invoice.amount_paid ?? 0), 0),
+      (sum, invoice) => sum + invoiceBalance(invoice),
       0,
     );
     const oldestDays = Math.max(

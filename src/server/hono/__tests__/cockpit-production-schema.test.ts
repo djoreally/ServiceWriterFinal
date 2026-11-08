@@ -83,6 +83,25 @@ function splitSelect(select: string): string[] {
   return parts;
 }
 
+describe("cockpit-rows in-progress query is bounded to today", () => {
+  it("scopes the in_progress pull to today's window so a stale started job cannot sit in Now forever", () => {
+    // Regression pin (2026-11-08): the unbounded in_progress query merged
+    // ANY started appointment into Today's Jobs as "Now" — one started
+    // 2025-09-24 and never closed rendered there permanently.
+    const source = readFileSync(
+      join(repoRoot, "src/server/hono/routes/platform.ts"),
+      "utf8",
+    );
+    const handlerIdx = source.indexOf("/v1/platform/dashboard/cockpit-rows");
+    if (handlerIdx < 0) throw new Error("cockpit-rows handler not found");
+    const statusIdx = source.indexOf('eq("status", "in_progress")', handlerIdx);
+    if (statusIdx < 0) throw new Error("in_progress cockpit query not found");
+    const chain = source.slice(statusIdx, statusIdx + 400);
+    expect(chain).toContain('gte("starts_at", bounds.today_start)');
+    expect(chain).toContain('lt("starts_at", bounds.today_end)');
+  });
+});
+
 describe("cockpit-rows appointment select vs the production schema", () => {
   it("requests only columns that exist in production", () => {
     const production = {

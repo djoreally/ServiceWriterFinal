@@ -244,8 +244,23 @@ function customerAddress(customer: InvoiceApiCustomer | null | undefined): strin
 
 export async function fetchInvoiceList(_userId: string): Promise<InvoiceListRow[]> {
   const id = workspaceId();
-  const response = await apiClient.get<{ data: unknown[] }>(`/v1/invoices`, { query: { workspace_id: id } });
-  return z.array(invoiceApiSchema).parse(response.data ?? []).map((row) => {
+  // The page's KPIs, filters, and client-side pagination are all defined
+  // over the WHOLE book, but the list API pages (default 25, max 100) —
+  // the old single call silently computed everything over the 25 newest
+  // invoices (the Nov 7 counters-disagree finding). Page through until a
+  // short page ends the book; the cap only guards a misbehaving API.
+  const PAGE_SIZE = 100;
+  const MAX_PAGES = 50;
+  const apiRows: unknown[] = [];
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const response = await apiClient.get<{ data: unknown[] }>(`/v1/invoices`, {
+      query: { workspace_id: id, limit: PAGE_SIZE, offset: page * PAGE_SIZE },
+    });
+    const batch = response.data ?? [];
+    apiRows.push(...batch);
+    if (batch.length < PAGE_SIZE) break;
+  }
+  return z.array(invoiceApiSchema).parse(apiRows).map((row) => {
     const metadata = object(row.metadata);
     const customer = relatedCustomer(row.customers);
     return {
