@@ -22,6 +22,15 @@ interface UseRealtimeWorkflowOptions {
 /**
  * Hook for real-time workflow updates across appointments and service records.
  */
+// Backoff for re-creating a channel whose subscribe failed. The realtime
+// service can refuse a join transiently (its subscription connection pool
+// timing out against the database was observed in production logs,
+// 2026-11-08); the previous implementation subscribed exactly once, so a
+// single refused join left the UI in a permanent false "Offline" state
+// until a full page reload. Retries continue at the last interval while
+// the page stays open — a dispatch board can sit open all day.
+const REJOIN_DELAYS_MS = [1_500, 4_000, 10_000, 25_000, 60_000];
+
 export function useRealtimeWorkflow({
   userId,
   onEvent,
@@ -83,52 +92,105 @@ export function useRealtimeWorkflow({
     [userId, onEvent, showToasts]
   );
 
+  // The event handler is kept in a ref so the subscription effect does not
+  // depend on its identity: callers pass inline callbacks that change on
+  // every render, and depending on the handler directly tore the channel
+  // down and re-created it on each of those renders.
+  const handleChangeRef = useRef(handleChange);
+  useEffect(() => {
+    handleChangeRef.current = handleChange;
+  });
+  const stableHandleChange = useCallback(
+    (
+      type: string,
+      payload: RealtimePostgresChangesPayload<Record<string, unknown>>
+    ) => {
+      handleChangeRef.current(type, payload);
+    },
+    []
+  );
+
   useEffect(() => {
     if (!enabled) {
       if (channelRef.current) {
-        removeChannel(channelRef.current);
+        void removeChannel(channelRef.current);
         channelRef.current = null;
         setIsConnected(false);
       }
       return;
     }
 
-    if (channelRef.current) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let attempt = 0;
 
-    const channelName = `workflow-${userId || "global"}`;
-
-    // Bindings must name tables that EXIST and are in the supabase_realtime
-    // publication (migration 20261108010000). The previous bindings pointed
-    // at "services" and "service_timeline" — neither table exists in
-    // production — and appointments was never published, so this channel
-    // could never reach SUBSCRIBED and the UI showed a permanent false
-    // "Offline" state. "service" events ride service_records, where a job's
-    // service actually starts and completes.
-    const channel = createWorkflowChannel(
-      channelName,
-      [
-        { table: "appointments", type: "appointment" },
-        { table: "service_records", type: "service" },
-      ],
-      handleChange
-    );
-
-    channel.subscribe((status) => {
-      if (status === "SUBSCRIBED") setIsConnected(true);
-      else if (status === "CLOSED" || status === "CHANNEL_ERROR") setIsConnected(false);
-    });
-
-    channelRef.current = channel;
-
-    return () => {
-      if (channelRef.current) {
-        removeChannel(channelRef.current);
-        channelRef.current = null;
-        setIsConnected(false);
+    const connect = async () => {
+      if (cancelled) return;
+      const previous = channelRef.current;
+      channelRef.current = null;
+      if (previous) {
+        try {
+          await removeChannel(previous);
+        } catch {
+          /* removal is best-effort; a fresh channel is created regardless */
+        }
       }
+      if (cancelled) return;
+
+      const channelName = `workflow-${userId || "global"}`;
+
+      // Bindings must name tables that EXIST and are in the supabase_realtime
+      // publication (migration 20261108010000). The previous bindings pointed
+      // at "services" and "service_timeline" — neither table exists in
+      // production — and appointments was never published, so this channel
+      // could never reach SUBSCRIBED and the UI showed a permanent false
+      // "Offline" state. "service" events ride service_records, where a job's
+      // service actually starts and completes.
+      const channel = createWorkflowChannel(
+        channelName,
+        [
+          { table: "appointments", type: "appointment" },
+          { table: "service_records", type: "service" },
+        ],
+        stableHandleChange
+      );
+      channelRef.current = channel;
+
+      channel.subscribe((status) => {
+        if (cancelled) return;
+        if (status === "SUBSCRIBED") {
+          attempt = 0;
+          setIsConnected(true);
+        } else if (status === "CHANNEL_ERROR" || status === "CLOSED") {
+          setIsConnected(false);
+          const delay =
+            REJOIN_DELAYS_MS[Math.min(attempt, REJOIN_DELAYS_MS.length - 1)];
+          attempt += 1;
+          timer = setTimeout(() => {
+            timer = null;
+            void connect();
+          }, delay);
+        }
+        // TIMED_OUT is left to the realtime client's own join retry; the
+        // rejoin above handles terminal channel states.
+      });
     };
 
-  }, [enabled, handleChange, userId]);
+    void connect();
+
+    return () => {
+      cancelled = true;
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      if (channelRef.current) {
+        void removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+      setIsConnected(false);
+    };
+  }, [enabled, userId, stableHandleChange]);
 
   return { isConnected };
 }

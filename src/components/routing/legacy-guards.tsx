@@ -5,6 +5,7 @@ import { useAuth } from "@packages/auth";
 import { useTeamRole } from "@/hooks/useTeamRole";
 import { useFeatureGate, type PlanFeatures } from "@/contexts/SubscriptionContext";
 import { canAccessRoute } from "@/domain/auth/access-policy";
+import ShellSkeleton from "./ShellSkeleton";
 import { AccessDenied } from "../security/AccessDenied";
 
 /**
@@ -96,13 +97,15 @@ export const RequireAuth = ({ children }: { children: React.ReactElement }) => {
   const { role, loading: roleLoading, error: roleError, retry } = useTeamRole();
   const location = useLocation();
 
-  if (loading) return <LoadingScreen />;
+  // Auth/role resolution is the first paint of every protected route: show
+  // the branded shell skeleton, not the plain spinner (§3.2.1 R2).
+  if (loading) return <ShellSkeleton />;
 
   if (!session) {
     return <Navigate to="/login" replace />;
   }
 
-  if (roleLoading) return <LoadingScreen />;
+  if (roleLoading) return <ShellSkeleton />;
 
   // Fleet-manager contacts authenticate as customer/fleet identities rather
   // than workspace_members. Authorization remains enforced by the fleet portal
