@@ -270,6 +270,30 @@ describe("platform router", () => {
       db.appointment_items = { data: [], error: null };
     };
 
+    it("counts Outstanding by the one owed definition: open status AND a real balance", async () => {
+      // Regression pin (2026-11-08 counters-disagree fix): the card used
+      // to count by status alone, so an issued invoice with a $0 balance
+      // inflated it. Owed = status in (issued, partially_paid, past_due)
+      // AND balance > $0.01.
+      seedHomeWorkspace();
+      db.appointments = { data: [], error: null };
+      db.invoices = {
+        data: [
+          { id: "inv-owed", status: "issued", total: 133.83, amount_paid: 0, created_at: "2026-10-30T00:00:00.000Z" },
+          { id: "inv-settled", status: "issued", total: 100, amount_paid: 100, created_at: "2026-10-30T00:00:00.000Z" },
+          { id: "inv-partial", status: "partially_paid", total: 120, amount_paid: 20, created_at: "2026-10-30T00:00:00.000Z" },
+        ],
+        error: null,
+      };
+      const res = await platformRouter.request(
+        `/v1/platform/dashboard/cockpit-rows?${homeBounds().toString()}`,
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.outstanding.count).toBe(2);
+      expect(body.outstanding.total).toBeCloseTo(233.83, 2);
+    });
+
     it("composes T-14 job money from the locked website quote and counts the whole day", async () => {
       seedHomeWorkspace();
       db.appointments = {
