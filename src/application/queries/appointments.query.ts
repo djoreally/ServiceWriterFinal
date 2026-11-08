@@ -1,10 +1,12 @@
 import { z } from "zod";
+import { addDays, endOfMonth, format, startOfMonth, startOfWeek } from "date-fns";
 import { apiClient } from "@/lib/api-client";
 import type { Appointment, BusinessHours, Customer, ServiceCatalogItem, Vehicle } from "@/shared/types";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { nextApi } from "@/lib/nextApiClient";
 import { appointmentStatusView } from "@/lib/status-vocabulary";
+import { zonedDateTimeParts, zonedLocalDateTimeToUtc } from "@/server/scheduling/timezone";
 
 const customerApiSchema = z.object({
   id: z.string(), first_name: z.string().nullable().optional(), last_name: z.string().nullable().optional(),
@@ -118,15 +120,67 @@ function mapAppointment(row: AppointmentApiRow, customerMap: Map<string, Custome
     job_total: row.job_total ?? undefined, job_due: row.job_due ?? undefined };
 }
 
-export async function fetchAppointmentsPageData(): Promise<AppointmentsPageData> {
+export interface AppointmentsViewWindow {
+  viewMode: "today" | "week" | "month" | "board";
+  anchor: Date;
+}
+
+/**
+ * The starts_at window a view actually shows, in workspace-local days —
+ * the same bucketing the views apply to scheduled_date: today and the
+ * board show the anchor day; week shows Sunday–Saturday around the
+ * anchor; month shows the calendar grid (the Sunday on/before the 1st
+ * through the last day of the month).
+ */
+export function computeAppointmentsWindow(
+  view: AppointmentsViewWindow,
+  timezone: string,
+): { from: string; to: string } {
+  const parts = zonedDateTimeParts(view.anchor, timezone);
+  const anchorLocal = new Date(parts.year, parts.month - 1, parts.day);
+  const isoDay = (date: Date) => format(date, "yyyy-MM-dd");
+  const startUtc = (date: Date) =>
+    zonedLocalDateTimeToUtc(isoDay(date), "00:00:00", timezone).toISOString();
+  switch (view.viewMode) {
+    case "week": {
+      const start = startOfWeek(anchorLocal, { weekStartsOn: 0 });
+      return { from: startUtc(start), to: startUtc(addDays(start, 7)) };
+    }
+    case "month": {
+      const start = startOfWeek(startOfMonth(anchorLocal), { weekStartsOn: 0 });
+      const end = addDays(endOfMonth(anchorLocal), 1);
+      return { from: startUtc(start), to: startUtc(end) };
+    }
+    default:
+      return { from: startUtc(anchorLocal), to: startUtc(addDays(anchorLocal, 1)) };
+  }
+}
+
+export async function fetchAppointmentsPageData(
+  view?: AppointmentsViewWindow,
+): Promise<AppointmentsPageData> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("You must be logged in to manage appointments.");
   const context = await resolveCurrentWorkspace();
   if (!context) throw new Error("No active workspace is available.");
 
+  // Timezone first (best-effort): the fetch window is computed in
+  // workspace-local days, and row mapping needs the same timezone.
+  let timezone = DEFAULT_TIMEZONE;
+  try {
+    const workspaceResult = await apiClient.get<{ data: { timezone: string | null } | null }>(
+      "/v1/appointments/workspace-context",
+      { query: { selected_workspace_id: context.workspaceId } },
+    );
+    if (workspaceResult.data?.timezone) timezone = String(workspaceResult.data.timezone);
+  } catch {
+    /* the default timezone applies */
+  }
+  const window = view ? computeAppointmentsWindow(view, timezone) : undefined;
+
   const errors: AppointmentsPageErrors = {};
-  const [appointmentsResult, customersResult, vehiclesResult, catalogResult, scheduleResult, workspaceResult, serviceLinesResult] = await Promise.allSettled([
-    nextApi.appointments.list(context.workspaceId),
+  const [appointmentsResult, customersResult, vehiclesResult, catalogResult, scheduleResult] = await Promise.allSettled([
+    nextApi.appointments.list(context.workspaceId, window),
     nextApi.customers.list(context.workspaceId),
     nextApi.vehicles.list(context.workspaceId),
     apiClient.get<{ data: Array<{ id: string; name: string; description: string | null; labor_price: number | string | null; estimated_minutes: number | null; category: string | null; is_active: boolean }> | null }>(
@@ -135,14 +189,6 @@ export async function fetchAppointmentsPageData(): Promise<AppointmentsPageData>
     ),
     apiClient.get<{ settings: Record<string, any> | null }>(
       "/v1/appointments/scheduling-settings",
-      { query: { selected_workspace_id: context.workspaceId } },
-    ),
-    apiClient.get<{ data: { timezone: string | null } | null }>(
-      "/v1/appointments/workspace-context",
-      { query: { selected_workspace_id: context.workspaceId } },
-    ),
-    apiClient.get<{ data: Array<{ appointment_id: string; vehicle_id: string | null; price: number; quantity: number }> | null }>(
-      "/v1/appointments/service-lines",
       { query: { selected_workspace_id: context.workspaceId } },
     ),
   ]);
@@ -156,12 +202,33 @@ export async function fetchAppointmentsPageData(): Promise<AppointmentsPageData>
   if (vehiclesResult.status === "rejected") errors.vehicles = vehiclesResult.reason instanceof Error ? vehiclesResult.reason.message : "Failed to load vehicles";
   if (catalogResult.status === "rejected") errors.catalog = "Failed to load service catalog";
 
-  const timezone = workspaceResult.status === "fulfilled" && workspaceResult.value.data?.timezone ? String(workspaceResult.value.data.timezone) : DEFAULT_TIMEZONE;
+  // Service lines for the fetched appointments only (Fix 3): the endpoint
+  // scopes by appointment_ids, replacing the old whole-workspace pull.
+  // Best-effort — a lines failure leaves rows without line detail, as a
+  // rejected allSettled leg did before.
+  type ServiceLineRow = { appointment_id: string; vehicle_id: string | null; price: number; quantity: number };
+  const serviceLines: ServiceLineRow[] = [];
+  if (appointmentsResult.status === "fulfilled" && appointmentRows.length > 0) {
+    const ids = (appointmentRows as Array<{ id?: unknown }>)
+      .map((row) => (typeof row.id === "string" ? row.id : ""))
+      .filter(Boolean);
+    try {
+      for (let i = 0; i < ids.length; i += 500) {
+        const chunk = ids.slice(i, i + 500);
+        const linesResult = await apiClient.get<{ data: ServiceLineRow[] | null }>(
+          "/v1/appointments/service-lines",
+          { query: { selected_workspace_id: context.workspaceId, appointment_ids: chunk.join(",") } },
+        );
+        serviceLines.push(...(linesResult.data ?? []));
+      }
+    } catch {
+      serviceLines.length = 0;
+    }
+  }
   const customers = z.array(customerApiSchema).parse(customerRows).map(mapCustomer);
   const vehicles = z.array(vehicleApiSchema).parse(vehicleRows).map(mapVehicle);
   const customerMap = new Map(customers.map((customer) => [customer.id, customer]));
   const vehicleMap = new Map(vehicles.map((vehicle) => [vehicle.id, vehicle]));
-  const serviceLines = serviceLinesResult.status === "fulfilled" ? (serviceLinesResult.value.data ?? []) : [];
   const serviceLinesByAppointment = new Map<string, Array<{ price: number; quantity: number }>>();
   const vehicleIdsByAppointment = new Map<string, Set<string>>();
   serviceLines.forEach((line: any) => {

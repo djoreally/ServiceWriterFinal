@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
 import { useRealtimeWorkflow } from "@/hooks/useRealtimeWorkflow";
@@ -96,6 +96,13 @@ const AppointmentsPage = () => {
     : null;
   const [editingAppointment, setEditingAppointment] = useState<AppointmentDraft | null>(null);
   const [currentDate, setCurrentDate] = useState(new Date());
+  // The fetch window follows the view (Fix 3): fetchData reads the
+  // current view through this ref so its identity stays stable, and a
+  // separate effect refetches when the view or the anchor date changes.
+  const viewRef = useRef({ viewMode, currentDate });
+  useEffect(() => {
+    viewRef.current = { viewMode, currentDate };
+  }, [viewMode, currentDate]);
   const [pendingOutboxCount, setPendingOutboxCount] = useState(0);
   const [deadLetterCount, setDeadLetterCount] = useState(0);
   const [syncingOutbox, setSyncingOutbox] = useState(false);
@@ -132,7 +139,10 @@ const AppointmentsPage = () => {
       setVehiclesError(null);
       setCatalogError(null);
 
-      const data = await fetchAppointmentsPageData();
+      const data = await fetchAppointmentsPageData({
+        viewMode: viewRef.current.viewMode,
+        anchor: viewRef.current.currentDate,
+      });
 
       // Store userId for realtime filtering
       setUserId(data.userId);
@@ -221,6 +231,18 @@ const AppointmentsPage = () => {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Refetch when the view or the anchor date changes — the window moved,
+  // so the loaded rows no longer cover what the view shows (Fix 3). The
+  // mount load above covers the first render.
+  const viewChangeSeenRef = useRef(false);
+  useEffect(() => {
+    if (!viewChangeSeenRef.current) {
+      viewChangeSeenRef.current = true;
+      return;
+    }
+    void fetchData();
+  }, [viewMode, currentDate, fetchData]);
 
   const handleSelectAppointment = (appointment: Appointment) => {
     setTraySelection(appointment);
