@@ -10,8 +10,7 @@ import { toast } from "@/components/ui/sonner";
 
 type WorkflowEvent =
   | { type: "appointment"; action: "INSERT" | "UPDATE" | "DELETE"; record: Record<string, unknown> }
-  | { type: "service"; action: "INSERT" | "UPDATE" | "DELETE"; record: Record<string, unknown> }
-  | { type: "timeline"; action: "INSERT" | "UPDATE" | "DELETE"; record: Record<string, unknown> };
+  | { type: "service"; action: "INSERT" | "UPDATE" | "DELETE"; record: Record<string, unknown> };
 
 interface UseRealtimeWorkflowOptions {
   userId?: string;
@@ -21,7 +20,7 @@ interface UseRealtimeWorkflowOptions {
 }
 
 /**
- * Hook for real-time workflow updates across appointments, services, and timeline.
+ * Hook for real-time workflow updates across appointments and service records.
  */
 export function useRealtimeWorkflow({
   userId,
@@ -37,7 +36,7 @@ export function useRealtimeWorkflow({
       type: string,
       payload: RealtimePostgresChangesPayload<Record<string, unknown>>
     ) => {
-      if (type !== "appointment" && type !== "service" && type !== "timeline") return;
+      if (type !== "appointment" && type !== "service") return;
 
       const action = payload.eventType as "INSERT" | "UPDATE" | "DELETE";
       const record = payload.new && Object.keys(payload.new).length > 0
@@ -98,12 +97,18 @@ export function useRealtimeWorkflow({
 
     const channelName = `workflow-${userId || "global"}`;
 
+    // Bindings must name tables that EXIST and are in the supabase_realtime
+    // publication (migration 20261108010000). The previous bindings pointed
+    // at "services" and "service_timeline" — neither table exists in
+    // production — and appointments was never published, so this channel
+    // could never reach SUBSCRIBED and the UI showed a permanent false
+    // "Offline" state. "service" events ride service_records, where a job's
+    // service actually starts and completes.
     const channel = createWorkflowChannel(
       channelName,
       [
         { table: "appointments", type: "appointment" },
-        { table: "services", type: "service" },
-        { table: "service_timeline", type: "timeline" },
+        { table: "service_records", type: "service" },
       ],
       handleChange
     );
