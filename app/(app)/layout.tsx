@@ -23,6 +23,7 @@ import { lazyRetry } from "@/lib/lazyRetry";
 import { NextRouterAdapter } from "@/components/routing/NextRouterAdapter";
 import { AppStartupNavigator } from "@/components/routing/AppStartupNavigator";
 import { NextSeoManager } from "@/components/routing/NextSeoManager";
+import ShellSkeleton from "@/components/routing/ShellSkeleton";
 
 /**
  * Route-group layout for migrated App Router pages (`app/(app)/<section>/page.tsx`).
@@ -124,7 +125,7 @@ export default function MigratedAppLayout({ children }: { children: ReactNode })
                       <SubscriptionProvider>
                         <TenantProvider>
                           {/* useSearchParams() below needs the Suspense boundary. */}
-                          <Suspense fallback={null}>
+                          <Suspense fallback={<ShellSkeleton />}>
                             <NextRouterAdapter>
                               <KeyboardShortcutsProvider>
                                 <Suspense fallback={null}>
