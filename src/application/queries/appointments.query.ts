@@ -39,6 +39,7 @@ const appointmentApiSchema = z.object({
   // verbatim when present instead of falling back to the locked quote.
   job_total: z.number().nullable().optional(), job_due: z.number().nullable().optional(),
   customers: z.union([customerApiSchema, z.array(customerApiSchema)]).nullable().optional(),
+  vehicles: z.union([vehicleApiSchema, z.array(vehicleApiSchema)]).nullable().optional(),
 }).passthrough();
 
 type CustomerApiRow = z.infer<typeof customerApiSchema>;
@@ -75,6 +76,7 @@ function localDateTime(iso: string, timezone: string): { date: string; time: str
 function optionalString(value: unknown): string | undefined { return typeof value === "string" && value ? value : undefined; }
 function metadataObject(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function relatedCustomer(row: AppointmentApiRow): CustomerApiRow | null { return Array.isArray(row.customers) ? row.customers[0] ?? null : row.customers ?? null; }
+function relatedVehicle(row: AppointmentApiRow): VehicleApiRow | null { return Array.isArray(row.vehicles) ? row.vehicles[0] ?? null : row.vehicles ?? null; }
 function hhmm(value: unknown, fallback: string): string {
   const match = /^(\d{1,2}):(\d{2})/.exec(String(value ?? ""));
   return match ? `${match[1].padStart(2, "0")}:${match[2]}` : fallback;
@@ -98,7 +100,8 @@ function mapAppointment(row: AppointmentApiRow, customerMap: Map<string, Custome
   const metadata = metadataObject(row.metadata);
   const customerFromRelation = relatedCustomer(row);
   const customer = row.customer_id ? customerMap.get(row.customer_id) ?? (customerFromRelation ? mapCustomer(customerFromRelation) : null) : (customerFromRelation ? mapCustomer(customerFromRelation) : null);
-  const vehicle = row.vehicle_id ? vehicleMap.get(row.vehicle_id) ?? null : null;
+  const vehicleFromRelation = relatedVehicle(row);
+  const vehicle = row.vehicle_id ? vehicleMap.get(row.vehicle_id) ?? (vehicleFromRelation ? mapVehicle(vehicleFromRelation) : null) : (vehicleFromRelation ? mapVehicle(vehicleFromRelation) : null);
   const start = localDateTime(row.starts_at, timezone);
   const duration = Math.max(15, Math.round((Date.parse(row.ends_at) - Date.parse(row.starts_at)) / 60000));
   const guestName = optionalString(metadata.guest_name);
@@ -156,9 +159,75 @@ export function computeAppointmentsWindow(
   }
 }
 
-export async function fetchAppointmentsPageData(
+export interface AppointmentServiceLineRow {
+  appointment_id: string;
+  vehicle_id: string | null;
+  price: number;
+  quantity: number;
+}
+
+/**
+ * Pure row assembly shared by the window load and the directory re-map
+ * (Fix 3): retail filter + per-appointment service lines and vehicles.
+ * With empty directories the rows map from their joined relations; the
+ * page re-runs this with the full directories when they land.
+ */
+export function mapWindowAppointments(
+  parsedRows: AppointmentApiRow[],
+  serviceLines: AppointmentServiceLineRow[],
+  customers: Customer[],
+  vehicles: Vehicle[],
+  timezone: string,
+): AppointmentWithSource[] {
+  const customerMap = new Map(customers.map((customer) => [customer.id, customer]));
+  const vehicleMap = new Map(vehicles.map((vehicle) => [vehicle.id, vehicle]));
+  const serviceLinesByAppointment = new Map<string, Array<{ price: number; quantity: number }>>();
+  const vehicleIdsByAppointment = new Map<string, Set<string>>();
+  serviceLines.forEach((line: any) => {
+    if (!line.appointment_id) return;
+    const current = serviceLinesByAppointment.get(line.appointment_id) ?? [];
+    current.push({ price: Number(line.price ?? 0), quantity: Number(line.quantity ?? 1) });
+    serviceLinesByAppointment.set(line.appointment_id, current);
+    if (line.vehicle_id) {
+      const ids = vehicleIdsByAppointment.get(line.appointment_id) ?? new Set<string>();
+      ids.add(String(line.vehicle_id));
+      vehicleIdsByAppointment.set(line.appointment_id, ids);
+    }
+  });
+  return parsedRows
+    .filter((row) => row.source !== "fleet_work_order" && !metadataObject(row.metadata).fleet_work_order_id)
+    .map((row) => {
+      const mapped = mapAppointment(row, customerMap, vehicleMap, timezone);
+      const ids = vehicleIdsByAppointment.get(row.id) ?? new Set<string>();
+      if (row.vehicle_id) ids.add(row.vehicle_id);
+      const appointmentVehicles = Array.from(ids).map((id) => vehicleMap.get(id)).filter((vehicle): vehicle is Vehicle => Boolean(vehicle));
+      return { ...mapped, vehicles: appointmentVehicles, appointment_services: serviceLinesByAppointment.get(row.id) ?? [] } as AppointmentWithSource;
+    });
+}
+
+export interface AppointmentsWindowData {
+  userId: string;
+  appointments: AppointmentWithSource[];
+  rawRows: AppointmentApiRow[];
+  serviceLines: AppointmentServiceLineRow[];
+  timezone: string;
+  serviceCatalog: ServiceCatalogItem[];
+  scheduleVans: AppointmentScheduleVan[];
+  businessHours: BusinessHours;
+  errors: AppointmentsPageErrors;
+  providerName: string;
+  providerEmail: string | null;
+}
+
+/**
+ * The window load (Fix 3): everything the views need to paint — the
+ * window's appointments with their service lines, the catalog, and the
+ * scheduling settings. The full customer/vehicle directories are NOT
+ * part of this load; they follow via fetchAppointmentDirectories.
+ */
+export async function fetchAppointmentsWindowData(
   view?: AppointmentsViewWindow,
-): Promise<AppointmentsPageData> {
+): Promise<AppointmentsWindowData> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("You must be logged in to manage appointments.");
   const context = await resolveCurrentWorkspace();
@@ -179,10 +248,8 @@ export async function fetchAppointmentsPageData(
   const window = view ? computeAppointmentsWindow(view, timezone) : undefined;
 
   const errors: AppointmentsPageErrors = {};
-  const [appointmentsResult, customersResult, vehiclesResult, catalogResult, scheduleResult] = await Promise.allSettled([
+  const [appointmentsResult, catalogResult, scheduleResult] = await Promise.allSettled([
     nextApi.appointments.list(context.workspaceId, window),
-    nextApi.customers.list(context.workspaceId),
-    nextApi.vehicles.list(context.workspaceId),
     apiClient.get<{ data: Array<{ id: string; name: string; description: string | null; labor_price: number | string | null; estimated_minutes: number | null; category: string | null; is_active: boolean }> | null }>(
       "/v1/appointments/service-catalog",
       { query: { active: "true", selected_workspace_id: context.workspaceId } },
@@ -193,21 +260,16 @@ export async function fetchAppointmentsPageData(
     ),
   ]);
 
-  const customerRows = customersResult.status === "fulfilled" ? customersResult.value.data : [];
-  const vehicleRows = vehiclesResult.status === "fulfilled" ? vehiclesResult.value.data : [];
   const appointmentRows = appointmentsResult.status === "fulfilled" ? appointmentsResult.value.data : [];
   const catalogRows = catalogResult.status === "fulfilled" ? (catalogResult.value.data ?? []) : [];
   if (appointmentsResult.status === "rejected") errors.appointments = appointmentsResult.reason instanceof Error ? appointmentsResult.reason.message : "Failed to load appointments";
-  if (customersResult.status === "rejected") errors.customers = customersResult.reason instanceof Error ? customersResult.reason.message : "Failed to load customers";
-  if (vehiclesResult.status === "rejected") errors.vehicles = vehiclesResult.reason instanceof Error ? vehiclesResult.reason.message : "Failed to load vehicles";
   if (catalogResult.status === "rejected") errors.catalog = "Failed to load service catalog";
 
   // Service lines for the fetched appointments only (Fix 3): the endpoint
   // scopes by appointment_ids, replacing the old whole-workspace pull.
   // Best-effort — a lines failure leaves rows without line detail, as a
   // rejected allSettled leg did before.
-  type ServiceLineRow = { appointment_id: string; vehicle_id: string | null; price: number; quantity: number };
-  const serviceLines: ServiceLineRow[] = [];
+  const serviceLines: AppointmentServiceLineRow[] = [];
   if (appointmentsResult.status === "fulfilled" && appointmentRows.length > 0) {
     const ids = (appointmentRows as Array<{ id?: unknown }>)
       .map((row) => (typeof row.id === "string" ? row.id : ""))
@@ -215,7 +277,7 @@ export async function fetchAppointmentsPageData(
     try {
       for (let i = 0; i < ids.length; i += 500) {
         const chunk = ids.slice(i, i + 500);
-        const linesResult = await apiClient.get<{ data: ServiceLineRow[] | null }>(
+        const linesResult = await apiClient.get<{ data: AppointmentServiceLineRow[] | null }>(
           "/v1/appointments/service-lines",
           { query: { selected_workspace_id: context.workspaceId, appointment_ids: chunk.join(",") } },
         );
@@ -225,32 +287,9 @@ export async function fetchAppointmentsPageData(
       serviceLines.length = 0;
     }
   }
-  const customers = z.array(customerApiSchema).parse(customerRows).map(mapCustomer);
-  const vehicles = z.array(vehicleApiSchema).parse(vehicleRows).map(mapVehicle);
-  const customerMap = new Map(customers.map((customer) => [customer.id, customer]));
-  const vehicleMap = new Map(vehicles.map((vehicle) => [vehicle.id, vehicle]));
-  const serviceLinesByAppointment = new Map<string, Array<{ price: number; quantity: number }>>();
-  const vehicleIdsByAppointment = new Map<string, Set<string>>();
-  serviceLines.forEach((line: any) => {
-    if (!line.appointment_id) return;
-    const current = serviceLinesByAppointment.get(line.appointment_id) ?? [];
-    current.push({ price: Number(line.price ?? 0), quantity: Number(line.quantity ?? 1) });
-    serviceLinesByAppointment.set(line.appointment_id, current);
-    if (line.vehicle_id) {
-      const ids = vehicleIdsByAppointment.get(line.appointment_id) ?? new Set<string>();
-      ids.add(String(line.vehicle_id));
-      vehicleIdsByAppointment.set(line.appointment_id, ids);
-    }
-  });
-  const appointments = z.array(appointmentApiSchema).parse(appointmentRows)
-    .filter((row) => row.source !== "fleet_work_order" && !metadataObject(row.metadata).fleet_work_order_id)
-    .map((row) => {
-      const mapped = mapAppointment(row, customerMap, vehicleMap, timezone);
-      const ids = vehicleIdsByAppointment.get(row.id) ?? new Set<string>();
-      if (row.vehicle_id) ids.add(row.vehicle_id);
-      const appointmentVehicles = Array.from(ids).map((id) => vehicleMap.get(id)).filter((vehicle): vehicle is Vehicle => Boolean(vehicle));
-      return { ...mapped, vehicles: appointmentVehicles, appointment_services: serviceLinesByAppointment.get(row.id) ?? [] } as AppointmentWithSource;
-    });
+
+  const rawRows = z.array(appointmentApiSchema).parse(appointmentRows);
+  const appointments = mapWindowAppointments(rawRows, serviceLines, [], [], timezone);
   const serviceCatalog = catalogRows.map(mapCatalog);
 
   const scheduling = scheduleResult.status === "fulfilled" ? scheduleResult.value.settings : null;
@@ -268,8 +307,70 @@ export async function fetchAppointmentsPageData(
     buffer_time_after: Number(scheduling?.buffer_time_after ?? DEFAULT_BUSINESS_HOURS.buffer_time_after),
   };
 
-  return { userId: user.id, appointments, customers, vehicles, serviceCatalog, scheduleVans: [], businessHours, errors,
+  return { userId: user.id, appointments, rawRows, serviceLines, timezone, serviceCatalog, scheduleVans: [], businessHours, errors,
     providerName: "Service Writer", providerEmail: null };
+}
+
+export interface AppointmentDirectories {
+  customers: Customer[];
+  vehicles: Vehicle[];
+  errors: AppointmentsPageErrors;
+}
+
+/**
+ * The full customer/vehicle directories (Fix 3): the form pickers and
+ * the full-record re-map. Loaded off the window's critical path — the
+ * customers leg pages the whole table, which was the mount's long tail.
+ */
+export async function fetchAppointmentDirectories(): Promise<AppointmentDirectories> {
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("No active workspace is available.");
+  const errors: AppointmentsPageErrors = {};
+  const [customersResult, vehiclesResult] = await Promise.allSettled([
+    nextApi.customers.list(context.workspaceId),
+    nextApi.vehicles.list(context.workspaceId),
+  ]);
+  const customerRows = customersResult.status === "fulfilled" ? customersResult.value.data : [];
+  const vehicleRows = vehiclesResult.status === "fulfilled" ? vehiclesResult.value.data : [];
+  if (customersResult.status === "rejected") errors.customers = customersResult.reason instanceof Error ? customersResult.reason.message : "Failed to load customers";
+  if (vehiclesResult.status === "rejected") errors.vehicles = vehiclesResult.reason instanceof Error ? vehiclesResult.reason.message : "Failed to load vehicles";
+  return {
+    customers: z.array(customerApiSchema).parse(customerRows).map(mapCustomer),
+    vehicles: z.array(vehicleApiSchema).parse(vehicleRows).map(mapVehicle),
+    errors,
+  };
+}
+
+/**
+ * The single-shot page load: window data with the directories applied.
+ * Kept for callers that need the complete picture in one promise; the
+ * Appointments page itself loads in two phases (window first).
+ */
+export async function fetchAppointmentsPageData(
+  view?: AppointmentsViewWindow,
+): Promise<AppointmentsPageData> {
+  const [windowData, directories] = await Promise.all([
+    fetchAppointmentsWindowData(view),
+    fetchAppointmentDirectories(),
+  ]);
+  return {
+    userId: windowData.userId,
+    appointments: mapWindowAppointments(
+      windowData.rawRows,
+      windowData.serviceLines,
+      directories.customers,
+      directories.vehicles,
+      windowData.timezone,
+    ),
+    customers: directories.customers,
+    vehicles: directories.vehicles,
+    serviceCatalog: windowData.serviceCatalog,
+    scheduleVans: windowData.scheduleVans,
+    businessHours: windowData.businessHours,
+    errors: { ...windowData.errors, ...directories.errors },
+    providerName: windowData.providerName,
+    providerEmail: windowData.providerEmail,
+  };
 }
 
 export interface AppointmentPickerOption { id: string; title: string | null; status: string | null; scheduled_date: string | null; scheduled_time: string | null; customer_name: string | null; }
