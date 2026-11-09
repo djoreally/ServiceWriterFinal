@@ -10,6 +10,7 @@ import {
   type To,
 } from "react-router-dom";
 import { usePathname, useRouter as useNextRouter, useSearchParams } from "next/navigation";
+import { getTenantSlugFromHostname, isCrossShellNavigation } from "@/lib/migratedRoutes";
 
 /**
  * Bridges react-router-dom v7 to Next.js App Router navigation so legacy page
@@ -70,8 +71,28 @@ const getHashServerSnapshot = (): string => "";
 
 function useAdapterNavigator(): Navigator {
   const nextRouter = useNextRouter();
-  return useMemo<Navigator>(
-    () => ({
+  const pathname = usePathname();
+  return useMemo<Navigator>(() => {
+    /**
+     * Cross-shell navigations (migrated App Router page <-> legacy SPA path)
+     * must be real document navigations: a soft navigation across the seam
+     * strands the visit on the wrong shell's fallback — the SPA's bare
+     * NotFound for /availability, a blank page in the reverse direction
+     * (reproduced live 2026-11-09; a refresh always rendered correctly
+     * because a document load boots the shell that owns the URL). Tenant
+     * hosts are exempt: their catch-all renders TenantBooking for every
+     * non-migrated path, so no seam exists there.
+     */
+    const isDocumentNavigation = (href: string): boolean => {
+      if (typeof window === "undefined") return false;
+      if (getTenantSlugFromHostname(window.location.hostname)) return false;
+      // Only same-origin absolute paths can be classified against the
+      // registry; query/hash-only and external hrefs keep router behavior.
+      if (!href.startsWith("/") || href.startsWith("//")) return false;
+      const destinationPathname = href.split(/[?#]/)[0] || "/";
+      return isCrossShellNavigation(pathname ?? "/", destinationPathname);
+    };
+    return {
       createHref: (to: To) => hrefFor(to),
       go: (delta: number) => {
         if (typeof window !== "undefined") {
@@ -80,17 +101,24 @@ function useAdapterNavigator(): Navigator {
       },
       push: (to: To, state?: unknown) => {
         const href = hrefFor(to);
+        if (isDocumentNavigation(href)) {
+          window.location.assign(href);
+          return;
+        }
         navigationState.set(href, state ?? null);
         nextRouter.push(href);
       },
       replace: (to: To, state?: unknown) => {
         const href = hrefFor(to);
+        if (isDocumentNavigation(href)) {
+          window.location.replace(href);
+          return;
+        }
         navigationState.set(href, state ?? null);
         nextRouter.replace(href);
       },
-    }),
-    [nextRouter],
-  );
+    };
+  }, [nextRouter, pathname]);
 }
 
 export function NextRouterAdapter({ children }: { children: React.ReactNode }) {

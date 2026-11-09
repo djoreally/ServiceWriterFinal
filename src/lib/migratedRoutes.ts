@@ -111,6 +111,26 @@ export function isMigratedTenantPath(pathname: string): boolean {
   return matchesAnyPrefix(pathname, MIGRATED_TENANT_ROUTE_PREFIXES);
 }
 
+/**
+ * True when an in-app navigation from `fromPathname` to `toPathname` crosses
+ * the shell seam on the apex app: one side is served by a migrated App Router
+ * page, the other by the legacy SPA shell (the `[[...path]]` catch-all +
+ * `ClientOnlyShell`).
+ *
+ * Cross-shell navigations must be REAL document navigations. A client-side
+ * (soft) navigation across the seam strands the visit — reproduced live
+ * 2026-11-09: from a migrated page, a sidebar tap to an SPA-only path
+ * (/availability) painted the SPA's bare NotFound; from the SPA, a tap to a
+ * migrated path (/service-catalog) painted a blank page. In both cases a
+ * refresh — a document load, which boots the shell that owns the URL —
+ * rendered correctly. The two navigation layers (`NextRouterAdapter` inside
+ * migrated pages, the SPA's `BrowserRouter` in `App.tsx`) consult this
+ * helper and fall back to `window.location` when it returns true.
+ */
+export function isCrossShellNavigation(fromPathname: string, toPathname: string): boolean {
+  return isMigratedPath(fromPathname) !== isMigratedPath(toPathname);
+}
+
 const TENANT_ROOT_DOMAIN = "servicewriter.xyz";
 const NON_TENANT_HOSTS = new Set([
   "localhost",
