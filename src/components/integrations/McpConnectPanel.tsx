@@ -6,27 +6,21 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { Bot, Copy, Check, Lock, ShieldCheck, Info, RefreshCw, Server, ExternalLink } from "lucide-react";
+import { Bot, Copy, Check, Lock, ShieldCheck, Info, RefreshCw, Server, KeyRound } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
+import { apiClient, ApiClientError } from "@/lib/api-client";
 import {
+  MCP_AUTH_HEADER_EXAMPLE,
   MCP_CLIENT_GUIDES,
-  MCP_CURSOR_SNIPPET,
+  MCP_CONFIG_SNIPPET,
+  MCP_REST_BASE_URL,
   MCP_SERVER_TITLE,
   MCP_SERVER_URL,
   MCP_SERVER_VERSION,
   MCP_TOOLS,
-  MCP_EDGE_FUNCTION_NAME,
 } from "@/lib/mcpConnection";
 
-function CopyField({ value, label }: { value: string; label: string }) {
+export function CopyField({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
 
   const copy = async () => {
@@ -46,6 +40,31 @@ function CopyField({ value, label }: { value: string; label: string }) {
       <Button type="button" variant="outline" onClick={copy} className="gap-2 rounded-md shrink-0">
         {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
         {copied ? "Copied" : "Copy"}
+      </Button>
+    </div>
+  );
+}
+
+function SnippetBlock({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      toast.success(`${label} copied`);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error("Could not copy — select the text and copy manually");
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <pre className="overflow-x-auto rounded-md border bg-muted p-3 text-xs">{value}</pre>
+      <Button type="button" variant="outline" size="sm" onClick={copy} className="gap-2 rounded-md">
+        {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+        {copied ? "Copied" : "Copy snippet"}
       </Button>
     </div>
   );
@@ -72,51 +91,106 @@ function ToolList() {
   );
 }
 
-function DeploymentStatusCard({ variant }: { variant: McpConnectPanelProps["variant"] }) {
-  const [status, setStatus] = useState<"loading" | "reachable" | "unreachable" | "error">("loading");
-  const [metadata, setMetadata] = useState<Record<string, unknown> | null>(null);
+interface McpProbeResult {
+  jsonrpc?: string;
+  result?: unknown;
+  error?: { code?: number; message?: string };
+}
+
+type McpStatus = "checking" | "live" | "unreachable" | "failed";
+
+/**
+ * Truthful status check: POST tools/list to /api/mcp WITHOUT a key. A live
+ * server refuses with the JSON-RPC -32001 "key required" error — that
+ * refusal is the healthy signal. (The request travels through the staff
+ * API client, whose session token is not an API key, so the probe measures
+ * exactly what an uninvited caller gets.)
+ */
+function McpStatusCard() {
+  const [status, setStatus] = useState<McpStatus>("checking");
+  const [detail, setDetail] = useState<string | null>(null);
+
+  const check = async () => {
+    setStatus("checking");
+    setDetail(null);
+    try {
+      const response = await apiClient.post<McpProbeResult>("/mcp", {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/list",
+      });
+      if (response?.error?.code === -32001) {
+        setDetail(response.error.message ?? "A valid Service Writer API key is required");
+        setStatus("live");
+      } else if (response && (response.result !== undefined || response.error !== undefined)) {
+        setDetail("The endpoint answered the probe.");
+        setStatus("live");
+      } else {
+        setDetail("The endpoint answered something unexpected.");
+        setStatus("failed");
+      }
+    } catch (error) {
+      if (error instanceof ApiClientError && error.status === 404) {
+        setDetail("The MCP route was not found on this deployment.");
+        setStatus("unreachable");
+      } else {
+        setDetail(error instanceof Error ? error.message : "The probe request failed.");
+        setStatus("failed");
+      }
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
-    async function check() {
+    void (async () => {
       try {
-        const res = await fetch(`${MCP_SERVER_URL}/.well-known/oauth-protected-resource`, {
-          method: "GET",
-          headers: { Accept: "application/json" },
+        const response = await apiClient.post<McpProbeResult>("/mcp", {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/list",
         });
         if (cancelled) return;
-        if (res.ok) {
-          const data = await res.json();
-          setMetadata(data);
-          setStatus("reachable");
+        if (response?.error?.code === -32001) {
+          setDetail(response.error.message ?? "A valid Service Writer API key is required");
+          setStatus("live");
+        } else if (response && (response.result !== undefined || response.error !== undefined)) {
+          setDetail("The endpoint answered the probe.");
+          setStatus("live");
         } else {
-          setStatus("unreachable");
+          setDetail("The endpoint answered something unexpected.");
+          setStatus("failed");
         }
-      } catch {
-        if (!cancelled) setStatus("error");
+      } catch (error) {
+        if (cancelled) return;
+        if (error instanceof ApiClientError && error.status === 404) {
+          setDetail("The MCP route was not found on this deployment.");
+          setStatus("unreachable");
+        } else {
+          setDetail(error instanceof Error ? error.message : "The probe request failed.");
+          setStatus("failed");
+        }
       }
-    }
-    check();
+    })();
     return () => {
       cancelled = true;
     };
   }, []);
 
   const badge =
-    status === "loading" ? (
+    status === "checking" ? (
       <Badge variant="outline" className="rounded-md gap-1">
         <RefreshCw className="h-3 w-3 animate-spin" />
         Checking…
       </Badge>
-    ) : status === "reachable" ? (
-      <Badge variant="outline" className="rounded-md gap-1 border-green-500/30 bg-green-500/10 text-green-700">
+    ) : status === "live" ? (
+      <Badge variant="outline" className="rounded-md gap-1 border-emerald-500/30 bg-emerald-500/10 text-emerald-700">
         <Server className="h-3 w-3" />
-        Reachable
+        Live — key required
       </Badge>
     ) : (
       <Badge variant="outline" className="rounded-md gap-1 border-destructive/30 bg-destructive/10 text-destructive">
         <Info className="h-3 w-3" />
-        {status === "unreachable" ? "Not deployed" : "Check failed"}
+        {status === "unreachable" ? "Not reachable" : "Check failed"}
       </Badge>
     );
 
@@ -126,107 +200,38 @@ function DeploymentStatusCard({ variant }: { variant: McpConnectPanelProps["vari
         <CardTitle className="flex items-center justify-between gap-2">
           <span className="flex items-center gap-2">
             <Server className="h-5 w-5" />
-            Deployment status
+            Server status
           </span>
           {badge}
         </CardTitle>
         <CardDescription>
-          This app is deployed through Vercel + GitHub. The MCP server itself lives on the Supabase backend as the
-          Edge Function <code className="rounded bg-muted px-1 py-0.5">{MCP_EDGE_FUNCTION_NAME}</code>.
+          The MCP server runs inside this app — there is no separate function to deploy. This check calls the
+          endpoint without a key; a healthy server refuses the call and asks for one.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {status === "reachable" && metadata && (
-          <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">
-              The OAuth resource metadata is reachable and reports the resource as:
-            </p>
-            <pre className="overflow-x-auto rounded-md border bg-muted p-3 text-xs">
-              {JSON.stringify(metadata, null, 2)}
-            </pre>
-          </div>
+        {status === "live" && (
+          <p className="text-sm text-muted-foreground">
+            The server answered the probe with:{" "}
+            <code className="rounded bg-muted px-1 py-0.5">{detail ?? "A valid Service Writer API key is required"}</code>{" "}
+            — exactly what an uninvited caller should get. Present a valid key and the same endpoint serves the tools
+            below.
+          </p>
         )}
-
-        {status === "unreachable" && (
+        {(status === "unreachable" || status === "failed") && (
           <Alert>
             <Info className="h-4 w-4" />
-            <AlertTitle>Endpoint not deployed yet</AlertTitle>
+            <AlertTitle>{status === "unreachable" ? "Endpoint not reachable" : "Status check failed"}</AlertTitle>
             <AlertDescription>
-              The connection URL is returning a 404. The <code className="rounded bg-muted px-1 py-0.5">agent-api</code>{" "}
-              Edge Function is generated from the source MCP server and is deployed by the GitHub Actions workflow. Push
-              the latest code to <code className="rounded bg-muted px-1 py-0.5">main</code> and wait for the deploy job
-              to finish.
+              {detail ?? "The probe did not complete."} If this persists on the live site, the deployment serving
+              this page does not include the agent routes — check that the latest code is deployed.
             </AlertDescription>
           </Alert>
         )}
-
-        {variant === "admin" && (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-md gap-2"
-              onClick={() => {
-                window.location.reload();
-              }}
-            >
-              <RefreshCw className="h-4 w-4" />
-              Recheck status
-            </Button>
-            <Dialog>
-              <DialogTrigger asChild>
-                <Button type="button" variant="outline" className="rounded-md gap-2">
-                  <ExternalLink className="h-4 w-4" />
-                  Redeploy
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="rounded-md">
-                <DialogHeader>
-                  <DialogTitle>Redeploy the MCP Edge Function</DialogTitle>
-                  <DialogDescription>
-                    The function is deployed through GitHub Actions. Choose the fastest path for your situation.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4 text-sm">
-                  <div className="space-y-2">
-                    <p className="font-medium">1. Normal path (recommended)</p>
-                    <p className="text-muted-foreground">
-                      Push or merge the latest code to <code className="rounded bg-muted px-1 py-0.5">main</code>. The
-                      CI workflow runs the <code className="rounded bg-muted px-1 py-0.5">sync:agent-api</code> script and
-                      then deploys all Edge Functions to Supabase.
-                    </p>
-                  </div>
-                  <div className="space-y-2">
-                    <p className="font-medium">2. Manual path</p>
-                    <p className="text-muted-foreground">
-                      Open the GitHub Actions tab for this repository, open the latest completed CI run on{" "}
-                      <code className="rounded bg-muted px-1 py-0.5">main</code>, and click "Re-run all jobs". Make sure
-                      the deploy step has the required Supabase secrets:
-                    </p>
-                    <ul className="list-disc pl-5 text-muted-foreground">
-                      <li>
-                        <code className="rounded bg-muted px-1 py-0.5">SUPABASE_ACCESS_TOKEN</code>
-                      </li>
-                      <li>
-                        <code className="rounded bg-muted px-1 py-0.5">SUPABASE_PROJECT_REF</code>
-                      </li>
-                    </ul>
-                  </div>
-                  <div className="space-y-2">
-                    <p className="font-medium">3. Local path</p>
-                    <p className="text-muted-foreground">
-                      Run <code className="rounded bg-muted px-1 py-0.5">npm run sync:agent-api</code> then{" "}
-                      <code className="rounded bg-muted px-1 py-0.5">
-                        npx supabase functions deploy agent-api --project-ref hqfimxqsrwknvsuiizlg
-                      </code>{" "}
-                      from a machine with the Supabase CLI linked to the project.
-                    </p>
-                  </div>
-                </div>
-              </DialogContent>
-            </Dialog>
-          </div>
-        )}
+        <Button type="button" variant="outline" className="rounded-md gap-2" onClick={() => void check()}>
+          <RefreshCw className="h-4 w-4" />
+          Recheck status
+        </Button>
       </CardContent>
     </Card>
   );
@@ -238,9 +243,6 @@ interface McpConnectPanelProps {
 }
 
 export function McpConnectPanel({ variant = "user" }: McpConnectPanelProps) {
-  const isPreview =
-    typeof window !== "undefined" && /(^|\.)id-preview--|localhost|127\.0\.0\.1/.test(window.location.hostname);
-
   return (
     <div className="space-y-6">
       <Card>
@@ -250,15 +252,16 @@ export function McpConnectPanel({ variant = "user" }: McpConnectPanelProps) {
             {MCP_SERVER_TITLE} agent connection
           </CardTitle>
           <CardDescription>
-            Connect ChatGPT, Claude, Cursor, or any MCP-compatible assistant to your ServiceWriter workspace. The
-            assistant signs in as you and can only see and change what your account is allowed to.
+            Connect ChatGPT, Claude, Cursor, or any MCP-compatible assistant to this ServiceWriter workspace. The
+            assistant authenticates with a workspace API key you issue above — no separate sign-in — and can only do
+            what that key's scopes allow.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <Badge variant="outline" className="rounded-md gap-1">
-              <ShieldCheck className="h-3 w-3" />
-              Secured with sign-in (OAuth 2.1)
+              <KeyRound className="h-3 w-3" />
+              Secured with a workspace API key
             </Badge>
             <Badge variant="outline" className="rounded-md">v{MCP_SERVER_VERSION}</Badge>
             <Badge variant="outline" className="rounded-md">{MCP_TOOLS.length} tools</Badge>
@@ -268,25 +271,27 @@ export function McpConnectPanel({ variant = "user" }: McpConnectPanelProps) {
             <p className="text-sm font-medium">Connection URL</p>
             <CopyField value={MCP_SERVER_URL} label="Connection URL" />
             <p className="text-xs text-muted-foreground">
-              Paste this into your assistant's "custom connector" or "MCP server" field. There is no API key to copy —
-              you approve access by signing in.
+              Paste this into your assistant's "MCP server" settings, together with the Authorization header below.
             </p>
           </div>
 
-          {isPreview && (
-            <Alert>
-              <Info className="h-4 w-4" />
-              <AlertTitle>Publish first for outside assistants</AlertTitle>
-              <AlertDescription>
-                You're viewing a preview build. The connection URL works once the app is published, because the
-                assistant needs to reach the sign-in screen on your live site.
-              </AlertDescription>
-            </Alert>
-          )}
+          <div className="space-y-2">
+            <p className="text-sm font-medium">Authorization header</p>
+            <CopyField value={MCP_AUTH_HEADER_EXAMPLE} label="Authorization header" />
+            <p className="text-xs text-muted-foreground">
+              Replace the placeholder with a key from the API Keys section above. The{" "}
+              <code className="rounded bg-muted px-1 py-0.5">x-api-key</code> header with the same value works too.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-sm font-medium">Configuration snippet</p>
+            <SnippetBlock value={MCP_CONFIG_SNIPPET} label="Configuration snippet" />
+          </div>
         </CardContent>
       </Card>
 
-      <DeploymentStatusCard variant={variant} />
+      <McpStatusCard />
 
       <Card>
         <CardHeader>
@@ -314,10 +319,10 @@ export function McpConnectPanel({ variant = "user" }: McpConnectPanelProps) {
                     </li>
                   ))}
                 </ol>
-                {guide.id === "cursor" && (
+                {guide.id === "config" && (
                   <div className="space-y-2">
                     <p className="text-sm font-medium">Configuration snippet</p>
-                    <pre className="overflow-x-auto rounded-md border bg-muted p-3 text-xs">{MCP_CURSOR_SNIPPET}</pre>
+                    <SnippetBlock value={MCP_CONFIG_SNIPPET} label="Configuration snippet" />
                   </div>
                 )}
               </TabsContent>
@@ -328,9 +333,55 @@ export function McpConnectPanel({ variant = "user" }: McpConnectPanelProps) {
 
       <Card>
         <CardHeader>
+          <CardTitle>Prefer REST?</CardTitle>
+          <CardDescription>
+            The same key works on the REST agent API — same workspace, same scopes, same booking rules.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <p className="text-sm font-medium">Base URL</p>
+            <CopyField value={MCP_REST_BASE_URL} label="REST base URL" />
+            <p className="text-xs text-muted-foreground">
+              Send the same Authorization header on every call. The workspace comes from the key — there is no
+              workspace parameter to aim a key elsewhere.
+            </p>
+          </div>
+          <ul className="divide-y rounded-md border text-sm">
+            <li className="flex flex-col gap-1 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <span>Service catalog</span>
+              <code className="rounded bg-muted px-1.5 py-0.5 text-xs">GET /catalog</code>
+            </li>
+            <li className="flex flex-col gap-1 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <span>Booking rules</span>
+              <code className="rounded bg-muted px-1.5 py-0.5 text-xs">GET /booking-rules</code>
+            </li>
+            <li className="flex flex-col gap-1 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <span>Check availability / open slots</span>
+              <code className="rounded bg-muted px-1.5 py-0.5 text-xs">POST /availability</code>
+            </li>
+            <li className="flex flex-col gap-1 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <span>Appointments</span>
+              <code className="rounded bg-muted px-1.5 py-0.5 text-xs">GET /appointments</code>
+            </li>
+            <li className="flex flex-col gap-1 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <span>Create a booking (catalog prices, rules enforced)</span>
+              <code className="rounded bg-muted px-1.5 py-0.5 text-xs">POST /bookings</code>
+            </li>
+            <li className="flex flex-col gap-1 p-3 sm:flex-row sm:items-center sm:justify-between">
+              <span>Customers, vehicles, locations, invoices</span>
+              <code className="rounded bg-muted px-1.5 py-0.5 text-xs">GET /customers · /vehicles · /locations · /invoices</code>
+            </li>
+          </ul>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>What the assistant can do</CardTitle>
           <CardDescription>
-            These are every tool the connection exposes. Nothing outside this list is reachable.
+            These are every tool the connection exposes. A tool only runs when the key holds the scope it needs —
+            nothing outside this list is reachable.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -338,8 +389,8 @@ export function McpConnectPanel({ variant = "user" }: McpConnectPanelProps) {
           <div className="flex items-start gap-2 rounded-md border bg-muted/40 p-3 text-sm text-muted-foreground">
             <Lock className="mt-0.5 h-4 w-4 shrink-0" />
             <span>
-              Every tool call runs as the signed-in user, so an assistant connected by one team member sees only that
-              workspace's data. Revoke access at any time by removing the connector in your assistant's settings.
+              Every call runs under the key's workspace and scopes, and every write is stamped with the key's
+              integrator name. Revoke a key in the API Keys section above and its access ends immediately.
             </span>
           </div>
         </CardContent>
@@ -353,17 +404,21 @@ export function McpConnectPanel({ variant = "user" }: McpConnectPanelProps) {
           </CardHeader>
           <CardContent className="space-y-2 text-sm text-muted-foreground">
             <p>
-              The endpoint is protected by the platform's OAuth 2.1 authorization server with dynamic client
-              registration. Clients register themselves; there is no shared secret to distribute.
+              Keys are per-workspace and stored as SHA-256 hashes only; the raw key exists solely in the one-time
+              display at creation. There is no way to view a key again — a lost key is revoked and re-issued.
             </p>
             <p>
-              Consent happens on <code className="rounded bg-muted px-1 py-0.5">/.lovable/oauth/consent</code>. If a
-              provider reports being bounced back to the dashboard, they were signed out when the approval screen
-              opened — have them sign in first, then retry the connect flow.
+              Server error codes worth knowing:{" "}
+              <code className="rounded bg-muted px-1 py-0.5">unauthenticated</code> (no or malformed key),{" "}
+              <code className="rounded bg-muted px-1 py-0.5">key_revoked</code>,{" "}
+              <code className="rounded bg-muted px-1 py-0.5">key_expired</code>,{" "}
+              <code className="rounded bg-muted px-1 py-0.5">insufficient_scope</code> (the key lacks the scope the
+              call needs), and <code className="rounded bg-muted px-1 py-0.5">workspace_mismatch</code> (a caller
+              claimed a workspace other than the key's — the key's workspace always wins).
             </p>
             <p>
-              Row-level security applies per connection, so no cross-tenant access is possible even if a provider shares
-              the URL. The URL itself is not a credential.
+              Key management itself (list / create / revoke) requires a staff session with the owner or admin role
+              in that workspace; the routes enforce it server-side regardless of what any UI shows.
             </p>
             <p>Providers can self-serve these instructions at Settings → Integrations → Agent integrations.</p>
           </CardContent>
@@ -376,52 +431,58 @@ export function McpConnectPanel({ variant = "user" }: McpConnectPanelProps) {
         </CardHeader>
         <CardContent>
           <Accordion type="single" collapsible>
-            <AccordionItem value="bounce">
-              <AccordionTrigger>The approval screen sent me back to the dashboard</AccordionTrigger>
+            <AccordionItem value="key-required">
+              <AccordionTrigger>The client says a key is required (401)</AccordionTrigger>
               <AccordionContent className="text-sm text-muted-foreground">
-                You weren't signed in when the approval screen opened. Sign in to ServiceWriter in the same browser,
-                then start the connect flow again from your assistant.
+                The request reached the server without a usable key: the Authorization header is missing, the key was
+                pasted with extra spaces or quotes, or the key has been revoked or expired. Generate a fresh key in
+                the API Keys section above and update the client with exactly the value shown, once.
               </AccordionContent>
             </AccordionItem>
-            <AccordionItem value="not-auth">
-              <AccordionTrigger>Tools return "Not authenticated"</AccordionTrigger>
+            <AccordionItem value="scope">
+              <AccordionTrigger>Calls fail with "insufficient scope" (403)</AccordionTrigger>
               <AccordionContent className="text-sm text-muted-foreground">
-                The connection's sign-in expired. Remove the connector in your assistant's settings and add it again
-                using the URL above.
+                The key works, but it doesn't hold the scope that tool needs. Scopes can't be added to an existing
+                key — revoke it and generate a new one with the scopes the integration actually needs (or use the
+                "Full agent access" preset).
               </AccordionContent>
             </AccordionItem>
-            <AccordionItem value="not-found">
-              <AccordionTrigger>The connection URL returns a 404</AccordionTrigger>
-              <AccordionContent className="text-sm text-muted-foreground">
-                The MCP Edge Function is deployed separately from the Vercel frontend. Make sure the latest code is on{" "}
-                <code className="rounded bg-muted px-1 py-0.5">main</code> and the GitHub Actions "Deploy edge functions"
-                step completed. Admins can click the <strong>Redeploy</strong> button above for the exact commands.
-              </AccordionContent>
-            </AccordionItem>
-            <AccordionItem value="empty">
+            <AccordionItem value="no-tools">
               <AccordionTrigger>No tools show up after connecting</AccordionTrigger>
               <AccordionContent className="text-sm text-muted-foreground">
-                Confirm the URL ends in <code className="rounded bg-muted px-1 py-0.5">/functions/v1/agent-api</code> and
-                that the assistant is using the HTTP (Streamable HTTP) transport, not SSE or a local command.
+                Confirm the URL ends in <code className="rounded bg-muted px-1 py-0.5">/api/mcp</code> and that the
+                client is using the Streamable HTTP transport (in config files,{" "}
+                <code className="rounded bg-muted px-1 py-0.5">"type": "http"</code>), not SSE or a local command.
+                Then check the Server status card above: it should read "Live — key required".
               </AccordionContent>
             </AccordionItem>
             <AccordionItem value="empty-results">
               <AccordionTrigger>Tools work but return nothing</AccordionTrigger>
               <AccordionContent className="text-sm text-muted-foreground">
-                You're connected with an account that has no records in this workspace. Sign in with the account that
-                owns your shop data and reconnect.
+                A key only ever sees the workspace it was generated in. If you're viewing a different workspace than
+                the one the key belongs to, the data will look empty — generate a key in the workspace you mean to
+                connect.
               </AccordionContent>
             </AccordionItem>
             <AccordionItem value="revoke">
-              <AccordionTrigger>How do I disconnect?</AccordionTrigger>
+              <AccordionTrigger>How do I disconnect an assistant?</AccordionTrigger>
               <AccordionContent className="text-sm text-muted-foreground">
-                Delete the ServiceWriter connector in your assistant's settings. That drops its access immediately; no
-                change is needed inside ServiceWriter.
+                Revoke its key in the API Keys section above. Access ends immediately for both the MCP connection and
+                the REST API. Removing the connector in the assistant's settings as well keeps things tidy, but the
+                revocation is what actually cuts access.
               </AccordionContent>
             </AccordionItem>
           </Accordion>
         </CardContent>
       </Card>
+
+      <div className="flex items-start gap-2 text-xs text-muted-foreground">
+        <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>
+          Keys are workspace credentials: treat them like passwords, give each integration its own key, and revoke
+          keys you no longer use.
+        </span>
+      </div>
     </div>
   );
 }
