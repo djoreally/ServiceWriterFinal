@@ -112,6 +112,27 @@ export function isMigratedTenantPath(pathname: string): boolean {
   return matchesAnyPrefix(pathname, MIGRATED_TENANT_ROUTE_PREFIXES);
 }
 
+/**
+ * True when a navigation target (a path, optionally carrying query/hash)
+ * is owned by an App Router page — either registry — rather than by the
+ * legacy SPA shell.
+ *
+ * Such a target CANNOT be reached by a client-side navigation from inside
+ * the SPA. The SPA's react-router only rewrites the address in place
+ * (`history.replaceState`); Next.js follows the address change in its
+ * pathname bookkeeping, `ClientOnlyShell` then unmounts the SPA for the
+ * migrated path — but no Next navigation ever happens, so the App Router
+ * page for the new address is never loaded and the still-rendered
+ * catch-all (null on app hosts) is all that remains: a blank page until a
+ * manual reload. A real document navigation is the only way across: the
+ * reload boots the shell that owns the URL. SPA-owned targets return
+ * false and keep client-side navigation.
+ */
+export function requiresDocumentNavigation(target: string): boolean {
+  const pathname = target.split(/[?#]/)[0] || "/";
+  return isMigratedPath(pathname) || isMigratedTenantPath(pathname);
+}
+
 const TENANT_ROOT_DOMAIN = "servicewriter.xyz";
 const NON_TENANT_HOSTS = new Set([
   "localhost",

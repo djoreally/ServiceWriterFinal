@@ -2,6 +2,7 @@ import {
   getTenantSlugFromHostname,
   isMigratedPath,
   isMigratedTenantPath,
+  requiresDocumentNavigation,
 } from "@/lib/migratedRoutes";
 
 describe("migratedRoutes", () => {
@@ -44,6 +45,35 @@ describe("migratedRoutes", () => {
 
     it("returns false for app-shell paths", () => {
       expect(isMigratedTenantPath("/dashboard")).toBe(false);
+    });
+  });
+
+  describe("requiresDocumentNavigation", () => {
+    it("is true for App Router landing targets (the post-login seam)", () => {
+      expect(requiresDocumentNavigation("/dashboard")).toBe(true);
+      expect(requiresDocumentNavigation("/tech-app")).toBe(true);
+      expect(requiresDocumentNavigation("/dispatch")).toBe(true);
+      expect(requiresDocumentNavigation("/fleet-os")).toBe(true);
+      expect(requiresDocumentNavigation("/customers/123")).toBe(true);
+    });
+
+    it("classifies by pathname, ignoring query and hash", () => {
+      expect(requiresDocumentNavigation("/settings?tab=business&setup=1")).toBe(true);
+      expect(requiresDocumentNavigation("/invoices#top")).toBe(true);
+      expect(requiresDocumentNavigation("/plans?upgrade=1")).toBe(false);
+    });
+
+    it("is true for tenant App Router targets (customer portal landing)", () => {
+      expect(requiresDocumentNavigation("/customer/dashboard")).toBe(true);
+      expect(requiresDocumentNavigation("/my-bookings")).toBe(true);
+    });
+
+    it("is false for SPA-owned targets, which stay client-side", () => {
+      expect(requiresDocumentNavigation("/plans")).toBe(false);
+      expect(requiresDocumentNavigation("/login")).toBe(false);
+      expect(requiresDocumentNavigation("/login/business")).toBe(false);
+      expect(requiresDocumentNavigation("/financials")).toBe(false);
+      expect(requiresDocumentNavigation("/")).toBe(false);
     });
   });
 

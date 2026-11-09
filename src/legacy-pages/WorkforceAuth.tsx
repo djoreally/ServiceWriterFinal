@@ -15,6 +15,7 @@ import { PRIVACY_POLICY_PATH, TERMS_OF_SERVICE_PATH } from "@/lib/legal";
 import { supabase } from "@/integrations/supabase/client";
 import { useStartupRoutingStore } from "@/stores/startupRoutingStore";
 import { safeNextPath } from "@/lib/auth/next-path";
+import { navigatePostLogin } from "@/lib/auth/landing-navigation";
 import { errorMessage } from "@/lib/error-message";
 import { beginAuthInteraction } from "@/lib/authInteractionLock";
 import { withOperationTimeout } from "@/lib/operation-timeout";
@@ -105,7 +106,10 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
         }));
       });
     }
-    navigate(destination ?? nextPath ?? landingPathFor(selected), { replace: true });
+    // The landing is a shell-seam decision, not a plain router push: every
+    // role landing (and /settings) is an App Router page, which a
+    // client-side navigation from this SPA shell can never paint.
+    navigatePostLogin(navigate, destination ?? nextPath ?? landingPathFor(selected));
   }, [memberships, navigate, nextPath, queryClient]);
 
   const routeIdentity = useCallback(async () => {
@@ -192,7 +196,9 @@ export function WorkforceAuth({ intent, variant = "default" }: { intent: Intent;
         }
         setIntendedPath("/settings?tab=business&setup=1");
         toast.success("Business account created. Add your business settings to continue.");
-        navigate("/settings?tab=business&setup=1", { replace: true });
+        // /settings is an App Router page — same post-login seam rule as
+        // the workspace landing above.
+        navigatePostLogin(navigate, "/settings?tab=business&setup=1");
       } else {
         const result = await signInWithPassword(email, password);
         if (result.error) throw new Error(result.error);

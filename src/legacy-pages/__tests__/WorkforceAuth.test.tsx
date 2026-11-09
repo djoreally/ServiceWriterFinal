@@ -42,7 +42,26 @@ import { signUpWithEmail } from "@/application/commands/auth.command";
 import { provisionOwnerWorkspace } from "@/application/commands/workspace-provisioning.command";
 import { fetchWorkforceIdentity, selectActiveWorkspace } from "@/application/queries/workforce-identity.query";
 import { supabase } from "@/integrations/supabase/client";
+import { documentNavigation } from "@/lib/auth/landing-navigation";
 import { WorkforceAuth } from "@/legacy-pages/WorkforceAuth";
+
+/**
+ * Post-login landings to App Router pages leave via a document navigation
+ * (jsdom's `window.location` cannot be stubbed, so the seam's document
+ * effect is spied at its port instead). A landing that goes through
+ * `documentNavigation.replace` never moves the test router — in a real
+ * browser the document load replaces the page.
+ */
+let replaceSpy: jest.Mock;
+
+beforeEach(() => {
+  replaceSpy = jest.fn();
+  jest.spyOn(documentNavigation, "replace").mockImplementation(replaceSpy);
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
 
 const useAuthMock = useAuth as jest.Mock;
 const signUpMock = signUpWithEmail as jest.Mock;
@@ -127,13 +146,16 @@ describe("WorkforceAuth signup (self-serve)", () => {
     expect(screen.getByRole("link", { name: "Privacy Policy" })).toHaveAttribute("href", "/privacy-policy");
   });
 
-  it("provisions the workspace immediately when signup returns a session, then enters setup", async () => {
+  it("provisions the workspace immediately when signup returns a session, then hands setup to the document", async () => {
     getSessionMock.mockResolvedValue({ data: { session: { access_token: "token" } } });
     const { container } = renderSignup();
 
     fireEvent.submit(fillSignupForm(container));
 
-    await waitFor(() => expect(screen.getByText("SETTINGS SETUP")).toBeInTheDocument());
+    // /settings is an App Router page: the setup landing leaves by
+    // document navigation, so the SPA router never renders it.
+    await waitFor(() => expect(replaceSpy).toHaveBeenCalledWith("/settings?tab=business&setup=1"));
+    expect(screen.queryByText("SETTINGS SETUP")).not.toBeInTheDocument();
     expect(signUpMock).toHaveBeenCalledWith("owner@example.com", "secret1", "/login/business");
     expect(provisionMock).toHaveBeenCalledWith("MOMS Mobile Oil Change");
   });
@@ -176,7 +198,7 @@ describe("WorkforceAuth no-workspace door", () => {
     expect(screen.queryByText("Wrong sign-in for this account")).not.toBeInTheDocument();
   });
 
-  it("provisions exactly once from the door and enters the new workspace's setup", async () => {
+  it("provisions exactly once from the door and hands the new workspace's setup to the document", async () => {
     fetchIdentityMock
       .mockResolvedValueOnce([])
       .mockResolvedValue([ownerMembership]);
@@ -191,7 +213,8 @@ describe("WorkforceAuth no-workspace door", () => {
     expect(createButton).toBeEnabled();
     fireEvent.click(createButton);
 
-    await waitFor(() => expect(screen.getByText("SETTINGS SETUP")).toBeInTheDocument());
+    await waitFor(() => expect(replaceSpy).toHaveBeenCalledWith("/settings?tab=business&setup=1"));
+    expect(screen.queryByText("SETTINGS SETUP")).not.toBeInTheDocument();
     expect(provisionMock).toHaveBeenCalledTimes(1);
     expect(provisionMock).toHaveBeenCalledWith("MOMS Mobile Oil Change");
   });
@@ -211,5 +234,42 @@ describe("WorkforceAuth no-workspace door", () => {
 
     expect(await screen.findByText("Wrong sign-in for this account")).toBeInTheDocument();
     expect(screen.queryByText("Create your workspace")).not.toBeInTheDocument();
+  });
+});
+
+describe("WorkforceAuth post-login landing (shell seam)", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    useAuthMock.mockReturnValue({ session: { user: { id: "user-1" } }, loading: false });
+    selectWorkspaceMock.mockResolvedValue(ownerMembership);
+    getUserMock.mockResolvedValue({ data: { user: { id: "user-1" } } });
+    fetchIdentityMock.mockResolvedValue([ownerMembership]);
+  });
+
+  it("sends a signed-in owner to /dashboard by document navigation, not a router push", async () => {
+    renderBusinessLogin();
+
+    // /dashboard is an App Router page. The blank post-sign-in landing
+    // (live, 2026-11-09) was this call going through react-router: the
+    // address changed, the SPA unmounted, and no page ever painted.
+    await waitFor(() => expect(replaceSpy).toHaveBeenCalledTimes(1));
+    expect(replaceSpy).toHaveBeenCalledWith("/dashboard");
+  });
+
+  it("keeps an SPA-owned ?next= landing on the client-side router", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={["/login/business?next=%2Fplans"]}>
+          <Routes>
+            <Route path="/login/business" element={<WorkforceAuth intent="login" variant="business" />} />
+            <Route path="/plans" element={<div>PLANS GATE</div>} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("PLANS GATE")).toBeInTheDocument();
+    expect(replaceSpy).not.toHaveBeenCalled();
   });
 });
