@@ -31,6 +31,25 @@
 --   blocks are for parsing optional metadata timestamps, where a malformed
 --   value falls back to the appointment's own schedule/update timestamps.
 
+-- The guarantee leans on the (workspace_id, appointment_id) unique
+-- constraint below. Found at apply time (2026-11-09): production carried
+-- only a partial unique index on (workspace_id, appointment_id, vehicle_id),
+-- not the pair — so add the designed constraint when it is missing. If
+-- duplicate pairs existed this would fail loudly at apply time, which is
+-- the correct stop (dedupe is a human decision, not a migration's).
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+     where conname = 'service_records_workspace_appointment_key'
+  ) then
+    alter table public.service_records
+      add constraint service_records_workspace_appointment_key
+      unique (workspace_id, appointment_id);
+  end if;
+end;
+$$;
+
 create or replace function public.ensure_service_record_for_appointment_v1(
   p_workspace_id uuid,
   p_appointment_id uuid,
