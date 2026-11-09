@@ -1485,7 +1485,7 @@ vehiclesRouter.get("/v1/mileage/bookkeeping-settings", async (c) => {
   if (!workspaceId) throw new ApiError(403, "No active workspace.", "forbidden");
   const { data, error } = await (supabase as any)
     .from("bookkeeping_settings")
-    .select("mileage_enabled,mileage_round_trip,mileage_rate_per_mile,minimum_cash_reserve")
+    .select("mileage_enabled,mileage_round_trip,mileage_rate_per_mile,minimum_cash_reserve,vendor_classification_rules")
     .eq("workspace_id", workspaceId)
     .maybeSingle();
   if (error) throw error;
@@ -1498,14 +1498,20 @@ vehiclesRouter.put("/v1/mileage/bookkeeping-settings", async (c) => {
   const { supabase, user } = await requireAuth(c);
   const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id, hint);
   if (!workspaceId) throw new ApiError(403, "No active workspace.", "forbidden");
-  const { error } = await (supabase as any).from("bookkeeping_settings").upsert({
+  const payload: Record<string, unknown> = {
     workspace_id: workspaceId,
     mileage_enabled: body.mileage_enabled,
     mileage_round_trip: body.mileage_round_trip,
     mileage_rate_per_mile: body.mileage_rate_per_mile,
     minimum_cash_reserve: body.minimum_cash_reserve,
     updated_at: new Date().toISOString(),
-  }, { onConflict: "workspace_id" });
+  };
+  // Standing vendor rules are only written when the caller sends them, so
+  // a mileage/reserve save can never wipe a workspace's configured rules.
+  if (Array.isArray(body.vendor_classification_rules)) {
+    payload.vendor_classification_rules = body.vendor_classification_rules;
+  }
+  const { error } = await (supabase as any).from("bookkeeping_settings").upsert(payload, { onConflict: "workspace_id" });
   if (error) throw error;
   return json({ data: { ok: true } });
 });

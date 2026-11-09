@@ -63,6 +63,40 @@ export function isAccountingOperatingExpense(classification: AccountingClassific
   return OPERATING_EXPENSES.has(classification);
 }
 
+/** Human label for a classification ("parts_tools" -> "Parts Tools"). */
+export function accountingClassificationLabel(classification: string): string {
+  return classification.replaceAll("_", " ").replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+/**
+ * Classifications the Expenses view treats as money spent: the operating
+ * expense set, plus asset purchases, owner draws, and outflows still
+ * awaiting classification. Ordered for display (largest fixed obligations
+ * first, unresolved last). Capital, revenue, refunds and internal
+ * transfers are not spending and never appear in the expense ledger.
+ */
+export const BANK_EXPENSE_CLASSIFICATIONS = [
+  "rent",
+  "vehicle_payment",
+  "insurance",
+  "phone",
+  "inventory",
+  "parts_tools",
+  "marketing",
+  "transport",
+  "bank_fee",
+  "asset_purchase",
+  "owner_draw",
+  "unresolved",
+] as const satisfies readonly AccountingClassification[];
+
+const BANK_EXPENSES = new Set<AccountingClassification>(BANK_EXPENSE_CLASSIFICATIONS);
+
+/** Classifications shown as spending in the bank expense ledger. */
+export function isBankExpenseClassification(classification: AccountingClassification): boolean {
+  return BANK_EXPENSES.has(classification);
+}
+
 function includesAny(value: string, needles: string[]) {
   return needles.some((needle) => value.includes(needle));
 }
