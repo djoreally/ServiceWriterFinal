@@ -11,25 +11,29 @@ import {
   Download,
   Calendar,
   DollarSign,
-  CreditCard,
   Wallet,
-  PiggyBank,
   BarChart3,
   PieChart,
-  Users,
   FileText,
   Receipt,
   Landmark,
+  ScrollText,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { ExpensesTab } from "@/legacy-pages/financials/Expenses";
-import { InvoicesTab } from "@/legacy-pages/financials/Invoices";
+import { StatementsTab } from "@/legacy-pages/financials/Statements";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
-import { CustomerLifetimeValue } from "@/components/marketing/CustomerLifetimeValue";
 import { AccountingWorkspace } from "@/components/accounting/AccountingWorkspace";
-import { getCurrentUserId, fetchSucceededPayments, fetchPendingPayments, fetchAppointmentStatuses, fetchCompletedServices } from "@/application/queries/financials.query";
-import { format, subMonths, subWeeks, parseISO, isValid, startOfMonth, endOfMonth, startOfWeek, addDays } from "date-fns";
-import { toDollars, aggregatePayments } from "@/lib/currencyUtils";
-import { computeLedgerMetrics, groupMonthlyCollectedRevenue, mapServicesToCanonicalLedger } from "@/lib/financial-ledger";
+import { getCurrentUserId } from "@/application/queries/financials.query";
+import { fetchBankTransactions } from "@/application/queries/accounting.query";
+import { fetchInvoiceList } from "@/application/queries/invoices.query";
+import { invoiceBalance, isOwedInvoice } from "@/components/invoices/invoice-ui";
+import {
+  isAccountingOperatingExpense,
+  isAccountingRevenue,
+  summarizeAccounting,
+} from "@/features/accounting/accounting-engine";
+import { format, parseISO, isValid, startOfWeek, subWeeks, addDays } from "date-fns";
 
 interface StatCardProps {
   title: string;
@@ -77,18 +81,26 @@ const StatCard: React.FC<StatCardProps> = ({ title, value, subValue, trend, prog
 );
 
 interface OverviewData {
-  totalRevenue: number;
-  lastMonthRevenue: number;
-  totalTransactions: number;
-  avgTicketSize: number;
-  outstandingPayments: number;
-  completedValue: number;
-  totalPending: number;
-  collectionRate: number;
+  rangeLabel: string;
+  revenue: number;
+  operatingExpenses: number;
+  operatingProfit: number;
+  profitMargin: number | null;
+  netCashChange: number;
+  investorCapital: number;
+  ownerDraws: number;
+  unresolvedAmount: number;
+  unresolvedCount: number;
+  owedTotal: number;
+  owedCount: number;
   monthlyRevenue: { month: string; revenue: number }[];
   revenueHeatmapWeeks: { date: string; revenue: number }[][];
   revenueHeatmapMax: number;
-  paymentMethods: { method: string; amount: number; percentage: number }[];
+  expenseBreakdown: { label: string; amount: number; percentage: number }[];
+}
+
+function classificationLabel(classification: string) {
+  return classification.replaceAll("_", " ").replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
 function useFinancialOverview() {
@@ -101,152 +113,111 @@ function useFinancialOverview() {
       const userId = await getCurrentUserId();
       if (!userId) return;
 
-      const now = new Date();
-      const startOfThisMonth = startOfMonth(now).toISOString();
-      const startOfLastMonth = startOfMonth(subMonths(now, 1)).toISOString();
-      const endOfLastMonth = endOfMonth(subMonths(now, 1)).toISOString();
-      const twelveMonthsAgo = subMonths(now, 12).toISOString();
-
-      // Fetch all collected payments (succeeded + refunded) for last 12 months
-      const [succeededRes, pendingRes, completedServicesRes] = await Promise.all([
-        fetchSucceededPayments(userId, twelveMonthsAgo),
-        fetchPendingPayments(userId),
-        fetchCompletedServices(userId, twelveMonthsAgo),
+      // THE WAREHOUSE — this tab used to run its own payments-only math in
+      // the browser (succeeded payments + pending payments + completed
+      // services), a third version of the truth. It now reads the same
+      // sources the rest of the product reads: the Accounting tab's bank
+      // transactions run through the shared accounting summary engine, and
+      // the whole invoice book under the one Fix-2 owed definition.
+      const [bankRows, invoiceRows] = await Promise.all([
+        fetchBankTransactions(),
+        fetchInvoiceList(userId),
       ]);
 
-      const succeeded = succeededRes.data || [];
-      const pending = pendingRes.data || [];
-      const completedServices = completedServicesRes.data || [];
-
-      // Filter pending: exclude cancelled appointments
-      let pendingTotal = 0;
-      if (pending.length > 0) {
-        const apptIds = pending.map(p => p.appointment_id).filter(Boolean) as string[];
-        const { data: appts } = await fetchAppointmentStatuses(apptIds);
-        const cancelledIds = new Set((appts || []).filter(a => a.status === "cancelled").map(a => a.id));
-        const validPending = pending.filter(p => !p.appointment_id || !cancelledIds.has(p.appointment_id));
-        // Use currency utility for type-safe cents → dollars conversion
-        pendingTotal = aggregatePayments(validPending.map(p => ({ ...p, status: 'pending' })));
+      if (bankRows.length === 0 && invoiceRows.length === 0) {
+        setData(null);
+        return;
       }
 
-      // This month revenue
-      const thisMonthPayments = succeeded.filter(p => p.created_at >= startOfThisMonth);
-      const lastMonthPayments = succeeded.filter(p =>
-        p.created_at >= startOfLastMonth && p.created_at <= endOfLastMonth
+      const summary = summarizeAccounting(
+        bankRows.map((row) => ({ amount: Number(row.amount), classification: row.classification })),
       );
 
-      // Use currency utilities for type-safe aggregation
-      const totalRevenue = aggregatePayments(
-        thisMonthPayments.map((p) => ({
-          ...p,
-          status: p.status || 'succeeded',
-          refund_amount: p.refund_amount || 0,
-        }))
-      );
-      const lastMonthRevenue = aggregatePayments(
-        lastMonthPayments.map((p) => ({
-          ...p,
-          status: p.status || 'succeeded',
-          refund_amount: p.refund_amount || 0,
-        }))
-      );
-      const thisMonthCompleted = completedServices.filter((s) => s.service_date >= startOfThisMonth);
-      const thisMonthSnapshots = mapServicesToCanonicalLedger(thisMonthCompleted);
-      const thisMonthLedger = computeLedgerMetrics({
-        services: thisMonthCompleted,
-        payments: thisMonthPayments.map((p) => ({
-          amount: p.amount,
-          refund_amount: p.refund_amount,
-          status: p.status,
-        })),
+      // The bank data range — every period label on this tab names it.
+      const postedDates = bankRows.map((row) => row.posted_on).filter(Boolean).sort();
+      const rangeLabel = postedDates.length > 0
+        ? `${format(parseISO(postedDates[0]), "MMM d, yyyy")} – ${format(parseISO(postedDates[postedDates.length - 1]), "MMM d, yyyy")}`
+        : "No bank records imported";
+
+      // Monthly operating revenue, from classified bank revenue rows.
+      const monthlyMap = new Map<string, number>();
+      bankRows.forEach((row) => {
+        if (!isAccountingRevenue(row.classification) || Number(row.amount) <= 0 || !row.posted_on) return;
+        const key = row.posted_on.slice(0, 7);
+        monthlyMap.set(key, (monthlyMap.get(key) || 0) + Number(row.amount));
       });
-
-      const totalTransactions = thisMonthPayments.length;
-      const avgTicketSize = totalTransactions > 0 ? totalRevenue / totalTransactions : 0;
-
-      // Collection rate = succeeded / (succeeded + pending)
-      const totalSucceededAllTime = aggregatePayments(
-        succeeded.map((p) => ({
-          ...p,
-          status: p.status || 'succeeded',
-          refund_amount: p.refund_amount || 0,
-        }))
-      );
-      const collectionRate = (totalSucceededAllTime + pendingTotal) > 0
-        ? (totalSucceededAllTime / (totalSucceededAllTime + pendingTotal)) * 100
-        : 100;
-
-      // Monthly revenue for chart (last 12 months)
-      const monthlyRevenue = groupMonthlyCollectedRevenue(
-        succeeded,
-        (isoDate) => {
-          const parsed = isoDate ? parseISO(isoDate) : new Date(NaN);
-          return isValid(parsed) ? format(parsed, "MMM yy") : "Unknown";
-        },
-      );
-
-      // Daily revenue heatmap for last 12 weeks (7-day columns, Sun-Sat)
-      const heatmapStart = startOfWeek(subWeeks(now, 11), { weekStartsOn: 0 });
-      const dailyRevenueMap = new Map<string, number>();
-
-      succeeded.forEach((p) => {
-        if (!p.created_at) return;
-        if (p.created_at < heatmapStart.toISOString()) return;
-        const parsed = parseISO(p.created_at);
-        if (!isValid(parsed)) return;
-        const day = format(parsed, "yyyy-MM-dd");
-        const netAmount = (p.amount || 0) - (p.refund_amount || 0);
-        dailyRevenueMap.set(day, (dailyRevenueMap.get(day) || 0) + toDollars(netAmount));
-      });
-
-      const revenueHeatmapWeeks: { date: string; revenue: number }[][] = Array.from({ length: 12 }, (_, weekIndex) => {
-        const weekStart = addDays(heatmapStart, weekIndex * 7);
-        return Array.from({ length: 7 }, (_, dayIndex) => {
-          const date = format(addDays(weekStart, dayIndex), "yyyy-MM-dd");
+      const monthlyRevenue = Array.from(monthlyMap.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([key, revenue]) => {
+          const parsed = parseISO(`${key}-01`);
           return {
-            date,
-            revenue: dailyRevenueMap.get(date) || 0,
+            month: isValid(parsed) ? format(parsed, "MMM yy") : key,
+            revenue: Math.round(revenue * 100) / 100,
           };
         });
-      });
-      const revenueHeatmapMax = Math.max(
-        ...revenueHeatmapWeeks.flat().map((d) => d.revenue),
-        0
-      );
 
-      // Payment type breakdown (this month) — use payment_type as method label
-      const methodMap = new Map<string, number>();
-      thisMonthPayments.forEach(p => {
-        const raw = p.payment_type || "card";
-        // Normalize labels
-        const label = raw === "booking_deposit" ? "Deposit"
-          : raw === "pay_at_service" ? "Cash / Manual"
-          : raw === "invoice_payment" ? "Invoice"
-          : raw === "balance" ? "Balance"
-          : "Card";
-        // Use currency utility for type-safe conversion
-        const netAmount = (p.amount || 0) - (p.refund_amount || 0);
-        methodMap.set(label, (methodMap.get(label) || 0) + toDollars(netAmount));
+      // Daily revenue heatmap — the latest 12 weeks OF THE BANK RECORDS,
+      // anchored to the newest posted date, not to today.
+      let revenueHeatmapWeeks: { date: string; revenue: number }[][] = [];
+      let revenueHeatmapMax = 0;
+      if (postedDates.length > 0) {
+        const heatmapStart = startOfWeek(subWeeks(parseISO(postedDates[postedDates.length - 1]), 11), { weekStartsOn: 0 });
+        const heatmapStartKey = format(heatmapStart, "yyyy-MM-dd");
+        const dailyRevenueMap = new Map<string, number>();
+        bankRows.forEach((row) => {
+          if (!isAccountingRevenue(row.classification) || Number(row.amount) <= 0 || !row.posted_on) return;
+          if (row.posted_on < heatmapStartKey) return;
+          dailyRevenueMap.set(row.posted_on, (dailyRevenueMap.get(row.posted_on) || 0) + Number(row.amount));
+        });
+        revenueHeatmapWeeks = Array.from({ length: 12 }, (_, weekIndex) => {
+          const weekStart = addDays(heatmapStart, weekIndex * 7);
+          return Array.from({ length: 7 }, (_, dayIndex) => {
+            const date = format(addDays(weekStart, dayIndex), "yyyy-MM-dd");
+            return { date, revenue: dailyRevenueMap.get(date) || 0 };
+          });
+        });
+        revenueHeatmapMax = Math.max(...revenueHeatmapWeeks.flat().map((d) => d.revenue), 0);
+      }
+
+      // Expense breakdown — the top classified operating-expense
+      // categories in the bank records (owner draws and capital excluded
+      // by the same engine sets that produce the summary).
+      const expenseMap = new Map<string, number>();
+      bankRows.forEach((row) => {
+        if (!isAccountingOperatingExpense(row.classification) || Number(row.amount) >= 0) return;
+        expenseMap.set(row.classification, (expenseMap.get(row.classification) || 0) + Math.abs(Number(row.amount)));
       });
-      const paymentMethods = Array.from(methodMap.entries()).map(([method, amount]) => ({
-        method,
-        amount,
-        percentage: totalRevenue > 0 ? Math.round((amount / totalRevenue) * 100) : 0,
-      })).sort((a, b) => b.amount - a.amount);
+      const expenseBreakdownTotal = Array.from(expenseMap.values()).reduce((sum, v) => sum + v, 0);
+      const expenseBreakdown = Array.from(expenseMap.entries())
+        .map(([classification, amount]) => ({
+          label: classificationLabel(classification),
+          amount: Math.round(amount * 100) / 100,
+          percentage: expenseBreakdownTotal > 0 ? Math.round((amount / expenseBreakdownTotal) * 100) : 0,
+        }))
+        .sort((a, b) => b.amount - a.amount)
+        .slice(0, 5);
+
+      // Receivables — the one owed definition over the whole invoice book.
+      const owedRows = invoiceRows.filter(isOwedInvoice);
+      const owedTotal = Math.round(owedRows.reduce((sum, row) => sum + invoiceBalance(row), 0) * 100) / 100;
 
       setData({
-        totalRevenue,
-        lastMonthRevenue,
-        totalTransactions,
-        avgTicketSize,
-        outstandingPayments: thisMonthLedger.outstanding,
-        totalPending: thisMonthSnapshots.filter((s) => s.balance_due > 0).length,
-        collectionRate,
-        completedValue: thisMonthLedger.completedValue,
+        rangeLabel,
+        revenue: summary.revenue,
+        operatingExpenses: summary.operatingExpenses,
+        operatingProfit: summary.operatingProfit,
+        profitMargin: summary.revenue > 0 ? (summary.operatingProfit / summary.revenue) * 100 : null,
+        netCashChange: summary.netCashChange,
+        investorCapital: summary.investorCapital,
+        ownerDraws: summary.ownerDraws,
+        unresolvedAmount: summary.unresolvedAmount,
+        unresolvedCount: summary.unresolvedCount,
+        owedTotal,
+        owedCount: owedRows.length,
         monthlyRevenue,
         revenueHeatmapWeeks,
         revenueHeatmapMax,
-        paymentMethods,
+        expenseBreakdown,
       });
     } catch (err) {
       console.error("Failed to load financial overview:", err);
@@ -283,16 +254,10 @@ const OverviewTab: React.FC = () => {
   if (!data) {
     return (
       <div className="flex items-center justify-center min-h-[400px] text-muted-foreground">
-        No financial data available yet.
+        No financial data available yet. Import a bank statement in the Accounting tab to light up these numbers.
       </div>
     );
   }
-
-  const revenueChangeAmt = data.totalRevenue - data.lastMonthRevenue;
-  const revenueChangePct = data.lastMonthRevenue > 0
-    ? ((revenueChangeAmt / data.lastMonthRevenue) * 100).toFixed(1)
-    : null;
-  const revenuePositive = revenueChangeAmt >= 0;
 
   const maxMonthRevenue = Math.max(...data.monthlyRevenue.map(m => m.revenue), 1);
   const heatmapIntensity = (value: number) => {
@@ -306,35 +271,31 @@ const OverviewTab: React.FC = () => {
 
   return (
     <div className="space-y-8">
-      {/* Key Metrics */}
+      {/* Key Metrics — warehouse totals over the bank data range */}
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
-          title="Collected Cash (Net)"
-          value={formatCurrency(data.totalRevenue)}
-          trend={revenueChangePct !== null ? {
-            value: `${revenuePositive ? "+" : ""}${revenueChangePct}% vs last month`,
-            positive: revenuePositive,
-          } : undefined}
-          subtitle={`Completed Job Value: ${formatCurrency(data.completedValue)}`}
+          title="Operating Revenue"
+          value={formatCurrency(data.revenue)}
+          subtitle={`Bank records: ${data.rangeLabel}`}
           icon={<DollarSign className="h-5 w-5 text-primary" />}
         />
         <StatCard
-          title="Avg. Transaction"
-          value={formatCurrency(data.avgTicketSize)}
-          subtitle={`${data.totalTransactions} transactions this month`}
-          icon={<CreditCard className="h-5 w-5 text-primary" />}
+          title="Operating Expenses"
+          value={formatCurrency(data.operatingExpenses)}
+          subtitle="Classified bank expenses · draws & capital excluded"
+          icon={<TrendingDown className="h-5 w-5 text-primary" />}
+        />
+        <StatCard
+          title="Operating Profit"
+          value={formatCurrency(data.operatingProfit)}
+          subtitle={data.profitMargin !== null ? `${data.profitMargin.toFixed(1)}% of operating revenue` : "Revenue minus operating expenses"}
+          icon={<TrendingUp className="h-5 w-5 text-primary" />}
         />
         <StatCard
           title="Outstanding Balance"
-          value={formatCurrency(data.outstandingPayments)}
-          subtitle={`${data.totalPending} completed jobs with balance due`}
+          value={formatCurrency(data.owedTotal)}
+          subtitle={`${data.owedCount} ${data.owedCount === 1 ? "invoice" : "invoices"} owed`}
           icon={<Wallet className="h-5 w-5 text-primary" />}
-        />
-        <StatCard
-          title="Collection Rate"
-          value={`${data.collectionRate.toFixed(1)}%`}
-          subtitle="Payments collected"
-          icon={<PiggyBank className="h-5 w-5 text-primary" />}
         />
       </section>
 
@@ -342,7 +303,7 @@ const OverviewTab: React.FC = () => {
       <section className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         <Card className="lg:col-span-2">
           <CardHeader className="pb-4">
-            <CardTitle className="text-base font-bold">Monthly Collected Cash (Last 12 Months)</CardTitle>
+            <CardTitle className="text-base font-bold">Monthly Operating Revenue (Bank Records)</CardTitle>
           </CardHeader>
           <CardContent>
             {data.monthlyRevenue.length > 0 ? (
@@ -366,7 +327,7 @@ const OverviewTab: React.FC = () => {
               </div>
             ) : (
               <div className="h-64 flex items-center justify-center text-muted-foreground">
-                No succeeded payments yet — collected cash will appear once payments are processed.
+                No classified revenue yet — revenue appears once bank rows are classified in Accounting.
               </div>
             )}
           </CardContent>
@@ -376,6 +337,7 @@ const OverviewTab: React.FC = () => {
         <Card>
           <CardHeader className="pb-4">
             <CardTitle className="text-base font-bold">Daily Revenue (12 Weeks)</CardTitle>
+            <p className="text-xs text-muted-foreground">Latest 12 weeks in the bank records</p>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
@@ -401,69 +363,67 @@ const OverviewTab: React.FC = () => {
           </CardContent>
         </Card>
 
-        {/* Payment Methods */}
+        {/* Expense Breakdown (was Payment Methods — payments-only math is gone) */}
         <Card>
           <CardHeader className="pb-4">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-base font-bold">Payment Methods</CardTitle>
+              <CardTitle className="text-base font-bold">Top Expense Categories</CardTitle>
               <PieChart className="h-4 w-4 text-muted-foreground" />
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            {data.paymentMethods.length > 0 ? (
-              data.paymentMethods.map((pm) => (
-                <div key={pm.method} className="space-y-1.5">
+            {data.expenseBreakdown.length > 0 ? (
+              data.expenseBreakdown.map((category) => (
+                <div key={category.label} className="space-y-1.5">
                   <div className="flex justify-between text-sm">
-                    <span className="font-medium">{pm.method}</span>
-                    <span className="font-bold">{formatCurrency(pm.amount)} ({pm.percentage}%)</span>
+                    <span className="font-medium">{category.label}</span>
+                    <span className="font-bold">{formatCurrency(category.amount)} ({category.percentage}%)</span>
                   </div>
-                  <Progress value={pm.percentage} className="h-2" />
+                  <Progress value={category.percentage} className="h-2" />
                 </div>
               ))
             ) : (
-              <p className="text-sm text-muted-foreground text-center py-8">No payment method data this month.</p>
+              <p className="text-sm text-muted-foreground text-center py-8">No classified expenses in the bank records yet.</p>
             )}
           </CardContent>
         </Card>
       </section>
 
-      {/* Period Summary — single source of truth, no duplicates */}
+      {/* Bank Record Summary — the warehouse totals, range labeled */}
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="lg:col-span-2">
           <CardHeader className="pb-4">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-base font-bold">Period Comparison</CardTitle>
+              <CardTitle className="text-base font-bold">Bank Record Summary</CardTitle>
               <BarChart3 className="h-4 w-4 text-muted-foreground" />
             </div>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               <div className="p-4 bg-muted/50 rounded-lg">
-                <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">This Month</p>
-                <p className="text-xl font-black mt-1">{formatCurrency(data.totalRevenue)}</p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">collected (net)</p>
+                <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Operating Revenue</p>
+                <p className="text-xl font-black mt-1">{formatCurrency(data.revenue)}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">bank records: {data.rangeLabel}</p>
               </div>
               <div className="p-4 bg-muted/50 rounded-lg">
-                <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Last Month</p>
-                <p className="text-xl font-black mt-1">{formatCurrency(data.lastMonthRevenue)}</p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">collected (net)</p>
+                <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Operating Expenses</p>
+                <p className="text-xl font-black mt-1">{formatCurrency(data.operatingExpenses)}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">classified, profit & loss</p>
               </div>
               <div className="p-4 bg-muted/50 rounded-lg">
-                <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Change</p>
-                <p className={`text-xl font-black mt-1 ${revenuePositive ? "text-emerald-600" : "text-red-500"}`}>
-                  {revenueChangePct !== null ? `${revenuePositive ? "+" : ""}${revenueChangePct}%` : "—"}
-                </p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">vs last month</p>
+                <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Operating Profit</p>
+                <p className="text-xl font-black mt-1">{formatCurrency(data.operatingProfit)}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">revenue minus expenses</p>
               </div>
             </div>
 
             <div className="mt-4 flex items-center justify-between bg-primary/5 p-4 rounded-lg border border-primary/20">
               <div>
-                <p className="text-xs font-bold text-primary uppercase tracking-wider">Trailing 12-Month Revenue</p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">Net collected cash from succeeded payments</p>
+                <p className="text-xs font-bold text-primary uppercase tracking-wider">Net Cash Change</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">All imported bank activity — capital and owner draws move cash but stay out of profit & loss</p>
               </div>
               <p className="text-2xl font-black text-primary">
-                {formatCurrency(data.monthlyRevenue.reduce((sum, m) => sum + m.revenue, 0))}
+                {formatCurrency(data.netCashChange)}
               </p>
             </div>
           </CardContent>
@@ -477,21 +437,25 @@ const OverviewTab: React.FC = () => {
             <div className="text-center py-2">
               <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Awaiting Collection</p>
               <p className="text-3xl font-black mt-2 text-amber-600 dark:text-amber-500">
-                {formatCurrency(data.outstandingPayments)}
+                {formatCurrency(data.owedTotal)}
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                {data.totalPending} {data.totalPending === 1 ? "job" : "jobs"} with balance due
+                {data.owedCount} {data.owedCount === 1 ? "invoice" : "invoices"} owed — issued, partially paid, or past due
               </p>
             </div>
             <div className="mt-4 pt-4 border-t space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">Completed Job Value</span>
-                <span className="text-sm font-bold">{formatCurrency(data.completedValue)}</span>
+                <span className="text-xs text-muted-foreground">Investor Capital In</span>
+                <span className="text-sm font-bold">{formatCurrency(data.investorCapital)}</span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">Collection Rate</span>
-                <span className={`text-sm font-bold ${data.collectionRate >= 90 ? "text-emerald-600" : "text-amber-500"}`}>
-                  {data.collectionRate.toFixed(1)}%
+                <span className="text-xs text-muted-foreground">Owner Draws</span>
+                <span className="text-sm font-bold">{formatCurrency(data.ownerDraws)}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Unclassified Bank Activity</span>
+                <span className="text-sm font-bold">
+                  {formatCurrency(data.unresolvedAmount)} ({data.unresolvedCount})
                 </span>
               </div>
             </div>
@@ -507,17 +471,23 @@ const Financials: React.FC = () => {
     <AppLayout title="Financials">
       <div className="p-8 space-y-6 max-w-[1400px] mx-auto w-full">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4" data-print-hide>
           <div>
             <h2 className="text-3xl font-black tracking-tight">Financial Overview</h2>
             <p className="text-muted-foreground mt-1">
-              Track collected cash, outstanding balances, and customer lifetime value.
+              One warehouse: classified bank records, outstanding invoices, and shareable statements.
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <Button asChild className="flex items-center gap-2">
+              <Link to="/invoices">
+                <FileText className="h-4 w-4" />
+                <span className="text-sm">Invoices</span>
+              </Link>
+            </Button>
             <Button variant="outline" className="flex items-center gap-2">
               <Calendar className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm">This Month</span>
+              <span className="text-sm">Bank Records</span>
             </Button>
             <Button variant="outline" className="flex items-center gap-2">
               <Download className="h-4 w-4" />
@@ -527,14 +497,10 @@ const Financials: React.FC = () => {
         </div>
 
         <Tabs defaultValue="overview" className="space-y-6">
-          <TabsList className="inline-flex">
+          <TabsList className="inline-flex" data-print-hide>
             <TabsTrigger value="overview" className="gap-2">
               <BarChart3 className="h-4 w-4" />
               Overview
-            </TabsTrigger>
-            <TabsTrigger value="invoices" className="gap-2">
-              <FileText className="h-4 w-4" />
-              Invoices
             </TabsTrigger>
             <TabsTrigger value="expenses" className="gap-2">
               <Receipt className="h-4 w-4" />
@@ -544,18 +510,14 @@ const Financials: React.FC = () => {
               <Landmark className="h-4 w-4" />
               Accounting
             </TabsTrigger>
-            <TabsTrigger value="ltv" className="gap-2">
-              <Users className="h-4 w-4" />
-              Customer LTV
+            <TabsTrigger value="statements" className="gap-2">
+              <ScrollText className="h-4 w-4" />
+              Statements
             </TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview">
             <OverviewTab />
-          </TabsContent>
-
-          <TabsContent value="invoices">
-            <InvoicesTab />
           </TabsContent>
 
           <TabsContent value="expenses">
@@ -566,8 +528,8 @@ const Financials: React.FC = () => {
             <AccountingWorkspace />
           </TabsContent>
 
-          <TabsContent value="ltv">
-            <CustomerLifetimeValue />
+          <TabsContent value="statements">
+            <StatementsTab />
           </TabsContent>
         </Tabs>
       </div>

@@ -65,7 +65,6 @@ const buildAllGroups = (terms: Terms): NavGroup[] => [
     { path: "/invoices", label: "Invoices" },
     { path: "/payments", label: "Payments" },
     { path: "/financials", label: "Financials" },
-    { path: "/expenses", label: "Expenses" },
     { path: "/tax-compliance", label: "Tax Compliance" },
   ]},
   { label: "Communications", items: [
