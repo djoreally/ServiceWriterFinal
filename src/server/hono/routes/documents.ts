@@ -1586,8 +1586,20 @@ documentsRouter.post("/v1/document-intake/:id/parse", async (c) => {
   if (docError) throw docError;
   if (!doc) throw new ApiError(404, "Document not found.", "not_found");
 
+  // The parse function authenticates with a job-scoped token minted for
+  // this one document (see src/server/agent-api/job-token.ts); it also
+  // accepts the caller's session JWT, so a minting failure never blocks
+  // the parse — the invoke falls back to the session header alone.
+  let jobToken: string | null = null;
+  try {
+    const { mintTranscriptionJobToken } = await import("@/server/agent-api/job-token");
+    jobToken = mintTranscriptionJobToken({ documentId: id, ownerUserId: user.id });
+  } catch (e) {
+    console.error("[document-intake] job token mint failed", e);
+  }
   const { data, error } = await supabase.functions.invoke("expense-document-parse", {
     body: { documentId: id },
+    ...(jobToken ? { headers: { "x-job-token": jobToken } } : {}),
   });
   if (error) throw error;
   return json({ data });

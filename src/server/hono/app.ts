@@ -18,6 +18,7 @@
  */
 import { Hono } from "hono";
 import { corsHeaders, errorResponse, toError } from "@/server/api";
+import { agentApiRouter } from "./routes/agent-api";
 import { appointmentsRouter } from "./routes/appointments";
 import { billingRouter } from "./routes/billing";
 import { catalogRouter } from "./routes/catalog";
@@ -57,6 +58,7 @@ export function createHonoApp(): Hono {
   // `/v1/appointments/:id` on the router serves `/api/v1/appointments/:id`.
   // ---------------------------------------------------------------------------
   app.route("/", publicBookingRouter);
+  app.route("/", agentApiRouter);
   app.route("/", appointmentsRouter);
   app.route("/", billingRouter);
   app.route("/", catalogRouter);
