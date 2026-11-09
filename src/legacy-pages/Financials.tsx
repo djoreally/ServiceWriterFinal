@@ -21,8 +21,8 @@ import {
   Receipt,
   Landmark,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { ExpensesTab } from "@/legacy-pages/financials/Expenses";
-import { InvoicesTab } from "@/legacy-pages/financials/Invoices";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { CustomerLifetimeValue } from "@/components/marketing/CustomerLifetimeValue";
 import { AccountingWorkspace } from "@/components/accounting/AccountingWorkspace";
@@ -515,6 +515,12 @@ const Financials: React.FC = () => {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <Button asChild className="flex items-center gap-2">
+              <Link to="/invoices">
+                <FileText className="h-4 w-4" />
+                <span className="text-sm">Invoices</span>
+              </Link>
+            </Button>
             <Button variant="outline" className="flex items-center gap-2">
               <Calendar className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm">This Month</span>
@@ -532,10 +538,6 @@ const Financials: React.FC = () => {
               <BarChart3 className="h-4 w-4" />
               Overview
             </TabsTrigger>
-            <TabsTrigger value="invoices" className="gap-2">
-              <FileText className="h-4 w-4" />
-              Invoices
-            </TabsTrigger>
             <TabsTrigger value="expenses" className="gap-2">
               <Receipt className="h-4 w-4" />
               Expenses
@@ -552,10 +554,6 @@ const Financials: React.FC = () => {
 
           <TabsContent value="overview">
             <OverviewTab />
-          </TabsContent>
-
-          <TabsContent value="invoices">
-            <InvoicesTab />
           </TabsContent>
 
           <TabsContent value="expenses">

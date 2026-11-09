@@ -17,7 +17,6 @@ describe("role-by-route authorization contract", () => {
   it.each(roles)("keeps owner-only financial reporting closed (%s)", (role) => {
     const owner = role === "admin" || role === "owner";
     expect(canAccessRoute(role, "/financials")).toBe(owner);
-    expect(canAccessRoute(role, "/expenses")).toBe(owner);
     expect(canAccessRoute(role, "/reports")).toBe(owner);
     expect(canAccessRoute(role, "/tax-compliance")).toBe(owner);
   });

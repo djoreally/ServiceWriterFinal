@@ -90,7 +90,6 @@ const NotFound = lazyRetry(() => import("./legacy-pages/NotFound"));
 const PublicServices = lazyRetry(() => import("./legacy-pages/PublicServices"));
 const Reports = lazyRetry(() => import("./legacy-pages/Reports"));
 const Financials = lazyRetry(() => import("./legacy-pages/Financials"));
-const Expenses = lazyRetry(() => import("./legacy-pages/Expenses"));
 const Operations = lazyRetry(() => import("./legacy-pages/Operations"));
 const TaxCompliance = lazyRetry(() => import("./legacy-pages/TaxCompliance"));
 const TeamJoin = lazyRetry(() => import("./legacy-pages/TeamJoin"));
@@ -272,7 +271,6 @@ export const AppRoutes = () => {
               {/* Financials routes — isolated error boundary */}
               <Route path="/reports" element={<RequireAuth><RequirePlanFeature feature="has_invoicing_full"><RouteErrorBoundary section="Financials"><Reports /></RouteErrorBoundary></RequirePlanFeature></RequireAuth>} />
               <Route path="/financials" element={<RequireAuth><RouteErrorBoundary section="Financials"><Financials /></RouteErrorBoundary></RequireAuth>} />
-              <Route path="/expenses" element={<RequireAuth><RouteErrorBoundary section="Financials"><Expenses /></RouteErrorBoundary></RequireAuth>} />
               <Route path="/operations" element={<RequireAuth><RouteErrorBoundary section="Financials"><Operations /></RouteErrorBoundary></RequireAuth>} />
               <Route path="/tax-compliance" element={<RequireAuth><RouteErrorBoundary section="Financials"><TaxCompliance /></RouteErrorBoundary></RequireAuth>} />
               <Route path="/messages" element={<RequireAuth><RouteErrorBoundary section="Dashboard"><Messages /></RouteErrorBoundary></RequireAuth>} />

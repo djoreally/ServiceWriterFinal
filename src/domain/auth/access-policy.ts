@@ -81,7 +81,6 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
 
   // --- finance ----------------------------------------------------------
   { match: "/financials", roles: ADMIN },
-  { match: "/expenses", roles: ADMIN },
   { match: "/reports", roles: ADMIN },
   { match: "/operations", roles: ADMIN },
   { match: "/tax-compliance", roles: ADMIN },
