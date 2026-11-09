@@ -11,6 +11,7 @@ describe("role-by-route authorization contract", () => {
     expect(canAccessRoute(role, "/vehicle-specs")).toBe(owner);
     expect(canAccessRoute(role, "/invitations")).toBe(owner);
     expect(canAccessRoute(role, "/receptionist")).toBe(owner);
+    expect(canAccessRoute(role, "/agent-integrations")).toBe(owner);
     expect(canAccessRoute(role, "/marketplace/listing")).toBe(owner);
   });
 

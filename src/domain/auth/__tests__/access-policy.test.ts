@@ -18,6 +18,14 @@ describe("access-policy", () => {
       expect(canAccessRoute("technician", "/invoices")).toBe(false);
     });
 
+    it("limits Agent Integrations to owners and admins", () => {
+      expect(canAccessRoute("owner", "/agent-integrations")).toBe(true);
+      expect(canAccessRoute("admin", "/agent-integrations")).toBe(true);
+      for (const role of ["manager", "viewer", "technician", "dispatcher"] as const) {
+        expect(canAccessRoute(role, "/agent-integrations")).toBe(false);
+      }
+    });
+
     it("grants technicians their field app", () => {
       expect(canAccessRoute("technician", "/tech-app")).toBe(true);
       expect(canAccessRoute("dispatcher", "/tech-app")).toBe(false);

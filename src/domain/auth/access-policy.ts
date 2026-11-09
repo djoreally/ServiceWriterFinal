@@ -74,6 +74,8 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
   { match: "/settings", roles: ADMIN },
   { match: "/invitations", roles: ADMIN },
   { match: "/receptionist", roles: ADMIN },
+  // Key management is owner/admin server-side (agent-api.ts ADMIN_ROLES).
+  { match: "/agent-integrations", roles: ADMIN },
   { match: "/vehicle-specs", roles: ADMIN },
   { match: "/admin", roles: ADMIN },
   { match: "/marketplace", roles: ADMIN },
