@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@packages/auth";
 import { useSubscription } from "@/contexts/SubscriptionContext";
 import { safeNextPath } from "@/lib/auth/next-path";
+import { navigatePostLogin } from "@/lib/auth/landing-navigation";
 import { isStartupDecisionPath, resolveStartupRoute } from "@/lib/resolveStartupRoute";
 import { useStartupRoutingStore } from "@/stores/startupRoutingStore";
 import { useTeamRole } from "@/hooks/useTeamRole";
@@ -71,7 +72,11 @@ export function useStartupNavigation({ enabled = true }: UseStartupNavigationOpt
         });
 
     if (destination !== location.pathname) {
-      navigate(destination, { replace: true });
+      // Startup destinations are role landings — App Router pages. A
+      // client-side push from this SPA shell strands the visit on a blank
+      // page; navigatePostLogin hands migrated targets to the document
+      // and keeps SPA-owned targets (e.g. /plans) client-side.
+      navigatePostLogin(navigate, destination);
     }
 
     if (destination === intendedPath && intendedPath) {
