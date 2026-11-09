@@ -116,7 +116,10 @@ export default function MigratedAppLayout({ children }: { children: ReactNode })
     <StrictMode>
       <ErrorBoundary>
         <AuthProvider authStateSource={supabase.auth}>
-          <ThemeProvider defaultTheme="system" storageKey="servicewriter-ui-theme">
+          {/* Light is the product default in both shells (Redesign Phase 0,
+              Gate 1 — see scripts/check-frontend-ui-contract.mjs); a stored
+              per-user preference still wins inside ThemeProvider. */}
+          <ThemeProvider defaultTheme="light" storageKey="servicewriter-ui-theme">
             <QueryClientProvider client={queryClient}>
               <TooltipProvider>
                 <TerminologyProvider>
