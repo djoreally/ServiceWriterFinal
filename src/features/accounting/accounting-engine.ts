@@ -53,6 +53,16 @@ const REVENUE = new Set<AccountingClassification>([
   "revenue_card","revenue_fleet","revenue_cash","revenue_other",
 ]);
 
+/** Classifications that count as operating revenue in the warehouse summary. */
+export function isAccountingRevenue(classification: AccountingClassification): boolean {
+  return REVENUE.has(classification);
+}
+
+/** Classifications that count as operating expenses in the warehouse summary. */
+export function isAccountingOperatingExpense(classification: AccountingClassification): boolean {
+  return OPERATING_EXPENSES.has(classification);
+}
+
 function includesAny(value: string, needles: string[]) {
   return needles.some((needle) => value.includes(needle));
 }

@@ -1,5 +1,7 @@
 import {
   classifyBankTransaction,
+  isAccountingOperatingExpense,
+  isAccountingRevenue,
   normalizeBankRows,
   summarizeAccounting,
 } from "../accounting-engine";
@@ -24,6 +26,19 @@ describe("accounting engine", () => {
       unresolvedAmount: 0,
       unresolvedCount: 0,
     });
+  });
+
+  test("revenue and operating-expense predicates match the summary sets", () => {
+    expect(isAccountingRevenue("revenue_card")).toBe(true);
+    expect(isAccountingRevenue("revenue_fleet")).toBe(true);
+    expect(isAccountingRevenue("merchant_refund")).toBe(false);
+    expect(isAccountingRevenue("investor_capital")).toBe(false);
+    expect(isAccountingOperatingExpense("inventory")).toBe(true);
+    expect(isAccountingOperatingExpense("rent")).toBe(true);
+    expect(isAccountingOperatingExpense("bank_fee")).toBe(true);
+    expect(isAccountingOperatingExpense("owner_draw")).toBe(false);
+    expect(isAccountingOperatingExpense("asset_purchase")).toBe(false);
+    expect(isAccountingOperatingExpense("transfer")).toBe(false);
   });
 
   test("does not guess ATM withdrawals", () => {

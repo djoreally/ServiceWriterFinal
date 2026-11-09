@@ -17,6 +17,7 @@ import { InvoiceDetailDialog } from "@/components/invoices/InvoiceDetailDialog";
 import {
   invoiceBalance,
   isInvoiceOverdue,
+  isOwedInvoice,
   overdueDays,
   InvoiceStatusPill,
   OverduePill,
@@ -34,15 +35,9 @@ const FILTER_LABELS: Record<StatusFilter, string> = {
   paid: "Paid",
 };
 
-// THE one owed definition (Fix 2 — the same rule the dashboard composes
-// server-side): an invoice is owed when it has been sent and still
-// carries a balance. In this page's status vocabulary: sent / partial /
-// past_due with balance > $0.01. Drafts are not owed — nothing has been
-// asked of the customer yet — and paid/void are settled.
-const OWED_STATUSES = new Set(["sent", "partial", "past_due"]);
-function isOwedInvoice(r: InvoiceListRow): boolean {
-  return OWED_STATUSES.has(r.status) && invoiceBalance(r) > 0.01;
-}
+// THE one owed definition lives with the shared invoice money helpers
+// (isOwedInvoice in @/components/invoices/invoice-ui) — this page, the
+// dashboard, and Financials Overview all count owed the same way.
 
 function billToName(r: InvoiceListRow): string {
   return r.bill_to_type === "fleet"
