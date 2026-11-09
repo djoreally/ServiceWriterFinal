@@ -2115,27 +2115,154 @@ crmRouter.get("/v1/crm/marketing/analytics", async (c) => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// GET /v1/crm/marketing/ltv
+//
+// Lifetime value is computed from the canonical ledger, never from stored
+// rollup columns: the customers table carries no lifetime_value /
+// total_services / customer_segment columns, and there is no "services"
+// table — the legacy handler read both (user_id-scoped), which is why this
+// endpoint 500'd. Definitions, one source each:
+//   money      = invoices.amount_paid actually received (void excluded)
+//   job count  = paid invoices per customer (the average-order denominator)
+//   recency    = invoice dates + service_records completion dates
+// Segments and churn risk are derived from recency/value with the plain
+// rules below; they are presentation labels, not stored facts.
+// ---------------------------------------------------------------------------
+const LTV_MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const LTV_DAY_MS = 86_400_000;
+
+function ltvSegment(daysSince: number | null, lifetimeValue: number, paidCount: number): string {
+  if (daysSince === null) return "New";
+  if (daysSince > 365) return "Dormant";
+  if (daysSince > 180) return "At Risk";
+  if (lifetimeValue >= 750 && paidCount >= 3) return "VIP";
+  if (paidCount >= 3) return "Regular";
+  if (paidCount === 1 && daysSince <= 90) return "New";
+  return "Occasional";
+}
+
+function ltvChurnRisk(daysSince: number | null): string {
+  if (daysSince === null) return "low";
+  if (daysSince > 180) return "high";
+  if (daysSince > 90) return "medium";
+  return "low";
+}
+
 crmRouter.get("/v1/crm/marketing/ltv", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const url = new URL(c.req.url);
+  const workspaceId = url.searchParams.get("workspace_id");
+  if (!workspaceId) {
+    return json({ error: { code: "missing_workspace", message: "workspace_id is required" } }, { status: 400 });
+  }
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const db = supabase as any;
-  const twelveMonthsAgo = new Date();
-  twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
-  const twelveMonthsAgoDate = twelveMonthsAgo.toISOString().slice(0, 10);
-  const [customerRes, paymentRes, serviceRes] = await Promise.all([
-    db.from("customers").select("*").eq("user_id", user.id).not("lifetime_value", "is", null).order("lifetime_value", { ascending: false }),
-    db.from("payments").select("created_at, amount, status, appointment_id").eq("user_id", user.id).eq("status", "succeeded").gte("created_at", `${twelveMonthsAgoDate}T00:00:00`).order("created_at"),
-    db.from("services").select("service_date, total_cost").eq("user_id", user.id).eq("status", "completed").gte("service_date", twelveMonthsAgoDate).order("service_date"),
+  const [customerRes, invoiceRes, serviceRes] = await Promise.all([
+    db.from("customers")
+      .select("id, first_name, last_name, company_name, email, phone")
+      .eq("workspace_id", workspaceId)
+      .neq("status", "archived"),
+    db.from("invoices")
+      .select("customer_id, amount_paid, issued_at, created_at")
+      .eq("workspace_id", workspaceId)
+      .neq("status", "void")
+      .gt("amount_paid", 0),
+    db.from("service_records")
+      .select("customer_id, completed_at, created_at")
+      .eq("workspace_id", workspaceId)
+      .neq("status", "voided"),
   ]);
   if (customerRes.error) throw customerRes.error;
-  if (paymentRes.error) throw paymentRes.error;
+  if (invoiceRes.error) throw invoiceRes.error;
   if (serviceRes.error) throw serviceRes.error;
-  return json({
-    data: {
-      customers: customerRes.data ?? [],
-      payments: paymentRes.data ?? [],
-      services: serviceRes.data ?? [],
-    },
-  });
+
+  const money = (value: unknown) => Math.round((Number(value) || 0) * 100) / 100;
+  const dateMs = (value: unknown) => {
+    const parsed = typeof value === "string" ? Date.parse(value) : NaN;
+    return Number.isNaN(parsed) ? null : parsed;
+  };
+
+  type LtvAccumulator = { paidTotal: number; paidCount: number; dates: number[] };
+  const byCustomer = new Map<string, LtvAccumulator>();
+  const accFor = (customerId: string): LtvAccumulator => {
+    let acc = byCustomer.get(customerId);
+    if (!acc) {
+      acc = { paidTotal: 0, paidCount: 0, dates: [] };
+      byCustomer.set(customerId, acc);
+    }
+    return acc;
+  };
+
+  const monthly = new Map<string, { month: string; revenue: number; services: number }>();
+  for (const invoice of (invoiceRes.data ?? []) as Array<Record<string, unknown>>) {
+    if (typeof invoice.customer_id !== "string") continue;
+    const acc = accFor(invoice.customer_id);
+    const amount = Number(invoice.amount_paid) || 0;
+    acc.paidTotal += amount;
+    acc.paidCount += 1;
+    const at = dateMs(invoice.issued_at ?? invoice.created_at);
+    if (at !== null) {
+      acc.dates.push(at);
+      const d = new Date(at);
+      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+      const point = monthly.get(key) ?? {
+        month: `${LTV_MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`,
+        revenue: 0,
+        services: 0,
+      };
+      point.revenue += amount;
+      point.services += 1;
+      monthly.set(key, point);
+    }
+  }
+  for (const record of (serviceRes.data ?? []) as Array<Record<string, unknown>>) {
+    if (typeof record.customer_id !== "string") continue;
+    const at = dateMs(record.completed_at ?? record.created_at);
+    if (at !== null) accFor(record.customer_id).dates.push(at);
+  }
+
+  const now = Date.now();
+  const customers = ((customerRes.data ?? []) as Array<Record<string, unknown>>)
+    .map((customer) => {
+      const acc = byCustomer.get(customer.id as string);
+      if (!acc || acc.paidCount === 0) return null;
+      const lifetimeValue = money(acc.paidTotal);
+      const sortedDates = [...acc.dates].sort((a, b) => a - b);
+      const firstMs = sortedDates[0] ?? null;
+      const lastMs = sortedDates[sortedDates.length - 1] ?? null;
+      const daysSince = lastMs === null ? null : Math.max(0, Math.floor((now - lastMs) / LTV_DAY_MS));
+      const firstName = typeof customer.first_name === "string" ? customer.first_name : null;
+      const lastName = typeof customer.last_name === "string" ? customer.last_name : null;
+      const companyName = typeof customer.company_name === "string" ? customer.company_name : null;
+      return {
+        id: customer.id as string,
+        name: [firstName, lastName].filter(Boolean).join(" ").trim() || companyName || "Customer",
+        first_name: firstName,
+        last_name: lastName,
+        email: typeof customer.email === "string" ? customer.email : null,
+        phone: typeof customer.phone === "string" ? customer.phone : null,
+        lifetime_value: lifetimeValue,
+        total_services: acc.paidCount,
+        average_order_value: money(lifetimeValue / acc.paidCount),
+        first_service_date: firstMs === null ? null : new Date(firstMs).toISOString().slice(0, 10),
+        last_service_date: lastMs === null ? null : new Date(lastMs).toISOString().slice(0, 10),
+        days_since_last_service: daysSince,
+        visit_frequency_days:
+          acc.paidCount > 1 && firstMs !== null && lastMs !== null && lastMs > firstMs
+            ? Math.round((lastMs - firstMs) / LTV_DAY_MS / (acc.paidCount - 1))
+            : null,
+        customer_segment: ltvSegment(daysSince, lifetimeValue, acc.paidCount),
+        churn_risk: ltvChurnRisk(daysSince),
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => row !== null)
+    .sort((a, b) => b.lifetime_value - a.lifetime_value);
+
+  const monthlyRevenue = [...monthly.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([, point]) => ({ month: point.month, revenue: money(point.revenue), services: point.services }));
+
+  return json({ data: { customers, monthlyRevenue } });
 });
 
 crmRouter.patch("/v1/crm/marketing/testimonials/:id", async (c) => {

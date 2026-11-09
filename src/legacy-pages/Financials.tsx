@@ -14,7 +14,6 @@ import {
   Wallet,
   BarChart3,
   PieChart,
-  Users,
   FileText,
   Receipt,
   Landmark,
@@ -24,7 +23,6 @@ import { Link } from "react-router-dom";
 import { ExpensesTab } from "@/legacy-pages/financials/Expenses";
 import { StatementsTab } from "@/legacy-pages/financials/Statements";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
-import { CustomerLifetimeValue } from "@/components/marketing/CustomerLifetimeValue";
 import { AccountingWorkspace } from "@/components/accounting/AccountingWorkspace";
 import { getCurrentUserId } from "@/application/queries/financials.query";
 import { fetchBankTransactions } from "@/application/queries/accounting.query";
@@ -477,7 +475,7 @@ const Financials: React.FC = () => {
           <div>
             <h2 className="text-3xl font-black tracking-tight">Financial Overview</h2>
             <p className="text-muted-foreground mt-1">
-              One warehouse: classified bank records, outstanding invoices, shareable statements, and customer lifetime value.
+              One warehouse: classified bank records, outstanding invoices, and shareable statements.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -516,10 +514,6 @@ const Financials: React.FC = () => {
               <ScrollText className="h-4 w-4" />
               Statements
             </TabsTrigger>
-            <TabsTrigger value="ltv" className="gap-2">
-              <Users className="h-4 w-4" />
-              Customer LTV
-            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview">
@@ -536,10 +530,6 @@ const Financials: React.FC = () => {
 
           <TabsContent value="statements">
             <StatementsTab />
-          </TabsContent>
-
-          <TabsContent value="ltv">
-            <CustomerLifetimeValue />
           </TabsContent>
         </Tabs>
       </div>

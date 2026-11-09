@@ -3,8 +3,8 @@
  */
 
 import { apiClient } from "@/lib/api-client";
-import { format, subMonths, parseISO } from "date-fns";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
 // Realtime subscriptions stay on the browser client (HTTP-only apiClient cannot
 // subscribe); re-exported here so existing imports keep working.
@@ -130,43 +130,17 @@ export interface LTVDataResult {
   monthlyRevenue: MonthlyRevenuePoint[];
 }
 
-interface LTVRawPayment { created_at: string; amount: number | null; status: string; appointment_id: string | null; }
-interface LTVRawService { service_date: string; total_cost: number | null; }
-
 export async function fetchLTVData(): Promise<LTVDataResult> {
   await requireUser();
-  const { data } = await apiClient.get<{ data: { customers: LTVCustomer[]; payments: LTVRawPayment[]; services: LTVRawService[] } }>(
-    "/v1/crm/marketing/ltv",
-  );
-
-  const customers = data.customers ?? [];
-
-  // Build monthly revenue map
-  const monthlyMap = new Map<string, { revenue: number; services: number }>();
-
-  (data.payments ?? []).forEach((p) => {
-    const month = format(parseISO(p.created_at), "MMM yyyy");
-    const existing = monthlyMap.get(month) || { revenue: 0, services: 0 };
-    monthlyMap.set(month, {
-      revenue: existing.revenue + (p.amount || 0) / 100,
-      services: existing.services + 1,
-    });
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) throw new Error("Select a workspace before viewing customer lifetime value.");
+  // The endpoint computes LTV server-side from the canonical ledger (paid
+  // invoices + service records, workspace-scoped); this adapter only carries
+  // the selected workspace and passes the derived shape through.
+  const { data } = await apiClient.get<{ data: LTVDataResult }>("/v1/crm/marketing/ltv", {
+    query: { workspace_id: workspaceId },
   });
-
-  (data.services ?? []).forEach((s) => {
-    const month = format(parseISO(s.service_date), "MMM yyyy");
-    const existing = monthlyMap.get(month) || { revenue: 0, services: 0 };
-    monthlyMap.set(month, {
-      revenue: existing.revenue,
-      services: existing.services + 1,
-    });
-  });
-
-  const monthlyRevenue = Array.from(monthlyMap.entries()).map(
-    ([month, point]) => ({ month, ...point })
-  );
-
-  return { customers, monthlyRevenue };
+  return { customers: data.customers ?? [], monthlyRevenue: data.monthlyRevenue ?? [] };
 }
 
 // ── Additional marketing UI queries (segmentation, abandoned bookings, retention analytics, live visitors) ──
