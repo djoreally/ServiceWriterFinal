@@ -23,6 +23,7 @@ export const MIGRATED_ROUTE_PREFIXES: string[] = [
   "/service-catalog",
   "/appointments",
   "/services",
+  "/website-bookings",
   "/work-orders",
   "/quick-service",
   "/quotes",
