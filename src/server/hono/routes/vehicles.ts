@@ -515,6 +515,52 @@ async function validateTargetReferences(supabase: any, workspaceId: string, targ
   return null;
 }
 
+// Registered before /v1/service-records/:id on purpose: Hono resolves
+// same-router overlaps in registration order, so the :id handler would
+// otherwise capture "page" and fail UUID validation before this handler
+// runs. (The static Next route app/api/v1/service-records/page gets the
+// request past the legacy [id] route file; this ordering gets it past
+// the :id registration here.)
+vehiclesRouter.get("/v1/service-records/page", async (c) => {
+  const url = new URL(c.req.url);
+  const workspaceId = url.searchParams.get("selected_workspace_id");
+  if (!workspaceId) return json({ data: null });
+  const { supabase, user } = await requireAuth(c);
+  const db = supabase as any;
+
+  const [servicesRes, customersRes, vehiclesRes] = await Promise.all([
+    db.from("service_records")
+      .select("id,customer_id,vehicle_id,status,work_performed,customer_notes,internal_notes,metadata,started_at,completed_at,created_at,subtotal,total_amount,technician_id")
+      .eq("workspace_id", workspaceId)
+      .neq("status", "voided")
+      .order("completed_at", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false }),
+    db.from("customers")
+      .select("id,first_name,last_name")
+      .eq("workspace_id", workspaceId)
+      .neq("status", "archived")
+      .order("last_name"),
+    db.from("vehicles")
+      .select("id,customer_id,make,model,year")
+      .eq("workspace_id", workspaceId)
+      .neq("status", "archived")
+      .order("created_at", { ascending: false }),
+  ]);
+
+  if (servicesRes.error) throw servicesRes.error;
+  if (customersRes.error) throw customersRes.error;
+  if (vehiclesRes.error) throw vehiclesRes.error;
+
+  return json({
+    data: {
+      services: servicesRes.data ?? [],
+      customers: customersRes.data ?? [],
+      vehicles: vehiclesRes.data ?? [],
+      userId: user.id,
+    },
+  });
+});
+
 vehiclesRouter.get("/v1/service-records/:id", async (c) => {
   const id = idSchema.parse(c.req.param("id"));
   const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
@@ -6431,46 +6477,6 @@ vehiclesRouter.get("/v1/fleet/reports", async (c) => {
         overdueVehicles: overdue,
       },
       topVehicles: [],
-    },
-  });
-});
-
-vehiclesRouter.get("/v1/service-records/page", async (c) => {
-  const url = new URL(c.req.url);
-  const workspaceId = url.searchParams.get("selected_workspace_id");
-  if (!workspaceId) return json({ data: null });
-  const { supabase, user } = await requireAuth(c);
-  const db = supabase as any;
-
-  const [servicesRes, customersRes, vehiclesRes] = await Promise.all([
-    db.from("service_records")
-      .select("id,customer_id,vehicle_id,status,work_performed,customer_notes,internal_notes,metadata,started_at,completed_at,created_at,subtotal,total_amount,technician_id")
-      .eq("workspace_id", workspaceId)
-      .neq("status", "voided")
-      .order("completed_at", { ascending: false, nullsFirst: false })
-      .order("created_at", { ascending: false }),
-    db.from("customers")
-      .select("id,first_name,last_name")
-      .eq("workspace_id", workspaceId)
-      .neq("status", "archived")
-      .order("last_name"),
-    db.from("vehicles")
-      .select("id,customer_id,make,model,year")
-      .eq("workspace_id", workspaceId)
-      .neq("status", "archived")
-      .order("created_at", { ascending: false }),
-  ]);
-
-  if (servicesRes.error) throw servicesRes.error;
-  if (customersRes.error) throw customersRes.error;
-  if (vehiclesRes.error) throw vehiclesRes.error;
-
-  return json({
-    data: {
-      services: servicesRes.data ?? [],
-      customers: customersRes.data ?? [],
-      vehicles: vehiclesRes.data ?? [],
-      userId: user.id,
     },
   });
 });
