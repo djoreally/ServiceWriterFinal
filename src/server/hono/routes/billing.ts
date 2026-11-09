@@ -2799,12 +2799,33 @@ billingRouter.get("/v1/billing/bank-transactions", async (c) => {
   const { supabase, workspaceId } = await resolveBillingWorkspace(c);
   const limit = Math.min(Math.max(Number(new URL(c.req.url).searchParams.get("limit")) || 1000, 1), 5000);
   const { data, error } = await (supabase.from("bank_transactions") as any)
-    .select("id,posted_on,description_raw,amount,direction,classification,confidence,review_status,notes,created_at")
+    .select("id,posted_on,description_raw,amount,direction,classification,confidence,review_status,notes,created_at,source_data")
     .eq("workspace_id", workspaceId)
     .order("posted_on", { ascending: false })
     .limit(limit);
   if (error) throw error;
-  return json({ data: data ?? [] });
+  // Statements need to split owner draws by the side recorded in the
+  // imported source data. Expose only that derived side, not the full
+  // source payload, which can contain provider identifiers.
+  const rows = (data ?? []).map((row: any) => {
+    const sourceData = row.source_data && typeof row.source_data === "object" ? row.source_data : null;
+    return {
+      id: row.id,
+      posted_on: row.posted_on,
+      description_raw: row.description_raw,
+      amount: row.amount,
+      direction: row.direction,
+      classification: row.classification,
+      confidence: row.confidence,
+      draw_side: sourceData?.draw_side === "owner" || sourceData?.draw_side === "partner"
+        ? sourceData.draw_side
+        : null,
+      review_status: row.review_status,
+      notes: row.notes,
+      created_at: row.created_at,
+    };
+  });
+  return json({ data: rows });
 });
 
 const bankTransactionPatchSchema = z.object({

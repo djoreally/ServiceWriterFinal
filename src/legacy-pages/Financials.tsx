@@ -18,9 +18,11 @@ import {
   FileText,
   Receipt,
   Landmark,
+  ScrollText,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ExpensesTab } from "@/legacy-pages/financials/Expenses";
+import { StatementsTab } from "@/legacy-pages/financials/Statements";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { CustomerLifetimeValue } from "@/components/marketing/CustomerLifetimeValue";
 import { AccountingWorkspace } from "@/components/accounting/AccountingWorkspace";
@@ -471,11 +473,11 @@ const Financials: React.FC = () => {
     <AppLayout title="Financials">
       <div className="p-8 space-y-6 max-w-[1400px] mx-auto w-full">
         {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4" data-print-hide>
           <div>
             <h2 className="text-3xl font-black tracking-tight">Financial Overview</h2>
             <p className="text-muted-foreground mt-1">
-              One warehouse: classified bank records, outstanding invoices, and customer lifetime value.
+              One warehouse: classified bank records, outstanding invoices, shareable statements, and customer lifetime value.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -497,7 +499,7 @@ const Financials: React.FC = () => {
         </div>
 
         <Tabs defaultValue="overview" className="space-y-6">
-          <TabsList className="inline-flex">
+          <TabsList className="inline-flex" data-print-hide>
             <TabsTrigger value="overview" className="gap-2">
               <BarChart3 className="h-4 w-4" />
               Overview
@@ -509,6 +511,10 @@ const Financials: React.FC = () => {
             <TabsTrigger value="accounting" className="gap-2">
               <Landmark className="h-4 w-4" />
               Accounting
+            </TabsTrigger>
+            <TabsTrigger value="statements" className="gap-2">
+              <ScrollText className="h-4 w-4" />
+              Statements
             </TabsTrigger>
             <TabsTrigger value="ltv" className="gap-2">
               <Users className="h-4 w-4" />
@@ -526,6 +532,10 @@ const Financials: React.FC = () => {
 
           <TabsContent value="accounting">
             <AccountingWorkspace />
+          </TabsContent>
+
+          <TabsContent value="statements">
+            <StatementsTab />
           </TabsContent>
 
           <TabsContent value="ltv">

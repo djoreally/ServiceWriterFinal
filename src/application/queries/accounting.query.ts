@@ -15,6 +15,7 @@ export type StoredBankTransaction = {
   direction: "inflow" | "outflow";
   classification: AccountingClassification;
   confidence: number | null;
+  draw_side: "owner" | "partner" | null;
   review_status: "pending" | "approved" | "rejected";
   notes: string | null;
   created_at: string;
