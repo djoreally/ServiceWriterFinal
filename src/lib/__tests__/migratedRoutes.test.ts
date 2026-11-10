@@ -1,5 +1,6 @@
 import {
   getTenantSlugFromHostname,
+  isCrossShellNavigation,
   isMigratedPath,
   isMigratedTenantPath,
 } from "@/lib/migratedRoutes";
@@ -32,6 +33,28 @@ describe("migratedRoutes", () => {
     it("returns false for unmigrated paths", () => {
       expect(isMigratedPath("/login")).toBe(false);
       expect(isMigratedPath("/")).toBe(false);
+    });
+  });
+
+  describe("isCrossShellNavigation", () => {
+    it("crosses from a migrated page to an SPA-only path (the /availability 404)", () => {
+      expect(isCrossShellNavigation("/dashboard", "/availability")).toBe(true);
+      expect(isCrossShellNavigation("/appointments", "/availability")).toBe(true);
+    });
+
+    it("crosses from the SPA to a migrated path (the /service-catalog blank)", () => {
+      expect(isCrossShellNavigation("/availability", "/service-catalog")).toBe(true);
+      expect(isCrossShellNavigation("/", "/dashboard")).toBe(true);
+    });
+
+    it("stays soft within the migrated shell", () => {
+      expect(isCrossShellNavigation("/dashboard", "/invoices")).toBe(false);
+      expect(isCrossShellNavigation("/customers/123", "/customers")).toBe(false);
+    });
+
+    it("stays soft within the SPA shell", () => {
+      expect(isCrossShellNavigation("/availability", "/login")).toBe(false);
+      expect(isCrossShellNavigation("/", "/")).toBe(false);
     });
   });
 

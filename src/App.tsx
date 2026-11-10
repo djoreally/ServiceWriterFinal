@@ -12,6 +12,7 @@ import { TenantProvider, useTenant } from "@/contexts/TenantContext";
 import { SubscriptionProvider } from "@/contexts/SubscriptionContext";
 import { useAuth } from "@packages/auth";
 import { lazyRetry } from "./lib/lazyRetry";
+import { isMigratedPath } from "./lib/migratedRoutes";
 import { LoadingScreen, RequireAuth, RequirePlanFeature, TenantLoadError } from "./components/routing/legacy-guards";
 import { useSeoSync } from "./components/routing/useSeoSync";
 // AIAssistant is lazy-loaded — it is a heavy, always-mounted component that only
@@ -127,6 +128,26 @@ const queryClient = new QueryClient({
 // `RequirePlanFeature` is imported from `./components/routing/legacy-guards`
 // (shared with the App Router shell). Its implementation is unchanged.
 
+/**
+ * Cross-shell guard (SPA side). This BrowserRouter only ever owns SPA-shell
+ * URLs — `ClientOnlyShell` refuses to mount the SPA on migrated paths. If an
+ * in-SPA navigation (a sidebar tap, a `navigate()` call, the post-login
+ * startup bounce) lands on a migrated App Router path, the SPA has nothing
+ * to render for it and the visit strands on a blank page (reproduced live
+ * 2026-11-09: SPA -> /service-catalog painted blank until refresh). Hand the
+ * URL to the document instead: a real load boots the App Router page that
+ * owns it. The reverse direction is handled in `NextRouterAdapter`.
+ */
+function CrossShellNavigationGuard() {
+  const location = useLocation();
+  useEffect(() => {
+    if (isMigratedPath(location.pathname)) {
+      window.location.assign(location.pathname + location.search + location.hash);
+    }
+  }, [location]);
+  return null;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -136,6 +157,7 @@ const App = () => (
             <SubscriptionProvider>
               <TenantProvider>
                 <BrowserRouter>
+                  <CrossShellNavigationGuard />
                   <KeyboardShortcutsProvider>
                     <Suspense fallback={null}>
                       <PostHogIdentity />
