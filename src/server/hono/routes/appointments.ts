@@ -1433,6 +1433,13 @@ async function geocodeAddressServer(address: string): Promise<{ lat: number; lng
 }
 
 // POST /v1/appointments/geocode-backfill — geocode appointments missing coordinates.
+// Production `appointments` has no location_address / location_lat /
+// location_lng / deleted_at columns: the service address is carried in
+// `metadata` (or composed from the linked `locations` row), and geocoded
+// coordinates are written back into `metadata`, where the canonical read
+// models (operational jobs, mileage candidates) look for them. The old
+// query selected and updated the phantom columns, so PostgREST rejected
+// it (42703) and no appointment ever gained coordinates.
 appointmentsRouter.post("/v1/appointments/geocode-backfill", async (c: Context) => {
   const { batch_size } = z.object({ batch_size: z.number().int().min(1).max(100).optional() }).parse(await c.req.json().catch(() => ({})));
   const batchSize = batch_size ?? 25;
@@ -1446,25 +1453,49 @@ appointmentsRouter.post("/v1/appointments/geocode-backfill", async (c: Context) 
   const workspaceIds = ((memberships ?? []) as Array<{ workspace_id: string }>).map((m) => m.workspace_id);
   if (!workspaceIds.length) throw new ApiError(400, "No active workspace", "no_workspace");
   const db = supabase as any;
-  const { data, error, count } = await db
+  const { data, error } = await db
     .from("appointments")
-    .select("id, location_address", { count: "exact" })
+    .select("id, metadata, locations(address_line1,address_line2,city,region,postal_code,latitude,longitude)")
     .in("workspace_id", workspaceIds)
-    .is("location_lat", null)
-    .not("location_address", "is", null)
-    .is("deleted_at", null)
-    .limit(batchSize);
+    .order("starts_at", { ascending: false })
+    .limit(500);
   if (error) throw error;
-  const rows = (data ?? []) as Array<{ id: string; location_address: string }>;
+  type BackfillRow = {
+    id: string;
+    address: string;
+    metadata: Record<string, unknown>;
+  };
+  const pending: BackfillRow[] = [];
+  for (const raw of (data ?? []) as Array<Record<string, unknown>>) {
+    const metadata = object(raw.metadata);
+    const location = one(raw.locations) as Record<string, unknown> | null;
+    const locationAddress = location
+      ? [location.address_line1, location.address_line2, location.city, location.region, location.postal_code]
+          .filter((part) => typeof part === "string" && part.trim() !== "")
+          .join(", ") || null
+      : null;
+    const address =
+      locationAddress ??
+      (typeof metadata.location_address === "string" && metadata.location_address.trim() !== ""
+        ? metadata.location_address
+        : null);
+    if (!address) continue;
+    const hasCoordinates =
+      (location?.latitude != null && location?.longitude != null) ||
+      (metadata.location_lat != null && metadata.location_lng != null);
+    if (hasCoordinates) continue;
+    pending.push({ id: String(raw.id), address, metadata });
+  }
+  const rows = pending.slice(0, batchSize);
   let geocoded = 0;
   let failed = 0;
   for (const row of rows) {
     try {
-      const result = await geocodeAddressServer(String(row.location_address));
+      const result = await geocodeAddressServer(row.address);
       if (!result) { failed += 1; continue; }
       const { error: updateError } = await db
         .from("appointments")
-        .update({ location_lat: result.lat, location_lng: result.lng })
+        .update({ metadata: { ...row.metadata, location_lat: result.lat, location_lng: result.lng } })
         .eq("id", row.id);
       if (updateError) throw updateError;
       geocoded += 1;
@@ -1476,7 +1507,7 @@ appointmentsRouter.post("/v1/appointments/geocode-backfill", async (c: Context) 
     scanned: rows.length,
     geocoded,
     failed,
-    remaining: Math.max(0, (count ?? rows.length) - geocoded),
+    remaining: Math.max(0, pending.length - geocoded),
   });
 });
 

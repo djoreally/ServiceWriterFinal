@@ -1540,6 +1540,79 @@ vehiclesRouter.post("/v1/vin/plate-lookup", async (c) => {
 // Mileage (workspace-scoped)
 // ---------------------------------------------------------------------------
 
+type MileageCandidateLocation = {
+  address_line1?: unknown;
+  address_line2?: unknown;
+  city?: unknown;
+  region?: unknown;
+  postal_code?: unknown;
+  latitude?: unknown;
+  longitude?: unknown;
+};
+
+function optionalMileageString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() !== "" ? value : null;
+}
+
+function optionalMileageNumber(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Resolve one appointments row into a mileage candidate, or null when the
+ * job has no usable coordinates anywhere.
+ *
+ * Production `appointments` has no location_address / location_lat /
+ * location_lng columns: the service address is a compatibility value the
+ * write paths carry in `metadata`, and the canonical location lives on
+ * the linked `locations` row. Selecting the phantom columns made
+ * PostgREST reject the query outright (42703), so mileage sync never
+ * returned a single candidate. Resolution mirrors the operational-jobs
+ * read model: the locations row wins for address and coordinates, and
+ * metadata is the fallback for both. A completed job whose coordinates
+ * exist in neither place is not a mileage candidate yet — the same
+ * contract the old NOT NULL filters expressed — so it is skipped
+ * instead of failing the whole sync.
+ */
+function resolveMileageCandidate(row: Record<string, unknown>): {
+  id: string;
+  starts_at: string;
+  location_address: string | null;
+  location_lat: number;
+  location_lng: number;
+  status: string;
+} | null {
+  const metadata =
+    row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+      ? (row.metadata as Record<string, unknown>)
+      : {};
+  const embedded = row.locations as MileageCandidateLocation | MileageCandidateLocation[] | null | undefined;
+  const location: MileageCandidateLocation | null = Array.isArray(embedded)
+    ? embedded[0] ?? null
+    : embedded ?? null;
+  const locationAddress = location
+    ? [location.address_line1, location.address_line2, location.city, location.region, location.postal_code]
+        .map((part) => optionalMileageString(part))
+        .filter(Boolean)
+        .join(", ") || null
+    : null;
+  const locationLat =
+    location?.latitude != null ? optionalMileageNumber(location.latitude) : optionalMileageNumber(metadata.location_lat);
+  const locationLng =
+    location?.longitude != null ? optionalMileageNumber(location.longitude) : optionalMileageNumber(metadata.location_lng);
+  if (locationLat == null || locationLng == null) return null;
+  return {
+    id: String(row.id),
+    starts_at: String(row.starts_at),
+    location_address: locationAddress ?? optionalMileageString(metadata.location_address),
+    location_lat: locationLat,
+    location_lng: locationLng,
+    status: String(row.status),
+  };
+}
+
 vehiclesRouter.get("/v1/mileage/candidates", async (c) => {
   const url = new URL(c.req.url);
   const hint = url.searchParams.get("selected_workspace_id");
@@ -1548,15 +1621,16 @@ vehiclesRouter.get("/v1/mileage/candidates", async (c) => {
   if (!workspaceId) throw new ApiError(403, "No active workspace.", "forbidden");
   const { data, error } = await (supabase as any)
     .from("appointments")
-    .select("id,starts_at,location_address,location_lat,location_lng,status")
+    .select("id,starts_at,status,metadata,locations(address_line1,address_line2,city,region,postal_code,latitude,longitude)")
     .eq("workspace_id", workspaceId)
     .eq("status", "completed")
-    .not("location_lat", "is", null)
-    .not("location_lng", "is", null)
     .order("starts_at", { ascending: false })
     .limit(500);
   if (error) throw error;
-  return json({ data: data ?? [] });
+  const candidates = ((data ?? []) as Array<Record<string, unknown>>)
+    .map((row) => resolveMileageCandidate(row))
+    .filter((candidate) => candidate !== null);
+  return json({ data: candidates });
 });
 
 vehiclesRouter.get("/v1/mileage/trips", async (c) => {
