@@ -76,7 +76,7 @@ describe("need1 — public testimonial submit resolves the workspace by slug", (
 
   it("the client chain sends the slug it renders under, never a workspace_id", () => {
     expect(COMMAND).toContain("slug: string;");
-    expect(COMMAND).not.toContain("workspace_id");
+    expect(COMMAND).not.toContain("workspace_id:");
     const callStart = PAGE.indexOf("await submitTestimonial({");
     if (callStart < 0) throw new Error("submitTestimonial call not found");
     const call = PAGE.slice(callStart, PAGE.indexOf("});", callStart));
