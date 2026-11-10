@@ -65,10 +65,24 @@ interface PaymentReceiptRow {
 }
 
 /**
+ * A cash-closeout waiver row: the manual-payment flow records the waived
+ * difference as its own succeeded payment row (metadata.source =
+ * "manual_adjustment") so the reconcile trigger can settle the invoice,
+ * but no cash moved on it. Collected means succeeded payments that are
+ * NOT adjustments, so waiver rows are not cash receipts and never enter
+ * this set. Null-tolerant: rows without metadata, or metadata without a
+ * `source` key, are ordinary receipts and stay.
+ */
+function isManualAdjustment(metadata: Record<string, unknown>): boolean {
+  return metadata.source === "manual_adjustment";
+}
+
+/**
  * Canonical replacement for the retired cash_collection_receipts_v1 view.
  * Settled cash is periodized by payments.paid_at and always scoped to the
  * caller's workspace (resolved server-side; the workspaceId param is
- * compatibility-only).
+ * compatibility-only). Adjustment rows (cash-closeout waivers) are
+ * excluded — see isManualAdjustment.
  */
 export async function fetchCanonicalCashReceipts(params: {
   workspaceId: string;
@@ -107,6 +121,9 @@ export async function fetchCanonicalCashReceipts(params: {
             metadata,
           };
         })
+        // Waivers are not receipts: a succeeded adjustment row records a
+        // discount the shop ate, not money collected.
+        .filter((receipt) => !isManualAdjustment(receipt.metadata))
         // Drop receipts with no usable collection date — they cannot be
         // bucketed by day and would crash date formatting downstream.
         .filter((receipt) => !!receipt.collected_at),
