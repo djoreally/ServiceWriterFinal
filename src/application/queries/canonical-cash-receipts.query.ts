@@ -4,7 +4,15 @@ export interface CanonicalCashReceipt {
   payment_record_id: string;
   payment_status: string;
   payment_provider: string | null;
+  /**
+   * The receipt's effective date — the instant every collected figure
+   * buckets on. When the payment links to an appointment (through the
+   * invoice chain), this is the JOB's service date; otherwise it is the
+   * paid date. Collected counts on the job's date, not the typing date.
+   */
   collected_at: string;
+  /** The linked appointment's starts_at when the chain resolved, else null. */
+  service_date: string | null;
   collected_cents: number;
   refunded_cents: number;
   net_collected_cents: number;
@@ -62,6 +70,9 @@ interface PaymentReceiptRow {
   paid_at: string | null;
   created_at: string;
   metadata: Record<string, unknown> | null;
+  invoice_id?: string | null;
+  /** Resolved server-side via invoice → work order → appointment. */
+  appointment_starts_at?: string | null;
 }
 
 /**
@@ -79,10 +90,16 @@ function isManualAdjustment(metadata: Record<string, unknown>): boolean {
 
 /**
  * Canonical replacement for the retired cash_collection_receipts_v1 view.
- * Settled cash is periodized by payments.paid_at and always scoped to the
- * caller's workspace (resolved server-side; the workspaceId param is
- * compatibility-only). Adjustment rows (cash-closeout waivers) are
- * excluded — see isManualAdjustment.
+ * Settled cash is periodized by its EFFECTIVE date — the linked
+ * appointment's service date when the payment resolves through the
+ * invoice chain (resolved and windowed server-side by
+ * GET /v1/billing/cash-receipts), otherwise payments.paid_at — and always
+ * scoped to the caller's workspace (the workspaceId param is
+ * compatibility-only). Because collected_at is an instant, consumers
+ * bucket it against workspace-timezone day boundaries exactly as they
+ * did when it was the paid instant: the job's day in the business
+ * timezone is the day that counts. Adjustment rows (cash-closeout
+ * waivers) are excluded — see isManualAdjustment.
  */
 export async function fetchCanonicalCashReceipts(params: {
   workspaceId: string;
@@ -106,12 +123,18 @@ export async function fetchCanonicalCashReceipts(params: {
           const refundedCents = dollarsToCents(refundedDollars);
           const paymentType = metadata.payment_type ?? metadata.payment_method ?? row.provider ?? null;
           const dataOrigin = metadata.data_origin ?? metadata.origin ?? null;
+          const serviceDate = typeof row.appointment_starts_at === "string" && row.appointment_starts_at
+            ? row.appointment_starts_at
+            : null;
 
           return {
             payment_record_id: row.id,
             payment_status: row.status,
             payment_provider: row.provider,
-            collected_at: row.paid_at ?? row.created_at,
+            // The job's date when the payment links to an appointment;
+            // the paid/recorded date when no appointment link resolves.
+            collected_at: serviceDate ?? row.paid_at ?? row.created_at,
+            service_date: serviceDate,
             collected_cents: collectedCents,
             refunded_cents: refundedCents,
             net_collected_cents: Math.max(collectedCents - refundedCents, 0),
