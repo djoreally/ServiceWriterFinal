@@ -1431,11 +1431,30 @@ vehiclesRouter.put("/v1/admin/carfax/settings", async (c) => {
   // platform_settings is global; its write policies are platform-admin
   // only, so the write is gated here as well (NEED-4, Step 3 spec).
   const { supabase } = await requirePlatformAdmin(c);
-  const { error } = await (supabase as any)
+  const db = supabase as any;
+  // The settings row may not exist yet: an UPDATE alone would touch
+  // zero rows and still report success while persisting nothing
+  // (admin examination, 2026-11-10). Select-then-write: insert the row
+  // on first save, update it after. No unique constraint on key is
+  // assumed.
+  const { data: existing, error: readError } = await db
     .from("platform_settings")
-    .update({ value: body.config as never })
-    .eq("key", "carfax");
-  if (error) throw error;
+    .select("id")
+    .eq("key", "carfax")
+    .maybeSingle();
+  if (readError) throw readError;
+  if (existing?.id) {
+    const { error } = await db
+      .from("platform_settings")
+      .update({ value: body.config as never })
+      .eq("id", existing.id);
+    if (error) throw error;
+  } else {
+    const { error } = await db
+      .from("platform_settings")
+      .insert({ key: "carfax", value: body.config as never });
+    if (error) throw error;
+  }
   return json({ data: { ok: true } });
 });
 

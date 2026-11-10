@@ -1386,8 +1386,8 @@ platformRouter.get("/v1/platform/admin/organization-360", async (c) => {
   const { supabase } = await requirePlatformAdmin(c);
   const db = supabase as any;
 
-  async function countRows(table: string, userId: string): Promise<number> {
-    const { count, error } = await db.from(table).select("id", { count: "exact", head: true }).eq("user_id", userId);
+  async function countRows(table: string, workspaceId: string): Promise<number> {
+    const { count, error } = await db.from(table).select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId);
     if (error) throw error;
     return count ?? 0;
   }
@@ -1401,10 +1401,12 @@ platformRouter.get("/v1/platform/admin/organization-360", async (c) => {
   if (error) throw error;
   if (!profiles?.length) return json([]);
 
-  // business_profiles is workspace-keyed after the Step 3 translation.
-  // The per-organization counts below still read user_id-keyed tables
-  // (customers, vehicles, appointments, invoices — outside this step), so
-  // each workspace's owner is resolved once, in bulk, via workspace_members.
+  // business_profiles is workspace-keyed after the Step 3 translation,
+  // and the per-organization counts below are workspace-keyed too
+  // (customers, vehicles, appointments, invoices, inventory_items all
+  // carry workspace_id in production). The owner is still resolved once,
+  // in bulk, via workspace_members — but only for the team_user_links
+  // employee count, which is owner-keyed by design.
   const profileWorkspaceIds = (profiles as Array<{ workspace_id: string }>).map((p) => p.workspace_id);
   const { data: ownerRows, error: ownerError } = await db
     .from("workspace_members")
@@ -1440,23 +1442,23 @@ platformRouter.get("/v1/platform/admin/organization-360", async (c) => {
         firstCompletedRes,
         subscriptionRes,
       ] = await Promise.all([
-        countRows("customers", userId),
-        countRows("vehicles", userId),
-        countRows("appointments", userId),
+        countRows("customers", workspaceId),
+        countRows("vehicles", workspaceId),
+        countRows("appointments", workspaceId),
         (async () => {
           const { count, error: completedError } = await db
             .from("appointments")
             .select("id", { count: "exact", head: true })
-            .eq("user_id", userId)
+            .eq("workspace_id", workspaceId)
             .eq("status", "completed");
           if (completedError) throw completedError;
           return completedError ? 0 : (count ?? 0);
         })(),
-        countRows("inventory_items", userId),
+        countRows("inventory_items", workspaceId),
         db.from("team_user_links").select("id", { count: "exact", head: true }).eq("owner_user_id", userId),
-        db.from("invoices").select("total, amount_paid").eq("user_id", userId).is("deleted_at", null),
-        db.from("appointments").select("updated_at").eq("user_id", userId).order("updated_at", { ascending: false }).limit(1).maybeSingle(),
-        db.from("appointments").select("updated_at, actual_end_time").eq("user_id", userId).eq("status", "completed").order("updated_at", { ascending: true }).limit(1).maybeSingle(),
+        db.from("invoices").select("total, amount_paid").eq("workspace_id", workspaceId),
+        db.from("appointments").select("updated_at").eq("workspace_id", workspaceId).order("updated_at", { ascending: false }).limit(1).maybeSingle(),
+        db.from("appointments").select("updated_at").eq("workspace_id", workspaceId).eq("status", "completed").order("updated_at", { ascending: true }).limit(1).maybeSingle(),
         db.from("business_subscriptions").select("plan_id, status").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
       ]);
 
@@ -1492,7 +1494,7 @@ platformRouter.get("/v1/platform/admin/organization-360", async (c) => {
       const retentionRate = appointmentCount > 0
         ? Math.round((completedAppointmentCount / appointmentCount) * 100)
         : 0;
-      const firstValueAt = firstCompletedRes.data?.actual_end_time ?? firstCompletedRes.data?.updated_at ?? null;
+      const firstValueAt = firstCompletedRes.data?.updated_at ?? null;
       const firstValueLabel = org360FormatFirstValue(profile.created_at, firstValueAt);
       const lastActiveAt = lastAppointmentRes.data?.updated_at ?? profile.created_at ?? null;
       const featureUsage: Organization360FeatureUsage = {
