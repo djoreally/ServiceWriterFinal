@@ -2391,25 +2391,14 @@ workOrdersRouter.delete("/v1/tech-os/technicians/:id", async (c) => {
 // ---------------------------------------------------------------------------
 // Service records search for linking — GET /v1/service-records/search-for-linking
 //
-// The CRM ↔ Assets linkage searches service *records* (with customer names),
-// not the service catalog. Returns the raw bundle; the caller filters by
-// term client-side.
+// MOVED to vehicles.ts (registered on vehiclesRouter, before
+// /v1/service-records/:id). It lived here originally, but app.ts mounts
+// workOrdersRouter after vehiclesRouter, whose :id handler captured
+// "search-for-linking" and failed UUID validation before this handler
+// could run — the same shadowing the /page route escaped. Do not
+// re-register it here; a second copy would sit behind the :id handler
+// and never serve.
 // ---------------------------------------------------------------------------
-
-workOrdersRouter.get("/v1/service-records/search-for-linking", async (c) => {
-  const { supabase } = await requireAuth(c);
-  const params = new URL(c.req.url).searchParams;
-  const workspaceId = z.string().uuid().parse(params.get("workspace_id") ?? "");
-  const limit = Math.min(Math.max(Number(params.get("limit") ?? 25) || 25, 1), 200);
-  const { data, error } = await (supabase.from("service_records") as any)
-    .select("id,customer_id,work_performed,metadata,completed_at,created_at,customers(first_name,last_name,company_name)")
-    .eq("workspace_id", workspaceId)
-    .neq("status", "voided")
-    .order("completed_at", { ascending: false, nullsFirst: false })
-    .limit(Math.max(limit * 4, limit));
-  if (error) throw error;
-  return json({ data: data ?? [] });
-});
 
 // ---------------------------------------------------------------------------
 // Shop pricing operational settings — GET/PUT

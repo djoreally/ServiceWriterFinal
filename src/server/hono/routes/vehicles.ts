@@ -561,6 +561,37 @@ vehiclesRouter.get("/v1/service-records/page", async (c) => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Service records search for linking — GET /v1/service-records/search-for-linking
+//
+// The CRM ↔ Assets linkage searches service *records* (with customer names),
+// not the service catalog. Returns the raw bundle; the caller filters by
+// term client-side.
+//
+// Registered here, before /v1/service-records/:id, on purpose — the same
+// shadowing the /page handler above escaped. This route used to live on
+// workOrdersRouter, which app.ts mounts after this router, so the :id
+// handler captured "search-for-linking" and failed UUID validation before
+// the search could run. (The static Next route
+// app/api/v1/service-records/search-for-linking gets the request past the
+// legacy [id] route file; this ordering gets it past the :id registration
+// here.)
+// ---------------------------------------------------------------------------
+vehiclesRouter.get("/v1/service-records/search-for-linking", async (c) => {
+  const { supabase } = await requireAuth(c);
+  const params = new URL(c.req.url).searchParams;
+  const workspaceId = z.string().uuid().parse(params.get("workspace_id") ?? "");
+  const limit = Math.min(Math.max(Number(params.get("limit") ?? 25) || 25, 1), 200);
+  const { data, error } = await (supabase.from("service_records") as any)
+    .select("id,customer_id,work_performed,metadata,completed_at,created_at,customers(first_name,last_name,company_name)")
+    .eq("workspace_id", workspaceId)
+    .neq("status", "voided")
+    .order("completed_at", { ascending: false, nullsFirst: false })
+    .limit(Math.max(limit * 4, limit));
+  if (error) throw error;
+  return json({ data: data ?? [] });
+});
+
 vehiclesRouter.get("/v1/service-records/:id", async (c) => {
   const id = idSchema.parse(c.req.param("id"));
   const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
