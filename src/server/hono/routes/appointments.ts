@@ -68,7 +68,15 @@ appointmentsRouter.get("/v1/appointments", async (c: Context) => {
   if (!workspaceId) throw new Error("workspace_id is required");
   const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const { limit, offset } = paginationSchema.parse(Object.fromEntries(url.searchParams));
-  const { data, error } = await supabase.from("appointments").select("*,customers(id,first_name,last_name,email,phone),vehicles(id,customer_id,year,make,model,vin,license_plate,plate_region,color,mileage,notes),locations(id,name)").eq("workspace_id", workspaceId).order("starts_at").range(offset, offset + limit - 1);
+  // Optional starts_at window (Fix 3) — mirrors the legacy shadow route
+  // (app/api/v1/appointments/route.ts), which production actually serves;
+  // keep the two handlers in step. Absent params = historical behavior.
+  const from = url.searchParams.get("from");
+  const to = url.searchParams.get("to");
+  let listQuery = supabase.from("appointments").select("*,customers(id,first_name,last_name,email,phone),vehicles(id,customer_id,year,make,model,vin,license_plate,plate_region,color,mileage,notes),locations(id,name)").eq("workspace_id", workspaceId);
+  if (from) listQuery = listQuery.gte("starts_at", from);
+  if (to) listQuery = listQuery.lt("starts_at", to);
+  const { data, error } = await listQuery.order("starts_at").range(offset, offset + limit - 1);
   if (error) throw error;
   const rows = data ?? [];
   // P3: rows also carry the composed job money from the shared
@@ -248,12 +256,22 @@ appointmentsRouter.get("/v1/appointments/scheduling-settings", async (c: Context
 // GET /v1/appointments/service-lines — canonical appointment_items rows
 // projected to the legacy client shape (appointment_id, vehicle_id, price, quantity).
 appointmentsRouter.get("/v1/appointments/service-lines", async (c: Context) => {
-  const { supabase, workspaceId } = await requireCallerWorkspace(c, selectedWorkspaceHint(new URL(c.req.url)));
+  const url = new URL(c.req.url);
+  const { supabase, workspaceId } = await requireCallerWorkspace(c, selectedWorkspaceHint(url));
   const db = supabase as any;
-  const { data, error } = await db
+  // Optional scoping (Fix 3): the Appointments page asks for the lines of
+  // the appointments in its window instead of every line in the workspace.
+  // A plain column filter — no JSON-path matching. Absent = all lines.
+  const idsParam = url.searchParams.get("appointment_ids");
+  const appointmentIds = idsParam
+    ? idsParam.split(",").map((id) => id.trim()).filter(Boolean).slice(0, 500)
+    : [];
+  let linesQuery = db
     .from("appointment_items")
     .select("appointment_id,quantity,unit_price,metadata")
     .eq("workspace_id", workspaceId);
+  if (appointmentIds.length > 0) linesQuery = linesQuery.in("appointment_id", appointmentIds);
+  const { data, error } = await linesQuery;
   if (error) throw error;
   const rows = ((data ?? []) as Array<{
     appointment_id: string;

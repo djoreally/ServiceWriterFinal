@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
 import { useRealtimeWorkflow } from "@/hooks/useRealtimeWorkflow";
@@ -18,7 +18,9 @@ import type { AppointmentFormState, CustomerFormData, VehicleFormData } from "@/
 import { AppointmentForm } from "@/components/appointments/AppointmentForm";
 // ENTERPRISE: Booking confirmation emails are now server-side via DB triggers → email_queue → transactional-email-worker
 import {
-  fetchAppointmentsPageData,
+  fetchAppointmentsWindowData,
+  fetchAppointmentDirectories,
+  mapWindowAppointments,
   type AppointmentWithSource,
 } from "@/application/queries";
 import {
@@ -96,6 +98,16 @@ const AppointmentsPage = () => {
     : null;
   const [editingAppointment, setEditingAppointment] = useState<AppointmentDraft | null>(null);
   const [currentDate, setCurrentDate] = useState(new Date());
+  // The fetch window follows the view (Fix 3): fetchData reads the
+  // current view through this ref so its identity stays stable, and a
+  // separate effect refetches when the view or the anchor date changes.
+  const viewRef = useRef({ viewMode, currentDate });
+  useEffect(() => {
+    viewRef.current = { viewMode, currentDate };
+  }, [viewMode, currentDate]);
+  // Incremented per fetchData run; a stale run's directory phase must
+  // not overwrite a newer run's rows (Fix 3 two-phase load).
+  const loadSeqRef = useRef(0);
   const [pendingOutboxCount, setPendingOutboxCount] = useState(0);
   const [deadLetterCount, setDeadLetterCount] = useState(0);
   const [syncingOutbox, setSyncingOutbox] = useState(false);
@@ -132,14 +144,19 @@ const AppointmentsPage = () => {
       setVehiclesError(null);
       setCatalogError(null);
 
-      const data = await fetchAppointmentsPageData();
+      const loadSeq = ++loadSeqRef.current;
+      const data = await fetchAppointmentsWindowData({
+        viewMode: viewRef.current.viewMode,
+        anchor: viewRef.current.currentDate,
+      });
+      if (loadSeq !== loadSeqRef.current) return;
 
       // Store userId for realtime filtering
       setUserId(data.userId);
 
+      // Phase 1 (Fix 3): the window paints from the rows' joined
+      // relations — the full directories are not on the critical path.
       setAppointments(data.appointments);
-      setCustomers(data.customers);
-      setVehicles(data.vehicles);
       setServiceCatalog(data.serviceCatalog);
       setScheduleResources(data.scheduleVans.map((van) => ({ id: van.id, name: van.name })));
       setBusinessHours(data.businessHours);
@@ -147,10 +164,29 @@ const AppointmentsPage = () => {
       setProviderEmail(data.providerEmail);
 
       setAppointmentsLoading(false);
-      setCustomersLoading(false);
-      setVehiclesLoading(false);
       setCatalogLoading(false);
       setLoading(false);
+
+      // Phase 2: the directories land, the rows re-map with the full
+      // records, and the form's pickers fill in. A stale load (a newer
+      // fetch started meanwhile) never applies its directories.
+      const directories = await fetchAppointmentDirectories().catch(() => null);
+      if (!directories || loadSeq !== loadSeqRef.current) {
+        setCustomersLoading(false);
+        setVehiclesLoading(false);
+        return;
+      }
+      setCustomers(directories.customers);
+      setVehicles(directories.vehicles);
+      setAppointments(mapWindowAppointments(
+        data.rawRows,
+        data.serviceLines,
+        directories.customers,
+        directories.vehicles,
+        data.timezone,
+      ));
+      setCustomersLoading(false);
+      setVehiclesLoading(false);
 
       // After data loads, open prefill dialog with full customer + vehicle info
       if (prefillStateRef) {
@@ -160,8 +196,8 @@ const AppointmentsPage = () => {
           setDialogOpen(true);
           return;
         }
-        const allCustomers = data.customers ?? [];
-        const allVehicles = data.vehicles ?? [];
+        const allCustomers = directories.customers ?? [];
+        const allVehicles = directories.vehicles ?? [];
       const customer = prefillStateRef.prefillCustomerId
         ? allCustomers.find(c => c.id === prefillStateRef.prefillCustomerId)
         : undefined;
@@ -221,6 +257,18 @@ const AppointmentsPage = () => {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Refetch when the view or the anchor date changes — the window moved,
+  // so the loaded rows no longer cover what the view shows (Fix 3). The
+  // mount load above covers the first render.
+  const viewChangeSeenRef = useRef(false);
+  useEffect(() => {
+    if (!viewChangeSeenRef.current) {
+      viewChangeSeenRef.current = true;
+      return;
+    }
+    void fetchData();
+  }, [viewMode, currentDate, fetchData]);
 
   const handleSelectAppointment = (appointment: Appointment) => {
     setTraySelection(appointment);

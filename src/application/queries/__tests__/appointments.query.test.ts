@@ -21,8 +21,13 @@ jest.mock("@/lib/nextApiClient", () => ({
   },
 }));
 
+jest.mock("@/lib/api-client", () => ({
+  apiClient: { get: jest.fn() },
+}));
+
 import { supabase } from "@/integrations/supabase/client";
 import { nextApi } from "@/lib/nextApiClient";
+import { apiClient } from "@/lib/api-client";
 import { fetchAppointmentsPageData } from "@/application/queries/appointments.query";
 
 interface MockQueryResult<T> {
@@ -73,6 +78,13 @@ describe("fetchAppointmentsPageData retail boundary", () => {
   beforeEach(() => {
     mockGetUser.mockReset();
     mockFrom.mockReset();
+    (apiClient.get as jest.Mock).mockReset();
+    (apiClient.get as jest.Mock).mockImplementation(async (path: string) => {
+      if (path === "/v1/appointments/workspace-context") {
+        return { data: { timezone: "America/New_York" } };
+      }
+      return { data: [] };
+    });
   });
 
   it("excludes fleet_work_order source rows from retail appointments query", async () => {
@@ -113,7 +125,51 @@ describe("fetchAppointmentsPageData retail boundary", () => {
 
     const result = await fetchAppointmentsPageData();
 
-    expect(nextApi.appointments.list).toHaveBeenCalledWith("workspace-1");
+    expect(nextApi.appointments.list).toHaveBeenCalledWith("workspace-1", undefined);
     expect(result.appointments.map((a) => a.id)).toEqual(["a1"]);
+  });
+
+  it("fetches only the view's window and scopes service-lines to it (Fix 3)", async () => {
+    mockGetUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
+    (nextApi.appointments.list as jest.Mock).mockResolvedValue({
+      data: [
+        { id: "a1", source: "manual", starts_at: "2026-11-10T14:00:00.000Z", ends_at: "2026-11-10T15:00:00.000Z", status: "confirmed", customer_id: "customer-1", vehicle_id: "vehicle-1", metadata: null },
+      ],
+    });
+    (nextApi.customers.list as jest.Mock).mockResolvedValue({ data: [] });
+    (nextApi.vehicles.list as jest.Mock).mockResolvedValue({ data: [] });
+    mockFrom.mockImplementation(() => ({
+      select: jest.fn(() => Promise.resolve({ data: [], error: null })),
+    }));
+
+    // Sunday Nov 8 2026, 10:00 AM in America/New_York: the week window
+    // is Sun Nov 8 00:00 EST through Sun Nov 15 00:00 EST.
+    await fetchAppointmentsPageData({
+      viewMode: "week",
+      anchor: new Date("2026-11-08T15:00:00.000Z"),
+    });
+    expect(nextApi.appointments.list).toHaveBeenCalledWith("workspace-1", {
+      from: "2026-11-08T05:00:00.000Z",
+      to: "2026-11-15T05:00:00.000Z",
+    });
+    expect(apiClient.get).toHaveBeenCalledWith(
+      "/v1/appointments/service-lines",
+      { query: { selected_workspace_id: "workspace-1", appointment_ids: "a1" } },
+    );
+
+    // Month view: the grid starts Sun Nov 1 (Nov 1 2026 is a Sunday)
+    // and runs through the last day of November. Nov 1 00:00 local is
+    // still EDT (fall-back happens at 2 AM), hence 04:00Z, while Dec 1
+    // 00:00 is EST, hence 05:00Z — the DST seam the zoned helpers exist
+    // for.
+    (nextApi.appointments.list as jest.Mock).mockClear();
+    await fetchAppointmentsPageData({
+      viewMode: "month",
+      anchor: new Date("2026-11-08T15:00:00.000Z"),
+    });
+    expect(nextApi.appointments.list).toHaveBeenCalledWith("workspace-1", {
+      from: "2026-11-01T04:00:00.000Z",
+      to: "2026-12-01T05:00:00.000Z",
+    });
   });
 });

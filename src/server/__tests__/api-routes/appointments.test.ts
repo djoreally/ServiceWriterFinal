@@ -192,6 +192,50 @@ describe("appointments/route (collection)", () => {
       expect(body.pagination).toEqual({ limit: 25, offset: 0 });
     });
 
+    it("applies the optional from/to window to the appointments query (Fix 3)", async () => {
+      const supabase = makeSupabaseClient({ appointments: { data: [], error: null } });
+      const buildersByTable = new Map<string, Array<Record<string, jest.Mock>>>();
+      const origFrom = supabase.from as unknown as jest.Mock;
+      supabase.from = jest.fn((table: string) => {
+        const builder = origFrom(table) as Record<string, jest.Mock>;
+        const list = buildersByTable.get(table) ?? [];
+        list.push(builder);
+        buildersByTable.set(table, list);
+        return builder;
+      }) as unknown as MockSupabaseClient["from"];
+      stubWorkspaceMember(api, supabase);
+      const { status } = await readJson(
+        await appointmentsGet(makeRequest(
+          `/api/v1/appointments?workspace_id=${WS_ID}&from=2026-11-08T05:00:00.000Z&to=2026-11-09T05:00:00.000Z`,
+        )),
+      );
+      expect(status).toBe(200);
+      const listBuilder = buildersByTable.get("appointments")?.[0];
+      expect(listBuilder?.gte.mock.calls).toContainEqual(["starts_at", "2026-11-08T05:00:00.000Z"]);
+      expect(listBuilder?.lt.mock.calls).toContainEqual(["starts_at", "2026-11-09T05:00:00.000Z"]);
+    });
+
+    it("keeps the historical unwindowed query when from/to are absent (Fix 3)", async () => {
+      const supabase = makeSupabaseClient({ appointments: { data: [], error: null } });
+      const buildersByTable = new Map<string, Array<Record<string, jest.Mock>>>();
+      const origFrom = supabase.from as unknown as jest.Mock;
+      supabase.from = jest.fn((table: string) => {
+        const builder = origFrom(table) as Record<string, jest.Mock>;
+        const list = buildersByTable.get(table) ?? [];
+        list.push(builder);
+        buildersByTable.set(table, list);
+        return builder;
+      }) as unknown as MockSupabaseClient["from"];
+      stubWorkspaceMember(api, supabase);
+      const { status } = await readJson(
+        await appointmentsGet(makeRequest(`/api/v1/appointments?workspace_id=${WS_ID}`)),
+      );
+      expect(status).toBe(200);
+      const listBuilder = buildersByTable.get("appointments")?.[0];
+      const gteArgs = (listBuilder?.gte.mock.calls ?? []).map((call) => call[0]);
+      expect(gteArgs).not.toContain("starts_at");
+    });
+
     it("attaches the composed job_total/job_due — a paid job carries job_due 0", async () => {
       // Regression lock for the 2026-11-06 shadow-route bug: this route.ts
       // is the handler production serves for GET /v1/appointments (Next.js

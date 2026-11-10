@@ -149,6 +149,9 @@ export {
 
 export {
   fetchAppointmentsPageData,
+  fetchAppointmentsWindowData,
+  fetchAppointmentDirectories,
+  mapWindowAppointments,
   type AppointmentWithSource,
   type AppointmentsPageData,
   type AppointmentsPageErrors,
