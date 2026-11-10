@@ -1977,6 +1977,7 @@ crmRouter.post("/v1/crm/marketing/email-campaigns/:id/send", async (c) => {
     .maybeSingle();
 
   const emailQueue = recipients.map((customer) => ({
+    workspace_id,
     user_id: user.id,
     customer_id: customer.id,
     campaign_id: campaign.id,
@@ -2076,10 +2077,11 @@ crmRouter.get("/v1/crm/marketing/review-dashboard", async (c) => {
 });
 
 crmRouter.get("/v1/crm/marketing/analytics", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
+  const { supabase, user } = await requireWorkspaceAuth(c, workspaceId);
   const db = supabase as any;
   const [emailQueueRes, reviewRes, testimonialRes, campaignRes, subscriberRes] = await Promise.all([
-    db.from("email_queue").select("email_type, status").eq("user_id", user.id),
+    db.from("email_queue").select("email_type, status").eq("workspace_id", workspaceId),
     db.from("review_requests").select("status, clicked_at").eq("user_id", user.id),
     db.from("testimonials").select("status").eq("user_id", user.id),
     db.from("email_marketing_campaigns").select("id").eq("user_id", user.id),

@@ -1294,16 +1294,16 @@ billingRouter.post("/v1/billing/messaging-addon-checkout", async (c) => {
 });
 
 billingRouter.get("/v1/billing/messaging-stats", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, workspaceId } = await resolveBillingWorkspace(c);
   const [outbound, failed, replies, optOuts] = await Promise.all([
     supabase.from("sms_logs").select("id", { count: "exact", head: true })
-      .eq("user_id", user.id).eq("direction", "outbound").in("status", ["sent", "delivered"]),
+      .eq("workspace_id", workspaceId).eq("direction", "outbound").in("status", ["sent", "delivered"]),
     supabase.from("sms_logs").select("id", { count: "exact", head: true })
-      .eq("user_id", user.id).eq("direction", "outbound").in("status", ["failed", "undelivered"]),
+      .eq("workspace_id", workspaceId).eq("direction", "outbound").in("status", ["failed", "undelivered"]),
     supabase.from("sms_logs").select("id", { count: "exact", head: true })
-      .eq("user_id", user.id).eq("direction", "inbound").eq("message_type", "reply"),
+      .eq("workspace_id", workspaceId).eq("direction", "inbound").eq("message_type", "reply"),
     supabase.from("sms_opt_outs").select("id", { count: "exact", head: true })
-      .eq("user_id", user.id),
+      .eq("workspace_id", workspaceId),
   ]);
   if (outbound.error) throw outbound.error;
   if (failed.error) throw failed.error;

@@ -3322,12 +3322,12 @@ export type Database = {
           recipient_name: string | null
           retry_recommended: boolean
           review_request_id: string | null
-          source: string
+          source: string | null
           status: string
           subject: string | null
           suppression_state: boolean
           updated_at: string
-          user_id: string | null
+          workspace_id: string
         }
         Insert: {
           campaign_id?: string | null
@@ -3346,12 +3346,12 @@ export type Database = {
           recipient_name?: string | null
           retry_recommended?: boolean
           review_request_id?: string | null
-          source?: string
-          status?: string
+          source?: string | null
+          status: string
           subject?: string | null
           suppression_state?: boolean
           updated_at?: string
-          user_id?: string | null
+          workspace_id: string
         }
         Update: {
           campaign_id?: string | null
@@ -3370,14 +3370,22 @@ export type Database = {
           recipient_name?: string | null
           retry_recommended?: boolean
           review_request_id?: string | null
-          source?: string
+          source?: string | null
           status?: string
           subject?: string | null
           suppression_state?: boolean
           updated_at?: string
-          user_id?: string | null
+          workspace_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "email_logs_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       email_marketing_campaigns: {
         Row: {
@@ -3472,10 +3480,11 @@ export type Database = {
           scheduled_for: string
           sent_at: string | null
           service_id: string | null
-          source: string
+          source: string | null
           status: string
           updated_at: string
           user_id: string
+          workspace_id: string
         }
         Insert: {
           appointment_id?: string | null
@@ -3497,10 +3506,11 @@ export type Database = {
           scheduled_for: string
           sent_at?: string | null
           service_id?: string | null
-          source?: string
+          source?: string | null
           status?: string
           updated_at?: string
           user_id: string
+          workspace_id: string
         }
         Update: {
           appointment_id?: string | null
@@ -3522,10 +3532,11 @@ export type Database = {
           scheduled_for?: string
           sent_at?: string | null
           service_id?: string | null
-          source?: string
+          source?: string | null
           status?: string
           updated_at?: string
           user_id?: string
+          workspace_id?: string
         }
         Relationships: [
           {
@@ -3543,10 +3554,10 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "email_queue_service_id_fkey"
-            columns: ["service_id"]
+            foreignKeyName: "email_queue_workspace_id_fkey"
+            columns: ["workspace_id"]
             isOneToOne: false
-            referencedRelation: "services"
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
@@ -9728,7 +9739,7 @@ export type Database = {
           is_active?: boolean
           name: string
           price_cents: number
-          renewal_period?: string
+          renewal_period: string
           updated_at?: string
         }
         Update: {
@@ -14479,6 +14490,7 @@ export type Database = {
           units: number
           updated_at: string
           user_id: string
+          workspace_id: string | null
         }
         Insert: {
           amount_cents?: number | null
@@ -14490,6 +14502,7 @@ export type Database = {
           units: number
           updated_at?: string
           user_id: string
+          workspace_id?: string | null
         }
         Update: {
           amount_cents?: number | null
@@ -14501,8 +14514,17 @@ export type Database = {
           units?: number
           updated_at?: string
           user_id?: string
+          workspace_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "sms_credit_purchases_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       sms_inbound: {
         Row: {
@@ -14565,7 +14587,7 @@ export type Database = {
           to_number: string | null
           to_number_last4: string | null
           updated_at: string
-          user_id: string
+          workspace_id: string
         }
         Insert: {
           appointment_id?: string | null
@@ -14573,7 +14595,7 @@ export type Database = {
           created_at?: string
           deleted_at?: string | null
           delivered_at?: string | null
-          direction?: string
+          direction: string
           error_message?: string | null
           failed_at?: string | null
           from_number?: string | null
@@ -14584,11 +14606,11 @@ export type Database = {
           provider_error_code?: string | null
           provider_status?: string | null
           recipient_hash?: string | null
-          status?: string
+          status: string
           to_number?: string | null
           to_number_last4?: string | null
           updated_at?: string
-          user_id: string
+          workspace_id: string
         }
         Update: {
           appointment_id?: string | null
@@ -14611,9 +14633,17 @@ export type Database = {
           to_number?: string | null
           to_number_last4?: string | null
           updated_at?: string
-          user_id?: string
+          workspace_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "sms_logs_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       sms_opt_outs: {
         Row: {
@@ -14624,7 +14654,7 @@ export type Database = {
           phone_hash: string
           phone_last4: string | null
           source: string
-          user_id: string
+          workspace_id: string
         }
         Insert: {
           created_at?: string
@@ -14633,8 +14663,8 @@ export type Database = {
           opted_out_at?: string
           phone_hash: string
           phone_last4?: string | null
-          source?: string
-          user_id: string
+          source: string
+          workspace_id: string
         }
         Update: {
           created_at?: string
@@ -14644,9 +14674,17 @@ export type Database = {
           phone_hash?: string
           phone_last4?: string | null
           source?: string
-          user_id?: string
+          workspace_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "sms_opt_outs_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       sms_preferences: {
         Row: {
@@ -18276,7 +18314,7 @@ export type Database = {
           related_record_type?: string | null
           replayed_at?: string | null
           replayed_by?: string | null
-          status?: string
+          status: string
           stripe_event_id: string
           user_id?: string | null
         }
