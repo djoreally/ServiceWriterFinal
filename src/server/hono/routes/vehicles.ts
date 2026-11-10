@@ -1967,11 +1967,14 @@ vehiclesRouter.get("/v1/inventory/stock-options", async (c) => {
 
 vehiclesRouter.get("/v1/vans/stock", async (c) => {
   const url = new URL(c.req.url);
-  const { supabase, user } = await requireFleetScope(c, url.searchParams.get("selected_workspace_id"));
+  const { supabase, user, workspaceId } = await requireFleetScope(c, url.searchParams.get("selected_workspace_id"));
+  // Dispatch S-D2 (Step 10): vans are workspace-tenanted; the user_id
+  // filter was the pre-recon creator stamp.
+  const vanWorkspaceId = workspaceId ?? (await resolveWorkspaceIdForUser(supabase, user.id));
   const { data: vans } = await (supabase as any)
     .from("vans")
     .select("id, name")
-    .eq("user_id", user.id)
+    .eq("workspace_id", vanWorkspaceId)
     .eq("is_active", true);
   const vanIds = (vans ?? []).map((v: { id: string }) => v.id);
   if (vanIds.length === 0) return json({ data: [] });
@@ -2224,7 +2227,7 @@ vehiclesRouter.get("/v1/vans/:id/detail", async (c) => {
   let techQuery = client.from("technicians").select("id, name").eq("user_id", user.id).eq("is_active", true);
   if (techWorkspaceId) techQuery = techQuery.eq("workspace_id", techWorkspaceId);
   const [vanRes, terrRes, invRes, apptsRes, techRes, whRes] = await Promise.all([
-    client.from("vans").select("*").eq("id", vanId).eq("user_id", user.id).single(),
+    client.from("vans").select("*").eq("id", vanId).eq("workspace_id", techWorkspaceId).single(),
     client.from("van_territories").select("*").eq("van_id", vanId).order("zip_code"),
     client.from("van_inventory").select("*, inventory_items(name, sku, quantity)").eq("van_id", vanId),
     client.from("appointments")
@@ -2254,7 +2257,11 @@ vehiclesRouter.patch("/v1/vans/:id", async (c) => {
   const vanId = c.req.param("id");
   const body = await c.req.json();
   const { supabase } = await requireFleetScope(c, selectedWorkspaceHint(c));
-  const { error } = await (supabase as any).from("vans").update(body.payload ?? body).eq("id", vanId);
+  // Dispatch S-D2 (Step 10): the passthrough update must never move a
+  // van between workspaces or rewrite its creator / identity.
+  const rawPatch = (body.payload ?? body) as Record<string, unknown>;
+  const { id: _id, user_id: _userId, workspace_id: _workspaceId, ...patch } = rawPatch ?? {};
+  const { error } = await (supabase as any).from("vans").update(patch).eq("id", vanId);
   if (error) throw new Error(error.message);
   return json({ data: { ok: true } });
 });
@@ -3396,9 +3403,14 @@ vehiclesRouter.post("/v1/vans", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const payload = body.payload ?? body;
   if (!payload.name) throw new ApiError(400, "Van name is required.", "invalid_input");
-  const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  const { supabase, user, workspaceId } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  // Dispatch S-D2 (Step 10): stamp the van with the caller's resolved
+  // workspace (vans.workspace_id is NOT NULL; user_id stays as the
+  // legacy creator stamp).
+  const vanWorkspaceId = workspaceId ?? (await resolveWorkspaceIdForUser(supabase, user.id));
   const { error } = await (supabase as any).from("vans").insert([
     {
+      workspace_id: vanWorkspaceId,
       user_id: user.id,
       name: payload.name,
       vin: payload.vin || null,
@@ -6319,7 +6331,7 @@ vehiclesRouter.get("/v1/fleet/map-data", async (c) => {
     db
       .from("vans")
       .select("id, name, status, color, make, model, year, license_plate, assigned_technician_id")
-      .eq("user_id", user.id)
+      .eq("workspace_id", techWorkspaceId)
       .eq("is_active", true),
     db.from("van_territories").select("van_id, zip_code, is_primary"),
     techQuery,
@@ -7289,7 +7301,7 @@ vehiclesRouter.get("/v1/fleet/vans-overview", async (c) => {
   if (techWorkspaceId) techQuery = techQuery.eq("workspace_id", techWorkspaceId);
 
   const [vansRes, territoriesRes, inventoryRes, techRes] = await Promise.all([
-    db.from("vans").select("*").eq("user_id", user.id).order("name"),
+    db.from("vans").select("*").eq("workspace_id", techWorkspaceId).order("name"),
     db.from("van_territories").select("van_id"),
     db.from("van_inventory").select("van_id"),
     techQuery.order("name"),

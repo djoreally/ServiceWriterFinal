@@ -1777,7 +1777,7 @@ workOrdersRouter.get("/v1/tech-app/context", async (c) => {
     .select("*").eq("user_id", user.id).eq("workspace_id", workspaceId).maybeSingle();
   if (techError && techError.code !== "PGRST116") throw techError;
   const [vanRes, clockRes, prefsRes] = await Promise.all([
-    (supabase.from("vans") as any).select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    (supabase.from("vans") as any).select("*").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
     (() => {
       const start = new Date(); start.setHours(0, 0, 0, 0);
       return (supabase.from("time_clock_entries") as any).select("*").eq("user_id", user.id)
@@ -1886,11 +1886,16 @@ workOrdersRouter.get("/v1/tech-app/technician-id", async (c) => {
 
 workOrdersRouter.get("/v1/tech-app/more", async (c) => {
   const { supabase, user } = await requireAuth(c);
+  // Dispatch S-D2 (Step 10): vans are workspace-tenanted; resolve the
+  // caller's workspace the Step 4 way and scope the van list to it.
+  const workspaceId = await resolveCallerWorkspaceId(supabase, user.id);
   const [techRes, vansRes] = await Promise.all([
     (supabase.from("technicians") as any)
       .select("id, user_id, workspace_id, first_name, last_name, full_name, phone, email, status, employment_type, hourly_rate, pay_type, role, home_address, avatar_url, emergency_contact_name, emergency_contact_phone")
       .eq("user_id", user.id).single(),
-    (supabase.from("vans") as any).select("*").eq("user_id", user.id),
+    workspaceId
+      ? (supabase.from("vans") as any).select("*").eq("workspace_id", workspaceId)
+      : Promise.resolve({ data: [], error: null }),
   ]);
   const error = techRes.error || vansRes.error;
   if (error) throw error;
@@ -1915,11 +1920,17 @@ workOrdersRouter.get("/v1/tech-app/inventory", async (c) => {
   const { data: technician, error: techError } = await (supabase.from("technicians") as any)
     .select("id").eq("user_id", user.id).maybeSingle();
   if (techError) throw techError;
+  // Dispatch S-D2 (Step 10): the vans leg scopes to the caller's
+  // workspace (the stale van_inventory select above is a separate,
+  // already-reported defect and is deliberately untouched here).
+  const workspaceId = await resolveCallerWorkspaceId(supabase, user.id);
   const [inventoryRes, vansRes] = await Promise.all([
     technician?.id
       ? (supabase.from("van_inventory") as any).select("*").eq("technician_id", technician.id).order("item_name")
       : Promise.resolve({ data: [], error: null }),
-    (supabase.from("vans") as any).select("*").eq("user_id", user.id),
+    workspaceId
+      ? (supabase.from("vans") as any).select("*").eq("workspace_id", workspaceId)
+      : Promise.resolve({ data: [], error: null }),
   ]);
   const error = inventoryRes.error || vansRes.error;
   if (error) throw error;
