@@ -155,3 +155,161 @@ describe("fetchCanonicalCashReceipts adjustment exclusion", () => {
     expect(data.map((receipt) => receipt.payment_record_id)).toEqual(["pay-synced"]);
   });
 });
+
+// Collected counts on the JOB's date, not the typing date (owner's rule,
+// second half). The cash-receipts endpoint resolves each payment's
+// appointment service date through the invoice chain and returns it as
+// appointment_starts_at; the receipt's collected_at — the instant every
+// collected figure buckets on — is that date when it resolved, and the
+// paid/recorded date when no appointment link resolves.
+describe("fetchCanonicalCashReceipts job-date periodization", () => {
+  const mockGet = apiClient.get as jest.Mock;
+
+  beforeEach(() => {
+    mockGet.mockReset();
+  });
+
+  it("buckets a back-dated closeout on the job's date, not the recording date", async () => {
+    // Angela's shape: job performed Sep 24, 2025; the cash closeout was
+    // only recorded Nov 9, 2026. The receipt belongs to Sep 24, 2025.
+    mockGet.mockResolvedValue({
+      data: [
+        {
+          id: "pay-angela-cash",
+          amount: 110.23,
+          status: "succeeded",
+          provider: "other",
+          paid_at: "2026-11-09T19:31:00.000Z",
+          created_at: "2026-11-09T19:31:00.000Z",
+          invoice_id: "inv-569",
+          appointment_starts_at: "2025-09-24T14:00:00.000Z",
+          metadata: { payment_method: "cash", recorded_manually: true },
+        },
+      ],
+    });
+
+    const { data, error } = await fetchCanonicalCashReceipts({
+      workspaceId: "workspace-1",
+      from: "2025-01-01T05:00:00.000Z",
+    });
+
+    expect(error).toBeNull();
+    expect(data).toHaveLength(1);
+    expect(data[0].collected_at).toBe("2025-09-24T14:00:00.000Z");
+    expect(data[0].service_date).toBe("2025-09-24T14:00:00.000Z");
+    expect(data[0].net_collected_cents).toBe(11023);
+  });
+
+  it("still excludes a manual_adjustment row when it carries a job date", async () => {
+    mockGet.mockResolvedValue({
+      data: [
+        {
+          id: "pay-angela-waive",
+          amount: 10.84,
+          status: "succeeded",
+          provider: null,
+          paid_at: "2026-11-09T19:31:00.000Z",
+          created_at: "2026-11-09T19:31:00.000Z",
+          invoice_id: "inv-569",
+          appointment_starts_at: "2025-09-24T14:00:00.000Z",
+          metadata: {
+            source: "manual_adjustment",
+            adjustment_type: "cash_discount_fee_waive",
+          },
+        },
+      ],
+    });
+
+    const { data, error } = await fetchCanonicalCashReceipts({
+      workspaceId: "workspace-1",
+      from: "2025-01-01T05:00:00.000Z",
+    });
+
+    expect(error).toBeNull();
+    expect(data).toHaveLength(0);
+  });
+
+  it("falls back to the paid date when the payment has no appointment link", async () => {
+    mockGet.mockResolvedValue({
+      data: [
+        {
+          id: "pay-unlinked",
+          amount: 42,
+          status: "succeeded",
+          provider: "stripe",
+          paid_at: "2026-11-09T15:00:00.000Z",
+          created_at: "2026-11-09T15:00:00.000Z",
+          invoice_id: null,
+          appointment_starts_at: null,
+          metadata: null,
+        },
+      ],
+    });
+
+    const { data, error } = await fetchCanonicalCashReceipts({
+      workspaceId: "workspace-1",
+      from: "2026-01-01T05:00:00.000Z",
+    });
+
+    expect(error).toBeNull();
+    expect(data).toHaveLength(1);
+    expect(data[0].collected_at).toBe("2026-11-09T15:00:00.000Z");
+    expect(data[0].service_date).toBeNull();
+  });
+
+  it("falls back to the paid date when the invoice chain does not resolve", async () => {
+    mockGet.mockResolvedValue({
+      data: [
+        {
+          id: "pay-broken-chain",
+          amount: 42,
+          status: "succeeded",
+          provider: "stripe",
+          paid_at: "2026-11-09T15:00:00.000Z",
+          created_at: "2026-11-09T15:00:00.000Z",
+          invoice_id: "inv-orphan",
+          appointment_starts_at: null,
+          metadata: null,
+        },
+      ],
+    });
+
+    const { data, error } = await fetchCanonicalCashReceipts({
+      workspaceId: "workspace-1",
+      from: "2026-01-01T05:00:00.000Z",
+    });
+
+    expect(error).toBeNull();
+    expect(data).toHaveLength(1);
+    expect(data[0].collected_at).toBe("2026-11-09T15:00:00.000Z");
+    expect(data[0].service_date).toBeNull();
+  });
+
+  it("leaves a same-day job and payment on that day", async () => {
+    mockGet.mockResolvedValue({
+      data: [
+        {
+          id: "pay-same-day",
+          amount: 99,
+          status: "succeeded",
+          provider: "stripe",
+          paid_at: "2026-11-09T20:00:00.000Z",
+          created_at: "2026-11-09T20:00:00.000Z",
+          invoice_id: "inv-1",
+          appointment_starts_at: "2026-11-09T14:00:00.000Z",
+          metadata: null,
+        },
+      ],
+    });
+
+    const { data, error } = await fetchCanonicalCashReceipts({
+      workspaceId: "workspace-1",
+      from: "2026-01-01T05:00:00.000Z",
+    });
+
+    expect(error).toBeNull();
+    expect(data).toHaveLength(1);
+    expect(data[0].collected_at).toBe("2026-11-09T14:00:00.000Z");
+    expect(data[0].net_collected_cents).toBe(9900);
+  });
+});

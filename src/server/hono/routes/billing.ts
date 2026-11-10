@@ -2862,17 +2862,108 @@ billingRouter.get("/v1/billing/cash-receipts", async (c) => {
   const url = new URL(c.req.url);
   const from = url.searchParams.get("from") ?? "";
   const to = url.searchParams.get("to");
-  let query = (supabase.from("payments") as any)
-    .select("id,amount,status,provider,paid_at,created_at,metadata")
+
+  // Collected counts on the JOB's date, not the recording date (owner's
+  // rule): a receipt's effective date is the service date of the
+  // appointment it settles — payments.invoice_id → invoices.work_order_id
+  // → work_orders.appointment_id → appointments.starts_at (invoices carry
+  // no appointment_id; jobs bind through the work order). A payment whose
+  // chain does not resolve keeps its paid date. The from/to window applies
+  // to the EFFECTIVE date so every consumer of this one endpoint
+  // (dashboard cockpit, reports, provider snapshot) sums the same period.
+  // The window therefore cannot stay a SQL paid_at filter — a back-dated
+  // closeout is paid after its job, a prepayment before it — so candidates
+  // are the workspace's settled payments, the chain is resolved in three
+  // batched lookups, and the window is applied here.
+  const { data: paymentRows, error } = await (supabase.from("payments") as any)
+    .select("id,amount,status,provider,paid_at,created_at,metadata,invoice_id")
     .eq("workspace_id", workspaceId)
     .in("status", ["succeeded", "partially_refunded", "refunded"])
     .not("paid_at", "is", null)
-    .gte("paid_at", from)
     .order("paid_at", { ascending: true });
-  if (to) query = query.lte("paid_at", to);
-  const { data, error } = await query;
   if (error) throw error;
-  return json({ data: data ?? [] });
+  const payments = (paymentRows ?? []) as Array<Record<string, unknown>>;
+
+  const serviceDateByPaymentId = new Map<string, string | null>();
+  const invoiceIds = Array.from(
+    new Set(
+      payments
+        .map((row) => row.invoice_id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0),
+    ),
+  );
+  if (invoiceIds.length > 0) {
+    const { data: invoiceRows, error: invoiceError } = await (supabase.from("invoices") as any)
+      .select("id,work_order_id")
+      .eq("workspace_id", workspaceId)
+      .in("id", invoiceIds);
+    if (invoiceError) throw invoiceError;
+    const workOrderIdByInvoiceId = new Map<string, string>();
+    for (const invoice of (invoiceRows ?? []) as Array<Record<string, unknown>>) {
+      if (typeof invoice.work_order_id === "string" && invoice.work_order_id) {
+        workOrderIdByInvoiceId.set(String(invoice.id), invoice.work_order_id);
+      }
+    }
+
+    const appointmentIdByWorkOrderId = new Map<string, string>();
+    const workOrderIds = Array.from(new Set(workOrderIdByInvoiceId.values()));
+    if (workOrderIds.length > 0) {
+      const { data: workOrderRows, error: workOrderError } = await (supabase.from("work_orders") as any)
+        .select("id,appointment_id")
+        .eq("workspace_id", workspaceId)
+        .in("id", workOrderIds);
+      if (workOrderError) throw workOrderError;
+      for (const workOrder of (workOrderRows ?? []) as Array<Record<string, unknown>>) {
+        if (typeof workOrder.appointment_id === "string" && workOrder.appointment_id) {
+          appointmentIdByWorkOrderId.set(String(workOrder.id), workOrder.appointment_id);
+        }
+      }
+    }
+
+    const startsAtByAppointmentId = new Map<string, string>();
+    const appointmentIds = Array.from(new Set(appointmentIdByWorkOrderId.values()));
+    if (appointmentIds.length > 0) {
+      const { data: appointmentRows, error: appointmentError } = await (supabase.from("appointments") as any)
+        .select("id,starts_at")
+        .eq("workspace_id", workspaceId)
+        .in("id", appointmentIds);
+      if (appointmentError) throw appointmentError;
+      for (const appointment of (appointmentRows ?? []) as Array<Record<string, unknown>>) {
+        if (typeof appointment.starts_at === "string" && appointment.starts_at) {
+          startsAtByAppointmentId.set(String(appointment.id), appointment.starts_at);
+        }
+      }
+    }
+
+    for (const row of payments) {
+      const invoiceId = typeof row.invoice_id === "string" ? row.invoice_id : null;
+      const workOrderId = invoiceId ? workOrderIdByInvoiceId.get(invoiceId) : undefined;
+      const appointmentId = workOrderId ? appointmentIdByWorkOrderId.get(workOrderId) : undefined;
+      serviceDateByPaymentId.set(
+        String(row.id),
+        appointmentId ? startsAtByAppointmentId.get(appointmentId) ?? null : null,
+      );
+    }
+  }
+
+  const fromMs = from ? Date.parse(from) : Number.NaN;
+  const toMs = to ? Date.parse(to) : Number.NaN;
+  const data = payments
+    .map((row): Record<string, unknown> & { appointment_starts_at: string | null } => ({
+      ...row,
+      appointment_starts_at: serviceDateByPaymentId.get(String(row.id)) ?? null,
+    }))
+    .filter((row) => {
+      const effective = row.appointment_starts_at ??
+        (typeof row.paid_at === "string" ? row.paid_at : null);
+      if (!effective) return false;
+      const effectiveMs = Date.parse(effective);
+      if (Number.isNaN(effectiveMs)) return false;
+      if (!Number.isNaN(fromMs) && effectiveMs < fromMs) return false;
+      if (!Number.isNaN(toMs) && effectiveMs > toMs) return false;
+      return true;
+    });
+  return json({ data });
 });
 
 billingRouter.get("/v1/billing/financials/succeeded-payments", async (c) => {
