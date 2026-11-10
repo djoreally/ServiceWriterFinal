@@ -3087,7 +3087,9 @@ crmRouter.get("/v1/crm/customer-portal/accounts/:id", async (c) => {
 crmRouter.get("/v1/crm/customer-portal/bookings", async (c) => {
   const params = new URL(c.req.url).searchParams;
   const accountId = params.get("account_id") ? z.string().uuid().parse(params.get("account_id")) : null;
-  const email = z.string().email().max(320).parse(params.get("email"));
+  // Parsed (and validated) for contract compatibility — the consumer always
+  // sends it; the RPC read below keys on the JWT identity instead.
+  z.string().email().max(320).parse(params.get("email"));
   const { supabase, user } = await requireAuth(c);
   const db = supabase as any;
   // Verify the account belongs to the caller before exposing its bookings.
@@ -3100,14 +3102,45 @@ crmRouter.get("/v1/crm/customer-portal/bookings", async (c) => {
     if (accountError) throw accountError;
     if (!account || account.user_id !== user.id) throw new ApiError(403, "You can only view your own bookings", "forbidden");
   }
-  const { data, error } = await db
-    .from("appointments")
-    .select("id, title, scheduled_date, scheduled_time, duration_minutes, status, estimated_cost, guest_name, management_token, service_catalog:service_catalog(name), user_id")
-    .or(accountId ? `customer_account_id.eq.${accountId},guest_email.ilike.${email.replace(/,/g, "\\,")}` : `guest_email.ilike.${email.replace(/,/g, "\\,")}`)
-    .order("scheduled_date", { ascending: false })
-    .order("scheduled_time", { ascending: false });
-  if (error) throw error;
-  return json({ data: data ?? [] });
+  // The bookings read delegates to get_customer_portal_appointments_v1 — the
+  // canonical portal read the sibling /customer-portal/appointments handler
+  // serves. The old direct query named eight columns production appointments
+  // does not have (title, scheduled_date, scheduled_time, duration_minutes,
+  // estimated_cost, guest_name, management_token, user_id), filtered on two
+  // more (customer_account_id, guest_email), ordered on scheduled_date/time,
+  // and embedded service_catalog with no FK path from appointments — every
+  // call 42703'd (live census 2026-11-10). The RPC resolves the caller's own
+  // appointments from the JWT identity, so the account_id/email params now
+  // only gate access (verified above / parsed for contract compatibility);
+  // rows are projected to the consumer's CustomerBookingRow shape
+  // (src/application/queries/customer-booking.query.ts), most recent first,
+  // matching this handler's original ordering intent.
+  const { data, error } = await db.rpc("get_customer_portal_appointments_v1");
+  if (error) {
+    console.error("[customer-portal/bookings] rpc error", error);
+    throw new Error("Appointments are temporarily unavailable.");
+  }
+  type Row = {
+    id: string; title: string | null; scheduled_date: string; scheduled_time: string; duration_minutes: number | null;
+    status: string; estimated_cost: number | null; guest_name: string | null; management_token: string | null;
+    service_catalog_name: string | null;
+  };
+  const rows = ((data ?? []) as Row[]).map((r) => ({
+    id: r.id,
+    title: r.title ?? "",
+    scheduled_date: r.scheduled_date,
+    scheduled_time: r.scheduled_time,
+    duration_minutes: r.duration_minutes ?? 0,
+    status: r.status,
+    estimated_cost: r.estimated_cost,
+    guest_name: r.guest_name,
+    management_token: r.management_token,
+    service_catalog: r.service_catalog_name ? { name: r.service_catalog_name } : null,
+  }));
+  rows.sort((a, b) =>
+    b.scheduled_date.localeCompare(a.scheduled_date) || b.scheduled_time.localeCompare(a.scheduled_time),
+  );
+  return json({ data: rows });
 });
 
 crmRouter.post("/v1/crm/customer-portal/appointments/cancel-by-token", async (c) => {
