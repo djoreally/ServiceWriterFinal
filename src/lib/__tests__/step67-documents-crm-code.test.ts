@@ -170,10 +170,20 @@ describe("step67 code — crm.ts reviews / testimonials / reminders", () => {
 });
 
 describe("step67 code — exceptions stay untouched", () => {
-  it("public testimonial submit is byte-identical in contract (NEED-1 gate)", () => {
+  it("public testimonial submit resolves the workspace server-side from the slug (NEED-1 landed, PR #216)", () => {
     const b = block(CRM, 'crmRouter.post("/v1/crm/testimonials/submit"', "crmRouter.");
-    expect(b).toContain("insert({ ...body, status: \"pending\" })");
-    expect(b).not.toContain("workspace_id");
+    // The body gains the booking slug; a client-supplied workspace_id is
+    // never declared in the schema and never read.
+    expect(b).toContain("slug: z.string().trim().min(1).max(200)");
+    expect(b).not.toContain("workspace_id: z.");
+    // Resolution is server-side via workspace_settings (the profile RPC's
+    // own source), owner cross-checked, fail-closed.
+    expect(b).toContain('.from("workspace_settings")');
+    expect(b).toContain("workspace.created_by !== body.user_id");
+    expect(b).toContain('"business_not_found"');
+    // The insert is explicit and stamps the resolved workspace.
+    expect(b).toContain("workspace_id: settings.workspace_id");
+    expect(b).not.toContain("insert({ ...body");
   });
 
   it("live-visitors still keys on the legacy tenant_id with the owner self-check", () => {
