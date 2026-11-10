@@ -11,7 +11,7 @@ describe("roleLandingPath", () => {
     ["dispatcher", "/dispatch"],
     ["service_advisor", "/dispatch"],
     ["receptionist", "/dispatch"],
-    ["fleet_manager", "/fleet-os"],
+    ["fleet_manager", "/dashboard"],
     ["technician", "/tech-app"],
   ])("routes %s to %s", (role, expected) => {
     expect(roleLandingPath(role)).toBe(expected);

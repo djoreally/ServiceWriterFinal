@@ -3,7 +3,7 @@ import { renderRoute } from "../../test/journeys/renderRoute";
 import { personas } from "../../test/journeys/personas";
 import { expectNoConsoleErrors, expectNoPlumbingError } from "../../test/journeys/matchers";
 
-describe("Phase 4 Journey — Fleet OS", () => {
+describe("Phase 4 Journey — Fleet (vans core, Fleet OS stripped)", () => {
   it("renders fleet command center with vans and technicians for owner", async () => {
     renderRoute({
       route: "/fleet",
@@ -19,33 +19,34 @@ describe("Phase 4 Journey — Fleet OS", () => {
     expectNoPlumbingError();
   });
 
-  it("renders fleet OS scheduling and work order management", async () => {
+  // S1 (Fleet OS strip): the /fleet-os/* section page is deleted and the
+  // prefix is unregistered, so these paths now fall through to the SPA
+  // catch-all NotFound — the door is closed even for the owner.
+  // expectNoConsoleErrors is intentionally not called here: the NotFound
+  // page logs the attempted route via console.error by design.
+  it("serves NotFound for the stripped Fleet OS scheduler", async () => {
     renderRoute({
       route: "/fleet-os/scheduler",
       persona: personas.asOwner(),
     });
 
     await waitFor(() => {
-      const elements = screen.getAllByText(/Fleet|Schedule|Work Orders|Metro Logistics/i);
-      expect(elements.length).toBeGreaterThan(0);
+      expect(screen.getByText(/Oops! Page not found/i)).toBeTruthy();
     });
 
-    expectNoConsoleErrors();
     expectNoPlumbingError();
   });
 
-  it("enforces contract pricing inheritance and work order PO guards", async () => {
-    const { backend } = renderRoute({
+  it("serves NotFound for the stripped Fleet OS work orders", async () => {
+    renderRoute({
       route: "/fleet-os/work-orders",
       persona: personas.asOwner(),
     });
 
-    // Query fleet work order table to verify PO limit and status defaults
-    const wo = backend.tables.fleet_work_orders[0];
-    expect(wo.po_authorization_status).toBe("approved");
-    expect(wo.po_amount_limit).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(screen.getByText(/Oops! Page not found/i)).toBeTruthy();
+    });
 
-    expectNoConsoleErrors();
     expectNoPlumbingError();
   });
 });

@@ -9,7 +9,7 @@ export const ROLE_LANDING: Record<WorkforceRole, string> = {
   dispatcher: "/dispatch",
   service_advisor: "/dispatch",
   receptionist: "/dispatch",
-  fleet_manager: "/fleet-os",
+  fleet_manager: "/dashboard",
   technician: "/tech-app",
 };
 

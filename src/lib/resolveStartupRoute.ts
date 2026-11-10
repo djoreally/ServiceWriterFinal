@@ -65,7 +65,8 @@ export function resolveStartupRoute({
     return roleLandingPath(role);
   }
 
-  // Fleet managers land in Fleet OS, which is their canonical authorized home.
+  // Fleet managers land on the dashboard via roleLandingPath — their former
+  // home, Fleet OS, was stripped (S1); the role itself remains staff.
   if (role === "fleet_manager") {
     if (!isStartupDecisionPath(currentPath)) return currentPath;
     return roleLandingPath(role);

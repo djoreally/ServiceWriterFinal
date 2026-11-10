@@ -10,7 +10,7 @@ describe("migratedRoutes", () => {
     it("matches migrated App Router prefixes", () => {
       expect(isMigratedPath("/dashboard")).toBe(true);
       expect(isMigratedPath("/crm")).toBe(true);
-      expect(isMigratedPath("/fleet-os/scheduler")).toBe(true);
+      expect(isMigratedPath("/fleet")).toBe(true);
     });
 
     it("matches nested paths under a prefix (segment-aware)", () => {
@@ -33,6 +33,11 @@ describe("migratedRoutes", () => {
     it("returns false for unmigrated paths", () => {
       expect(isMigratedPath("/login")).toBe(false);
       expect(isMigratedPath("/")).toBe(false);
+    });
+
+    it("returns false for the stripped Fleet OS surface", () => {
+      expect(isMigratedPath("/fleet-os")).toBe(false);
+      expect(isMigratedPath("/fleet-os/scheduler")).toBe(false);
     });
   });
 
@@ -67,6 +72,11 @@ describe("migratedRoutes", () => {
 
     it("returns false for app-shell paths", () => {
       expect(isMigratedTenantPath("/dashboard")).toBe(false);
+    });
+
+    it("returns false for the stripped fleet-manager tenant surface", () => {
+      expect(isMigratedTenantPath("/fleet-manager")).toBe(false);
+      expect(isMigratedTenantPath("/fleet-manager/auth")).toBe(false);
     });
   });
 

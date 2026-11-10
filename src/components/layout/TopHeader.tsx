@@ -1,4 +1,4 @@
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { signOut } from "@/application/commands/signout.command";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -27,12 +27,10 @@ interface TopHeaderProps {
 }
 
 export const TopHeader = ({ title, onMenuClick, showMenuButton = true }: TopHeaderProps) => {
-  const location = useLocation();
   const navigate = useNavigate();
   const { user } = useAuth();
   const { isAdmin } = useRBAC();
   const { memberships, selectedWorkspace, selectWorkspace, loading: workspacesLoading, error: workspacesError } = useWorkspaceSelection();
-  const isFleetContext = location.pathname.startsWith("/fleet-os");
 
   const handleSignOut = async () => {
     await signOut();
@@ -135,7 +133,7 @@ export const TopHeader = ({ title, onMenuClick, showMenuButton = true }: TopHead
                   <AvatarFallback className="bg-primary/10 text-sm text-primary">{initials}</AvatarFallback>
                 </Avatar>
                 <div className="hidden text-left md:block">
-                  <p className="text-sm font-medium">{isFleetContext ? "Fleet Manager" : "Shop Manager"}</p>
+                  <p className="text-sm font-medium">Shop Manager</p>
                   <p className="max-w-[120px] truncate text-xs text-muted-foreground">{userEmail || "User"}</p>
                 </div>
               </Button>
