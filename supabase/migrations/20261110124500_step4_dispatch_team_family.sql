@@ -59,6 +59,23 @@
 --     code, and its invitation state belongs to the deferred
 --     team_invitations family. Its call site keeps failing loudly
 --     (function absent) rather than behind an invented state machine.
+--  4. UNION RE-BASED on the current tree (build-time finding): the
+--     design pair was evidenced against the PR #186 snapshot's
+--     types.ts; origin/main's types.ts has since drifted (technicians
+--     62 columns there vs 66 in the design tree, with a different
+--     column set, and similar drift on payroll cycles, skills,
+--     time-clock, availability, onboarding, dispatch runs). Per the
+--     governing shape rule (draft + generated types + exercised code,
+--     live code wins), every table below carries the FULL union:
+--     design columns + current-types columns + exercised columns.
+--     Columns added by the re-base are flagged inline ("re-base").
+--     Two consequences are named, not hidden: (a) booking_contexts
+--     gains service_context - the live PATCH writes it and the design
+--     missed it; (b) technician_payroll_cycles carries BOTH period
+--     generations (period_* from the draft/design types, cycle_* from
+--     the current types) and period_start/period_end are NULLABLE -
+--     with NOT NULL on both generations' date pairs, one of the two
+--     exercised insert shapes would fail on the other's columns.
 --
 -- Every statement is existence-guarded; the whole step is one
 -- transaction. Tables start empty; no data loads in this step.
@@ -104,6 +121,7 @@ create table if not exists public.booking_contexts (
   status text not null default 'active',  -- the only value live code writes
   location_context jsonb,
   vehicle_context jsonb,
+  service_context jsonb,              -- re-base: current types + the live PATCH writes it (design missed it)
   selected_date text,                 -- exercised: the progress PATCH writes it; NOT in types/draft
   selected_time text,                 -- exercised: the progress PATCH writes it; NOT in types/draft
   expires_at timestamptz not null default (now() + interval '2 hours'),  -- ASSUMED default, flagged
@@ -463,6 +481,45 @@ create table if not exists public.technicians (
   import_batch_id uuid,               -- FK owed -> import_batches(id) (Bucket iii)
   origin_source text,
   data_origin text not null default 'system_created',  -- enum vocabulary as text; see header
+  -- Re-base (header deviation 4): columns the CURRENT tree's types.ts
+  -- carries that the design tree's types lacked. All nullable, no
+  -- defaults (current types proves no insert supplies them by name
+  -- except through the passthrough profile payloads). Exercised among
+  -- them: current_location (vehicles.ts fleet map-data select + the
+  -- fleet work-order embed), max_daily_capacity_hours
+  -- (appointments.ts dispatch-capacity select), deactivated_at
+  -- (messaging.ts participant filters), working_hours +
+  -- drivers_license_expiry (team-dashboard profile payload).
+  display_name text,
+  bio text,
+  assigned_at timestamptz,
+  deactivated_at timestamptz,
+  deactivated_by uuid,
+  retained_auth_user_id uuid,
+  current_location jsonb,
+  last_location_update timestamptz,
+  location_tracking_enabled boolean,
+  home_lat numeric,
+  home_lng numeric,
+  home_zip text,
+  drivers_license_expiry date,
+  license_expiration_date date,
+  insurance_verified boolean,
+  base_hourly_rate numeric,
+  overtime_rate numeric,
+  commission_percentage numeric,
+  max_daily_capacity_hours numeric,
+  max_jobs_per_day integer,
+  weekly_capacity_hours numeric,
+  avg_job_duration_minutes numeric,
+  service_radius_miles numeric,
+  working_hours jsonb,
+  jobs_completed_mtd integer,
+  revenue_generated_mtd numeric,
+  callback_rate numeric,
+  redo_rate numeric,
+  upsell_rate numeric,
+  offboarding_notes text,
   onboarding_completed boolean,
   last_clock_in timestamptz,
   last_clock_out timestamptz,
@@ -527,10 +584,12 @@ create table if not exists public.technician_availability (
   workspace_id uuid not null,
   technician_id uuid not null,
   user_id uuid not null,
-  weekday integer not null,
+  weekday text not null,              -- RE-BASE correction (header deviation 4): the design said integer (draft), but the live client sends day-name strings ('monday'...'sunday', WeeklyAvailabilityGrid) and keys read-backs by them; current types agree (string). An integer column would reject every availability save.
   start_time text not null,           -- types/draft: text time strings; code passes them through opaquely
   end_time text not null,
   is_available boolean not null default true,
+  max_jobs_per_day integer,           -- re-base: current types only (not exercised by name)
+  service_radius_miles numeric,       -- re-base: current types only (not exercised by name)
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   foreign key (workspace_id, technician_id)
@@ -696,6 +755,8 @@ create table if not exists public.technician_onboarding_tasks (
   description text,
   is_completed boolean not null default false,
   completed_at timestamptz,
+  completed_by uuid,                  -- re-base: current types only
+  notes text,                         -- re-base: current types only (design carried description instead; both kept)
   due_date date,
   sort_order integer,
   created_at timestamptz not null default now(),
@@ -744,10 +805,20 @@ create table if not exists public.technician_payroll_cycles (
   workspace_id uuid not null,
   technician_id uuid not null,
   user_id uuid not null,
-  period_start date not null,
-  period_end date not null,
+  period_start date,                  -- NULLABLE per header deviation 4(b): two period generations are carried
+  period_end date,                    -- NULLABLE per header deviation 4(b)
+  cycle_start date,                   -- re-base: current types' generation
+  cycle_end date,                     -- re-base: current types' generation
   total_hours numeric,
   total_jobs integer,
+  regular_hours numeric,              -- re-base: current types only
+  overtime_hours numeric,             -- re-base: current types only
+  base_pay numeric,                   -- re-base: current types only
+  overtime_pay numeric,               -- re-base: current types only
+  bonuses numeric,                    -- re-base: current types only
+  commission_earned numeric,          -- re-base: current types only
+  gross_revenue_generated numeric,    -- re-base: current types only
+  final_payout numeric,               -- re-base: current types only
   gross_pay numeric,
   deductions numeric,
   net_pay numeric,
@@ -804,6 +875,9 @@ create table if not exists public.technician_skills (
   certification_level text,
   certification_number text,
   certification_expiry date,
+  certified_by text,                  -- re-base: current types only
+  issue_date date,                    -- re-base: current types only
+  expiration_date date,               -- re-base: current types only (the other generation's spelling of certification_expiry; both kept)
   years_experience integer,
   is_active boolean not null default true,
   notes text,
@@ -864,6 +938,14 @@ create table if not exists public.time_clock_entries (
   break_end text,
   status text,                        -- exercised values: 'active', 'on_break'
   total_hours numeric,
+  regular_hours numeric,              -- re-base: current types + the time-clock client contract
+  overtime_hours numeric,             -- re-base: current types + the time-clock client contract
+  break_duration_minutes numeric,     -- re-base: current types; stamped by end_break (section 17)
+  clock_in_location jsonb,            -- re-base: current types; stamped by clock_in from p_location objects
+  clock_out_location jsonb,           -- re-base: current types; stamped by clock_out from p_location objects
+  approved_by uuid,                   -- re-base: current types only (approval workflow; no writer in this pass)
+  approved_at timestamptz,            -- re-base: current types only
+  edit_reason text,                   -- re-base: current types only
   notes text,
   location_data jsonb,
   created_at timestamptz not null default now(),
@@ -930,6 +1012,8 @@ create table if not exists public.dispatch_runs (
   start_location_lat numeric,         -- exercised: the route-optimize handler reads them off the run row
   start_location_lng numeric,         -- exercised: same read; only the start pair is exercised
   end_location jsonb,
+  end_location_lat numeric,           -- re-base: current types only (the end pair; only the start pair is exercised)
+  end_location_lng numeric,           -- re-base: current types only
   route_polyline text,
   total_distance numeric,             -- types shape
   total_distance_meters numeric,      -- exercised list select
@@ -1088,10 +1172,11 @@ end $$;
 -- workspaces likewise fails loud instead of guessing a shop
 -- (NEED-S4-10's hazard, surfaced at the write).
 --
--- p_location on clock_out is accepted for signature fidelity; it is
--- not persisted — the exercised shape carries a single location_data
--- column (the clock-in location), and no reader exercises a separate
--- clock-out location column.
+-- Locations: object-shaped p_location payloads land in the typed
+-- clock_in_location / clock_out_location columns (the time-clock
+-- client's {lat, lng} contract) as well as the generic location_data
+-- column the design carried; scalar payloads (the /v1/time-clock
+-- route passes a plain string) land in location_data only.
 -- ----------------------------------------------------------------------------
 create or replace function public.clock_in(p_location jsonb default null)
 returns text
@@ -1143,9 +1228,15 @@ begin
   end if;
 
   insert into public.time_clock_entries (
-    workspace_id, user_id, technician_id, clock_in, status, location_data
+    workspace_id, user_id, technician_id, clock_in, status, location_data,
+    clock_in_location
   ) values (
-    v_workspace_id, v_user, v_technician_id, v_now_text, 'active', p_location
+    v_workspace_id, v_user, v_technician_id, v_now_text, 'active', p_location,
+    -- The typed location columns carry object-shaped locations (the
+    -- {lat, lng} contract of the time-clock client); a scalar payload
+    -- (the /v1/time-clock route passes a plain string) lands only in
+    -- the generic location_data column.
+    case when jsonb_typeof(p_location) = 'object' then p_location end
   )
   returning id into v_entry_id;
 
@@ -1188,6 +1279,10 @@ begin
           (extract(epoch from (v_now_text::timestamptz - v_clock_in::timestamptz)) / 3600.0)::numeric,
           2
         ),
+        clock_out_location = case
+          when jsonb_typeof(p_location) = 'object' then p_location
+          else clock_out_location
+        end,
         updated_at = now()
     where id = v_entry_id;
 end;
@@ -1235,13 +1330,14 @@ as $$
 declare
   v_user uuid := auth.uid();
   v_entry_id uuid;
+  v_break_start text;
   v_now_text text := to_char(timezone('utc', now()), 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
 begin
   if v_user is null then
     raise exception 'Authentication required';
   end if;
 
-  select id into v_entry_id
+  select id, break_start into v_entry_id, v_break_start
   from public.time_clock_entries
   where user_id = v_user and clock_out is null
     and break_start is not null and break_end is null
@@ -1255,6 +1351,10 @@ begin
   update public.time_clock_entries
     set break_end = v_now_text,
         status = 'active',
+        break_duration_minutes = round(
+          (extract(epoch from (v_now_text::timestamptz - v_break_start::timestamptz)) / 60.0)::numeric,
+          2
+        ),
         updated_at = now()
     where id = v_entry_id;
 end;
