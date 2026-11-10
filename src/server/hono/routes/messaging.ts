@@ -1567,13 +1567,18 @@ messagingRouter.get("/v1/sms/eligible-recipients", async (c) => {
     Object.fromEntries(new URL(c.req.url).searchParams),
   );
   const { supabase, workspaceId } = await resolveWorkspaceOrThrow(c, selected_workspace_id);
+  // Production appointments has no scheduled_date / scheduled_time columns
+  // and customers has no `name` column (live census 2026-11-10) — the old
+  // select and order 42703'd on every call. The schedule is starts_at; the
+  // customer name is composed client-side from first/last/company parts
+  // (src/application/queries/sms.query.ts).
   const { data, error } = await supabase
     .from("appointments")
-    .select("id, status, scheduled_date, scheduled_time, customer:customers(name, phone)")
+    .select("id, status, starts_at, customer:customers(first_name, last_name, company_name, phone)")
     .eq("workspace_id", workspaceId)
     .in("status", ELIGIBLE_APPOINTMENT_STATUSES)
     .not("customer.phone", "is", null)
-    .order("scheduled_date", { ascending: true });
+    .order("starts_at", { ascending: true });
   if (error) throw error;
   return json({ data: data ?? [] });
 });

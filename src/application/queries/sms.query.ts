@@ -50,9 +50,13 @@ export async function fetchSmsMessages(): Promise<SmsMessage[]> {
 interface EligibleRecipientRow {
   id: string;
   status: string;
-  scheduled_date: string;
-  scheduled_time: string;
-  customer?: { name?: string | null; phone?: string | null } | null;
+  starts_at: string;
+  customer?: {
+    first_name?: string | null;
+    last_name?: string | null;
+    company_name?: string | null;
+    phone?: string | null;
+  } | null;
 }
 
 /** Customers with appointments that are not completed/cancelled and have a phone */
@@ -62,10 +66,13 @@ export async function fetchSmsEligibleRecipients(): Promise<SmsRecipient[]> {
     .filter((row) => row.customer?.phone)
     .map((row) => ({
       appointment_id: row.id,
-      customer_name: row.customer?.name || "Customer",
+      customer_name:
+        [row.customer?.first_name, row.customer?.last_name].filter(Boolean).join(" ") ||
+        row.customer?.company_name ||
+        "Customer",
       phone: row.customer?.phone as string,
       status: row.status,
-      scheduled_at: `${row.scheduled_date} ${row.scheduled_time}`,
+      scheduled_at: row.starts_at,
     }));
 }
 
