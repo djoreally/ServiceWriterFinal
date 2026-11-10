@@ -271,6 +271,6 @@ describe("tech-app workspace reads vs the live production schema", () => {
     expect(handler).not.toMatch(/\(supabase\.rpc as any\)\(\s*"get_technician_job_workspace_v1"/);
     expect(handler).not.toContain('.from("services")');
     expect(handler).toContain('"job_unresolved"');
-    expect(handler).toContain('const source = probe ? "appointment" : null;');
+    expect(handler).toContain('const source: string | null = probe ? "appointment" : null;');
   });
 });

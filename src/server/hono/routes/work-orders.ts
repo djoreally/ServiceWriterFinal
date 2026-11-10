@@ -3289,7 +3289,7 @@ workOrdersRouter.get("/v1/tech-app/job-detail", async (c) => {
   const { data: probe, error: probeError } = await (supabase as any)
     .from("appointments").select("id").eq("id", jobId).maybeSingle();
   if (probeError) throw probeError;
-  const source = probe ? "appointment" : null;
+  const source: string | null = probe ? "appointment" : null;
   if (!source) throw new ApiError(404, "Job access could not be resolved for this technician.", "job_unresolved");
 
   let job: Record<string, unknown> | null = null;
