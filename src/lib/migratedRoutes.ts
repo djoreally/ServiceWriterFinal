@@ -36,7 +36,6 @@ export const MIGRATED_ROUTE_PREFIXES: string[] = [
   "/voice-agent",
   // Phase 4: fleet/dispatch
   "/fleet",
-  "/fleet-os",
   "/weather-guard",
   "/dispatch-engine",
   "/dispatch",
@@ -67,8 +66,8 @@ export const MIGRATED_ROUTE_PREFIXES: string[] = [
  *
  * The tenant branch of the SPA (`src/App.tsx`) serves these route shapes;
  * migrate them by adding the corresponding prefixes here:
- * `/customer/dashboard`, `/customer/auth`, `/fleet-manager`,
- * `/fleet-manager/auth`, `/my-bookings`, `/booking-success`,
+ * `/customer/dashboard`, `/customer/auth`,
+ * `/my-bookings`, `/booking-success`,
  * `/messaging-preferences`, `/services`, `/subscribe`, `/embed/services`,
  * `/embed/subscribe`, `/embed/booking`.
  * The tenant catch-all `*` → `TenantBooking` is served by the App Router
@@ -77,8 +76,6 @@ export const MIGRATED_ROUTE_PREFIXES: string[] = [
 export const MIGRATED_TENANT_ROUTE_PREFIXES: string[] = [
   "/customer/dashboard",
   "/customer/auth",
-  "/fleet-manager",
-  "/fleet-manager/auth",
   "/my-bookings",
   "/booking-success",
   "/messaging-preferences",
