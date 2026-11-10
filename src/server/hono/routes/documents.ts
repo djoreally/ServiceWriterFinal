@@ -900,6 +900,7 @@ documentsRouter.post("/v1/invoices/:id/lifecycle-events", async (c) => {
 
   const { error } = await (supabase as any).from("invoice_lifecycle_events").insert({
     invoice_id: invoiceId,
+    workspace_id: body.workspace_id,
     user_id: user.id,
     event_type: body.event_type,
     idempotency_key: body.idempotency_key ?? null,

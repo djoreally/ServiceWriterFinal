@@ -925,11 +925,12 @@ crmRouter.delete("/v1/crm/follow-up/rules/:id", async (c) => {
 const retentionSignalIdsSchema = z.object({ signal_ids: z.array(z.string().uuid()).min(1).max(500) });
 
 crmRouter.get("/v1/crm/retention/signals", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const { data, error } = await supabase
     .from("retention_signals")
     .select("*")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .order("detected_at", { ascending: false })
     .limit(50);
   if (error) throw error;
@@ -937,11 +938,12 @@ crmRouter.get("/v1/crm/retention/signals", async (c) => {
 });
 
 crmRouter.get("/v1/crm/retention/vehicle-profiles", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const { data, error } = await supabase
     .from("retention_vehicle_profiles")
     .select("*")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .order("days_overdue", { ascending: false })
     .limit(50);
   if (error) throw error;
@@ -1026,10 +1028,10 @@ crmRouter.delete("/v1/crm/retention/automation-rules/:id", async (c) => {
 });
 
 crmRouter.post("/v1/crm/retention/signals/snooze", async (c) => {
-  const { signal_ids, days } = retentionSignalIdsSchema
-    .extend({ days: z.number().int().min(1).max(365).default(30) })
+  const { signal_ids, days, workspace_id } = retentionSignalIdsSchema
+    .extend({ days: z.number().int().min(1).max(365).default(30), workspace_id: z.string().uuid() })
     .parse(await c.req.json());
-  const { supabase } = await requireAuth(c);
+  const { supabase } = await requireWorkspaceAuth(c, workspace_id, [...loyaltyWriteRoles]);
   const db = supabase as any;
   const snoozeUntil = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
   for (const signalId of signal_ids) {
@@ -1037,6 +1039,7 @@ crmRouter.post("/v1/crm/retention/signals/snooze", async (c) => {
       .from("retention_signals")
       .select("payload_jsonb")
       .eq("id", signalId)
+      .eq("workspace_id", workspace_id)
       .single();
     if (readErr) throw readErr;
     const merged = {
@@ -1044,32 +1047,38 @@ crmRouter.post("/v1/crm/retention/signals/snooze", async (c) => {
       snooze_until: snoozeUntil,
       snoozed_at: new Date().toISOString(),
     };
-    const { error } = await db.from("retention_signals").update({ status: "suppressed", payload_jsonb: merged }).eq("id", signalId);
+    const { error } = await db.from("retention_signals").update({ status: "suppressed", payload_jsonb: merged }).eq("id", signalId).eq("workspace_id", workspace_id);
     if (error) throw error;
   }
   return json({ data: { snoozed: signal_ids.length, snooze_until: snoozeUntil } });
 });
 
 crmRouter.post("/v1/crm/retention/signals/dismiss", async (c) => {
-  const { signal_ids } = retentionSignalIdsSchema.parse(await c.req.json());
-  const { supabase } = await requireAuth(c);
-  const { error } = await (supabase as any).from("retention_signals").update({ status: "suppressed" }).in("id", signal_ids);
+  const { signal_ids, workspace_id } = retentionSignalIdsSchema
+    .extend({ workspace_id: z.string().uuid() })
+    .parse(await c.req.json());
+  const { supabase } = await requireWorkspaceAuth(c, workspace_id, [...loyaltyWriteRoles]);
+  const { error } = await (supabase as any).from("retention_signals").update({ status: "suppressed" }).in("id", signal_ids).eq("workspace_id", workspace_id);
   if (error) throw error;
   return json({ data: { dismissed: signal_ids.length } });
 });
 
 crmRouter.post("/v1/crm/retention/signals/resolve", async (c) => {
-  const { signal_ids } = retentionSignalIdsSchema.parse(await c.req.json());
-  const { supabase } = await requireAuth(c);
+  const { signal_ids, workspace_id } = retentionSignalIdsSchema
+    .extend({ workspace_id: z.string().uuid() })
+    .parse(await c.req.json());
+  const { supabase } = await requireWorkspaceAuth(c, workspace_id, [...loyaltyWriteRoles]);
   const { error } = await (supabase as any)
     .from("retention_signals")
     .update({ status: "resolved", resolved_at: new Date().toISOString() })
-    .in("id", signal_ids);
+    .in("id", signal_ids)
+    .eq("workspace_id", workspace_id);
   if (error) throw error;
   return json({ data: { resolved: signal_ids.length } });
 });
 
 const retentionActionSchema = z.object({
+  workspace_id: z.string().uuid(),
   signal_ids: z.array(z.string().uuid()).min(1).max(500),
   action_type: z.enum(["send_winback_sms", "send_winback_email", "issue_reward", "send_reminder", "schedule_call", "send_recovery_offer", "award_points"]),
   config: z.record(z.string(), z.unknown()).default({}),
@@ -1077,12 +1086,13 @@ const retentionActionSchema = z.object({
 
 crmRouter.post("/v1/crm/retention/actions/enqueue", async (c) => {
   const body = retentionActionSchema.parse(await c.req.json());
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, user } = await requireWorkspaceAuth(c, body.workspace_id, [...loyaltyWriteRoles]);
   const db = supabase as any;
   const { data: signals, error: fetchErr } = await db
     .from("retention_signals")
     .select("id, signal_type, customer_id, vehicle_id")
-    .in("id", body.signal_ids);
+    .in("id", body.signal_ids)
+    .eq("workspace_id", body.workspace_id);
   if (fetchErr) throw fetchErr;
   const jobs = (signals || []).map((s: any) => ({
     user_id: user.id,
@@ -1098,7 +1108,7 @@ crmRouter.post("/v1/crm/retention/actions/enqueue", async (c) => {
   }));
   const { error: insertErr } = await db.from("job_queue").insert(jobs);
   if (insertErr) throw insertErr;
-  const { error: updateErr } = await db.from("retention_signals").update({ status: "active" }).in("id", body.signal_ids);
+  const { error: updateErr } = await db.from("retention_signals").update({ status: "active" }).in("id", body.signal_ids).eq("workspace_id", body.workspace_id);
   if (updateErr) throw updateErr;
   return json({ data: { enqueued: jobs.length } }, { status: 201 });
 });
@@ -1148,15 +1158,16 @@ const RETENTION_TYPE_WEIGHT: Record<string, number> = {
 };
 
 crmRouter.get("/v1/crm/retention/impact/metrics", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const db = supabase as any;
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
   const [signalsRes, profilesRes, loyaltyRes, prevSignalsRes] = await Promise.all([
-    db.from("retention_signals").select("id, signal_type, customer_id, score, detected_at, status").eq("user_id", user.id).in("status", [...RETENTION_ACTIVE_STATUSES]).gte("detected_at", thirtyDaysAgo),
-    db.from("retention_vehicle_profiles").select("vehicle_id, days_overdue").eq("user_id", user.id).gt("days_overdue", 0),
-    db.from("loyalty_accounts").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("status", "active"),
-    db.from("retention_signals").select("id", { count: "exact", head: true }).eq("user_id", user.id).gte("detected_at", sixtyDaysAgo).lt("detected_at", thirtyDaysAgo),
+    db.from("retention_signals").select("id, signal_type, customer_id, score, detected_at, status").eq("workspace_id", workspaceId).in("status", [...RETENTION_ACTIVE_STATUSES]).gte("detected_at", thirtyDaysAgo),
+    db.from("retention_vehicle_profiles").select("vehicle_id, days_overdue").eq("workspace_id", workspaceId).gt("days_overdue", 0),
+    db.from("loyalty_accounts").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId).eq("status", "active"),
+    db.from("retention_signals").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId).gte("detected_at", sixtyDaysAgo).lt("detected_at", thirtyDaysAgo),
   ]);
   if (signalsRes.error) throw signalsRes.error;
   if (profilesRes.error) throw profilesRes.error;
@@ -1186,12 +1197,13 @@ crmRouter.get("/v1/crm/retention/impact/metrics", async (c) => {
 });
 
 crmRouter.get("/v1/crm/retention/impact/action-queue", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const db = supabase as any;
   const { data: signals, error } = await db
     .from("retention_signals")
     .select("id, signal_type, status, score, detected_at, customer_id, vehicle_id")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .in("status", [...RETENTION_ACTIVE_STATUSES])
     .order("detected_at", { ascending: false })
     .limit(500);
@@ -1240,14 +1252,17 @@ crmRouter.get("/v1/crm/retention/impact/action-queue", async (c) => {
 });
 
 crmRouter.get("/v1/crm/retention/signals/by-ids", async (c) => {
-  const ids = (new URL(c.req.url).searchParams.get("ids") || "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 50);
-  const { supabase } = await requireAuth(c);
+  const params = new URL(c.req.url).searchParams;
+  const ids = (params.get("ids") || "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 50);
+  const workspaceId = z.string().uuid().parse(params.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const db = supabase as any;
   if (!ids.length) return json({ data: [] });
   const { data, error } = await db
     .from("retention_signals")
     .select("id, signal_type, status, score, detected_at, customer_id, vehicle_id, payload_jsonb")
     .in("id", ids)
+    .eq("workspace_id", workspaceId)
     .order("score", { ascending: false, nullsFirst: false })
     .limit(50);
   if (error) throw error;
@@ -1267,12 +1282,13 @@ crmRouter.get("/v1/crm/retention/signals/by-ids", async (c) => {
 
 crmRouter.get("/v1/crm/retention/signal-log", async (c) => {
   const params = new URL(c.req.url).searchParams;
-  const { supabase, user } = await requireAuth(c);
+  const workspaceId = z.string().uuid().parse(params.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const db = supabase as any;
   let q = db
     .from("retention_signals")
     .select("id, signal_type, status, score, detected_at, customer_id, vehicle_id, payload_jsonb")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .order("detected_at", { ascending: false })
     .limit(Math.min(Number(params.get("limit") || 200), 5000));
   const type = params.get("type");
@@ -1298,13 +1314,16 @@ const retentionEventSchema = z.object({
 });
 
 crmRouter.post("/v1/crm/retention/events", async (c) => {
-  const rows = z.array(retentionEventSchema).min(1).max(500).parse(await c.req.json());
-  const { supabase, user } = await requireAuth(c);
+  const { workspace_id, events } = z.object({
+    workspace_id: z.string().uuid(),
+    events: z.array(retentionEventSchema).min(1).max(500),
+  }).parse(await c.req.json());
+  const { supabase, user } = await requireWorkspaceAuth(c, workspace_id, [...loyaltyWriteRoles]);
   const { error } = await (supabase as any)
     .from("retention_events")
-    .insert(rows.map((row) => ({ ...row, user_id: user.id })));
+    .insert(events.map((row) => ({ ...row, workspace_id, user_id: user.id })));
   if (error) throw error;
-  return json({ data: { inserted: rows.length } }, { status: 201 });
+  return json({ data: { inserted: events.length } }, { status: 201 });
 });
 
 crmRouter.patch("/v1/crm/retention/email-queue/:id/retry", async (c) => {
@@ -1771,11 +1790,12 @@ crmRouter.get("/v1/crm/coupons/validate", async (c) => {
 // /v1/crm/marketing/* — marketing reads (user-scoped via session)
 // ---------------------------------------------------------------------------
 crmRouter.get("/v1/crm/marketing/email-campaigns", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const { data, error } = await supabase
     .from("email_marketing_campaigns")
     .select("*")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false });
   if (error) throw error;
   return json({ data: data ?? [] });
@@ -1795,6 +1815,7 @@ crmRouter.get("/v1/crm/marketing/email-campaigns/customer-count", async (c) => {
 });
 
 const emailCampaignCreateSchema = z.object({
+  workspace_id: z.string().uuid(),
   name: z.string().trim().min(1).max(200),
   subject: z.string().trim().min(1).max(500),
   content: z.string().min(1),
@@ -1805,10 +1826,11 @@ const emailCampaignCreateSchema = z.object({
 
 crmRouter.post("/v1/crm/marketing/email-campaigns", async (c) => {
   const payload = emailCampaignCreateSchema.parse(await c.req.json());
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, user } = await requireWorkspaceAuth(c, payload.workspace_id, [...loyaltyWriteRoles]);
   const { data, error } = await (supabase as any)
     .from("email_marketing_campaigns")
     .insert({
+      workspace_id: payload.workspace_id,
       user_id: user.id,
       name: payload.name,
       subject: payload.subject,
@@ -1826,8 +1848,9 @@ crmRouter.post("/v1/crm/marketing/email-campaigns", async (c) => {
 
 crmRouter.delete("/v1/crm/marketing/email-campaigns/:id", async (c) => {
   const id = z.string().uuid().parse(c.req.param("id"));
-  const { supabase, user } = await requireAuth(c);
-  const { error } = await (supabase as any).from("email_marketing_campaigns").delete().eq("id", id).eq("user_id", user.id);
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId, [...loyaltyWriteRoles]);
+  const { error } = await (supabase as any).from("email_marketing_campaigns").delete().eq("id", id).eq("workspace_id", workspaceId);
   if (error) throw error;
   return json({ data: { id } });
 });
@@ -1963,7 +1986,7 @@ crmRouter.post("/v1/crm/marketing/email-campaigns/:id/send", async (c) => {
     .from("email_marketing_campaigns")
     .select("*")
     .eq("id", id)
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspace_id)
     .single();
   if (campaignError || !campaign) throw campaignError ?? new ApiError(404, "Campaign not found", "not_found");
 
@@ -2005,7 +2028,8 @@ crmRouter.post("/v1/crm/marketing/email-campaigns/:id/send", async (c) => {
   const { error: updateError } = await db
     .from("email_marketing_campaigns")
     .update({ status: "sent", sent_at: new Date().toISOString(), recipient_count: recipients.length })
-    .eq("id", campaign.id);
+    .eq("id", campaign.id)
+    .eq("workspace_id", workspace_id);
   if (updateError) throw updateError;
   return json({ data: { sent: recipients.length } });
 });
@@ -2013,16 +2037,16 @@ crmRouter.post("/v1/crm/marketing/email-campaigns/:id/send", async (c) => {
 crmRouter.post("/v1/crm/marketing/email-campaigns/:id/test", async (c) => {
   const id = z.string().uuid().parse(c.req.param("id"));
   const { to } = z.object({ to: z.string().email().max(320) }).parse(await c.req.json());
-  const { supabase, user } = await requireAuth(c);
+  const { workspace_id: workspaceId } = z.object({ workspace_id: z.string().uuid() }).parse({ workspace_id: new URL(c.req.url).searchParams.get("workspace_id") });
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId, [...loyaltyWriteRoles]);
   const db = supabase as any;
   const { data: campaign, error: campaignError } = await db
     .from("email_marketing_campaigns")
     .select("*")
     .eq("id", id)
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .single();
   if (campaignError || !campaign) throw campaignError ?? new ApiError(404, "Campaign not found", "not_found");
-  const workspaceId = await resolveSettingsWorkspaceId(c);
   const { data: profile } = await supabase
     .from("business_profiles")
     .select("business_name, email, booking_slug")
@@ -2050,11 +2074,12 @@ crmRouter.post("/v1/crm/marketing/email-campaigns/:id/test", async (c) => {
 
 // Marketing reads: testimonials, business slug, review dashboard, analytics, LTV.
 crmRouter.get("/v1/crm/marketing/testimonials", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const { data, error } = await supabase
     .from("testimonials")
     .select("*")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false });
   if (error) throw error;
   return json({ data: data ?? [] });
@@ -2068,11 +2093,12 @@ crmRouter.get("/v1/crm/marketing/business-slug", async (c) => {
 });
 
 crmRouter.get("/v1/crm/marketing/review-dashboard", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const db = supabase as any;
   const [analyticsRes, requestsRes] = await Promise.all([
     db.rpc("get_review_analytics", { p_days: 30 }),
-    supabase.from("review_requests").select("*, services:service_id (service_type, description)").eq("user_id", user.id).order("created_at", { ascending: false }).limit(50),
+    supabase.from("review_requests").select("*, services:service_id (service_type, description)").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).limit(50),
   ]);
   if (requestsRes.error) throw requestsRes.error;
   return json({ data: { analytics: analyticsRes.data?.[0] ?? null, requests: requestsRes.data ?? [] } });
@@ -2084,9 +2110,9 @@ crmRouter.get("/v1/crm/marketing/analytics", async (c) => {
   const db = supabase as any;
   const [emailQueueRes, reviewRes, testimonialRes, campaignRes, subscriberRes] = await Promise.all([
     db.from("email_queue").select("email_type, status").eq("workspace_id", workspaceId),
-    db.from("review_requests").select("status, clicked_at").eq("user_id", user.id),
-    db.from("testimonials").select("status").eq("user_id", user.id),
-    db.from("email_marketing_campaigns").select("id").eq("user_id", user.id),
+    db.from("review_requests").select("status, clicked_at").eq("workspace_id", workspaceId),
+    db.from("testimonials").select("status").eq("workspace_id", workspaceId),
+    db.from("email_marketing_campaigns").select("id").eq("workspace_id", workspaceId),
     db.from("customers").select("*", { count: "exact", head: true }).eq("user_id", user.id).not("email", "is", null),
   ]);
   if (emailQueueRes.error) throw emailQueueRes.error;
@@ -2271,18 +2297,18 @@ crmRouter.get("/v1/crm/marketing/ltv", async (c) => {
 
 crmRouter.patch("/v1/crm/marketing/testimonials/:id", async (c) => {
   const id = z.string().uuid().parse(c.req.param("id"));
-  const { status } = z.object({ status: z.enum(["approved", "rejected"]) }).parse(await c.req.json());
-  const { supabase, user } = await requireAuth(c);
-  const { error } = await (supabase as any).from("testimonials").update({ status }).eq("id", id).eq("user_id", user.id);
+  const { status, workspace_id } = z.object({ status: z.enum(["approved", "rejected"]), workspace_id: z.string().uuid() }).parse(await c.req.json());
+  const { supabase } = await requireWorkspaceAuth(c, workspace_id, [...loyaltyWriteRoles]);
+  const { error } = await (supabase as any).from("testimonials").update({ status }).eq("id", id).eq("workspace_id", workspace_id);
   if (error) throw error;
   return json({ data: { id, status } });
 });
 
 crmRouter.patch("/v1/crm/marketing/testimonials/:id/featured", async (c) => {
   const id = z.string().uuid().parse(c.req.param("id"));
-  const { featured } = z.object({ featured: z.boolean() }).parse(await c.req.json());
-  const { supabase, user } = await requireAuth(c);
-  const { error } = await (supabase as any).from("testimonials").update({ featured }).eq("id", id).eq("user_id", user.id);
+  const { featured, workspace_id } = z.object({ featured: z.boolean(), workspace_id: z.string().uuid() }).parse(await c.req.json());
+  const { supabase } = await requireWorkspaceAuth(c, workspace_id, [...loyaltyWriteRoles]);
+  const { error } = await (supabase as any).from("testimonials").update({ featured }).eq("id", id).eq("workspace_id", workspace_id);
   if (error) throw error;
   return json({ data: { id, featured } });
 });
@@ -2356,12 +2382,14 @@ crmRouter.get("/v1/crm/marketing/legacy-segments/:name/customer-ids", async (c) 
 });
 
 crmRouter.get("/v1/crm/marketing/retention-signals-since", async (c) => {
-  const since = z.string().datetime().parse(new URL(c.req.url).searchParams.get("since"));
-  const { supabase, user } = await requireAuth(c);
+  const params = new URL(c.req.url).searchParams;
+  const since = z.string().datetime().parse(params.get("since"));
+  const workspaceId = z.string().uuid().parse(params.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const { data, error } = await supabase
     .from("retention_signals")
     .select("detected_at, signal_type, customer_id")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .gte("detected_at", since)
     .order("detected_at", { ascending: true })
     .limit(5000);
@@ -2370,12 +2398,14 @@ crmRouter.get("/v1/crm/marketing/retention-signals-since", async (c) => {
 });
 
 crmRouter.get("/v1/crm/marketing/service-reminders-since", async (c) => {
-  const since = z.string().datetime().parse(new URL(c.req.url).searchParams.get("since"));
-  const { supabase, user } = await requireAuth(c);
+  const params = new URL(c.req.url).searchParams;
+  const since = z.string().datetime().parse(params.get("since"));
+  const workspaceId = z.string().uuid().parse(params.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const { data, error } = await supabase
     .from("service_reminders")
     .select("created_at, reminder_date, service_type, status, customer_id")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .gte("created_at", since)
     .order("created_at", { ascending: true })
     .limit(5000);
@@ -3093,14 +3123,13 @@ crmRouter.get("/v1/crm/customer-portal/appointments", async (c) => {
 
 crmRouter.get("/v1/crm/retention/automation-executions", async (c) => {
   const params = new URL(c.req.url).searchParams;
-  const userId = z.string().uuid().parse(params.get("user_id"));
+  const workspaceId = z.string().uuid().parse(params.get("workspace_id"));
   const limit = Math.max(1, Math.min(500, Number(params.get("limit") ?? 50) || 50));
-  const { supabase, user } = await requireAuth(c);
-  if (user.id !== userId) throw new ApiError(403, "You can only view your own execution log", "forbidden");
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const { data, error } = await (supabase as any)
     .from("retention_action_executions")
     .select("id, rule_id, customer_id, action_type, status, executed_at, result_jsonb, automation_rules(name), customers(name)")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .order("executed_at", { ascending: false, nullsFirst: false })
     .limit(limit);
   if (error) throw error;

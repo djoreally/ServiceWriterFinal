@@ -1939,15 +1939,15 @@ platformRouter.post("/v1/platform/automation/rules/:id/dry-run", async (c) => {
 });
 
 platformRouter.get("/v1/platform/automation/executions", async (c) => {
-  const { user_id, limit } = z.object({
-    user_id: z.string().uuid(),
+  const { workspace_id, limit } = z.object({
+    workspace_id: z.string().uuid(),
     limit: z.coerce.number().int().min(1).max(500).default(50),
   }).parse(Object.fromEntries(new URL(c.req.url).searchParams));
   const { supabase } = await requirePlatformWorkspace(c);
   const { data, error } = await supabase
     .from("retention_action_executions")
     .select("id, rule_id, customer_id, action_type, status, executed_at, result_jsonb, automation_rules(name), customers(name)")
-    .eq("user_id", user_id)
+    .eq("workspace_id", workspace_id)
     .order("executed_at", { ascending: false, nullsFirst: false })
     .limit(limit);
   if (error) throw error;

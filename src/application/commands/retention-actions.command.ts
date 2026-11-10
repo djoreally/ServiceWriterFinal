@@ -8,6 +8,13 @@
  * - bulkEnqueueAction: writes one job_queue row per signal and flips signals → active.
  */
 import { apiClient } from "@/lib/api-client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+
+async function retentionWorkspaceId(): Promise<string> {
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("No active workspace is available.");
+  return context.workspaceId;
+}
 
 export type RetentionActionType =
   | "send_winback_sms"
@@ -19,7 +26,9 @@ export type RetentionActionType =
   | "award_points";
 
 export async function snoozeSignal(signalId: string, days = 30) {
+  const workspaceId = await retentionWorkspaceId();
   await apiClient.post("/v1/crm/retention/signals/snooze", {
+    workspace_id: workspaceId,
     signal_ids: [signalId],
     days,
   });
@@ -27,34 +36,44 @@ export async function snoozeSignal(signalId: string, days = 30) {
 
 export async function snoozeSignals(signalIds: string[], days = 30) {
   if (!signalIds.length) return;
+  const workspaceId = await retentionWorkspaceId();
   await apiClient.post("/v1/crm/retention/signals/snooze", {
+    workspace_id: workspaceId,
     signal_ids: signalIds,
     days,
   });
 }
 
 export async function dismissSignal(signalId: string) {
+  const workspaceId = await retentionWorkspaceId();
   await apiClient.post("/v1/crm/retention/signals/dismiss", {
+    workspace_id: workspaceId,
     signal_ids: [signalId],
   });
 }
 
 export async function dismissSignals(signalIds: string[]) {
   if (!signalIds.length) return;
+  const workspaceId = await retentionWorkspaceId();
   await apiClient.post("/v1/crm/retention/signals/dismiss", {
+    workspace_id: workspaceId,
     signal_ids: signalIds,
   });
 }
 
 export async function resolveSignal(signalId: string) {
+  const workspaceId = await retentionWorkspaceId();
   await apiClient.post("/v1/crm/retention/signals/resolve", {
+    workspace_id: workspaceId,
     signal_ids: [signalId],
   });
 }
 
 export async function resolveSignals(signalIds: string[]) {
   if (!signalIds.length) return;
+  const workspaceId = await retentionWorkspaceId();
   await apiClient.post("/v1/crm/retention/signals/resolve", {
+    workspace_id: workspaceId,
     signal_ids: signalIds,
   });
 }
@@ -71,10 +90,12 @@ export async function bulkEnqueueAction(params: {
 }) {
   const { signalIds, actionType, config } = params;
   if (!signalIds.length) return { enqueued: 0 };
+  const workspaceId = await retentionWorkspaceId();
 
   const { data } = await apiClient.post<{ data: { enqueued: number } }>(
     "/v1/crm/retention/actions/enqueue",
     {
+      workspace_id: workspaceId,
       signal_ids: signalIds,
       action_type: actionType,
       config: config || {},
