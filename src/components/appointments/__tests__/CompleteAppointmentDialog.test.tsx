@@ -1,5 +1,6 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { CompleteAppointmentDialog } from "@/components/appointments/CompleteAppointmentDialog";
+import { completeAppointmentWithServiceRecord } from "@/application/commands/service-record.command";
 import {
   fetchAppointmentPayments,
   fetchAppointmentPaymentsWithState,
@@ -211,5 +212,64 @@ describe("CompleteAppointmentDialog — locked quote paid out-of-band (INV-106)"
       />,
     );
     await waitFor(() => expect(totalRowText()).toContain("$133.83"));
+  });
+});
+
+// Cycle 4 regression: the dialog's mileage gate was
+// `!formData.mileage || parseInt(formData.mileage) <= 0`, which rejected
+// a legitimate ending mileage of 0 as "required" (a real closeout had
+// to be falsified to 1 to proceed). Empty stays invalid; 0 is valid.
+describe("CompleteAppointmentDialog — ending mileage validation", () => {
+  const mockComplete = completeAppointmentWithServiceRecord as jest.Mock;
+
+  beforeEach(() => {
+    mockFetchWithState.mockResolvedValue({ payments: [], paymentState: null });
+    mockComplete.mockResolvedValue({ success: true, serviceId: "svc-1" });
+  });
+
+  function renderDialog() {
+    render(
+      <CompleteAppointmentDialog
+        appointment={lockedAppointment}
+        open={true}
+        onOpenChange={() => {}}
+      />,
+    );
+    return {
+      mileageInput: screen.getByPlaceholderText("Enter mileage"),
+      completeButton: screen.getByRole("button", { name: /Complete & Create Record/ }),
+    };
+  }
+
+  it("accepts an ending mileage of 0 and submits it as 0", async () => {
+    const { mileageInput, completeButton } = renderDialog();
+    fireEvent.change(mileageInput, { target: { value: "0" } });
+    fireEvent.click(completeButton);
+    await waitFor(() =>
+      expect(mockComplete).toHaveBeenCalledWith(
+        APPT_ID,
+        expect.objectContaining({ mileage: 0 }),
+      ),
+    );
+    expect(screen.queryByText("Ending mileage is required")).toBeNull();
+  });
+
+  it("rejects an empty ending mileage and does not complete", async () => {
+    const { completeButton } = renderDialog();
+    fireEvent.click(completeButton);
+    expect(await screen.findByText("Ending mileage is required")).toBeTruthy();
+    expect(mockComplete).not.toHaveBeenCalled();
+  });
+
+  it("accepts a normal ending mileage", async () => {
+    const { mileageInput, completeButton } = renderDialog();
+    fireEvent.change(mileageInput, { target: { value: "45210" } });
+    fireEvent.click(completeButton);
+    await waitFor(() =>
+      expect(mockComplete).toHaveBeenCalledWith(
+        APPT_ID,
+        expect.objectContaining({ mileage: 45210 }),
+      ),
+    );
   });
 });

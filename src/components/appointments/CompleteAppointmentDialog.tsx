@@ -26,6 +26,7 @@ import {
 import { ManualPaymentDialog } from "@/components/payments/ManualPaymentDialog";
 import { PaymentLinkDialog } from "@/components/payments/PaymentLinkDialog";
 import { dollarsToCents, toCents, toDollars } from "@/lib/financialMath";
+import { parseEndingMileage } from "@/lib/endingMileage";
 
 interface CompleteAppointmentDialogProps {
   open: boolean;
@@ -144,8 +145,10 @@ export function CompleteAppointmentDialog({
   const handleComplete = async () => {
     if (!appointment) return;
     
-    // Require mileage
-    if (!formData.mileage || parseInt(formData.mileage) <= 0) {
+    // Require mileage. Only an EMPTY value is invalid: an odometer
+    // reading of 0 is a real reading and must be accepted.
+    const endingMileage = parseEndingMileage(formData.mileage);
+    if (endingMileage === null) {
       setMileageError("Ending mileage is required");
       return;
     }
@@ -178,7 +181,7 @@ export function CompleteAppointmentDialog({
         technician: formData.technician || undefined,
         laborHours: formData.laborHours ? parseFloat(formData.laborHours) : undefined,
         additionalNotes: formData.additionalNotes || undefined,
-        mileage: parseInt(formData.mileage),
+        mileage: endingMileage,
         vin: formData.vin.trim() || undefined,
         filterParts: filterParts.length > 0 ? filterParts : undefined,
         oilQuartsUsed: formData.oilQuartsUsed ? parseFloat(formData.oilQuartsUsed) : undefined,
