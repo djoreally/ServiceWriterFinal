@@ -30,7 +30,6 @@ import AppointmentsPage from "../../../app/(app)/appointments/page";
 import QuotesPage from "../../../app/(app)/quotes/page";
 import SettingsPage from "../../../app/(app)/settings/page";
 import FleetPage from "../../../app/(app)/fleet/page";
-import FleetOsPage from "../../../app/(app)/fleet-os/[[...path]]/page";
 import TechAppPage from "../../../app/(app)/tech-app/[[...path]]/page";
 import CommandCenterPage from "../../../app/(app)/command-center/page";
 import PublicServicesPage from "../../../app/(tenant)/public-services/[slug]/page";
@@ -44,7 +43,6 @@ const ROUTE_REDIRECTS: Record<string, string> = {
 function sectionPageFor(pathname: string): React.ComponentType | null {
   const matches = (prefix: string) => pathname === prefix || pathname.startsWith(`${prefix}/`);
   if (matches("/public-services")) return PublicServicesPage;
-  if (matches("/fleet-os")) return FleetOsPage;
   if (matches("/tech-app")) return TechAppPage;
   if (matches("/dashboard")) return DashboardPage;
   if (matches("/appointments")) return AppointmentsPage;
