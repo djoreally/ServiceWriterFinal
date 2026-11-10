@@ -1124,7 +1124,7 @@ const EMAIL_LOG_COLUMNS =
 messagingRouter.get("/v1/email-testing/data", async (c) => {
   const { supabase, user, workspaceId } = await resolveWorkspaceOrThrow(c, undefined);
   const [profileResp, emailSettingsResp, queueResp, logsResp] = await Promise.all([
-    supabase.from("business_profiles").select("business_name, email").eq("user_id", user.id).maybeSingle(),
+    supabase.from("business_profiles").select("business_name, email").eq("workspace_id", workspaceId).maybeSingle(),
     supabase.from("email_settings").select("id, use_custom_smtp, smtp_host, verified").eq("user_id", user.id).maybeSingle(),
     supabase.from("email_queue").select(EMAIL_QUEUE_COLUMNS).eq("workspace_id", workspaceId).order("created_at", { ascending: false }).limit(20),
     supabase.from("email_logs").select(EMAIL_LOG_COLUMNS).eq("workspace_id", workspaceId).order("created_at", { ascending: false }).limit(50),
@@ -1677,11 +1677,16 @@ messagingRouter.get("/v1/sms-credits/balance", async (c) => {
   const { data, error } = await supabase.rpc("sms_credit_balance_v1", { p_user_id: user.id });
   if (error) throw error;
 
-  const { data: businessProfile } = await supabase
-    .from("business_profiles")
-    .select("sms_low_balance_threshold, sms_transactional_enabled, sms_marketing_enabled")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  // business_profiles is workspace-keyed after the Step 3 translation;
+  // the workspace is resolved server-side from the auth token.
+  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id);
+  const { data: businessProfile } = workspaceId
+    ? await supabase
+        .from("business_profiles")
+        .select("sms_low_balance_threshold, sms_transactional_enabled, sms_marketing_enabled")
+        .eq("workspace_id", workspaceId)
+        .maybeSingle()
+    : { data: null };
 
   return json({
     data: {
@@ -1732,10 +1737,12 @@ messagingRouter.put("/v1/sms-credits/threshold", async (c) => {
   const { threshold } = z.object({ threshold: z.number().finite() }).parse(await c.req.json());
   const { supabase, user } = await requireAuth(c);
   const clamped = Math.max(0, Math.round(threshold));
+  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id);
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
   const { error } = await supabase
     .from("business_profiles")
     .update({ sms_low_balance_threshold: clamped })
-    .eq("user_id", user.id);
+    .eq("workspace_id", workspaceId);
   if (error) throw error;
   return json({ ok: true });
 });
@@ -1749,7 +1756,9 @@ messagingRouter.put("/v1/sms-credits/channel-toggles", async (c) => {
   if (body.transactional !== undefined) update.sms_transactional_enabled = body.transactional;
   if (body.marketing !== undefined) update.sms_marketing_enabled = body.marketing;
   if (Object.keys(update).length > 0) {
-    const { error } = await supabase.from("business_profiles").update(update).eq("user_id", user.id);
+    const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id);
+    if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
+    const { error } = await supabase.from("business_profiles").update(update).eq("workspace_id", workspaceId);
     if (error) throw error;
   }
   return json({ ok: true });
@@ -1798,10 +1807,12 @@ messagingRouter.put("/v1/sms-preferences", async (c) => {
 
 messagingRouter.get("/v1/voice-agent/settings", async (c) => {
   const { supabase, user } = await requireAuth(c);
+  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id);
+  if (!workspaceId) return json({ data: { agentId: null } });
   const { data, error } = await supabase
     .from("business_profiles")
     .select("elevenlabs_agent_id")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .maybeSingle();
   if (error) throw error;
   return json({ data: { agentId: data?.elevenlabs_agent_id ?? null } });
@@ -1811,9 +1822,11 @@ messagingRouter.put("/v1/voice-agent/settings", async (c) => {
   const body = z.object({ enabled: z.boolean(), agentId: z.string().max(200) }).parse(await c.req.json());
   const { supabase, user } = await requireAuth(c);
   const nextValue = body.enabled ? body.agentId || null : null;
+  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id);
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
   // Upsert: a missing business_profiles row must not turn the save into a
   // silent zero-write. The helper throws when the write cannot be verified.
-  await upsertBusinessProfile(supabase as any, user.id, { elevenlabs_agent_id: nextValue });
+  await upsertBusinessProfile(supabase as any, workspaceId, { elevenlabs_agent_id: nextValue });
   return json({ ok: true });
 });
 
@@ -1912,20 +1925,20 @@ messagingRouter.get("/v1/admin/messaging-health", async (c) => {
       admin.from("sms_opt_outs").select("id", { count: "exact", head: true }),
       admin
         .from("business_profiles")
-        .select("user_id", { count: "exact", head: true })
+        .select("workspace_id", { count: "exact", head: true })
         .eq("sms_enabled", true),
       admin
         .from("business_profiles")
-        .select("user_id", { count: "exact", head: true })
+        .select("workspace_id", { count: "exact", head: true })
         .eq("marketing_email_enabled", true),
       admin
         .from("business_profiles")
-        .select("user_id", { count: "exact", head: true })
+        .select("workspace_id", { count: "exact", head: true })
         .eq("sms_overage_enabled", false)
         .lt("sms_segments_remaining", 10),
       admin
         .from("business_profiles")
-        .select("user_id", { count: "exact", head: true })
+        .select("workspace_id", { count: "exact", head: true })
         .not("sms_a2p_status", "in", '("approved","verified","active")'),
     ]);
 
