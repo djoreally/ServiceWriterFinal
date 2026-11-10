@@ -212,6 +212,50 @@ async function resolveOwnedWorkspaceId(
   return (data as { workspace_id: string } | null)?.workspace_id ?? null;
 }
 
+/**
+ * Invoice totals keyed by appointment id for one workspace. Production
+ * invoices has no appointment_id column (live census 2026-11-10) — the link
+ * is metadata->>'appointment_id', the canonical invoice↔appointment hop.
+ * One invoice per job is the doctrine, so the first invoice seen for an
+ * appointment wins.
+ */
+async function invoiceTotalsByAppointmentId(
+  db: { from: (table: string) => any },
+  workspaceId: string,
+): Promise<Map<string, number>> {
+  const { data, error } = await db
+    .from("invoices")
+    .select("total, metadata")
+    .eq("workspace_id", workspaceId);
+  if (error) throw error;
+  const totals = new Map<string, number>();
+  for (const row of (data ?? []) as Array<{ total: number | null; metadata: unknown }>) {
+    const metadata =
+      row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+        ? (row.metadata as Record<string, unknown>)
+        : {};
+    const appointmentId = metadata.appointment_id;
+    if (typeof appointmentId === "string" && appointmentId && !totals.has(appointmentId)) {
+      totals.set(appointmentId, Number(row.total ?? 0));
+    }
+  }
+  return totals;
+}
+
+/** Display name from live customer parts (customers has no `name` column). */
+function customerDisplayName(
+  customer: { first_name?: unknown; last_name?: unknown; company_name?: unknown } | null | undefined,
+): string | null {
+  if (!customer) return null;
+  const parts = [customer.first_name, customer.last_name]
+    .filter((part): part is string => typeof part === "string" && part.trim() !== "")
+    .join(" ");
+  if (parts) return parts;
+  return typeof customer.company_name === "string" && customer.company_name.trim() !== ""
+    ? customer.company_name
+    : null;
+}
+
 const DEFAULT_WORKSPACE_CONTEXT_PROFILE = {
   business_name: "",
   owner_name: "",
@@ -3871,15 +3915,25 @@ platformRouter.get("/v1/platform/marketplace/metrics", async (c) => {
     if (since) q = q.gte("created_at", since);
     return q;
   };
-  let apptQuery = admin.from("appointments").select("status, estimated_cost, created_at")
-    .eq("user_id", userId).eq("source", "provider_directory");
+  // Production appointments has no user_id and no estimated_cost (live
+  // census 2026-11-10): the old appointments leg 42703'd, taking the whole
+  // metrics payload down. Scope by the owner's workspace instead (the
+  // listing sibling's resolution), and source estimated_cost from the
+  // appointment's invoice total via metadata->>'appointment_id' — invoices
+  // has no appointment_id column. The analytics_events legs are live as-is
+  // (tenant_id is the Step 7 DDL column, keyed on the owner's user id).
+  const workspaceId = await resolveOwnedWorkspaceId(admin, userId);
+  if (!workspaceId) throw new ApiError(404, "Business profile not found", "not_found");
+  let apptQuery = admin.from("appointments").select("id, status, created_at")
+    .eq("workspace_id", workspaceId).eq("source", "provider_directory");
   if (since) apptQuery = apptQuery.gte("created_at", since);
-  const [impressionsRes, viewsRes, bookingClicksRes, quoteClicksRes, apptRes] = await Promise.all([
+  const [impressionsRes, viewsRes, bookingClicksRes, quoteClicksRes, apptRes, invoiceTotals] = await Promise.all([
     countEvent(MARKETPLACE_FUNNEL_EVENTS.impressions),
     countEvent(MARKETPLACE_FUNNEL_EVENTS.views),
     countEvent(MARKETPLACE_FUNNEL_EVENTS.bookingClicks),
     countEvent(MARKETPLACE_FUNNEL_EVENTS.quoteClicks),
     apptQuery,
+    invoiceTotalsByAppointmentId(admin, workspaceId),
   ]);
   for (const result of [impressionsRes, viewsRes, bookingClicksRes, quoteClicksRes, apptRes]) {
     if (result.error) throw result.error;
@@ -3889,7 +3943,11 @@ platformRouter.get("/v1/platform/marketplace/metrics", async (c) => {
     views: viewsRes.count ?? 0,
     bookingClicks: bookingClicksRes.count ?? 0,
     quoteClicks: quoteClicksRes.count ?? 0,
-    appointments: (apptRes.data ?? []) as Array<{ status: string | null; estimated_cost: number | null }>,
+    appointments: ((apptRes.data ?? []) as Array<{ id: string; status: string | null; created_at: string }>).map((row) => ({
+      status: row.status,
+      estimated_cost: invoiceTotals.get(row.id) ?? null,
+      created_at: row.created_at,
+    })),
   });
 });
 
@@ -3897,15 +3955,47 @@ platformRouter.get("/v1/platform/marketplace/leads", async (c) => {
   const url = new URL(c.req.url);
   const userId = await requireSelfUser(c, url.searchParams.get("user_id") ?? "");
   const admin = createSupabaseAdminClient() as any;
+  // Production appointments has no user_id / title / scheduled_date /
+  // scheduled_time / guest_* / estimated_cost columns and customers has no
+  // `name` column (live census 2026-11-10) — the old select 42703'd on every
+  // call. Scope by the owner's workspace and map each live row back to the
+  // legacy lead shape the consumer (marketplace-provider.query.ts
+  // fetchMarketplaceLeads) reads: schedule from starts_at, guest identity
+  // from the linked customer, title null (the consumer defaults it to
+  // "Marketplace booking"), estimated_cost from the appointment's invoice
+  // total via metadata->>'appointment_id'.
+  const workspaceId = await resolveOwnedWorkspaceId(admin, userId);
+  if (!workspaceId) return json({ data: [] });
   const { data, error } = await admin
     .from("appointments")
-    .select("id, title, status, scheduled_date, scheduled_time, guest_name, guest_email, guest_phone, estimated_cost, customers(name), vehicles(year, make, model)")
-    .eq("user_id", userId)
+    .select("id, status, starts_at, customers(first_name, last_name, company_name, phone, email), vehicles(year, make, model)")
+    .eq("workspace_id", workspaceId)
     .eq("source", "provider_directory")
-    .order("scheduled_date", { ascending: true })
+    .order("starts_at", { ascending: true })
     .limit(100);
   if (error) throw error;
-  return json({ data: data ?? [] });
+  const rows = (data ?? []) as Array<Record<string, any>>;
+  const invoiceTotals = await invoiceTotalsByAppointmentId(admin, workspaceId);
+  return json({
+    data: rows.map((row) => {
+      const customer = (Array.isArray(row.customers) ? row.customers[0] : row.customers) ?? null;
+      const displayName = customerDisplayName(customer);
+      const startsAt = typeof row.starts_at === "string" ? row.starts_at : "";
+      return {
+        id: row.id,
+        title: null,
+        status: row.status,
+        scheduled_date: startsAt.slice(0, 10),
+        scheduled_time: startsAt.slice(11, 19),
+        guest_name: displayName,
+        guest_email: customer?.email ?? null,
+        guest_phone: customer?.phone ?? null,
+        estimated_cost: invoiceTotals.get(row.id as string) ?? null,
+        customers: { name: displayName },
+        vehicles: row.vehicles ?? null,
+      };
+    }),
+  });
 });
 
 platformRouter.get("/v1/platform/marketplace/services", async (c) => {
@@ -3977,9 +4067,14 @@ platformRouter.patch("/v1/platform/marketplace/lead-status", async (c) => {
   }).parse(await c.req.json());
   const uid = (await auth.supabase.auth.getUser()).data.user?.id ?? null;
   const admin = createSupabaseAdminClient() as any;
+  // Production appointments has no user_id (live census 2026-11-10): the old
+  // lookup selected it, so the 42703 lookup error converted EVERY call —
+  // including the owner's own leads — into this 403. Ownership is the
+  // appointment's workspace vs the caller's owned workspace.
   const { data: appt, error: lookupError } = await admin
-    .from("appointments").select("user_id").eq("id", appointment_id).single();
-  if (lookupError || !appt || appt.user_id !== uid) throw new ApiError(403, "Not authorized for this lead", "forbidden");
+    .from("appointments").select("workspace_id").eq("id", appointment_id).single();
+  const ownedWorkspaceId = uid ? await resolveOwnedWorkspaceId(admin, uid) : null;
+  if (lookupError || !appt || !ownedWorkspaceId || appt.workspace_id !== ownedWorkspaceId) throw new ApiError(403, "Not authorized for this lead", "forbidden");
   const { error } = await admin.from("appointments").update({ status }).eq("id", appointment_id);
   if (error) throw error;
   return json({ data: { ok: true } });
@@ -4512,16 +4607,59 @@ platformRouter.get("/v1/platform/weather-guard/at-risk", async (c) => {
   const url = new URL(c.req.url);
   const today = url.searchParams.get("today") ?? new Date().toISOString().slice(0, 10);
   const horizon = url.searchParams.get("horizon") ?? today;
+  // Production appointments has none of the columns the old select named
+  // (title, scheduled_date, scheduled_time, duration_minutes,
+  // location_address, guest_name, weather_risk_score, weather_decision,
+  // weather_evaluated_at, deleted_at — live census 2026-11-10), so every
+  // call 42703'd. The DTO is composed from live columns: schedule from
+  // starts_at/ends_at, address from the locations embed (metadata fallback,
+  // the canonical read model), guest from the linked customer, title from
+  // the first booked service. The weather_* fields have NO live source —
+  // no weather columns exist on appointments, weather_risk_logs is absent
+  // from production, and nothing in the repo writes risk scores — so they
+  // are returned null until the evaluation pipeline gains storage.
   const { data, error } = await (supabase as any)
     .from("appointments")
-    .select("id, title, scheduled_date, scheduled_time, duration_minutes, status, location_address, guest_name, weather_risk_score, weather_decision, weather_evaluated_at")
-    .gte("scheduled_date", today)
-    .lte("scheduled_date", horizon)
-    .is("deleted_at", null)
-    .order("scheduled_date", { ascending: true })
-    .order("scheduled_time", { ascending: true });
+    .select("id, status, starts_at, ends_at, metadata, locations(address_line1,address_line2,city,region,postal_code), customers(first_name, last_name, company_name), appointment_services(name)")
+    .gte("starts_at", `${today}T00:00:00`)
+    .lte("starts_at", `${horizon}T23:59:59.999`)
+    .order("starts_at", { ascending: true });
   if (error) throw error;
-  return json(data ?? []);
+  const rows = (data ?? []) as Array<Record<string, any>>;
+  return json(rows.map((row) => {
+    const location = (Array.isArray(row.locations) ? row.locations[0] : row.locations) ?? null;
+    const metadata =
+      row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+        ? (row.metadata as Record<string, unknown>)
+        : {};
+    const locationAddress = location
+      ? [location.address_line1, location.address_line2, location.city, location.region, location.postal_code]
+          .filter((part: unknown) => typeof part === "string" && part.trim() !== "")
+          .join(", ") || null
+      : null;
+    const customer = (Array.isArray(row.customers) ? row.customers[0] : row.customers) ?? null;
+    const services = Array.isArray(row.appointment_services) ? row.appointment_services : [];
+    const startsAt = typeof row.starts_at === "string" ? row.starts_at : "";
+    const startMs = Date.parse(startsAt);
+    const endMs = typeof row.ends_at === "string" ? Date.parse(row.ends_at) : NaN;
+    return {
+      id: row.id,
+      title: typeof services[0]?.name === "string" ? services[0].name : "",
+      scheduled_date: startsAt.slice(0, 10),
+      scheduled_time: startsAt.slice(11, 19),
+      duration_minutes: Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, Math.round((endMs - startMs) / 60000)) : 0,
+      status: row.status,
+      location_address:
+        locationAddress ??
+        (typeof metadata.location_address === "string" && metadata.location_address.trim() !== ""
+          ? metadata.location_address
+          : null),
+      guest_name: customerDisplayName(customer),
+      weather_risk_score: null,
+      weather_decision: null,
+      weather_evaluated_at: null,
+    };
+  }));
 });
 
 platformRouter.get("/v1/platform/weather-guard/risk-logs", async (c) => {
