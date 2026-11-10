@@ -2857,6 +2857,23 @@ billingRouter.patch("/v1/billing/bank-transactions/:id", async (c) => {
 // Cash receipts + financial reports
 // ---------------------------------------------------------------------------
 
+const UUID_SHAPE =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+// Production invoices carry their appointment link in metadata, not in a
+// column: sync_appointment_invoice_v1 itself finds an invoice by
+// metadata->>'appointment_id'. Parse defensively — only a uuid-shaped
+// string counts; anything else falls through to the next hop.
+function invoiceMetadataAppointmentId(metadata: unknown): string | null {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+  const raw = (metadata as Record<string, unknown>).appointment_id;
+  if (typeof raw !== "string") return null;
+  const candidate = raw.trim();
+  return UUID_SHAPE.test(candidate) ? candidate : null;
+}
+
 billingRouter.get("/v1/billing/cash-receipts", async (c) => {
   const { supabase, workspaceId } = await resolveBillingWorkspace(c);
   const url = new URL(c.req.url);
@@ -2865,16 +2882,20 @@ billingRouter.get("/v1/billing/cash-receipts", async (c) => {
 
   // Collected counts on the JOB's date, not the recording date (owner's
   // rule): a receipt's effective date is the service date of the
-  // appointment it settles — payments.invoice_id → invoices.work_order_id
-  // → work_orders.appointment_id → appointments.starts_at (invoices carry
-  // no appointment_id; jobs bind through the work order). A payment whose
-  // chain does not resolve keeps its paid date. The from/to window applies
-  // to the EFFECTIVE date so every consumer of this one endpoint
-  // (dashboard cockpit, reports, provider snapshot) sums the same period.
-  // The window therefore cannot stay a SQL paid_at filter — a back-dated
-  // closeout is paid after its job, a prepayment before it — so candidates
-  // are the workspace's settled payments, the chain is resolved in three
-  // batched lookups, and the window is applied here.
+  // appointment it settles. Resolution order follows production's real
+  // shape (live census, 2026-11-10: of 191 paid invoices only 2 carry
+  // work_order_id — the work-order chain PR #205 walked is nearly unused
+  // live): (1) payments.invoice_id → invoices.metadata->>'appointment_id'
+  // → appointments.starts_at — the same metadata key
+  // sync_appointment_invoice_v1 uses to find an invoice; (2)
+  // invoices.work_order_id → work_orders.appointment_id →
+  // appointments.starts_at; (3) the payment's paid date. The from/to
+  // window applies to the EFFECTIVE date so every consumer of this one
+  // endpoint (dashboard cockpit, reports, provider snapshot) sums the
+  // same period. The window therefore cannot stay a SQL paid_at filter —
+  // a back-dated closeout is paid after its job, a prepayment before it —
+  // so candidates are the workspace's settled payments, the chain is
+  // resolved in batched lookups, and the window is applied here.
   const { data: paymentRows, error } = await (supabase.from("payments") as any)
     .select("id,amount,status,provider,paid_at,created_at,metadata,invoice_id")
     .eq("workspace_id", workspaceId)
@@ -2894,19 +2915,32 @@ billingRouter.get("/v1/billing/cash-receipts", async (c) => {
   );
   if (invoiceIds.length > 0) {
     const { data: invoiceRows, error: invoiceError } = await (supabase.from("invoices") as any)
-      .select("id,work_order_id")
+      .select("id,work_order_id,metadata")
       .eq("workspace_id", workspaceId)
       .in("id", invoiceIds);
     if (invoiceError) throw invoiceError;
+    const metadataAppointmentIdByInvoiceId = new Map<string, string>();
     const workOrderIdByInvoiceId = new Map<string, string>();
     for (const invoice of (invoiceRows ?? []) as Array<Record<string, unknown>>) {
+      const metadataAppointmentId = invoiceMetadataAppointmentId(invoice.metadata);
+      if (metadataAppointmentId) {
+        metadataAppointmentIdByInvoiceId.set(String(invoice.id), metadataAppointmentId);
+      }
       if (typeof invoice.work_order_id === "string" && invoice.work_order_id) {
         workOrderIdByInvoiceId.set(String(invoice.id), invoice.work_order_id);
       }
     }
 
+    // Hop 2 is only consulted for invoices the metadata hop did not
+    // resolve, so work orders are fetched for those invoices alone.
     const appointmentIdByWorkOrderId = new Map<string, string>();
-    const workOrderIds = Array.from(new Set(workOrderIdByInvoiceId.values()));
+    const workOrderIds = Array.from(
+      new Set(
+        Array.from(workOrderIdByInvoiceId.entries())
+          .filter(([invoiceId]) => !metadataAppointmentIdByInvoiceId.has(invoiceId))
+          .map(([, workOrderId]) => workOrderId),
+      ),
+    );
     if (workOrderIds.length > 0) {
       const { data: workOrderRows, error: workOrderError } = await (supabase.from("work_orders") as any)
         .select("id,appointment_id")
@@ -2921,7 +2955,12 @@ billingRouter.get("/v1/billing/cash-receipts", async (c) => {
     }
 
     const startsAtByAppointmentId = new Map<string, string>();
-    const appointmentIds = Array.from(new Set(appointmentIdByWorkOrderId.values()));
+    const appointmentIds = Array.from(
+      new Set([
+        ...metadataAppointmentIdByInvoiceId.values(),
+        ...appointmentIdByWorkOrderId.values(),
+      ]),
+    );
     if (appointmentIds.length > 0) {
       const { data: appointmentRows, error: appointmentError } = await (supabase.from("appointments") as any)
         .select("id,starts_at")
@@ -2937,12 +2976,24 @@ billingRouter.get("/v1/billing/cash-receipts", async (c) => {
 
     for (const row of payments) {
       const invoiceId = typeof row.invoice_id === "string" ? row.invoice_id : null;
+      const metadataAppointmentId = invoiceId
+        ? metadataAppointmentIdByInvoiceId.get(invoiceId)
+        : undefined;
       const workOrderId = invoiceId ? workOrderIdByInvoiceId.get(invoiceId) : undefined;
-      const appointmentId = workOrderId ? appointmentIdByWorkOrderId.get(workOrderId) : undefined;
-      serviceDateByPaymentId.set(
-        String(row.id),
-        appointmentId ? startsAtByAppointmentId.get(appointmentId) ?? null : null,
-      );
+      const workOrderAppointmentId = workOrderId
+        ? appointmentIdByWorkOrderId.get(workOrderId)
+        : undefined;
+      // Hop 1 wins; if its appointment row is somehow absent, hop 2
+      // still gets its chance before the paid-date fallback rules.
+      const startsAt =
+        (metadataAppointmentId
+          ? startsAtByAppointmentId.get(metadataAppointmentId)
+          : undefined) ??
+        (workOrderAppointmentId
+          ? startsAtByAppointmentId.get(workOrderAppointmentId)
+          : undefined) ??
+        null;
+      serviceDateByPaymentId.set(String(row.id), startsAt);
     }
   }
 
