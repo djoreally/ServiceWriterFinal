@@ -1461,6 +1461,7 @@ documentsRouter.post("/v1/declined-services/:id/follow-up", async (c) => {
   if (error) throw error;
 
   const { error: queueError } = await (supabase as any).from("email_queue").insert({
+    workspace_id: body.workspace_id,
     user_id: user.id,
     customer_id: body.customer_id,
     email_type: "declined_service_followup",

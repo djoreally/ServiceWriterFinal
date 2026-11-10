@@ -95,7 +95,11 @@ export interface MarketingAnalyticsResult {
 
 export async function fetchMarketingAnalytics(): Promise<MarketingAnalyticsResult> {
   await requireUser();
-  const { data } = await apiClient.get<{ data: MarketingAnalyticsResult }>("/v1/crm/marketing/analytics");
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) throw new Error("Select a workspace before viewing marketing analytics.");
+  const { data } = await apiClient.get<{ data: MarketingAnalyticsResult }>("/v1/crm/marketing/analytics", {
+    query: { workspace_id: workspaceId },
+  });
   return data;
 }
 

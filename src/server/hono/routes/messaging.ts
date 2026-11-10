@@ -1122,12 +1122,12 @@ const EMAIL_LOG_COLUMNS =
   "id, recipient_email, recipient_name, email_type, subject, status, provider, error_message, created_at, source, queue_id, review_request_id, campaign_id, provider_message_id, last_event, last_event_at";
 
 messagingRouter.get("/v1/email-testing/data", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, user, workspaceId } = await resolveWorkspaceOrThrow(c, undefined);
   const [profileResp, emailSettingsResp, queueResp, logsResp] = await Promise.all([
     supabase.from("business_profiles").select("business_name, email").eq("user_id", user.id).maybeSingle(),
     supabase.from("email_settings").select("id, use_custom_smtp, smtp_host, verified").eq("user_id", user.id).maybeSingle(),
-    supabase.from("email_queue").select(EMAIL_QUEUE_COLUMNS).eq("user_id", user.id).order("created_at", { ascending: false }).limit(20),
-    supabase.from("email_logs").select(EMAIL_LOG_COLUMNS).eq("user_id", user.id).order("created_at", { ascending: false }).limit(50),
+    supabase.from("email_queue").select(EMAIL_QUEUE_COLUMNS).eq("workspace_id", workspaceId).order("created_at", { ascending: false }).limit(20),
+    supabase.from("email_logs").select(EMAIL_LOG_COLUMNS).eq("workspace_id", workspaceId).order("created_at", { ascending: false }).limit(50),
   ]);
   const firstError = [profileResp, emailSettingsResp, queueResp, logsResp].find((r) => r.error)?.error;
   if (firstError) throw firstError;
@@ -1141,11 +1141,11 @@ messagingRouter.get("/v1/email-testing/data", async (c) => {
 });
 
 messagingRouter.get("/v1/email-testing/queue", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, workspaceId } = await resolveWorkspaceOrThrow(c, undefined);
   const { data, error } = await supabase
     .from("email_queue")
     .select(EMAIL_QUEUE_COLUMNS)
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false })
     .limit(20);
   if (error) throw error;
@@ -1153,11 +1153,11 @@ messagingRouter.get("/v1/email-testing/queue", async (c) => {
 });
 
 messagingRouter.get("/v1/email-testing/logs", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, workspaceId } = await resolveWorkspaceOrThrow(c, undefined);
   const { data, error } = await supabase
     .from("email_logs")
     .select(EMAIL_LOG_COLUMNS)
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false })
     .limit(50);
   if (error) throw error;
@@ -1554,7 +1554,7 @@ messagingRouter.get("/v1/sms/messages", async (c) => {
   const { data, error } = await supabase
     .from("sms_logs")
     .select("id, direction, recipient_hash, status, correlation_id, message_body, created_at, error_message")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false });
   if (error) throw error;
   return json({ data: data ?? [], workspaceId });
@@ -1592,12 +1592,13 @@ messagingRouter.get("/v1/sms/timeline", async (c) => {
     .parse(Object.fromEntries(new URL(c.req.url).searchParams));
   // Workspace membership is verified; row access is enforced by RLS on the
   // scoped client, mirroring the original direct-from-browser queries.
-  const { supabase } = await resolveWorkspaceOrThrow(c, params.selected_workspace_id);
+  const { supabase, workspaceId } = await resolveWorkspaceOrThrow(c, params.selected_workspace_id);
 
   const { data, error } = await supabase
     .from("sms_logs")
     .select(SMS_TIMELINE_COLUMNS)
     .eq("appointment_id", params.appointment_id)
+    .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false });
   if (error) throw error;
   if (data && data.length > 0) return json({ data });
@@ -1609,6 +1610,7 @@ messagingRouter.get("/v1/sms/timeline", async (c) => {
     .from("sms_logs")
     .select(SMS_TIMELINE_COLUMNS)
     .eq("to_number_last4", last4)
+    .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false })
     .limit(25);
   if (params.scheduled_date) {
