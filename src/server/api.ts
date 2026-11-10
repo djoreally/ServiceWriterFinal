@@ -119,6 +119,23 @@ export function errorResponse(error: unknown) {
   if (code === "22P02" || code === "22007" || code === "22023") {
     return json({ error: { code: "invalid_input", message: "One or more values are invalid." } }, { status: 400 });
   }
+  // PostgREST's own error codes (PGRST*) mean the database gateway could
+  // not serve the request as asked — most importantly PGRST202, "function
+  // not in the schema cache", which fires when an RPC's migration has
+  // not landed (or the cache has not refreshed) yet. Preserve the
+  // original code and message under a 503 instead of masking them as
+  // internal_error: clients key designed fallbacks off the PGRST202
+  // code (the appointment start command's PATCH fallback), and a masked
+  // 500 leaves them with a dead button and no signal. PostgREST
+  // messages name the missing object/signature; they carry no user
+  // data. Postgres SQLSTATEs are deliberately NOT swept in here — they
+  // keep the mappings above (or internal_error) unchanged.
+  if (typeof code === "string" && /^PGRST\d+$/.test(code)) {
+    return json(
+      { error: { code, message: candidate?.message ?? "The request could not be completed." } },
+      { status: 503 },
+    );
+  }
   if (candidate?.status && candidate.status >= 400 && candidate.status < 600) {
     return json({ error: { code: code ?? "request_failed", message: candidate.message ?? "The request could not be completed." } }, { status: candidate.status });
   }

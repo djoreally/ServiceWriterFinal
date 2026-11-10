@@ -170,6 +170,57 @@ describe("errorResponse", () => {
     }
   });
 
+  it("preserves PGRST202 (RPC not in schema cache) as a 503 with its code and message", async () => {
+    // The production Start Job failure mode: the canonical start RPC's
+    // migration has not landed, PostgREST answers PGRST202, and masking
+    // it as internal_error hid the condition from the client's designed
+    // PATCH fallback. The preserved envelope is what un-masks it.
+    const res = errorResponse({
+      code: "PGRST202",
+      message: "Could not find the function public.start_appointment_job_v1(p_workspace_id, p_appointment_id, p_idempotency_key) in the schema cache",
+    });
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toEqual({
+      error: {
+        code: "PGRST202",
+        message: "Could not find the function public.start_appointment_job_v1(p_workspace_id, p_appointment_id, p_idempotency_key) in the schema cache",
+      },
+    });
+  });
+
+  it("preserves other PostgREST-layer codes the same way", async () => {
+    const res = errorResponse({ code: "PGRST003", message: "Timed out acquiring connection from pool" });
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toEqual({
+      error: { code: "PGRST003", message: "Timed out acquiring connection from pool" },
+    });
+  });
+
+  it("preserves PGRST202 after toError normalization (the route throw path)", async () => {
+    const res = errorResponse(toError({ code: "PGRST202", message: "Could not find the function public.start_appointment_job_v1 in the schema cache" }));
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("PGRST202");
+    expect(body.error.message).toMatch(/start_appointment_job_v1/);
+  });
+
+  it("does not sweep Postgres SQLSTATEs into the PostgREST preservation", async () => {
+    // The phantom-column 42703 behind the Start Job break is fixed in
+    // the function itself; errorResponse deliberately keeps unmapped
+    // SQLSTATEs on the internal_error path — preservation is scoped to
+    // PostgREST's own codes, no broader.
+    const consoleSpy = jest.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const res = errorResponse({ code: "42703", message: "record \"v_appt\" has no field \"tax_amount\"" });
+      expect(res.status).toBe(500);
+      await expect(res.json()).resolves.toEqual({
+        error: { code: "internal_error", message: "An unexpected error occurred." },
+      });
+    } finally {
+      consoleSpy.mockRestore();
+    }
+  });
+
   it("passes through 4xx/5xx status carriers with their code and message", async () => {
     const res = errorResponse({ status: 429, code: "rate_limited", message: "slow down" });
     expect(res.status).toBe(429);

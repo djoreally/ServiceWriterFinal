@@ -5,7 +5,7 @@
  * (`@/lib/api-client`) to the appointments Hono router. Exported signatures
  * are unchanged. The server resolves the workspace from the auth token.
  */
-import { errorMessage } from "@/lib/error-message";
+import { errorCode, errorMessage } from "@/lib/error-message";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import { trackAppointmentStatusChanged } from "@/lib/posthog/analytics";
 import { nextApi } from "@/lib/nextApiClient";
@@ -61,6 +61,15 @@ export async function deleteAppointment(id: string) {
 }
 
 function isCanonicalStartRpcUnavailable(error: unknown): boolean {
+  // The server preserves the PostgREST code on its error envelope and
+  // ApiClientError carries it as `code`: PGRST202 means the canonical
+  // start RPC is not in the schema cache (its migration has not landed
+  // yet). Check the code as well as the message — when the server used
+  // to mask this as a generic internal_error, the message-only check
+  // below could not see the condition and the fallback never engaged,
+  // leaving Start Job a dead button. The fallback stays specific to
+  // the RPC-unavailable condition; no other error code engages it.
+  if (errorCode(error)?.toUpperCase() === "PGRST202") return true;
   const raw = errorMessage(error, "").toLowerCase();
   return raw.includes("start_appointment_job_v1")
     || raw.includes("pgrst202")
