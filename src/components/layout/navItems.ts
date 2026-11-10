@@ -48,7 +48,6 @@ const buildAllGroups = (terms: Terms): NavGroup[] => [
   { label: "Field Ops", items: [
     { path: "/dispatch-engine", label: "Dispatch" },
     { path: "/team-os", label: "Team & Technicians" },
-    { path: "/fleet-os", label: "Fleet OS" },
     { path: "/fleet", label: "Vans & Fleet" },
     { path: "/field-companion", label: "Field Companion" },
     { path: "/inventory", label: "Inventory & Parts" },
