@@ -1291,6 +1291,7 @@ export type Database = {
           status: string
           updated_at: string
           vehicle_context: Json | null
+          workspace_id: string
         }
         Insert: {
           business_user_id: string
@@ -1305,6 +1306,7 @@ export type Database = {
           status?: string
           updated_at?: string
           vehicle_context?: Json | null
+          workspace_id: string
         }
         Update: {
           business_user_id?: string
@@ -1319,8 +1321,17 @@ export type Database = {
           status?: string
           updated_at?: string
           vehicle_context?: Json | null
+          workspace_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "booking_contexts_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       business_profiles: {
         Row: {
@@ -3110,18 +3121,20 @@ export type Database = {
           id: string
           name: string
           updated_at: string
-          user_id: string
+          user_id: string | null
+          workspace_id: string
         }
         Insert: {
           action: string
           active?: boolean
           auto_execute?: boolean
-          condition?: Json
+          condition: Json
           created_at?: string
           id?: string
           name: string
           updated_at?: string
-          user_id: string
+          user_id?: string | null
+          workspace_id: string
         }
         Update: {
           action?: string
@@ -3132,58 +3145,97 @@ export type Database = {
           id?: string
           name?: string
           updated_at?: string
-          user_id?: string
+          user_id?: string | null
+          workspace_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "dispatch_rules_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       dispatch_runs: {
         Row: {
+          completed_at: string | null
           created_at: string
+          created_by: string | null
+          end_location: Json | null
           end_location_lat: number | null
           end_location_lng: number | null
           id: string
+          notes: string | null
+          route_polyline: string | null
           run_date: string
+          start_location: Json | null
           start_location_lat: number | null
           start_location_lng: number | null
+          started_at: string | null
           status: string
           technician_id: string
+          total_distance: number | null
           total_distance_meters: number | null
+          total_duration_seconds: number | null
           total_travel_time_seconds: number | null
           updated_at: string
-          user_id: string
+          user_id: string | null
           van_id: string | null
+          workspace_id: string
         }
         Insert: {
+          completed_at?: string | null
           created_at?: string
+          created_by?: string | null
+          end_location?: Json | null
           end_location_lat?: number | null
           end_location_lng?: number | null
           id?: string
+          notes?: string | null
+          route_polyline?: string | null
           run_date: string
+          start_location?: Json | null
           start_location_lat?: number | null
           start_location_lng?: number | null
+          started_at?: string | null
           status?: string
           technician_id: string
+          total_distance?: number | null
           total_distance_meters?: number | null
+          total_duration_seconds?: number | null
           total_travel_time_seconds?: number | null
           updated_at?: string
-          user_id: string
+          user_id?: string | null
           van_id?: string | null
+          workspace_id: string
         }
         Update: {
+          completed_at?: string | null
           created_at?: string
+          created_by?: string | null
+          end_location?: Json | null
           end_location_lat?: number | null
           end_location_lng?: number | null
           id?: string
+          notes?: string | null
+          route_polyline?: string | null
           run_date?: string
+          start_location?: Json | null
           start_location_lat?: number | null
           start_location_lng?: number | null
+          started_at?: string | null
           status?: string
           technician_id?: string
+          total_distance?: number | null
           total_distance_meters?: number | null
+          total_duration_seconds?: number | null
           total_travel_time_seconds?: number | null
           updated_at?: string
-          user_id?: string
+          user_id?: string | null
           van_id?: string | null
+          workspace_id?: string
         }
         Relationships: [
           {
@@ -3198,6 +3250,13 @@ export type Database = {
             columns: ["van_id"]
             isOneToOne: false
             referencedRelation: "vans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dispatch_runs_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
@@ -10755,6 +10814,41 @@ export type Database = {
         }
         Relationships: []
       }
+      operational_jobs: {
+        Row: {
+          created_at: string
+          id: string
+          job_id: string
+          job_source: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          job_id: string
+          job_source: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          job_id?: string
+          job_source?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "operational_jobs_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       parts_catalog: {
         Row: {
           brand: string | null
@@ -13097,47 +13191,65 @@ export type Database = {
         Row: {
           actual_arrival: string | null
           actual_departure: string | null
+          actual_duration_minutes: number | null
+          arrival_time: string | null
           created_at: string
+          departure_time: string | null
           dispatch_run_id: string
           distance_to_next_meters: number | null
           estimated_arrival: string | null
+          estimated_departure: string | null
           estimated_duration_minutes: number | null
           id: string
+          notes: string | null
           sequence_order: number
           status: string
           travel_time_to_next_seconds: number | null
           updated_at: string
           work_order_id: string
+          workspace_id: string
         }
         Insert: {
           actual_arrival?: string | null
           actual_departure?: string | null
+          actual_duration_minutes?: number | null
+          arrival_time?: string | null
           created_at?: string
+          departure_time?: string | null
           dispatch_run_id: string
           distance_to_next_meters?: number | null
           estimated_arrival?: string | null
+          estimated_departure?: string | null
           estimated_duration_minutes?: number | null
           id?: string
+          notes?: string | null
           sequence_order: number
           status?: string
           travel_time_to_next_seconds?: number | null
           updated_at?: string
           work_order_id: string
+          workspace_id: string
         }
         Update: {
           actual_arrival?: string | null
           actual_departure?: string | null
+          actual_duration_minutes?: number | null
+          arrival_time?: string | null
           created_at?: string
+          departure_time?: string | null
           dispatch_run_id?: string
           distance_to_next_meters?: number | null
           estimated_arrival?: string | null
+          estimated_departure?: string | null
           estimated_duration_minutes?: number | null
           id?: string
+          notes?: string | null
           sequence_order?: number
           status?: string
           travel_time_to_next_seconds?: number | null
           updated_at?: string
           work_order_id?: string
+          workspace_id?: string
         }
         Relationships: [
           {
@@ -13152,6 +13264,13 @@ export type Database = {
             columns: ["work_order_id"]
             isOneToOne: false
             referencedRelation: "work_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "route_stops_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
@@ -15092,25 +15211,34 @@ export type Database = {
       }
       team_members: {
         Row: {
-          created_at: string | null
+          created_at: string
+          full_name: string | null
           id: string
           role: string
-          team_id: string
+          team_id: string | null
+          updated_at: string
           user_id: string
+          workspace_id: string
         }
         Insert: {
-          created_at?: string | null
+          created_at?: string
+          full_name?: string | null
           id?: string
-          role?: string
-          team_id: string
+          role: string
+          team_id?: string | null
+          updated_at?: string
           user_id: string
+          workspace_id: string
         }
         Update: {
-          created_at?: string | null
+          created_at?: string
+          full_name?: string | null
           id?: string
           role?: string
-          team_id?: string
+          team_id?: string | null
+          updated_at?: string
           user_id?: string
+          workspace_id?: string
         }
         Relationships: [
           {
@@ -15120,6 +15248,13 @@ export type Database = {
             referencedRelation: "teams"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "team_members_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
         ]
       }
       team_user_links: {
@@ -15127,28 +15262,37 @@ export type Database = {
           created_at: string
           id: string
           invitation_id: string | null
+          linked_customer_id: string | null
           member_user_id: string
           owner_user_id: string
           role: string
           updated_at: string
+          user_id: string | null
+          workspace_id: string | null
         }
         Insert: {
           created_at?: string
           id?: string
           invitation_id?: string | null
+          linked_customer_id?: string | null
           member_user_id: string
           owner_user_id: string
           role: string
           updated_at?: string
+          user_id?: string | null
+          workspace_id?: string | null
         }
         Update: {
           created_at?: string
           id?: string
           invitation_id?: string | null
+          linked_customer_id?: string | null
           member_user_id?: string
           owner_user_id?: string
           role?: string
           updated_at?: string
+          user_id?: string | null
+          workspace_id?: string | null
         }
         Relationships: [
           {
@@ -15156,6 +15300,13 @@ export type Database = {
             columns: ["invitation_id"]
             isOneToOne: false
             referencedRelation: "team_invitations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "team_user_links_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
@@ -15311,7 +15462,7 @@ export type Database = {
           created_at: string
           end_time: string
           id: string
-          is_available: boolean | null
+          is_available: boolean
           max_jobs_per_day: number | null
           service_radius_miles: number | null
           start_time: string
@@ -15319,25 +15470,27 @@ export type Database = {
           updated_at: string
           user_id: string
           weekday: string
+          workspace_id: string
         }
         Insert: {
           created_at?: string
-          end_time?: string
+          end_time: string
           id?: string
-          is_available?: boolean | null
+          is_available?: boolean
           max_jobs_per_day?: number | null
           service_radius_miles?: number | null
-          start_time?: string
+          start_time: string
           technician_id: string
           updated_at?: string
           user_id: string
           weekday: string
+          workspace_id: string
         }
         Update: {
           created_at?: string
           end_time?: string
           id?: string
-          is_available?: boolean | null
+          is_available?: boolean
           max_jobs_per_day?: number | null
           service_radius_miles?: number | null
           start_time?: string
@@ -15345,6 +15498,7 @@ export type Database = {
           updated_at?: string
           user_id?: string
           weekday?: string
+          workspace_id?: string
         }
         Relationships: [
           {
@@ -15352,6 +15506,13 @@ export type Database = {
             columns: ["technician_id"]
             isOneToOne: false
             referencedRelation: "technicians"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "technician_availability_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
@@ -15387,6 +15548,44 @@ export type Database = {
             columns: ["technician_id"]
             isOneToOne: false
             referencedRelation: "technicians"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      technician_clock_entries: {
+        Row: {
+          clock_in: string | null
+          clock_out: string | null
+          created_at: string
+          id: string
+          updated_at: string
+          user_id: string
+          workspace_id: string
+        }
+        Insert: {
+          clock_in?: string | null
+          clock_out?: string | null
+          created_at?: string
+          id?: string
+          updated_at?: string
+          user_id: string
+          workspace_id: string
+        }
+        Update: {
+          clock_in?: string | null
+          clock_out?: string | null
+          created_at?: string
+          id?: string
+          updated_at?: string
+          user_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "technician_clock_entries_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
@@ -15876,75 +16075,107 @@ export type Database = {
           customer_email_enabled: boolean
           customer_sms_enabled: boolean
           dispatch_push_enabled: boolean
+          enabled: boolean | null
+          id: string
+          notification_types: string[] | null
           offline_cache_enabled: boolean
           push_notifications_enabled: boolean
+          technician_id: string | null
           updated_at: string
-          user_id: string
+          user_id: string | null
+          workspace_id: string
         }
         Insert: {
           created_at?: string
           customer_email_enabled?: boolean
           customer_sms_enabled?: boolean
           dispatch_push_enabled?: boolean
+          enabled?: boolean | null
+          id?: string
+          notification_types?: string[] | null
           offline_cache_enabled?: boolean
           push_notifications_enabled?: boolean
+          technician_id?: string | null
           updated_at?: string
-          user_id: string
+          user_id?: string | null
+          workspace_id: string
         }
         Update: {
           created_at?: string
           customer_email_enabled?: boolean
           customer_sms_enabled?: boolean
           dispatch_push_enabled?: boolean
+          enabled?: boolean | null
+          id?: string
+          notification_types?: string[] | null
           offline_cache_enabled?: boolean
           push_notifications_enabled?: boolean
+          technician_id?: string | null
           updated_at?: string
-          user_id?: string
+          user_id?: string | null
+          workspace_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "technician_notification_preferences_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       technician_onboarding_tasks: {
         Row: {
-          category: string | null
+          category: string
           completed_at: string | null
           completed_by: string | null
           created_at: string
+          description: string | null
           due_date: string | null
           id: string
-          is_completed: boolean | null
+          is_completed: boolean
           notes: string | null
+          sort_order: number | null
           task_name: string
           technician_id: string
           updated_at: string
           user_id: string
+          workspace_id: string
         }
         Insert: {
-          category?: string | null
+          category: string
           completed_at?: string | null
           completed_by?: string | null
           created_at?: string
+          description?: string | null
           due_date?: string | null
           id?: string
-          is_completed?: boolean | null
+          is_completed?: boolean
           notes?: string | null
+          sort_order?: number | null
           task_name: string
           technician_id: string
           updated_at?: string
           user_id: string
+          workspace_id: string
         }
         Update: {
-          category?: string | null
+          category?: string
           completed_at?: string | null
           completed_by?: string | null
           created_at?: string
+          description?: string | null
           due_date?: string | null
           id?: string
-          is_completed?: boolean | null
+          is_completed?: boolean
           notes?: string | null
+          sort_order?: number | null
           task_name?: string
           technician_id?: string
           updated_at?: string
           user_id?: string
+          workspace_id?: string
         }
         Relationships: [
           {
@@ -15952,6 +16183,13 @@ export type Database = {
             columns: ["technician_id"]
             isOneToOne: false
             referencedRelation: "technicians"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "technician_onboarding_tasks_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
@@ -15962,69 +16200,90 @@ export type Database = {
           bonuses: number | null
           commission_earned: number | null
           created_at: string
-          cycle_end: string
-          cycle_start: string
+          cycle_end: string | null
+          cycle_start: string | null
           deductions: number | null
           final_payout: number | null
+          gross_pay: number | null
           gross_revenue_generated: number | null
           id: string
+          net_pay: number | null
           notes: string | null
           overtime_hours: number | null
           overtime_pay: number | null
           payout_date: string | null
+          payout_method: string | null
+          payout_reference: string | null
           payout_status: string | null
+          period_end: string | null
+          period_start: string | null
           regular_hours: number | null
           technician_id: string
           total_hours: number | null
           total_jobs: number | null
           updated_at: string
           user_id: string
+          workspace_id: string
         }
         Insert: {
           base_pay?: number | null
           bonuses?: number | null
           commission_earned?: number | null
           created_at?: string
-          cycle_end: string
-          cycle_start: string
+          cycle_end?: string | null
+          cycle_start?: string | null
           deductions?: number | null
           final_payout?: number | null
+          gross_pay?: number | null
           gross_revenue_generated?: number | null
           id?: string
+          net_pay?: number | null
           notes?: string | null
           overtime_hours?: number | null
           overtime_pay?: number | null
           payout_date?: string | null
+          payout_method?: string | null
+          payout_reference?: string | null
           payout_status?: string | null
+          period_end?: string | null
+          period_start?: string | null
           regular_hours?: number | null
           technician_id: string
           total_hours?: number | null
           total_jobs?: number | null
           updated_at?: string
           user_id: string
+          workspace_id: string
         }
         Update: {
           base_pay?: number | null
           bonuses?: number | null
           commission_earned?: number | null
           created_at?: string
-          cycle_end?: string
-          cycle_start?: string
+          cycle_end?: string | null
+          cycle_start?: string | null
           deductions?: number | null
           final_payout?: number | null
+          gross_pay?: number | null
           gross_revenue_generated?: number | null
           id?: string
+          net_pay?: number | null
           notes?: string | null
           overtime_hours?: number | null
           overtime_pay?: number | null
           payout_date?: string | null
+          payout_method?: string | null
+          payout_reference?: string | null
           payout_status?: string | null
+          period_end?: string | null
+          period_start?: string | null
           regular_hours?: number | null
           technician_id?: string
           total_hours?: number | null
           total_jobs?: number | null
           updated_at?: string
           user_id?: string
+          workspace_id?: string
         }
         Relationships: [
           {
@@ -16034,55 +16293,68 @@ export type Database = {
             referencedRelation: "technicians"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "technician_payroll_cycles_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
         ]
       }
       technician_skills: {
         Row: {
+          certification_expiry: string | null
           certification_level: string | null
           certification_number: string | null
           certified_by: string | null
           created_at: string
           expiration_date: string | null
           id: string
-          is_active: boolean | null
+          is_active: boolean
           issue_date: string | null
           notes: string | null
           skill_type: string
           technician_id: string
           updated_at: string
           user_id: string
+          workspace_id: string
           years_experience: number | null
         }
         Insert: {
+          certification_expiry?: string | null
           certification_level?: string | null
           certification_number?: string | null
           certified_by?: string | null
           created_at?: string
           expiration_date?: string | null
           id?: string
-          is_active?: boolean | null
+          is_active?: boolean
           issue_date?: string | null
           notes?: string | null
           skill_type: string
           technician_id: string
           updated_at?: string
           user_id: string
+          workspace_id: string
           years_experience?: number | null
         }
         Update: {
+          certification_expiry?: string | null
           certification_level?: string | null
           certification_number?: string | null
           certified_by?: string | null
           created_at?: string
           expiration_date?: string | null
           id?: string
-          is_active?: boolean | null
+          is_active?: boolean
           issue_date?: string | null
           notes?: string | null
           skill_type?: string
           technician_id?: string
           updated_at?: string
           user_id?: string
+          workspace_id?: string
           years_experience?: number | null
         }
         Relationships: [
@@ -16091,6 +16363,13 @@ export type Database = {
             columns: ["technician_id"]
             isOneToOne: false
             referencedRelation: "technicians"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "technician_skills_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
@@ -16133,196 +16412,310 @@ export type Database = {
       }
       technicians: {
         Row: {
+          accepted_at: string | null
           account_status: string
           address: string | null
           assigned_at: string | null
+          assigned_van_id: string | null
           auth_user_id: string | null
           avatar_url: string | null
           avg_job_duration_minutes: number | null
+          background_check_date: string | null
           background_check_status: string | null
           base_hourly_rate: number | null
           bio: string | null
           callback_rate: number | null
           certifications: Json | null
+          city: string | null
           commission_percentage: number | null
+          country: string | null
           created_at: string
+          current_latitude: number | null
           current_location: Json | null
+          current_longitude: number | null
+          custom_fields: Json | null
           customer_rating_avg: number | null
           data_origin: Database["public"]["Enums"]["data_origin_type"]
           deactivated_at: string | null
           deactivated_by: string | null
           deleted_at: string | null
           display_name: string | null
+          drivers_license_expiration: string | null
           drivers_license_expiry: string | null
           drivers_license_number: string | null
+          drivers_license_state: string | null
           drivers_license_url: string | null
+          drug_test_date: string | null
+          drug_test_status: string | null
           email: string | null
           emergency_contact_name: string | null
           emergency_contact_phone: string | null
+          emergency_contact_relationship: string | null
+          employee_id: string | null
           employment_type: string | null
+          first_name: string | null
+          full_name: string | null
           hire_date: string | null
+          home_address: string | null
           home_lat: number | null
+          home_latitude: number | null
           home_lng: number | null
+          home_longitude: number | null
           home_zip: string | null
           hourly_rate: number | null
           id: string
           import_batch_id: string | null
+          insurance_info: Json | null
           insurance_verified: boolean | null
           invitation_id: string | null
-          is_active: boolean | null
+          invited_at: string | null
+          invited_by: string | null
+          is_active: boolean
           jobs_completed_mtd: number | null
+          last_clock_in: string | null
+          last_clock_out: string | null
           last_location_update: string | null
+          last_name: string | null
+          latitude: number | null
           license_expiration_date: string | null
           location_tracking_enabled: boolean | null
+          location_updated_at: string | null
+          longitude: number | null
           max_daily_capacity_hours: number | null
           max_jobs_per_day: number | null
           name: string
+          notes: string | null
           offboarding_notes: string | null
+          onboarding_completed: boolean | null
           origin_source: string | null
           overtime_rate: number | null
+          pay_type: string | null
           payroll_type: string | null
           performance_score: number | null
           phone: string | null
+          preferences: Json | null
           redo_rate: number | null
           retained_auth_user_id: string | null
           revenue_generated_mtd: number | null
+          role: string | null
+          salary: number | null
           service_radius_miles: number | null
           skills: string[] | null
+          state: string | null
           status: string
           team_id: string | null
+          termination_date: string | null
           updated_at: string
           upsell_rate: number | null
           user_id: string
           weekly_capacity_hours: number | null
           working_hours: Json | null
+          workspace_id: string
+          zip_code: string | null
         }
         Insert: {
+          accepted_at?: string | null
           account_status?: string
           address?: string | null
           assigned_at?: string | null
+          assigned_van_id?: string | null
           auth_user_id?: string | null
           avatar_url?: string | null
           avg_job_duration_minutes?: number | null
+          background_check_date?: string | null
           background_check_status?: string | null
           base_hourly_rate?: number | null
           bio?: string | null
           callback_rate?: number | null
           certifications?: Json | null
+          city?: string | null
           commission_percentage?: number | null
+          country?: string | null
           created_at?: string
+          current_latitude?: number | null
           current_location?: Json | null
+          current_longitude?: number | null
+          custom_fields?: Json | null
           customer_rating_avg?: number | null
           data_origin?: Database["public"]["Enums"]["data_origin_type"]
           deactivated_at?: string | null
           deactivated_by?: string | null
           deleted_at?: string | null
           display_name?: string | null
+          drivers_license_expiration?: string | null
           drivers_license_expiry?: string | null
           drivers_license_number?: string | null
+          drivers_license_state?: string | null
           drivers_license_url?: string | null
+          drug_test_date?: string | null
+          drug_test_status?: string | null
           email?: string | null
           emergency_contact_name?: string | null
           emergency_contact_phone?: string | null
+          emergency_contact_relationship?: string | null
+          employee_id?: string | null
           employment_type?: string | null
+          first_name?: string | null
+          full_name?: string | null
           hire_date?: string | null
+          home_address?: string | null
           home_lat?: number | null
+          home_latitude?: number | null
           home_lng?: number | null
+          home_longitude?: number | null
           home_zip?: string | null
           hourly_rate?: number | null
           id?: string
           import_batch_id?: string | null
+          insurance_info?: Json | null
           insurance_verified?: boolean | null
           invitation_id?: string | null
-          is_active?: boolean | null
+          invited_at?: string | null
+          invited_by?: string | null
+          is_active?: boolean
           jobs_completed_mtd?: number | null
+          last_clock_in?: string | null
+          last_clock_out?: string | null
           last_location_update?: string | null
+          last_name?: string | null
+          latitude?: number | null
           license_expiration_date?: string | null
           location_tracking_enabled?: boolean | null
+          location_updated_at?: string | null
+          longitude?: number | null
           max_daily_capacity_hours?: number | null
           max_jobs_per_day?: number | null
           name: string
+          notes?: string | null
           offboarding_notes?: string | null
+          onboarding_completed?: boolean | null
           origin_source?: string | null
           overtime_rate?: number | null
+          pay_type?: string | null
           payroll_type?: string | null
           performance_score?: number | null
           phone?: string | null
+          preferences?: Json | null
           redo_rate?: number | null
           retained_auth_user_id?: string | null
           revenue_generated_mtd?: number | null
+          role?: string | null
+          salary?: number | null
           service_radius_miles?: number | null
           skills?: string[] | null
+          state?: string | null
           status?: string
           team_id?: string | null
+          termination_date?: string | null
           updated_at?: string
           upsell_rate?: number | null
           user_id: string
           weekly_capacity_hours?: number | null
           working_hours?: Json | null
+          workspace_id: string
+          zip_code?: string | null
         }
         Update: {
+          accepted_at?: string | null
           account_status?: string
           address?: string | null
           assigned_at?: string | null
+          assigned_van_id?: string | null
           auth_user_id?: string | null
           avatar_url?: string | null
           avg_job_duration_minutes?: number | null
+          background_check_date?: string | null
           background_check_status?: string | null
           base_hourly_rate?: number | null
           bio?: string | null
           callback_rate?: number | null
           certifications?: Json | null
+          city?: string | null
           commission_percentage?: number | null
+          country?: string | null
           created_at?: string
+          current_latitude?: number | null
           current_location?: Json | null
+          current_longitude?: number | null
+          custom_fields?: Json | null
           customer_rating_avg?: number | null
           data_origin?: Database["public"]["Enums"]["data_origin_type"]
           deactivated_at?: string | null
           deactivated_by?: string | null
           deleted_at?: string | null
           display_name?: string | null
+          drivers_license_expiration?: string | null
           drivers_license_expiry?: string | null
           drivers_license_number?: string | null
+          drivers_license_state?: string | null
           drivers_license_url?: string | null
+          drug_test_date?: string | null
+          drug_test_status?: string | null
           email?: string | null
           emergency_contact_name?: string | null
           emergency_contact_phone?: string | null
+          emergency_contact_relationship?: string | null
+          employee_id?: string | null
           employment_type?: string | null
+          first_name?: string | null
+          full_name?: string | null
           hire_date?: string | null
+          home_address?: string | null
           home_lat?: number | null
+          home_latitude?: number | null
           home_lng?: number | null
+          home_longitude?: number | null
           home_zip?: string | null
           hourly_rate?: number | null
           id?: string
           import_batch_id?: string | null
+          insurance_info?: Json | null
           insurance_verified?: boolean | null
           invitation_id?: string | null
-          is_active?: boolean | null
+          invited_at?: string | null
+          invited_by?: string | null
+          is_active?: boolean
           jobs_completed_mtd?: number | null
+          last_clock_in?: string | null
+          last_clock_out?: string | null
           last_location_update?: string | null
+          last_name?: string | null
+          latitude?: number | null
           license_expiration_date?: string | null
           location_tracking_enabled?: boolean | null
+          location_updated_at?: string | null
+          longitude?: number | null
           max_daily_capacity_hours?: number | null
           max_jobs_per_day?: number | null
           name?: string
+          notes?: string | null
           offboarding_notes?: string | null
+          onboarding_completed?: boolean | null
           origin_source?: string | null
           overtime_rate?: number | null
+          pay_type?: string | null
           payroll_type?: string | null
           performance_score?: number | null
           phone?: string | null
+          preferences?: Json | null
           redo_rate?: number | null
           retained_auth_user_id?: string | null
           revenue_generated_mtd?: number | null
+          role?: string | null
+          salary?: number | null
           service_radius_miles?: number | null
           skills?: string[] | null
+          state?: string | null
           status?: string
           team_id?: string | null
+          termination_date?: string | null
           updated_at?: string
           upsell_rate?: number | null
           user_id?: string
           weekly_capacity_hours?: number | null
           working_hours?: Json | null
+          workspace_id?: string
+          zip_code?: string | null
         }
         Relationships: [
           {
@@ -16344,6 +16737,13 @@ export type Database = {
             columns: ["team_id"]
             isOneToOne: false
             referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "technicians_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
@@ -16514,21 +16914,23 @@ export type Database = {
           break_duration_minutes: number | null
           break_end: string | null
           break_start: string | null
-          clock_in: string
+          clock_in: string | null
           clock_in_location: Json | null
           clock_out: string | null
           clock_out_location: Json | null
           created_at: string
           edit_reason: string | null
           id: string
+          location_data: Json | null
           notes: string | null
           overtime_hours: number | null
           regular_hours: number | null
-          status: string
+          status: string | null
           technician_id: string | null
           total_hours: number | null
           updated_at: string
           user_id: string
+          workspace_id: string
         }
         Insert: {
           approved_at?: string | null
@@ -16536,21 +16938,23 @@ export type Database = {
           break_duration_minutes?: number | null
           break_end?: string | null
           break_start?: string | null
-          clock_in: string
+          clock_in?: string | null
           clock_in_location?: Json | null
           clock_out?: string | null
           clock_out_location?: Json | null
           created_at?: string
           edit_reason?: string | null
           id?: string
+          location_data?: Json | null
           notes?: string | null
           overtime_hours?: number | null
           regular_hours?: number | null
-          status?: string
+          status?: string | null
           technician_id?: string | null
           total_hours?: number | null
           updated_at?: string
           user_id: string
+          workspace_id: string
         }
         Update: {
           approved_at?: string | null
@@ -16558,21 +16962,23 @@ export type Database = {
           break_duration_minutes?: number | null
           break_end?: string | null
           break_start?: string | null
-          clock_in?: string
+          clock_in?: string | null
           clock_in_location?: Json | null
           clock_out?: string | null
           clock_out_location?: Json | null
           created_at?: string
           edit_reason?: string | null
           id?: string
+          location_data?: Json | null
           notes?: string | null
           overtime_hours?: number | null
           regular_hours?: number | null
-          status?: string
+          status?: string | null
           technician_id?: string | null
           total_hours?: number | null
           updated_at?: string
           user_id?: string
+          workspace_id?: string
         }
         Relationships: [
           {
@@ -16580,6 +16986,13 @@ export type Database = {
             columns: ["technician_id"]
             isOneToOne: false
             referencedRelation: "technicians"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "time_clock_entries_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
