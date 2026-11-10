@@ -3147,16 +3147,7 @@ appointmentsRouter.get("/v1/dispatch/operational-jobs", async (c: Context) => {
   const startIso = new Date(`${fromDate}T00:00:00`).toISOString();
   const endIso = new Date(`${toDate}T23:59:59.999`).toISOString();
   const db = supabase as any;
-  // Fleet work orders share the dispatch board: tech status transitions
-  // (en route → arrived → in progress → complete) write fleet_work_orders
-  // directly, so the board must read that table for the round trip to close.
-  // Workspace-scoped; RLS on fleet_work_orders is owner-only, so non-owner
-  // staff see only rows they own until the policy is widened.
-  //
-  // Technician names resolve through workspace_members on the techs' linked
-  // auth identities (no dependency on a technicians.workspace_id column,
-  // which is not in the generated schema).
-  const [appointmentsRes, workOrdersRes, membersRes, fleetRes] = await Promise.all([
+  const [appointmentsRes, workOrdersRes, membersRes] = await Promise.all([
     db.from("appointments")
       .select("id,status,starts_at,ends_at,assigned_user_id,updated_at,dispatch_status,metadata,confirmation_code,customers(first_name,last_name,company_name,phone,address_line1,address_line2,city,region,postal_code),vehicles(year,make,model),locations(address_line1,address_line2,city,region,postal_code,latitude,longitude)")
       .eq("workspace_id", workspaceId)
@@ -3174,23 +3165,9 @@ appointmentsRouter.get("/v1/dispatch/operational-jobs", async (c: Context) => {
       .select("user_id,profiles!workspace_members_user_id_fkey(display_name)")
       .eq("workspace_id", workspaceId)
       .eq("is_active", true),
-    db.from("fleet_work_orders")
-      .select("id,order_number,status,priority,scheduled_date,scheduled_time,assigned_technician_id,assigned_van_id,technician_notes,description,service_type,total,updated_at,fleet_clients(company_name),fleet_vehicles(year,make,model),fleet_locations(name,address)")
-      .eq("workspace_id", workspaceId)
-      .not("status", "in", '("completed","cancelled","invoiced")')
-      .or(`and(scheduled_date.gte.${fromDate},scheduled_date.lte.${toDate}),scheduled_date.is.null`)
-      .order("scheduled_date", { ascending: true, nullsFirst: false }),
   ]);
-  const error = appointmentsRes.error ?? workOrdersRes.error ?? membersRes.error ?? fleetRes.error;
+  const error = appointmentsRes.error ?? workOrdersRes.error ?? membersRes.error;
   if (error) throw error;
-
-  // Technician display names for fleet assignments: techs linked to this
-  // workspace through their auth identity.
-  const memberUserIds = (membersRes.data ?? []).map((m: { user_id: string }) => m.user_id).filter(Boolean);
-  const { data: fleetTechs, error: fleetTechsError } = memberUserIds.length > 0
-    ? await db.from("technicians").select("id,name,auth_user_id").in("auth_user_id", memberUserIds).neq("is_active", false)
-    : { data: [], error: null };
-  if (fleetTechsError) throw fleetTechsError;
 
   // B2/T-1: server-composed title fields on the board's appointment rows.
   const [timezone, primaryServiceNames] = await Promise.all([
@@ -3202,8 +3179,6 @@ appointmentsRouter.get("/v1/dispatch/operational-jobs", async (c: Context) => {
       appointments: (appointmentsRes.data ?? []).map((row: Record<string, unknown>) => withAppointmentTitleFields(withAppointmentStatusView(row), { timezone, primaryServiceName: primaryServiceNames.get(row.id as string) })),
       work_orders: workOrdersRes.data ?? [],
       members: membersRes.data ?? [],
-      fleet_work_orders: fleetRes.data ?? [],
-      technicians: fleetTechs ?? [],
     },
   });
 });
