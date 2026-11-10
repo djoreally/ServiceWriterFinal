@@ -29,7 +29,7 @@ jest.mock("@/server/website-bookings/client", () => {
 });
 
 import * as client from "@/server/website-bookings/client";
-import { executeAutoPush, executePushes } from "@/server/website-bookings/service";
+import { executeAutoPush, executePushes, parseAddressParts } from "@/server/website-bookings/service";
 import type { WebsiteBooking } from "@/lib/website-bookings";
 
 const WS_ID = "11111111-1111-4111-8111-111111111111";
@@ -384,6 +384,109 @@ describe("executeAutoPush (auto-push pipeline)", () => {
     expect(result.appointment_id).toBe(EXISTING_APPT_ID);
     expect(rpcCalls).toHaveLength(0);
     expect(stampPushed).toHaveBeenCalledWith(expect.anything(), b.id, EXISTING_APPT_ID);
+  });
+});
+
+describe("booking-merge address parts (Cycle 7 S2)", () => {
+  it("passes comma-parsed parts to the RPC when the geocode response has no context", async () => {
+    const b = booking();
+    const state = baseState({ unpushed: [b] });
+    const { supabase, rpcCalls } = wireState(state);
+
+    const result = await executeAutoPush(supabase, WS_ID, b.id);
+
+    expect(result.status).toBe("created");
+    expect(rpcCalls).toHaveLength(1);
+    // Default booking address: "1323 n tulip drive, West chester, PA 19380".
+    expect(rpcCalls[0].args.p_location_city).toBe("West chester");
+    expect(rpcCalls[0].args.p_location_region).toBe("PA");
+    expect(rpcCalls[0].args.p_location_postal_code).toBe("19380");
+  });
+
+  it("prefers the Mapbox context parts (region from short_code), even when the address itself does not parse", async () => {
+    const b = booking({ address: "6815 Lawnton St, Philadelphia, Pennsylvania 19128" });
+    const state = baseState({
+      unpushed: [b],
+      geocodeFeatures: [
+        {
+          center: [-75.16, 39.98],
+          context: [
+            { id: "postcode.123", text: "19128" },
+            { id: "place.456", text: "Philadelphia" },
+            { id: "region.789", text: "Pennsylvania", short_code: "US-PA" },
+          ],
+        },
+      ],
+    });
+    const { supabase, rpcCalls } = wireState(state);
+
+    const result = await executeAutoPush(supabase, WS_ID, b.id);
+
+    expect(result.status).toBe("created");
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0].args.p_location_city).toBe("Philadelphia");
+    expect(rpcCalls[0].args.p_location_region).toBe("PA");
+    expect(rpcCalls[0].args.p_location_postal_code).toBe("19128");
+  });
+
+  it("passes null parts when neither context nor a parseable address exists — the RPC takes its single-line path", async () => {
+    const b = booking({ address: "The big lot out back" });
+    const state = baseState({ unpushed: [b] });
+    const { supabase, rpcCalls } = wireState(state);
+
+    const result = await executeAutoPush(supabase, WS_ID, b.id);
+
+    expect(result.status).toBe("created");
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0].args.p_location_city).toBeNull();
+    expect(rpcCalls[0].args.p_location_region).toBeNull();
+    expect(rpcCalls[0].args.p_location_postal_code).toBeNull();
+  });
+
+  it("the staff RPC call carries the same merge params (one shared call site)", async () => {
+    const b = booking({ payment: "due_at_appointment" });
+    const state = baseState({ unpushed: [b] });
+    const { supabase, rpcCalls } = wireState(state);
+
+    const [result] = await executePushes(supabase, WS_ID, [{ booking_id: b.id, action: "push" }]);
+
+    expect(result.status).toBe("created");
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0].name).toBe("public_booking_book_appointment_staff_v1");
+    expect(rpcCalls[0].args.p_location_city).toBe("West chester");
+    expect(rpcCalls[0].args.p_location_region).toBe("PA");
+    expect(rpcCalls[0].args.p_location_postal_code).toBe("19380");
+  });
+});
+
+describe("parseAddressParts", () => {
+  it("parses the trailing 'City, ST ZIP' shape", () => {
+    expect(parseAddressParts("1323 n tulip drive, West chester, PA 19380")).toEqual({
+      city: "West chester",
+      region: "PA",
+      postalCode: "19380",
+    });
+  });
+
+  it("parses the two-segment 'City ST ZIP' shape and keeps ZIP+4", () => {
+    expect(parseAddressParts("6815 Lawnton St, Philadelphia PA 19128")).toEqual({
+      city: "Philadelphia",
+      region: "PA",
+      postalCode: "19128",
+    });
+    expect(parseAddressParts("1400 McKean Rd, Ambler, PA 19002-1234")).toEqual({
+      city: "Ambler",
+      region: "PA",
+      postalCode: "19002-1234",
+    });
+  });
+
+  it("returns all-null for anything it does not recognize", () => {
+    const none = { city: null, region: null, postalCode: null };
+    expect(parseAddressParts("")).toEqual(none);
+    expect(parseAddressParts("Just a street")).toEqual(none);
+    expect(parseAddressParts("123 Main St, Houston, TX")).toEqual(none);
+    expect(parseAddressParts("6815 Lawnton St, Philadelphia, Pennsylvania 19128")).toEqual(none);
   });
 });
 

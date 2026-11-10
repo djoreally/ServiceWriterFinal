@@ -121,7 +121,15 @@ export interface PushPreview {
   warnings: string[];
   customer_match: { kind: "existing" | "new"; customer_id: string | null; label: string };
   service_match: { catalog_id: string | null; name: string };
-  geocode: { lat: number; lng: number } | null;
+  geocode: {
+    lat: number;
+    lng: number;
+    /** Structured address parts (geocode context or comma-parse) the
+     * push passes to the booking RPC's profile-merge params. */
+    city: string | null;
+    region: string | null;
+    postalCode: string | null;
+  } | null;
   scheduled: { date: string; time: string; duration_minutes: number };
   duplicate_candidates: DuplicateCandidate[];
   overlaps: OverlapFlag[];

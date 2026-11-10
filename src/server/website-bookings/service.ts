@@ -56,10 +56,72 @@ import {
 } from "./client";
 import { sendShopBookingNotification } from "@/server/messaging/booking-confirmation";
 
+/** Coordinates plus the structured address parts the push passes to the
+ * booking RPC's profile-merge params (Cycle 7 S2). */
+interface GeocodeResult {
+  lat: number;
+  lng: number;
+  city: string | null;
+  region: string | null;
+  postalCode: string | null;
+}
+
+type AddressParts = Pick<GeocodeResult, "city" | "region" | "postalCode">;
+
+const NO_ADDRESS_PARTS: AddressParts = { city: null, region: null, postalCode: null };
+
+/**
+ * Structured parts from a Mapbox v5 feature `context[]`: postcode ->
+ * postal code, place (or locality) -> city, region -> its short code
+ * ("US-PA" -> "PA") when present, else the region text.
+ */
+function addressPartsFromContext(context: unknown): AddressParts {
+  const parts: AddressParts = { ...NO_ADDRESS_PARTS };
+  if (!Array.isArray(context)) return parts;
+  for (const entry of context as Array<{ id?: unknown; text?: unknown; short_code?: unknown }>) {
+    const id = typeof entry?.id === "string" ? entry.id : "";
+    const text = typeof entry?.text === "string" ? entry.text.trim() : "";
+    if (!text) continue;
+    if (id.startsWith("postcode")) {
+      parts.postalCode = text;
+    } else if (id.startsWith("place")) {
+      parts.city = text;
+    } else if (id.startsWith("locality")) {
+      if (!parts.city) parts.city = text;
+    } else if (id.startsWith("region")) {
+      const short = typeof entry?.short_code === "string" ? entry.short_code.trim() : "";
+      parts.region = short ? short.replace(/^US-/i, "") : text;
+    }
+  }
+  return parts;
+}
+
+/**
+ * Fallback structured parts parsed from the booking's single-line
+ * address when the geocode response carries no usable context
+ * (Cycle 7 S2). Conservative: only the common trailing
+ * "…, City, ST ZIP" shapes yield parts; anything else returns
+ * all-null and the push RPC takes its single-line path.
+ */
+export function parseAddressParts(address: string): AddressParts {
+  const segments = address.split(",").map((s) => s.trim()).filter(Boolean);
+  if (segments.length < 2) return { ...NO_ADDRESS_PARTS };
+  const tail = segments[segments.length - 1];
+  const stateZip = tail.match(/^([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/);
+  if (stateZip && segments.length >= 3) {
+    return { city: segments[segments.length - 2], region: stateZip[1].toUpperCase(), postalCode: stateZip[2] };
+  }
+  const combined = tail.match(/^(.+?)\s+([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/);
+  if (combined) {
+    return { city: combined[1].trim(), region: combined[2].toUpperCase(), postalCode: combined[3] };
+  }
+  return { ...NO_ADDRESS_PARTS };
+}
+
 // Mirrors geocodeAddressServer in src/server/hono/routes/appointments.ts
 // (Mapbox v5, same token env) so pushed appointments geocode identically to
 // backfilled ones.
-async function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
+async function geocodeAddress(address: string): Promise<GeocodeResult | null> {
   const token = (process.env.NEXT_PUBLIC_MAPBOX_PUBLIC_TOKEN || "").trim();
   if (!token.startsWith("pk.") || token.length <= 20) {
     throw new Error("Mapbox is not configured on the server, so the address cannot be geocoded.");
@@ -69,10 +131,22 @@ async function geocodeAddress(address: string): Promise<{ lat: number; lng: numb
     `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json?${params.toString()}`,
   );
   if (!res.ok) throw new Error(`Mapbox geocoding failed: ${res.statusText}`);
-  const data = (await res.json()) as { features?: Array<{ center?: [number, number] }> };
-  const center = data?.features?.[0]?.center;
+  const data = (await res.json()) as {
+    features?: Array<{ center?: [number, number]; context?: unknown }>;
+  };
+  const feature = data?.features?.[0];
+  const center = feature?.center;
   if (!center) return null;
-  return { lng: center[0], lat: center[1] };
+  // The booking RPC merges the booking's address into the customer
+  // profile (Cycle 7) and wants the structured parts; the Mapbox
+  // response already carries them in context[] — they were previously
+  // fetched and discarded. Fall back to a comma-parse of the booking
+  // address when the context yields nothing.
+  let parts = addressPartsFromContext(feature?.context);
+  if (!parts.city && !parts.region && !parts.postalCode) {
+    parts = parseAddressParts(address);
+  }
+  return { lng: center[0], lat: center[1], ...parts };
 }
 
 interface WorkspaceContext {
@@ -158,7 +232,7 @@ interface Resolution {
    * order); entry 0 is the first job and mirrors `service_match`. Only
    * set on the fully-resolved (unblocked) return. */
   job_catalog_ids?: Array<string | null>;
-  geocode: { lat: number; lng: number } | null;
+  geocode: GeocodeResult | null;
   scheduled: PushPreview["scheduled"];
   duplicate_candidates: PushPreview["duplicate_candidates"];
   overlaps: PushPreview["overlaps"];
@@ -351,7 +425,7 @@ async function resolveBooking(
 
   // Geocode (spec §4): no coordinates, no push — never create without a
   // location.
-  let geocode: { lat: number; lng: number } | null = null;
+  let geocode: GeocodeResult | null = null;
   try {
     geocode = await geocodeAddress(booking.address);
   } catch (error) {
@@ -946,6 +1020,12 @@ export async function executePushes(
       p_location_address: booking.address,
       p_location_lat: resolution.geocode.lat,
       p_location_lng: resolution.geocode.lng,
+      // Cycle 7: structured parts for the RPC's customer-profile merge
+      // (geocode context, or the comma-parse fallback). Nulls are fine —
+      // the RPC then takes its single-line merge path.
+      p_location_city: resolution.geocode.city,
+      p_location_region: resolution.geocode.region,
+      p_location_postal_code: resolution.geocode.postalCode,
       p_status: "confirmed",
       // Staff-confirmed push: the website promised this window, and the
       // owner saw every lead-time / overlap flag on the confirm screen
