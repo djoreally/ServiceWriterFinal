@@ -2644,7 +2644,7 @@ appointmentsRouter.get("/v1/inspections/:id/report", async (c: Context) => {
   const db = supabase as any;
   const { data: inspection } = await db.from("service_inspections").select("*").eq("id", id).single();
   if (!inspection) throw new ApiError(404, "Inspection not found.", "not_found");
-  const row = inspection as { vehicle_id?: string | null; user_id?: string | null };
+  const row = inspection as { vehicle_id?: string | null; workspace_id?: string | null };
   const { data: results } = await db
     .from("inspection_results")
     .select("*")
@@ -2660,11 +2660,11 @@ appointmentsRouter.get("/v1/inspections/:id/report", async (c: Context) => {
       .single();
     vehicle = veh ?? null;
   }
-  if (row.user_id) {
+  if (row.workspace_id) {
     const { data: biz } = await (supabase as any)
       .from("business_profiles")
       .select("business_name, phone, email, logo_url, service_address")
-      .eq("user_id", row.user_id)
+      .eq("workspace_id", row.workspace_id)
       .single();
     business = biz ?? null;
   }
@@ -3048,7 +3048,7 @@ appointmentsRouter.get("/v1/appointments/quick-service-form-data", async (c: Con
   const db = supabase as any;
   const [{ data: services, error: servicesError }, { data: profile, error: profileError }] = await Promise.all([
     db.from("service_catalog").select("id,name,description,labor_price,estimated_minutes,category,is_active,metadata").eq("workspace_id", workspaceId).eq("is_active", true).order("name"),
-    db.from("business_profiles").select("business_name").eq("user_id", user.id).maybeSingle(),
+    db.from("business_profiles").select("business_name").eq("workspace_id", workspaceId).maybeSingle(),
   ]);
   if (servicesError) throw servicesError;
   if (profileError) throw profileError;
@@ -3193,14 +3193,19 @@ appointmentsRouter.get("/v1/dispatch/dispatchable-appointments", async (c: Conte
 });
 
 // GET /v1/dispatch/settings — dispatch settings for the caller's business profile.
+// The profile is workspace-keyed after the Step 3 translation; the user_id
+// query param stays as the caller-identity check, and the workspace is
+// resolved server-side from the auth token.
 appointmentsRouter.get("/v1/dispatch/settings", async (c: Context) => {
   const { supabase, user } = await requireAuth(c);
   const userId = new URL(c.req.url).searchParams.get("user_id") ?? "";
   if (userId !== user.id) throw new ApiError(403, "user_id must match the caller.", "forbidden");
+  const workspaceId = await resolveCallerWorkspaceId(supabase, user.id);
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
   const { data, error } = await (supabase as any)
     .from("business_profiles")
-    .select("user_id,auto_dispatch_enabled,dispatch_weight_distance,dispatch_weight_load,dispatch_weight_performance,dispatch_weight_fairness,dispatch_weight_route,dispatch_fleet_performance_threshold,default_technician_id")
-    .eq("user_id", userId)
+    .select("auto_dispatch_enabled,dispatch_weight_distance,dispatch_weight_load,dispatch_weight_performance,dispatch_weight_fairness,dispatch_weight_route,dispatch_fleet_performance_threshold,default_technician_id")
+    .eq("workspace_id", workspaceId)
     .maybeSingle();
   if (error) throw error;
   return json({ data: data ?? null });
@@ -3224,9 +3229,11 @@ appointmentsRouter.patch("/v1/dispatch/settings", async (c: Context) => {
   const { supabase, user } = await requireAuth(c);
   if (user_id !== user.id) throw new ApiError(403, "user_id must match the caller.", "forbidden");
   const db = supabase as any;
+  const workspaceId = await resolveCallerWorkspaceId(supabase, user.id);
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
   // Upsert: a missing business_profiles row must not turn the save into a
   // silent zero-write. The helper throws when the write cannot be verified.
-  await upsertBusinessProfile(db, user_id, values);
+  await upsertBusinessProfile(db, workspaceId, values);
   return json({ data: { ok: true } });
 });
 
