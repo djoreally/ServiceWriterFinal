@@ -74,7 +74,7 @@ import { withAppointmentStatusView } from "@/lib/status-vocabulary";
 import { composeAppointmentJobMoney } from "@/server/appointments/appointment-money";
 import { formatMoney } from "@/lib/financialMath";
 import { resolvePrimaryServiceNames, resolveWorkspaceTimezone } from "@/server/appointments/title-resolution";
-import { dollarsToCents as dollarsToCents360, toDollars as toDollars360 } from "@/lib/money";
+import { dollarsToCents as dollarsToCents360, toCents as toCents360, toDollars as toDollars360 } from "@/lib/money";
 import type { Cents as Cents360 } from "@/lib/money";
 
 export const platformRouter = new Hono();
@@ -185,6 +185,31 @@ async function resolveWorkspaceIdForUser(
     if (selected) return selected.workspace_id;
   }
   return active[0]?.workspace_id ?? null;
+}
+
+/**
+ * The workspace a user-addressed route should act on when the addressed
+ * user is the shop OWNER (admin user management, public booking support
+ * reads, marketplace self-service): the workspace where that user holds
+ * the owner role. business_profiles is keyed by workspace_id after the
+ * Step 3 translation, so owner-addressed profile reads/writes resolve
+ * through here. Deterministic: lowest workspace_id wins.
+ */
+async function resolveOwnedWorkspaceId(
+  db: { from: (table: string) => any },
+  userId: string,
+): Promise<string | null> {
+  const { data, error } = await db
+    .from("workspace_members")
+    .select("workspace_id")
+    .eq("user_id", userId)
+    .eq("role", "owner")
+    .eq("is_active", true)
+    .order("workspace_id", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as { workspace_id: string } | null)?.workspace_id ?? null;
 }
 
 const DEFAULT_WORKSPACE_CONTEXT_PROFILE = {
@@ -1369,22 +1394,40 @@ platformRouter.get("/v1/platform/admin/organization-360", async (c) => {
 
   const { data: profiles, error } = await db
     .from("business_profiles")
-    .select("user_id, business_name, created_at, marketplace_opt_in, marketing_email_enabled")
+    .select("workspace_id, business_name, created_at, marketplace_opt_in, marketing_email_enabled")
     .not("business_name", "is", null)
     .neq("business_name", "")
     .order("created_at", { ascending: false });
   if (error) throw error;
   if (!profiles?.length) return json([]);
 
+  // business_profiles is workspace-keyed after the Step 3 translation.
+  // The per-organization counts below still read user_id-keyed tables
+  // (customers, vehicles, appointments, invoices — outside this step), so
+  // each workspace's owner is resolved once, in bulk, via workspace_members.
+  const profileWorkspaceIds = (profiles as Array<{ workspace_id: string }>).map((p) => p.workspace_id);
+  const { data: ownerRows, error: ownerError } = await db
+    .from("workspace_members")
+    .select("workspace_id, user_id")
+    .in("workspace_id", profileWorkspaceIds)
+    .eq("role", "owner")
+    .eq("is_active", true);
+  if (ownerError) throw ownerError;
+  const ownerByWorkspace = new Map<string, string>();
+  for (const row of (ownerRows ?? []) as Array<{ workspace_id: string; user_id: string }>) {
+    if (!ownerByWorkspace.has(row.workspace_id)) ownerByWorkspace.set(row.workspace_id, row.user_id);
+  }
+
   const results: Organization360Profile[] = await Promise.all(
     (profiles as Array<{
-      user_id: string;
+      workspace_id: string;
       business_name: string | null;
       created_at: string | null;
       marketplace_opt_in: boolean | null;
       marketing_email_enabled: boolean | null;
     }>).map(async (profile) => {
-      const userId = profile.user_id;
+      const workspaceId = profile.workspace_id;
+      const userId = ownerByWorkspace.get(workspaceId) ?? workspaceId;
       const [
         customerCount,
         vehicleCount,
@@ -1414,7 +1457,7 @@ platformRouter.get("/v1/platform/admin/organization-360", async (c) => {
         db.from("invoices").select("total, amount_paid").eq("user_id", userId).is("deleted_at", null),
         db.from("appointments").select("updated_at").eq("user_id", userId).order("updated_at", { ascending: false }).limit(1).maybeSingle(),
         db.from("appointments").select("updated_at, actual_end_time").eq("user_id", userId).eq("status", "completed").order("updated_at", { ascending: true }).limit(1).maybeSingle(),
-        db.from("business_subscriptions").select("plan_id, status").eq("user_id", userId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+        db.from("business_subscriptions").select("plan_id, status").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
       ]);
 
       if (teamCount.error) throw teamCount.error;
@@ -1426,14 +1469,19 @@ platformRouter.get("/v1/platform/admin/organization-360", async (c) => {
       let planName = "Free";
       let mrrCents = dollarsToCents360(toDollars360(0));
       if (subscriptionRes.data?.plan_id) {
+        // NEED-1 settlement (Step 3): business_subscriptions.plan_id follows
+        // the FK, the generated types, and the PostgREST embed — it points
+        // at platform_plans, not subscription_plan_templates. The templates
+        // table remains the public pricing-page source; this admin read
+        // follows the FK. platform_plans.price_cents is already cents.
         const { data: plan, error: planError } = await db
-          .from("subscription_plan_templates")
-          .select("name, price")
+          .from("platform_plans")
+          .select("name, price_cents")
           .eq("id", subscriptionRes.data.plan_id)
           .maybeSingle();
         if (planError) throw planError;
         planName = plan?.name ?? subscriptionRes.data.status ?? "Unknown";
-        mrrCents = dollarsToCents360(toDollars360(plan?.price ?? 0));
+        mrrCents = toCents360(plan?.price_cents ?? 0);
       }
 
       const revenueDollars = ((invoicesRes.data ?? []) as Array<{ total?: number | null; amount_paid?: number | null }>).reduce(
@@ -1467,7 +1515,7 @@ platformRouter.get("/v1/platform/admin/organization-360", async (c) => {
       });
 
       return {
-        organizationId: userId,
+        organizationId: workspaceId,
         organizationName: profile.business_name ?? "Unnamed organization",
         planName,
         mrrCents,
@@ -1551,13 +1599,14 @@ platformRouter.get("/v1/platform/system-health", async (c) => {
 
 platformRouter.get("/v1/platform/admin/users", async (c) => {
   const { supabase } = await requirePlatformAdmin(c);
-  const { data: profiles, error: profilesError } = await supabase
+  const db = supabase as any;
+  const { data: profiles, error: profilesError } = await db
     .from("business_profiles")
-    .select("user_id, business_name, email, created_at, booking_slug, marketplace_opt_in, deleted_at, onboarding_completed")
+    .select("workspace_id, business_name, email, created_at, booking_slug, marketplace_opt_in, deleted_at, onboarding_completed")
     .order("created_at", { ascending: false });
   if (profilesError) throw profilesError;
   const profileList = (profiles ?? []) as Array<{
-    user_id: string;
+    workspace_id: string;
     business_name: string | null;
     email: string | null;
     created_at: string;
@@ -1566,7 +1615,23 @@ platformRouter.get("/v1/platform/admin/users", async (c) => {
     deleted_at: string | null;
     onboarding_completed: boolean | null;
   }>;
-  const userIds = profileList.map((p) => p.user_id);
+  // business_profiles is workspace-keyed after the Step 3 translation;
+  // the listed "user" is each workspace's owner, resolved via
+  // workspace_members so roles and the response id stay user-shaped.
+  const ownerByWorkspace = new Map<string, string>();
+  if (profileList.length) {
+    const { data: ownerRows, error: ownerError } = await db
+      .from("workspace_members")
+      .select("workspace_id, user_id")
+      .in("workspace_id", profileList.map((p) => p.workspace_id))
+      .eq("role", "owner")
+      .eq("is_active", true);
+    if (ownerError) throw ownerError;
+    for (const row of (ownerRows ?? []) as Array<{ workspace_id: string; user_id: string }>) {
+      if (!ownerByWorkspace.has(row.workspace_id)) ownerByWorkspace.set(row.workspace_id, row.user_id);
+    }
+  }
+  const userIds = [...new Set([...ownerByWorkspace.values()])];
   const rolesRes = userIds.length
     ? await supabase.from("user_roles").select("user_id, role").in("user_id", userIds)
     : { data: [] as Array<{ user_id: string; role: string }>, error: null };
@@ -1576,17 +1641,20 @@ platformRouter.get("/v1/platform/admin/users", async (c) => {
     if (!roleByUser.has(row.user_id)) roleByUser.set(row.user_id, row.role);
   }
   return json(
-    profileList.map((profile) => ({
-      id: profile.user_id,
-      email: profile.email || "",
-      created_at: profile.created_at,
-      business_name: profile.business_name,
-      role: roleByUser.get(profile.user_id) ?? "user",
-      booking_slug: profile.booking_slug ?? null,
-      marketplace_opt_in: Boolean(profile.marketplace_opt_in),
-      deleted_at: profile.deleted_at ?? null,
-      onboarding_completed: Boolean(profile.onboarding_completed),
-    })),
+    profileList.map((profile) => {
+      const ownerId = ownerByWorkspace.get(profile.workspace_id);
+      return {
+        id: ownerId ?? profile.workspace_id,
+        email: profile.email || "",
+        created_at: profile.created_at,
+        business_name: profile.business_name,
+        role: (ownerId ? roleByUser.get(ownerId) : undefined) ?? "user",
+        booking_slug: profile.booking_slug ?? null,
+        marketplace_opt_in: Boolean(profile.marketplace_opt_in),
+        deleted_at: profile.deleted_at ?? null,
+        onboarding_completed: Boolean(profile.onboarding_completed),
+      };
+    }),
   );
 });
 
@@ -1632,11 +1700,16 @@ platformRouter.patch("/v1/platform/admin/users/:userId", async (c) => {
     booking_slug: z.string().trim().toLowerCase().min(1).max(120).nullable().optional(),
   }).parse(await c.req.json());
   const { supabase } = await requirePlatformAdmin(c);
+  // The :userId param addresses the shop owner; business_profiles is
+  // workspace-keyed after the Step 3 translation, so the owner's
+  // workspace is resolved server-side and the profile updates key on it.
+  const workspaceId = await resolveOwnedWorkspaceId(supabase as any, userId);
+  if (!workspaceId) throw new ApiError(404, "Business profile not found", "not_found");
   if (marketplace_opt_in !== undefined) {
     const { error } = await supabase
       .from("business_profiles")
       .update({ marketplace_opt_in })
-      .eq("user_id", userId);
+      .eq("workspace_id", workspaceId);
     if (error) throw error;
   }
   if (archived !== undefined) {
@@ -1648,7 +1721,7 @@ platformRouter.patch("/v1/platform/admin/users/:userId", async (c) => {
     const { error } = await supabase
       .from("business_profiles")
       .update(payload)
-      .eq("user_id", userId);
+      .eq("workspace_id", workspaceId);
     if (error) throw error;
   }
   if (booking_slug !== undefined) {
@@ -1656,7 +1729,7 @@ platformRouter.patch("/v1/platform/admin/users/:userId", async (c) => {
     const { error: profileError } = await supabase
       .from("business_profiles")
       .update({ booking_slug: slugValue })
-      .eq("user_id", userId);
+      .eq("workspace_id", workspaceId);
     if (profileError) throw profileError;
     const { error: settingsError } = await supabase
       .from("workspace_settings")
@@ -3299,10 +3372,15 @@ platformRouter.get("/v1/platform/public-booking/fee-settings", async (c) => {
   const url = new URL(c.req.url);
   const userId = z.string().uuid().parse(url.searchParams.get("user_id") ?? "");
   const admin = createSupabaseAdminClient();
+  // The user_id param addresses the shop owner; business_profiles is
+  // workspace-keyed after the Step 3 translation, so the owner's
+  // workspace is resolved server-side before the profile read.
+  const workspaceId = await resolveOwnedWorkspaceId(admin as any, userId);
+  if (!workspaceId) return json({ data: null, error: { message: "Business profile not found" } });
   const { data, error } = await (admin as any)
     .from("business_profiles")
     .select("oil_price_per_quart, waste_oil_fee_enabled, waste_oil_fee, shop_fee_enabled, shop_fee_type, shop_fee_value, shop_fee_description, surcharge_enabled, surcharge_type, surcharge_value, surcharge_description, payment_provider")
-    .eq("user_id", userId)
+    .eq("workspace_id", workspaceId)
     .single();
   if (error) return json({ data: null, error: { message: error.message } });
   return json({ data, error: null });
@@ -3769,10 +3847,12 @@ platformRouter.get("/v1/platform/marketplace/listing", async (c) => {
   const url = new URL(c.req.url);
   const userId = await requireSelfUser(c, url.searchParams.get("user_id") ?? "");
   const admin = createSupabaseAdminClient() as any;
+  const workspaceId = await resolveOwnedWorkspaceId(admin, userId);
+  if (!workspaceId) return json({ data: null });
   const { data, error } = await admin
     .from("business_profiles")
     .select(MARKETPLACE_LISTING_COLUMNS)
-    .eq("user_id", userId)
+    .eq("workspace_id", workspaceId)
     .maybeSingle();
   if (error) throw error;
   return json({ data: data ?? null });
@@ -3861,7 +3941,9 @@ platformRouter.patch("/v1/platform/marketplace/listing", async (c) => {
   }).parse(await c.req.json());
   const userId = await requireSelfUser(c, body.user_id);
   const admin = createSupabaseAdminClient() as any;
-  const { error } = await admin.from("business_profiles").update(body.updates).eq("user_id", userId);
+  const workspaceId = await resolveOwnedWorkspaceId(admin, userId);
+  if (!workspaceId) throw new ApiError(404, "Business profile not found", "not_found");
+  const { error } = await admin.from("business_profiles").update(body.updates).eq("workspace_id", workspaceId);
   if (error) throw error;
   return json({ data: { ok: true } });
 });
@@ -4131,11 +4213,14 @@ platformRouter.get("/v1/platform/team/data", async (c) => {
 
   if (membership?.teams) {
     const ownerId = membership.teams.user_id as string;
-    const { data: bp } = await admin
-      .from("business_profiles")
-      .select("booking_slug")
-      .eq("user_id", ownerId)
-      .single();
+    const ownerWorkspaceId = await resolveOwnedWorkspaceId(admin, ownerId);
+    const { data: bp } = ownerWorkspaceId
+      ? await admin
+          .from("business_profiles")
+          .select("booking_slug")
+          .eq("workspace_id", ownerWorkspaceId)
+          .maybeSingle()
+      : { data: null };
     return json({
       team: {
         id: membership.teams.id as string,
@@ -4148,11 +4233,14 @@ platformRouter.get("/v1/platform/team/data", async (c) => {
   }
 
   // Fallback for legacy single-tenant records that predate teams/team_members linkage.
-  const { data: profile } = await admin
-    .from("business_profiles")
-    .select("business_name, booking_slug")
-    .eq("user_id", uid)
-    .single();
+  const callerWorkspaceId = await resolveWorkspaceIdForUser(admin, uid);
+  const { data: profile } = callerWorkspaceId
+    ? await admin
+        .from("business_profiles")
+        .select("business_name, booking_slug")
+        .eq("workspace_id", callerWorkspaceId)
+        .maybeSingle()
+    : { data: null };
 
   return json({
     team: {
@@ -4310,10 +4398,12 @@ platformRouter.get("/v1/platform/link-health", async (c) => {
   const { supabase } = await requireAuth(c);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new ApiError(401, "Not authenticated", "not_authenticated");
+  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id);
+  if (!workspaceId) return json({ data: null, error: null });
   const { data, error } = await (supabase as any)
     .from("business_profiles")
     .select("booking_slug, google_review_url, yelp_review_url, website_url")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .maybeSingle();
   return json({ data: data ?? null, error: error ?? null });
 });
@@ -4346,10 +4436,12 @@ platformRouter.get("/v1/platform/weather-guard/shop-context", async (c) => {
   const { supabase } = await requireAuth(c);
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return json(null);
+  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id);
+  if (!workspaceId) return json(null);
   const { data, error } = await (supabase as any)
     .from("business_profiles")
     .select("service_address, service_coordinates, weather_guard_enabled, weather_guard_settings")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .maybeSingle();
   if (error || !data) return json(null);
   const coords = (data.service_coordinates ?? null) as { lat?: number; lng?: number } | null;

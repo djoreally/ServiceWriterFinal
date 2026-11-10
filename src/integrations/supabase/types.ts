@@ -1473,13 +1473,13 @@ export type Database = {
           terms_and_conditions: string | null
           timezone: string | null
           updated_at: string
-          user_id: string
           waste_oil_fee: number | null
           waste_oil_fee_enabled: boolean | null
           weather_guard_enabled: boolean | null
           weather_guard_settings: Json | null
           website_url: string | null
           working_days: string[] | null
+          workspace_id: string
           yelp_review_url: string | null
         }
         Insert: {
@@ -1632,13 +1632,13 @@ export type Database = {
           terms_and_conditions?: string | null
           timezone?: string | null
           updated_at?: string
-          user_id: string
           waste_oil_fee?: number | null
           waste_oil_fee_enabled?: boolean | null
           weather_guard_enabled?: boolean | null
           weather_guard_settings?: Json | null
           website_url?: string | null
           working_days?: string[] | null
+          workspace_id: string
           yelp_review_url?: string | null
         }
         Update: {
@@ -1791,16 +1791,24 @@ export type Database = {
           terms_and_conditions?: string | null
           timezone?: string | null
           updated_at?: string
-          user_id?: string
           waste_oil_fee?: number | null
           waste_oil_fee_enabled?: boolean | null
           weather_guard_enabled?: boolean | null
           weather_guard_settings?: Json | null
           website_url?: string | null
           working_days?: string[] | null
+          workspace_id?: string
           yelp_review_url?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "business_profiles_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: true
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       business_subscriptions: {
         Row: {
@@ -1818,7 +1826,7 @@ export type Database = {
           stripe_subscription_id: string | null
           trial_ends_at: string | null
           updated_at: string
-          user_id: string
+          workspace_id: string
         }
         Insert: {
           cancel_at_period_end?: boolean
@@ -1830,12 +1838,12 @@ export type Database = {
           grace_period_ends_at?: string | null
           id?: string
           plan_id: string
-          status?: string
+          status: string
           stripe_customer_id?: string | null
           stripe_subscription_id?: string | null
           trial_ends_at?: string | null
           updated_at?: string
-          user_id: string
+          workspace_id: string
         }
         Update: {
           cancel_at_period_end?: boolean
@@ -1852,7 +1860,7 @@ export type Database = {
           stripe_subscription_id?: string | null
           trial_ends_at?: string | null
           updated_at?: string
-          user_id?: string
+          workspace_id?: string
         }
         Relationships: [
           {
@@ -1860,6 +1868,13 @@ export type Database = {
             columns: ["plan_id"]
             isOneToOne: false
             referencedRelation: "platform_plans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "business_subscriptions_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
@@ -1945,7 +1960,7 @@ export type Database = {
           amount: number | null
           appointment_id: string | null
           created_at: string | null
-          device_info: Json | null
+          device_info: string | null
           event_type: string
           expected_amount: number | null
           id: string
@@ -1954,15 +1969,15 @@ export type Database = {
           payment_method: string | null
           reason: string | null
           trigger_type: string
-          user_id: string
           variance: number | null
+          workspace_id: string
         }
         Insert: {
           actual_amount?: number | null
           amount?: number | null
           appointment_id?: string | null
           created_at?: string | null
-          device_info?: Json | null
+          device_info?: string | null
           event_type: string
           expected_amount?: number | null
           id?: string
@@ -1971,15 +1986,15 @@ export type Database = {
           payment_method?: string | null
           reason?: string | null
           trigger_type: string
-          user_id: string
           variance?: number | null
+          workspace_id: string
         }
         Update: {
           actual_amount?: number | null
           amount?: number | null
           appointment_id?: string | null
           created_at?: string | null
-          device_info?: Json | null
+          device_info?: string | null
           event_type?: string
           expected_amount?: number | null
           id?: string
@@ -1988,10 +2003,18 @@ export type Database = {
           payment_method?: string | null
           reason?: string | null
           trigger_type?: string
-          user_id?: string
           variance?: number | null
+          workspace_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "cash_drawer_events_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       cash_drawer_reconciliations: {
         Row: {
@@ -2268,9 +2291,9 @@ export type Database = {
           full_name: string | null
           id: string
           phone: string | null
-          provider_id: string | null
           updated_at: string
           user_id: string
+          workspace_id: string | null
         }
         Insert: {
           created_at?: string
@@ -2279,9 +2302,9 @@ export type Database = {
           full_name?: string | null
           id?: string
           phone?: string | null
-          provider_id?: string | null
           updated_at?: string
           user_id: string
+          workspace_id?: string | null
         }
         Update: {
           created_at?: string
@@ -2290,24 +2313,17 @@ export type Database = {
           full_name?: string | null
           id?: string
           phone?: string | null
-          provider_id?: string | null
           updated_at?: string
           user_id?: string
+          workspace_id?: string | null
         }
         Relationships: [
           {
-            foreignKeyName: "customer_accounts_provider_id_fkey"
-            columns: ["provider_id"]
+            foreignKeyName: "customer_accounts_workspace_id_fkey"
+            columns: ["workspace_id"]
             isOneToOne: false
-            referencedRelation: "business_profiles"
-            referencedColumns: ["user_id"]
-          },
-          {
-            foreignKeyName: "customer_accounts_provider_id_fkey"
-            columns: ["provider_id"]
-            isOneToOne: false
-            referencedRelation: "public_booking_profiles"
-            referencedColumns: ["user_id"]
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -2521,7 +2537,6 @@ export type Database = {
       }
       customer_subscriptions: {
         Row: {
-          cancelled_at: string | null
           created_at: string
           current_period_end: string | null
           customer_id: string
@@ -2531,25 +2546,23 @@ export type Database = {
           status: string
           stripe_subscription_id: string | null
           updated_at: string
-          user_id: string
           vehicle_id: string | null
+          workspace_id: string
         }
         Insert: {
-          cancelled_at?: string | null
           created_at?: string
           current_period_end?: string | null
           customer_id: string
           id?: string
           plan_id: string
-          start_date?: string
-          status?: string
+          start_date: string
+          status: string
           stripe_subscription_id?: string | null
           updated_at?: string
-          user_id: string
           vehicle_id?: string | null
+          workspace_id: string
         }
         Update: {
-          cancelled_at?: string | null
           created_at?: string
           current_period_end?: string | null
           customer_id?: string
@@ -2559,8 +2572,8 @@ export type Database = {
           status?: string
           stripe_subscription_id?: string | null
           updated_at?: string
-          user_id?: string
           vehicle_id?: string | null
+          workspace_id?: string
         }
         Relationships: [
           {
@@ -2575,6 +2588,13 @@ export type Database = {
             columns: ["plan_id"]
             isOneToOne: false
             referencedRelation: "subscription_plans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_subscriptions_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
@@ -11371,11 +11391,11 @@ export type Database = {
         Insert: {
           badge_color?: string | null
           badge_label?: string | null
-          billing_interval?: string
+          billing_interval: string
           created_at?: string
           description?: string | null
           display_name: string
-          display_order?: number
+          display_order: number
           has_ai_assistant?: boolean
           has_ai_routing?: boolean
           has_carfax_integration?: boolean
@@ -11391,20 +11411,20 @@ export type Database = {
           has_technician_os?: boolean
           highlight?: boolean
           id?: string
-          is_active?: boolean
+          is_active: boolean
           is_contact_sales?: boolean
           max_appointments_per_month?: number | null
           max_customers?: number | null
           max_technician_seats?: number | null
-          min_platform_fee_cents?: number
+          min_platform_fee_cents: number
           name: string
-          platform_fee_bps?: number
-          price_cents?: number
+          platform_fee_bps: number
+          price_cents: number
           stripe_price_id?: string | null
           stripe_product_id?: string | null
           support_level?: string | null
           tax_compliance_level?: string | null
-          trial_period_days?: number
+          trial_period_days: number
           updated_at?: string
         }
         Update: {
@@ -11463,7 +11483,7 @@ export type Database = {
           id?: string
           key: string
           updated_at?: string
-          value?: Json
+          value: Json
         }
         Update: {
           created_at?: string
@@ -14822,22 +14842,22 @@ export type Database = {
         Insert: {
           badge_color?: string | null
           badge_label?: string | null
-          billing_cycle?: string
+          billing_cycle: string
           created_at?: string
           cta_label?: string | null
           description?: string | null
-          display_order?: number
-          features?: Json
+          display_order: number
+          features: Json
           highlight?: boolean
           id?: string
-          included_services_description?: Json
-          is_active?: boolean
+          included_services_description: Json
+          is_active: boolean
           max_services_per_cycle?: number | null
           name: string
-          price?: number
+          price: number
           price_max?: number | null
           price_min?: number | null
-          tier?: string
+          tier: string
           updated_at?: string
         }
         Update: {

@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
 export type TrustContext = {
   userId: string;
@@ -35,12 +36,32 @@ export async function buildTrustContext(): Promise<TrustContext> {
   const role = normalizeRole(user.app_metadata?.role || user.user_metadata?.role);
 
   let subscriptionTier: string | undefined;
-  const { data: sub } = await (supabase as any)
+  // business_subscriptions is workspace-keyed after the Step 3
+  // translation. NEED-7 source, named: the client's selected-workspace
+  // store — getSelectedWorkspaceId from workspaces.selection, the same
+  // selection the server resolvers accept as the selected_workspace_id
+  // hint. The lookup stays ONE round trip, exactly like the user_id
+  // read it replaces: membership is enforced through the workspaces
+  // embed (!inner at both levels), the selected workspace narrows the
+  // filter when one is set, and the latest active row wins. (Resolving
+  // the workspace in a separate call first — via settings.query's
+  // API-backed resolveCurrentWorkspace or a workspace_members pre-read
+  // — was measured adding ~5 s to cold render paths that build a trust
+  // context, so it is deliberately NOT done here.) orgId below stays
+  // the user id — the TrustContext contract is out of this step's scope.
+  let subQuery = (supabase as any)
     .from("business_subscriptions")
-    .select("status, plan_id, platform_plans(name)")
-    .eq("user_id", user.id)
+    .select("status, plan_id, platform_plans(name), workspaces!inner(workspace_members!inner(user_id))")
     .eq("status", "active")
-    .maybeSingle();
+    .eq("workspaces.workspace_members.user_id", user.id)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  const selectedWorkspaceId = getSelectedWorkspaceId();
+  if (selectedWorkspaceId) {
+    subQuery = subQuery.eq("workspace_id", selectedWorkspaceId);
+  }
+  const { data: subs } = await subQuery;
+  const sub = (subs as Array<{ plan_id?: string | null; platform_plans?: { name?: string } | null }> | null)?.[0];
   if (sub?.platform_plans?.name) {
     subscriptionTier = String(sub.platform_plans.name);
   } else if (sub?.plan_id) {
