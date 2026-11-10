@@ -1371,11 +1371,22 @@ workOrdersRouter.get("/v1/command-center/technicians", async (c) => {
     (supabase.from("technicians") as any)
       .select("id, user_id, first_name, last_name, full_name, email, phone, status, role, home_latitude, home_longitude, current_latitude, current_longitude, location_updated_at, assigned_van_id")
       .eq("workspace_id", workspaceId).order("full_name"),
+    // service_records columns below are the LIVE production shape, verified
+    // against information_schema on 2026-11-10 (pinned by
+    // command-center-technicians-selects.test.ts). The previous select named
+    // title/service_type/service_date/estimated_cost/assigned_technician_id —
+    // none of which exist in production — so PostgREST answered 42703 and
+    // this endpoint 500'd on every call, blanking Command Center (the page
+    // blocks all state when either of its endpoints errors). The day window
+    // sits on started_at: the completion guarantee stamps it with the job's
+    // actual (or scheduled) start, i.e. the day the service belongs to,
+    // while completed_at/created_at are closeout/row-mint stamps that drift
+    // to the typing day on a back-dated closeout.
     (supabase.from("service_records") as any)
-      .select("id,title,status,service_type,service_date,estimated_cost,metadata,appointment_id,assigned_technician_id")
+      .select("id,status,metadata,appointment_id,technician_id,started_at,completed_at,created_at,total_amount")
       .eq("workspace_id", workspaceId)
-      .gte("service_date", from).lte("service_date", to)
-      .order("service_date", { ascending: true }),
+      .gte("started_at", from).lte("started_at", to)
+      .order("started_at", { ascending: true }),
     (supabase.from("workspaces") as any).select("timezone").eq("id", workspaceId).maybeSingle(),
   ]);
   const error = techniciansRes.error || jobsRes.error || workspaceRes.error;
@@ -1385,7 +1396,7 @@ workOrdersRouter.get("/v1/command-center/technicians", async (c) => {
   ));
   const { data: appointments, error: appointmentsError } = appointmentIds.length > 0
     ? await (supabase.from("appointments") as any)
-      .select("id,metadata,appointment_type").in("id", appointmentIds).eq("workspace_id", workspaceId)
+      .select("id,metadata").in("id", appointmentIds).eq("workspace_id", workspaceId)
     : { data: [], error: null };
   if (appointmentsError) throw appointmentsError;
   return json({
