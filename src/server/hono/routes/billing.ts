@@ -1332,17 +1332,17 @@ const cashDrawerSettingsSchema = z.object({
 });
 
 billingRouter.get("/v1/billing/cash-drawer", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, user, workspaceId } = await resolveBillingWorkspace(c);
   const [profileRes, eventsRes, sessionsRes] = await Promise.all([
     supabase
       .from("business_profiles")
       .select("cash_drawer_enabled, cash_drawer_type, cash_drawer_config, cash_drawer_open_on_cash_payment, cash_drawer_require_reason, stripe_charges_enabled")
-      .eq("user_id", user.id)
+      .eq("workspace_id", workspaceId)
       .maybeSingle(),
     supabase
       .from("cash_drawer_events")
       .select("*")
-      .eq("user_id", user.id)
+      .eq("workspace_id", workspaceId)
       .order("created_at", { ascending: false })
       .limit(20),
     supabase
@@ -1365,7 +1365,7 @@ billingRouter.get("/v1/billing/cash-drawer", async (c) => {
 });
 
 billingRouter.put("/v1/billing/cash-drawer/settings", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, workspaceId } = await resolveBillingWorkspace(c);
   const body = cashDrawerSettingsSchema.parse(await c.req.raw.json());
   const { error } = await (supabase.from("business_profiles") as any)
     .update({
@@ -1375,7 +1375,7 @@ billingRouter.put("/v1/billing/cash-drawer/settings", async (c) => {
       cash_drawer_open_on_cash_payment: body.cash_drawer_open_on_cash_payment,
       cash_drawer_require_reason: body.cash_drawer_require_reason,
     })
-    .eq("user_id", user.id);
+    .eq("workspace_id", workspaceId);
   if (error) throw error;
   return json({ data: { success: true } });
 });
@@ -2170,12 +2170,12 @@ billingRouter.patch("/v1/billing/coupons/:id", async (c) => {
 // ---------------------------------------------------------------------------
 
 billingRouter.get("/v1/billing/qbo", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, user, workspaceId } = await resolveBillingWorkspace(c);
   const [profileResp, logsResp, customersResp, invoicesResp, paymentsResp] = await Promise.all([
     supabase
       .from("business_profiles")
       .select("qbo_enabled, qbo_realm_id, qbo_connected_at, qbo_sync_customers, qbo_sync_invoices, qbo_sync_payments, qbo_income_account_id, qbo_last_sync_at")
-      .eq("user_id", user.id)
+      .eq("workspace_id", workspaceId)
       .maybeSingle(),
     supabase
       .from("qbo_sync_log")
@@ -2213,11 +2213,11 @@ const qboSettingsSchema = z.object({
 });
 
 billingRouter.put("/v1/billing/qbo/settings", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, workspaceId } = await resolveBillingWorkspace(c);
   const body = qboSettingsSchema.parse(await c.req.raw.json());
   // Upsert: a missing business_profiles row must not turn the save into a
   // silent zero-write. The helper throws when the write cannot be verified.
-  await upsertBusinessProfile(supabase as any, user.id, body);
+  await upsertBusinessProfile(supabase as any, workspaceId, body);
   return json({ data: { success: true } });
 });
 
@@ -2495,11 +2495,11 @@ billingRouter.get("/v1/billing/plan-templates", async (c) => {
 });
 
 billingRouter.get("/v1/billing/customer-subscriptions", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, workspaceId } = await resolveBillingWorkspace(c);
   const customerId = new URL(c.req.url).searchParams.get("customer_id");
   let query = (supabase.from("customer_subscriptions") as any)
     .select("*")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false });
   if (customerId) query = query.eq("customer_id", customerId);
   const { data, error } = await query;
@@ -2508,14 +2508,14 @@ billingRouter.get("/v1/billing/customer-subscriptions", async (c) => {
 });
 
 billingRouter.get("/v1/billing/subscription-stats", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, user, workspaceId } = await resolveBillingWorkspace(c);
   const [plansResult, subsResult] = await Promise.all([
     (supabase.from("subscription_plans") as any)
       .select("id, price, billing_cycle, is_active, stripe_price_id")
       .eq("user_id", user.id),
     (supabase.from("customer_subscriptions") as any)
       .select("id, plan_id, status")
-      .eq("user_id", user.id)
+      .eq("workspace_id", workspaceId)
       .eq("status", "active"),
   ]);
   if (plansResult.error) throw plansResult.error;
@@ -3156,14 +3156,14 @@ const smsSettingsSchema = z.object({
 });
 
 billingRouter.put("/v1/billing/sms-settings", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, workspaceId } = await resolveBillingWorkspace(c);
   const body = smsSettingsSchema.parse(await c.req.raw.json());
   const update: Record<string, unknown> = {};
   if (body.sms_low_balance_threshold !== undefined) update.sms_low_balance_threshold = body.sms_low_balance_threshold;
   if (body.sms_transactional_enabled !== undefined) update.sms_transactional_enabled = body.sms_transactional_enabled;
   if (body.sms_marketing_enabled !== undefined) update.sms_marketing_enabled = body.sms_marketing_enabled;
   if (Object.keys(update).length === 0) return json({ data: { success: true } });
-  const { error } = await (supabase.from("business_profiles") as any).update(update).eq("user_id", user.id);
+  const { error } = await (supabase.from("business_profiles") as any).update(update).eq("workspace_id", workspaceId);
   if (error) throw error;
   return json({ data: { success: true } });
 });
