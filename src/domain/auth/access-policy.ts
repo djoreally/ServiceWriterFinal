@@ -117,16 +117,6 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
   { match: "/subscriptions", roles: OFFICE },
   { match: "/team-os", roles: OFFICE_STAFF },
   { match: "/technician-os", roles: OFFICE_STAFF },
-
-  // --- Fleet OS ---------------------------------------------------------
-  { match: "/fleet-os/scheduler", roles: FLEET },
-  { match: "/fleet-os/command-center", roles: FLEET },
-  { match: "/fleet-os/checkin", roles: FLEET },
-  { match: "/fleet-os/tracking", roles: FLEET },
-  { match: "/fleet-os/work-orders", roles: FLEET },
-  { match: "/fleet-os/vehicles", roles: FLEET },
-  { match: "/fleet-os/help", roles: FLEET },
-  { match: "/fleet-os", roles: [...OFFICE_STAFF, "fleet_manager"] },
 ];
 
 const matches = (pathname: string, match: string) =>
