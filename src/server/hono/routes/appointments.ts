@@ -3342,6 +3342,13 @@ appointmentsRouter.get("/v1/dispatch/mobile-dispatch-state", async (c: Context) 
 });
 
 // GET /v1/dispatch/mobile-state — member + presence + today's clock entries + open jobs.
+// Production `appointments` has no priority / location_address / location_lat /
+// location_lng columns (live-schema census 2026-11-10): the old jobs select
+// named all four, so PostgREST rejected it (42703) and the whole mobile-state
+// payload failed. `priority` has no live source and is dropped. The flat
+// location_* fields the mobile client reads are composed server-side from the
+// linked `locations` row first, falling back to `metadata` — the canonical
+// read model documented on the geocode-backfill handler in this file.
 appointmentsRouter.get("/v1/dispatch/mobile-state", async (c: Context) => {
   const { supabase, user, workspaceId } = await requireCallerWorkspace(c, selectedWorkspaceHint(new URL(c.req.url)));
   const userId = new URL(c.req.url).searchParams.get("user_id") ?? "";
@@ -3352,7 +3359,7 @@ appointmentsRouter.get("/v1/dispatch/mobile-state", async (c: Context) => {
     db.from("workspace_members").select("user_id,role,is_active").eq("workspace_id", workspaceId).eq("user_id", userId).eq("is_active", true).maybeSingle(),
     db.from("technician_presence").select("*").eq("workspace_id", workspaceId).eq("user_id", userId).maybeSingle(),
     db.from("technician_clock_entries").select("*").eq("workspace_id", workspaceId).eq("user_id", userId).gte("clock_in", `${today}T00:00:00`).order("clock_in", { ascending: false }).limit(10),
-    db.from("appointments").select("id,starts_at,ends_at,status,assigned_user_id,vehicle_id,customer_id,priority,dispatch_status,metadata,location_address,location_lat,location_lng,confirmation_code,customers(id,first_name,last_name,phone,email),vehicles(id,year,make,model,license_plate)").eq("workspace_id", workspaceId).eq("assigned_user_id", userId).not("status", "in", '("completed","cancelled","no_show")').order("starts_at", { ascending: true }).limit(50),
+    db.from("appointments").select("id,starts_at,ends_at,status,assigned_user_id,vehicle_id,customer_id,location_id,dispatch_status,metadata,confirmation_code,customers(id,first_name,last_name,phone,email),vehicles(id,year,make,model,license_plate),locations(address_line1,address_line2,city,region,postal_code,latitude,longitude)").eq("workspace_id", workspaceId).eq("assigned_user_id", userId).not("status", "in", '("completed","cancelled","no_show")').order("starts_at", { ascending: true }).limit(50),
   ]);
   if (memberError) throw memberError;
   if (presenceError) throw presenceError;
@@ -3363,8 +3370,32 @@ appointmentsRouter.get("/v1/dispatch/mobile-state", async (c: Context) => {
     resolveWorkspaceTimezone(db, workspaceId),
     resolvePrimaryServiceNames(db, workspaceId, (jobs ?? []).map((row: Record<string, unknown>) => row.id as string)),
   ]);
-  return json({ data: { member: member ?? null, presence: presence ?? null, clockEntries: clockEntries ?? [], jobs: (jobs ?? []).map((row: Record<string, unknown>) => withAppointmentTitleFields(withAppointmentStatusView(row), { timezone, primaryServiceName: primaryServiceNames.get(row.id as string) })) } });
+  return json({ data: { member: member ?? null, presence: presence ?? null, clockEntries: clockEntries ?? [], jobs: (jobs ?? []).map((row: Record<string, unknown>) => withAppointmentTitleFields(withAppointmentStatusView(withMobileJobLocation(row)), { timezone, primaryServiceName: primaryServiceNames.get(row.id as string) })) } });
 });
+
+// Flatten the linked locations row (falling back to metadata) into the
+// location_address / location_lat / location_lng fields the mobile client
+// reads on mobile-state job rows. See the handler comment above.
+function withMobileJobLocation(row: Record<string, unknown>): Record<string, unknown> {
+  const { locations, ...rest } = row;
+  const location = one(locations) as Record<string, unknown> | null;
+  const metadata = object(row.metadata);
+  const locationAddress = location
+    ? [location.address_line1, location.address_line2, location.city, location.region, location.postal_code]
+        .filter((part) => typeof part === "string" && part.trim() !== "")
+        .join(", ") || null
+    : null;
+  return {
+    ...rest,
+    location_address:
+      locationAddress ??
+      (typeof metadata.location_address === "string" && metadata.location_address.trim() !== ""
+        ? metadata.location_address
+        : null),
+    location_lat: location?.latitude ?? metadata.location_lat ?? null,
+    location_lng: location?.longitude ?? metadata.location_lng ?? null,
+  };
+}
 
 // POST /v1/dispatch/technician-location — update live location + presence via RPC.
 appointmentsRouter.post("/v1/dispatch/technician-location", async (c: Context) => {
