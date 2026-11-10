@@ -1142,6 +1142,25 @@ async function resolveWorkspaceIdForUser(
   return active[0]?.workspace_id ?? null;
 }
 
+/**
+ * Platform-admin gate (same idiom as platform.ts / messaging.ts,
+ * verified via user_roles). platform_settings is a global table whose
+ * RLS write arms are platform-admin-only after the Step 3 translation,
+ * so writes through this router must pass the same gate server-side.
+ */
+async function requirePlatformAdmin(c: Context) {
+  const { supabase, user } = await requireAuth(c);
+  const { data, error } = await supabase
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", user.id)
+    .eq("role", "admin")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new ApiError(403, "Platform admin access required", "forbidden");
+  return { supabase, user };
+}
+
 function selectedWorkspaceHint(c: Context): string | undefined {
   const fromQuery = new URL(c.req.url).searchParams.get("selected_workspace_id");
   return fromQuery ?? undefined;
@@ -1378,7 +1397,9 @@ vehiclesRouter.get("/v1/admin/carfax/settings", async (c) => {
 
 vehiclesRouter.put("/v1/admin/carfax/settings", async (c) => {
   const body = await c.req.json();
-  const { supabase } = await requireAuth(c);
+  // platform_settings is global; its write policies are platform-admin
+  // only, so the write is gated here as well (NEED-4, Step 3 spec).
+  const { supabase } = await requirePlatformAdmin(c);
   const { error } = await (supabase as any)
     .from("platform_settings")
     .update({ value: body.config as never })

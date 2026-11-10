@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 export type TrustContext = {
   userId: string;
@@ -35,16 +36,24 @@ export async function buildTrustContext(): Promise<TrustContext> {
   const role = normalizeRole(user.app_metadata?.role || user.user_metadata?.role);
 
   let subscriptionTier: string | undefined;
-  const { data: sub } = await (supabase as any)
-    .from("business_subscriptions")
-    .select("status, plan_id, platform_plans(name)")
-    .eq("user_id", user.id)
-    .eq("status", "active")
-    .maybeSingle();
-  if (sub?.platform_plans?.name) {
-    subscriptionTier = String(sub.platform_plans.name);
-  } else if (sub?.plan_id) {
-    subscriptionTier = String(sub.plan_id);
+  // business_subscriptions is workspace-keyed after the Step 3
+  // translation. NEED-7 source: the client's current workspace context
+  // (resolveCurrentWorkspace, backed by the selected-workspace store +
+  // the workspace-context API). orgId below stays the user id — the
+  // TrustContext contract is out of this step's scope.
+  const workspaceContext = await resolveCurrentWorkspace();
+  if (workspaceContext?.workspaceId) {
+    const { data: sub } = await (supabase as any)
+      .from("business_subscriptions")
+      .select("status, plan_id, platform_plans(name)")
+      .eq("workspace_id", workspaceContext.workspaceId)
+      .eq("status", "active")
+      .maybeSingle();
+    if (sub?.platform_plans?.name) {
+      subscriptionTier = String(sub.platform_plans.name);
+    } else if (sub?.plan_id) {
+      subscriptionTier = String(sub.plan_id);
+    }
   }
 
   return {
