@@ -2383,7 +2383,7 @@ crmRouter.get("/v1/crm/marketing/service-reminders-since", async (c) => {
   return json({ data: data ?? [] });
 });
 
-// Marketing settings (business_profiles, keyed by session user).
+// Marketing settings (business_profiles, keyed by the caller's workspace).
 const marketingSettingsSchema = z.object({
   google_review_url: z.string().trim().max(2000).nullable().optional(),
   yelp_review_url: z.string().trim().max(2000).nullable().optional(),
