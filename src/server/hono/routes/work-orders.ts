@@ -1351,18 +1351,28 @@ workOrdersRouter.get("/v1/operational-jobs", async (c) => {
   const workspaceId = z.string().uuid().parse(params.get("workspace_id") ?? "");
   const from = z.string().min(1).parse(params.get("from") ?? "");
   const to = z.string().min(1).parse(params.get("to") ?? "");
+  // Phantom fix #3 (2026-11-10): service_records has no title,
+  // service_type, service_date, estimated_cost or assigned_technician_id
+  // columns in production — the old select/window 42703'd on every call.
+  // Mirrors the healed GET /v1/command-center/technicians sibling: live
+  // columns only, and the day window runs on started_at, which is
+  // stamped with the job's actual/scheduled start (completed_at and
+  // created_at drift to the typing day on back-dated closeouts). The
+  // dropped DTO fields had no consumer — nothing in the repo reads this
+  // route's service_records rows (the Command Center reads
+  // /v1/dispatch/operational-jobs + /v1/command-center/technicians).
   const { data: serviceRecords, error: serviceError } = await (supabase.from("service_records") as any)
-    .select("id,title,status,service_type,service_date,estimated_cost,metadata,appointment_id,assigned_technician_id")
+    .select("id,status,metadata,appointment_id,technician_id,started_at,completed_at,created_at,total_amount")
     .eq("workspace_id", workspaceId)
-    .gte("service_date", from).lte("service_date", to)
-    .order("service_date", { ascending: true });
+    .gte("started_at", from).lte("started_at", to)
+    .order("started_at", { ascending: true });
   if (serviceError) throw serviceError;
   const appointmentIds = Array.from(new Set(
     (serviceRecords ?? []).map((r: any) => r.appointment_id).filter((id: unknown): id is string => typeof id === "string"),
   ));
   const { data: appointments, error: appointmentsError } = appointmentIds.length > 0
     ? await (supabase.from("appointments") as any)
-      .select("id,metadata,appointment_type").in("id", appointmentIds).eq("workspace_id", workspaceId)
+      .select("id,metadata").in("id", appointmentIds).eq("workspace_id", workspaceId)
     : { data: [], error: null };
   if (appointmentsError) throw appointmentsError;
   return json({ data: { service_records: serviceRecords ?? [], appointments: appointments ?? [] } });
@@ -2197,11 +2207,16 @@ workOrdersRouter.get("/v1/tech-os/roster", async (c) => {
   const end = new Date(start); end.setDate(end.getDate() + 1);
   const [membersRes, jobsRes] = await Promise.all([
     (supabase.from("team_members") as any).select("*").eq("workspace_id", workspaceId).order("full_name"),
+    // Phantom fix #3 (2026-11-10): same broken service_records shape as
+    // /v1/operational-jobs had — healed identically to the
+    // command-center/technicians sibling (live columns; window on
+    // started_at). The roster client reads /v1/tech-os/roster-members;
+    // nothing consumes these rows' dropped fields.
     (supabase.from("service_records") as any)
-      .select("id,title,status,service_type,service_date,estimated_cost,metadata,appointment_id,assigned_technician_id")
+      .select("id,status,metadata,appointment_id,technician_id,started_at,completed_at,created_at,total_amount")
       .eq("workspace_id", workspaceId)
-      .gte("service_date", start.toISOString()).lt("service_date", end.toISOString())
-      .order("service_date", { ascending: true }),
+      .gte("started_at", start.toISOString()).lt("started_at", end.toISOString())
+      .order("started_at", { ascending: true }),
   ]);
   const error = membersRes.error || jobsRes.error;
   if (error) throw error;
@@ -2210,7 +2225,7 @@ workOrdersRouter.get("/v1/tech-os/roster", async (c) => {
   ));
   const { data: appointments, error: appointmentsError } = appointmentIds.length > 0
     ? await (supabase.from("appointments") as any)
-      .select("id,metadata,appointment_type").in("id", appointmentIds).eq("workspace_id", workspaceId)
+      .select("id,metadata").in("id", appointmentIds).eq("workspace_id", workspaceId)
     : { data: [], error: null };
   if (appointmentsError) throw appointmentsError;
   const { data: workspace } = await (supabase.from("workspaces") as any)
