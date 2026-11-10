@@ -148,7 +148,7 @@ describe("resolveStartupRoute", () => {
     },
   );
 
-  it("routes fleet managers to Fleet OS instead of the owner dashboard", () => {
+  it("routes fleet managers to the dashboard (Fleet OS stripped)", () => {
     expect(
       resolveStartupRoute({
         currentPath: "/",
@@ -157,7 +157,7 @@ describe("resolveStartupRoute", () => {
         role: "fleet_manager",
         requiresPlan: true,
       }),
-    ).toBe("/fleet-os");
+    ).toBe("/dashboard");
   });
 
   it("preserves dispatcher deep links instead of forcing the board", () => {
