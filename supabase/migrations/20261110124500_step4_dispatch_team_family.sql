@@ -1397,7 +1397,7 @@ $$;
 -- ----------------------------------------------------------------------------
 create or replace function public.create_team_os_technician_v1(
   p_email text default null,
-  p_name text,
+  p_name text default null,
   p_phone text default null,
   p_profile jsonb default null,
   p_role text default null,
