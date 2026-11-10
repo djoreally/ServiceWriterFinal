@@ -1714,54 +1714,20 @@ workOrdersRouter.post("/v1/time-clock/break/end", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// Job runtime — GET /v1/jobs/:id/runtime (canonical execution bundle)
+// Job runtime — GET /v1/jobs/:id/runtime
+//
+// A second, older registration of this route used to sit here and SERVE
+// (Hono first-match wins): its appointment select named user_id,
+// service_catalog_id, title, assigned_technician_id, estimated_cost and
+// service_date, its items select named name/technician_notes/status, its
+// invoice leg filtered on a non-existent invoices.appointment_id column
+// and selected balance_due/due_date/paid_at, and its payments select
+// named method — none of which exist in production, so the bundle
+// 42703'd on every call (phantom fix #2, 2026-11-10). It was removed;
+// the sole registration is the workspace-scoped handler further down
+// (the "Job runtime bundle" section), whose response shape is the one
+// src/application/queries/get-job-runtime.query.ts consumes.
 // ---------------------------------------------------------------------------
-
-workOrdersRouter.get("/v1/jobs/:id/runtime", async (c) => {
-  const { supabase, user } = await requireAuth(c);
-  const jobId = c.req.param("id");
-  const { data: appointment, error: appointmentError } = await (supabase.from("appointments") as any)
-    .select("id,user_id,workspace_id,customer_id,vehicle_id,service_catalog_id,title,status,dispatch_status,assigned_technician_id,estimated_cost,metadata,starts_at,ends_at,service_date")
-    .eq("id", jobId).eq("user_id", user.id).single();
-  if (appointmentError) throw appointmentError;
-  const [itemsRes, serviceRes, invoiceRes, checklistRes] = await Promise.all([
-    (supabase.from("appointment_items") as any)
-      .select("id,service_catalog_id,name,quantity,unit_price,technician_notes,status,metadata")
-      .eq("workspace_id", appointment.workspace_id).eq("appointment_id", jobId).order("sort_order"),
-    (supabase.from("service_records") as any)
-      .select("id,subtotal,tax_amount,total_amount,status,started_at,completed_at,metadata")
-      .eq("workspace_id", appointment.workspace_id).eq("appointment_id", jobId)
-      .order("created_at", { ascending: false }).limit(1).maybeSingle(),
-    (supabase.from("invoices") as any)
-      .select("id,subtotal,tax_total,total,status,balance_due,due_date,paid_at")
-      .eq("workspace_id", appointment.workspace_id).eq("appointment_id", jobId)
-      .order("created_at", { ascending: false }).limit(1).maybeSingle(),
-    (supabase.from("job_execution_checklist") as any)
-      .select("id,step_key,label,step_order,status,evidence_url,completed_at,completed_by")
-      .eq("appointment_id", jobId).order("step_order"),
-  ]);
-  const error = itemsRes.error || serviceRes.error || invoiceRes.error || checklistRes.error;
-  if (error) throw error;
-  let payments: any[] = [];
-  if (invoiceRes.data?.id) {
-    const { data: paymentRows, error: paymentsError } = await (supabase.from("payments") as any)
-      .select("id,amount,method,status,created_at")
-      .eq("workspace_id", appointment.workspace_id).eq("invoice_id", invoiceRes.data.id)
-      .order("created_at", { ascending: false });
-    if (paymentsError) throw paymentsError;
-    payments = paymentRows ?? [];
-  }
-  return json({
-    data: {
-      appointment,
-      items: itemsRes.data ?? [],
-      service: serviceRes.data ?? null,
-      invoice: invoiceRes.data ?? null,
-      payments,
-      checklist: checklistRes.data ?? [],
-    },
-  });
-});
 
 // ---------------------------------------------------------------------------
 // Tech app — GET /v1/tech-app/* bundles
