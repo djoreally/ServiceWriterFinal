@@ -96,7 +96,9 @@ async function fetchCampaignRecipients(recipientType: string): Promise<CampaignR
 
 export async function createCampaign(payload: CreateCampaignPayload): Promise<void> {
   await requireUser();
+  const workspaceId = await requireWorkspaceId();
   await apiClient.post("/v1/crm/marketing/email-campaigns", {
+    workspace_id: workspaceId,
     name: payload.name,
     subject: payload.subject,
     content: payload.content,
@@ -107,7 +109,10 @@ export async function createCampaign(payload: CreateCampaignPayload): Promise<vo
 }
 
 export async function deleteCampaign(campaignId: string): Promise<void> {
-  await apiClient.delete(`/v1/crm/marketing/email-campaigns/${campaignId}`);
+  const workspaceId = await requireWorkspaceId();
+  await apiClient.delete(`/v1/crm/marketing/email-campaigns/${campaignId}`, {
+    query: { workspace_id: workspaceId },
+  });
 }
 
 export async function sendCampaign(campaign: CampaignRow): Promise<number> {
@@ -136,5 +141,10 @@ export async function fetchCampaignAudienceSize(recipientType: string): Promise<
 
 export async function sendCampaignTest(campaign: CampaignRow, to: string): Promise<void> {
   await requireUser();
-  await apiClient.post(`/v1/crm/marketing/email-campaigns/${campaign.id}/test`, { to });
+  const workspaceId = await requireWorkspaceId();
+  await apiClient.post(
+    `/v1/crm/marketing/email-campaigns/${campaign.id}/test`,
+    { to },
+    { query: { workspace_id: workspaceId } },
+  );
 }

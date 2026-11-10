@@ -34,7 +34,11 @@ export interface TestimonialRow {
 
 export async function fetchTestimonials(): Promise<TestimonialRow[]> {
   await requireUser();
-  const { data } = await apiClient.get<{ data: TestimonialRow[] }>("/v1/crm/marketing/testimonials");
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) throw new Error("Select a workspace before viewing testimonials.");
+  const { data } = await apiClient.get<{ data: TestimonialRow[] }>("/v1/crm/marketing/testimonials", {
+    query: { workspace_id: workspaceId },
+  });
   return data ?? [];
 }
 
@@ -72,8 +76,11 @@ export async function fetchReviewDashboardData(): Promise<{
   requests: ReviewRequestRow[];
 }> {
   await requireUser();
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) throw new Error("Select a workspace before viewing the review dashboard.");
   const { data } = await apiClient.get<{ data: { analytics: ReviewAnalyticsData | null; requests: ReviewRequestRow[] } }>(
     "/v1/crm/marketing/review-dashboard",
+    { query: { workspace_id: workspaceId } },
   );
   return data;
 }
@@ -212,9 +219,11 @@ export interface RetentionSignalRow {
   customer_id: string | null;
 }
 
-export async function fetchRetentionSignalsSince(userId: string, sinceISO: string) {
+export async function fetchRetentionSignalsSince(_userId: string, sinceISO: string) {
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) throw new Error("Select a workspace before viewing retention signals.");
   const { data } = await apiClient.get<{ data: RetentionSignalRow[] }>("/v1/crm/marketing/retention-signals-since", {
-    query: { since: sinceISO },
+    query: { since: sinceISO, workspace_id: workspaceId },
   });
   return (data ?? []) as RetentionSignalRow[];
 }
@@ -227,9 +236,11 @@ export interface ServiceReminderRow {
   customer_id: string | null;
 }
 
-export async function fetchServiceRemindersSince(userId: string, sinceISO: string) {
+export async function fetchServiceRemindersSince(_userId: string, sinceISO: string) {
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) throw new Error("Select a workspace before viewing service reminders.");
   const { data } = await apiClient.get<{ data: ServiceReminderRow[] }>("/v1/crm/marketing/service-reminders-since", {
-    query: { since: sinceISO },
+    query: { since: sinceISO, workspace_id: workspaceId },
   });
   return (data ?? []) as ServiceReminderRow[];
 }

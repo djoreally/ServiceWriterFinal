@@ -3,20 +3,30 @@
  */
 
 import { apiClient } from "@/lib/api-client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+
+async function marketingWorkspaceId(): Promise<string> {
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("No active workspace is available.");
+  return context.workspaceId;
+}
 
 export async function updateTestimonialStatus(
   id: string,
   status: "approved" | "rejected"
 ): Promise<void> {
-  await apiClient.patch(`/v1/crm/marketing/testimonials/${id}`, { status });
+  const workspaceId = await marketingWorkspaceId();
+  await apiClient.patch(`/v1/crm/marketing/testimonials/${id}`, { status, workspace_id: workspaceId });
 }
 
 export async function toggleTestimonialFeatured(
   id: string,
   currentlyFeatured: boolean
 ): Promise<void> {
+  const workspaceId = await marketingWorkspaceId();
   await apiClient.patch(`/v1/crm/marketing/testimonials/${id}/featured`, {
     featured: !currentlyFeatured,
+    workspace_id: workspaceId,
   });
 }
 

@@ -2,6 +2,7 @@
  * Queries for the automation Execution Log tab.
  */
 import { apiClient } from "@/lib/api-client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 export interface AutomationExecutionRow {
   id: string;
@@ -19,12 +20,14 @@ export interface AutomationExecutionRow {
  * Recent automation rule executions joined with rule + customer names.
  */
 export async function fetchAutomationExecutions(
-  userId: string,
+  _userId: string,
   limit = 50,
 ): Promise<AutomationExecutionRow[]> {
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("No active workspace is available.");
   const { data } = await apiClient.get<{ data: AutomationExecutionRow[] }>(
     "/v1/crm/retention/automation-executions",
-    { query: { user_id: userId, limit } },
+    { query: { workspace_id: context.workspaceId, limit } },
   );
   return data ?? [];
 }

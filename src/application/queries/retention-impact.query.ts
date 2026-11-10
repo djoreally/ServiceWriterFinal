@@ -5,6 +5,13 @@
  * No schema changes required.
  */
 import { apiClient } from "@/lib/api-client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
+
+async function retentionWorkspaceId(): Promise<string> {
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("No active workspace is available.");
+  return context.workspaceId;
+}
 
 // ── Types ────────────────────────────────────────────────────
 export type ImpactMetrics = {
@@ -41,22 +48,29 @@ export type SignalRow = {
 };
 
 // ── Hero Impact Metrics ──────────────────────────────────────
-export async function fetchImpactMetrics(userId: string): Promise<ImpactMetrics> {
-  const { data } = await apiClient.get<{ data: ImpactMetrics }>("/v1/crm/retention/impact/metrics");
+export async function fetchImpactMetrics(_userId: string): Promise<ImpactMetrics> {
+  const workspaceId = await retentionWorkspaceId();
+  const { data } = await apiClient.get<{ data: ImpactMetrics }>("/v1/crm/retention/impact/metrics", {
+    query: { workspace_id: workspaceId },
+  });
   return data;
 }
 
 // ── Grouped Signals (Action Queue) ───────────────────────────
-export async function fetchGroupedActionableSignals(userId: string): Promise<GroupedSignal[]> {
-  const { data } = await apiClient.get<{ data: GroupedSignal[] }>("/v1/crm/retention/impact/action-queue");
+export async function fetchGroupedActionableSignals(_userId: string): Promise<GroupedSignal[]> {
+  const workspaceId = await retentionWorkspaceId();
+  const { data } = await apiClient.get<{ data: GroupedSignal[] }>("/v1/crm/retention/impact/action-queue", {
+    query: { workspace_id: workspaceId },
+  });
   return data ?? [];
 }
 
 // ── Group Drill-down (signals + customer info) ───────────────
 export async function fetchSignalsByIds(signalIds: string[]): Promise<SignalRow[]> {
   if (!signalIds.length) return [];
+  const workspaceId = await retentionWorkspaceId();
   const { data } = await apiClient.get<{ data: SignalRow[] }>("/v1/crm/retention/signals/by-ids", {
-    query: { ids: signalIds.join(",") },
+    query: { ids: signalIds.join(","), workspace_id: workspaceId },
   });
   return data ?? [];
 }
@@ -69,9 +83,11 @@ export type SignalLogFilters = {
   limit?: number;
 };
 
-export async function fetchSignalLog(userId: string, filters: SignalLogFilters = {}) {
+export async function fetchSignalLog(_userId: string, filters: SignalLogFilters = {}) {
+  const workspaceId = await retentionWorkspaceId();
   const { data } = await apiClient.get<{ data: SignalRow[] }>("/v1/crm/retention/signal-log", {
     query: {
+      workspace_id: workspaceId,
       ...(filters.type ? { type: filters.type } : {}),
       ...(filters.status ? { status: filters.status } : {}),
       ...(typeof filters.scoreMin === "number" ? { score_min: String(filters.scoreMin) } : {}),
