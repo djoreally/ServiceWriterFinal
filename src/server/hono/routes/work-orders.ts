@@ -1776,12 +1776,16 @@ workOrdersRouter.get("/v1/tech-app/context", async (c) => {
 });
 
 workOrdersRouter.get("/v1/tech-app/job-workspace", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  // Phantom heal (2026-11-10): appointments has no user_id in production —
+  // the legacy owner key 42703'd every call. The appointment is scoped to
+  // the caller's workspace (Step 4 resolution), and the downstream
+  // catalog/technician legs key off the appointment's own workspace_id.
+  const { supabase, workspaceId: callerWorkspaceId } = await requireCallerWorkspaceId(c);
   const jobId = z.string().min(1).parse(new URL(c.req.url).searchParams.get("job_id") ?? "");
   const { data: appointment, error: appointmentError } = await (supabase.from("appointments") as any)
-    .select("*").eq("id", jobId).eq("user_id", user.id).single();
+    .select("*").eq("id", jobId).eq("workspace_id", callerWorkspaceId).single();
   if (appointmentError) throw appointmentError;
-  const workspaceId = appointment.user_id;
+  const workspaceId = appointment.workspace_id;
   const [customerRes, vehicleRes, itemsRes, catalogRes, techniciansRes, commentsRes, operationalJobRes] = await Promise.all([
     appointment.customer_id
       ? (supabase.from("customers") as any).select("*").eq("id", appointment.customer_id).maybeSingle()
@@ -1790,10 +1794,10 @@ workOrdersRouter.get("/v1/tech-app/job-workspace", async (c) => {
       ? (supabase.from("vehicles") as any).select("*").eq("id", appointment.vehicle_id).maybeSingle()
       : Promise.resolve({ data: null, error: null }),
     (supabase.from("appointment_items") as any)
-      .select("id, appointment_id, service_catalog_id, name, quantity, unit_price, status, technician_notes, service_catalog(id, name, category, description, base_price, duration_minutes)")
+      .select("id, appointment_id, service_catalog_id, item_type, description, quantity, unit_price, is_prepaid, sort_order, created_at, service_catalog(id, name, category, description, labor_price, estimated_minutes)")
       .eq("appointment_id", jobId).order("created_at"),
     (supabase.from("service_catalog") as any)
-      .select("id, name, category, description, base_price, duration_minutes")
+      .select("id, name, category, description, labor_price, estimated_minutes")
       .eq("workspace_id", workspaceId).order("name"),
     (supabase.from("technicians") as any)
       .select("id, first_name, last_name, full_name, phone, email, status")
@@ -1835,14 +1839,16 @@ workOrdersRouter.get("/v1/tech-app/session", async (c) => {
 });
 
 workOrdersRouter.get("/v1/tech-app/job-workspace-v2", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  // Phantom heal (2026-11-10): same user_id scoping defect as
+  // job-workspace — the appointment keys on workspace_id in production.
+  const { supabase, workspaceId: callerWorkspaceId } = await requireCallerWorkspaceId(c);
   const jobId = z.string().min(1).parse(new URL(c.req.url).searchParams.get("job_id") ?? "");
   const { data: appointment, error: appointmentError } = await (supabase.from("appointments") as any)
-    .select("*").eq("id", jobId).eq("user_id", user.id).single();
+    .select("*").eq("id", jobId).eq("workspace_id", callerWorkspaceId).single();
   if (appointmentError) throw appointmentError;
   const [itemsRes, threadsRes] = await Promise.all([
     (supabase.from("appointment_items") as any)
-      .select("id, appointment_id, service_catalog_id, name, quantity, unit_price, status, technician_notes, service_catalog(id, name, category, description, base_price, duration_minutes)")
+      .select("id, appointment_id, service_catalog_id, item_type, description, quantity, unit_price, is_prepaid, sort_order, created_at, service_catalog(id, name, category, description, labor_price, estimated_minutes)")
       .eq("appointment_id", jobId).order("created_at"),
     (supabase.from("threads") as any).select("id").eq("job_id", jobId).eq("job_source", "appointment")
       .is("deleted_at", null).order("created_at", { ascending: false }).limit(1).maybeSingle(),
@@ -1978,17 +1984,20 @@ workOrdersRouter.get("/v1/tech-app/messages", async (c) => {
   return json({ data: { threads: threads ?? [], unread_by_thread: unreadByThread } });
 });
 
-workOrdersRouter.get("/v1/tech-app/job-detail", async (c) => {
-  const { supabase, user } = await requireAuth(c);
-  const jobId = z.string().min(1).parse(new URL(c.req.url).searchParams.get("job_id") ?? "");
-  const { data: appointment, error: appointmentError } = await (supabase.from("appointments") as any)
-    .select("*").eq("id", jobId).eq("user_id", user.id).single();
-  if (appointmentError) throw appointmentError;
-  const { data: service, error: serviceError } = await (supabase.from("services") as any)
-    .select("*").eq("appointment_id", jobId).maybeSingle();
-  if (serviceError) throw serviceError;
-  return json({ data: { appointment, service: service ?? null } });
-});
+// ---------------------------------------------------------------------------
+// Tech-app job detail — GET /v1/tech-app/job-detail
+//
+// A second, older registration of this route used to sit here and SERVE
+// (Hono first-match wins): it scoped the appointment by the phantom
+// appointments.user_id key and read a `services` table that does not
+// exist in production, so it 42703/42P01'd on every call, and its
+// { appointment, service } response shape is not the one the repo's
+// consumer (src/application/queries/tech-app.query.ts
+// fetchTechJobDetailBundle) reads. It was removed (phantom fix,
+// 2026-11-10); the sole registration is the bundle handler further down
+// (the "job-detail" handler in the second tech-app block), healed to
+// live columns in the same change.
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Tech app mutations — POST /v1/tech-app/*
@@ -2128,11 +2137,14 @@ workOrdersRouter.post("/v1/tech-app/fleet-job-notes", async (c) => {
 });
 
 workOrdersRouter.post("/v1/tech-app/appointment-notes", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  // Phantom heal (2026-11-10): appointments has no user_id in production —
+  // the update 42703'd on every save. It scopes to the caller's workspace
+  // instead (Step 4 resolution idiom).
+  const { supabase, workspaceId } = await requireCallerWorkspaceId(c);
   const body = z.object({ job_id: z.string().min(1), notes: z.string().nullable().optional() })
     .parse(await c.req.json());
   const { data, error } = await (supabase.from("appointments") as any)
-    .update({ notes: body.notes ?? null }).eq("id", body.job_id).eq("user_id", user.id).select();
+    .update({ notes: body.notes ?? null }).eq("id", body.job_id).eq("workspace_id", workspaceId).select();
   if (error) throw error;
   return json({ data: data ?? [] });
 });
@@ -3262,14 +3274,22 @@ workOrdersRouter.get("/v1/tech-app/job-detail", async (c) => {
   const { supabase } = await requireAuth(c);
   const jobId = z.string().min(1).parse(new URL(c.req.url).searchParams.get("job_id") ?? "");
 
-  // The canonical workspace RPC is the ONLY authority for which table a job
-  // lives in. A failing RPC surfaces an explicit error instead of silently
-  // widening data access.
-  const { data: wsData, error: wsError } = await (supabase.rpc as any)(
-    "get_technician_job_workspace_v1", { p_job_id: jobId },
-  );
-  if (wsError) throw wsError;
-  const source = (wsData as { source?: string } | null)?.source;
+  // Source resolution: which table a job lives in. The canonical
+  // authority was the get_technician_job_workspace_v1 RPC — but that RPC
+  // does not exist in production (it is defined only by an unapplied
+  // Oct-10 reverse-engineered draft and is absent from the production
+  // function inventory), so the call errored on every request
+  // (phantom heal, 2026-11-10). Until the RPC lands, the source resolves
+  // from the only job table that exists in production: an appointments
+  // row (seen through the caller's RLS-bound client) means source
+  // "appointment"; anything else stays unresolved and surfaces the same
+  // explicit 404 instead of silently widening data access.
+  // fleet_work_orders is likewise absent in production, so no fleet job
+  // can resolve today.
+  const { data: probe, error: probeError } = await (supabase as any)
+    .from("appointments").select("id").eq("id", jobId).maybeSingle();
+  if (probeError) throw probeError;
+  const source: string | null = probe ? "appointment" : null;
   if (!source) throw new ApiError(404, "Job access could not be resolved for this technician.", "job_unresolved");
 
   let job: Record<string, unknown> | null = null;
@@ -3282,15 +3302,12 @@ workOrdersRouter.get("/v1/tech-app/job-detail", async (c) => {
     const { data, error } = await (supabase as any)
       .from("appointments")
       .select(`
-        id, scheduled_date, scheduled_time, estimated_duration_minutes,
-        dispatch_status, job_priority, status, location_address, location_lat, location_lng,
-        notes, dispatch_notes, estimated_cost, payment_status,
-        user_id, customer_id, vehicle_id,
-        customers(name, phone, email),
+        id, starts_at, ends_at, dispatch_status, status, notes,
+        workspace_id, customer_id, vehicle_id, location_id, assigned_user_id,
+        metadata, confirmation_code, created_at, updated_at,
+        customers(first_name, last_name, company_name, phone, email),
         vehicles(year, make, model, color, vin, license_plate),
-        service_catalog(name),
-        technicians(id, name),
-        vans(name)
+        locations(name, address_line1, address_line2, city, region, postal_code, latitude, longitude)
       `)
       .eq("id", jobId)
       .maybeSingle();
@@ -3299,7 +3316,7 @@ workOrdersRouter.get("/v1/tech-app/job-detail", async (c) => {
       const [servicesResult, photosResult] = await Promise.all([
         (supabase as any)
           .from("appointment_services")
-          .select("id, quantity, is_prepaid, service_catalog(name, price)")
+          .select("id, quantity, is_prepaid, name, price, description, service_catalog(name)")
           .eq("appointment_id", jobId),
         (supabase as any)
           .from("job_photos")
