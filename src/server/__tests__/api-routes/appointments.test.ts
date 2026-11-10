@@ -968,6 +968,29 @@ describe("POST /v1/appointments/:id/start (Hono appointments router)", () => {
     expect(body.error.message).not.toMatch(/unexpected error/i);
   });
 
+  it("preserves PGRST202 when the canonical start RPC is missing (no masked 500)", async () => {
+    // Regression for the production Start Job break: when the RPC is
+    // absent from the schema cache, the response must carry the
+    // PGRST202 code so the client's RPC-unavailable detector can engage
+    // its designed PATCH fallback — a masked internal_error left the
+    // button dead with only "An unexpected error occurred."
+    const supabase = startSupabase({ appointments: { data: startable(), error: null } });
+    stubStartAuth(supabase);
+    (supabase.rpc as jest.Mock).mockResolvedValue({
+      data: null,
+      error: {
+        code: "PGRST202",
+        message: "Could not find the function public.start_appointment_job_v1(p_workspace_id, p_appointment_id, p_idempotency_key) in the schema cache",
+      },
+    });
+    const { status, body } = await postStart({ selected_workspace_id: WS_ID });
+    expect(status).toBe(503);
+    expect(body.error.code).toBe("PGRST202");
+    expect(body.error.message).toMatch(/start_appointment_job_v1/);
+    expect(body.error.code).not.toBe("internal_error");
+    expect(body.error.message).not.toMatch(/unexpected error/i);
+  });
+
   it("sets technician presence on_job after a technician start", async () => {
     const supabase = startSupabase({ appointments: { data: startable(), error: null } });
     stubStartAuth(supabase, "technician");
