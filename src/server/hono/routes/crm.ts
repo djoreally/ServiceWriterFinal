@@ -2883,13 +2883,56 @@ crmRouter.get("/v1/crm/testimonials/profile", async (c) => {
 crmRouter.post("/v1/crm/testimonials/submit", async (c) => {
   const body = z.object({
     user_id: z.string().uuid(),
+    slug: z.string().trim().min(1).max(200),
     customer_name: z.string().trim().min(1).max(200),
     customer_email: z.string().email().max(320).nullable(),
     content: z.string().trim().min(1).max(10000),
     rating: z.number().int().min(1).max(5),
   }).parse(await c.req.json());
   const admin = createSupabaseAdminClient();
-  const { error } = await (admin as any).from("testimonials").insert({ ...body, status: "pending" });
+  // NEED-1: testimonials.workspace_id is NOT NULL, but the public page
+  // identifies the shop only by its booking slug + the owner's user_id
+  // (get_public_booking_profile_v2 returns no workspace_id). The workspace
+  // is resolved here, server-side: workspace_settings.booking_slug maps
+  // to exactly one workspace — the same join the profile RPC uses,
+  // including its is_active / booking_enabled conditions and the
+  // case-insensitive slug match. A client-supplied workspace_id is never
+  // read: the schema above does not declare one, and the insert stamps
+  // only the resolved id. The resolved workspace's owner must also be
+  // the body's user_id (the profile RPC returns created_by for this very
+  // slug, so a mismatch is a forged or stale submission).
+  const { data: settingsRows, error: settingsError } = await (admin as any)
+    .from("workspace_settings")
+    .select("workspace_id, booking_enabled, workspaces!inner(created_by, is_active)")
+    .ilike("booking_slug", body.slug)
+    .limit(1);
+  if (settingsError) throw settingsError;
+  const settings = (settingsRows ?? [])[0] as
+    | {
+        workspace_id: string;
+        booking_enabled: boolean;
+        workspaces: { created_by: string; is_active: boolean };
+      }
+    | undefined;
+  const workspace = settings?.workspaces;
+  if (
+    !settings ||
+    settings.booking_enabled !== true ||
+    !workspace ||
+    workspace.is_active !== true ||
+    workspace.created_by !== body.user_id
+  ) {
+    throw new ApiError(404, "Business not found for this booking link", "business_not_found");
+  }
+  const { error } = await (admin as any).from("testimonials").insert({
+    user_id: body.user_id,
+    workspace_id: settings.workspace_id,
+    customer_name: body.customer_name,
+    customer_email: body.customer_email,
+    content: body.content,
+    rating: body.rating,
+    status: "pending",
+  });
   if (error) throw error;
   return json({ data: { submitted: true } }, { status: 201 });
 });

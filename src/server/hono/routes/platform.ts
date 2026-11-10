@@ -1044,7 +1044,7 @@ async function requirePlatformAdmin(c: Context) {
   const { supabase, user } = await requireAuth(c);
   const { data, error } = await supabase
     .from("user_roles")
-    .select("id")
+    .select("role")
     .eq("user_id", user.id)
     .eq("role", "admin")
     .maybeSingle();
