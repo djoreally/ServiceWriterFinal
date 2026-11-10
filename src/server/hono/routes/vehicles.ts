@@ -2216,8 +2216,13 @@ vehiclesRouter.post("/v1/vehicles/oil-reset-procedure", async (c) => {
 
 vehiclesRouter.get("/v1/vans/:id/detail", async (c) => {
   const vanId = c.req.param("id");
-  const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  const { supabase, user, workspaceId } = await requireFleetScope(c, selectedWorkspaceHint(c));
   const client = supabase as any;
+  // Step 4 RESCOPE (SRC-F): the technician list is workspace-scoped;
+  // without a hint the caller's first active workspace stands in.
+  const techWorkspaceId = workspaceId ?? (await resolveWorkspaceIdForUser(supabase, user.id));
+  let techQuery = client.from("technicians").select("id, name").eq("user_id", user.id).eq("is_active", true);
+  if (techWorkspaceId) techQuery = techQuery.eq("workspace_id", techWorkspaceId);
   const [vanRes, terrRes, invRes, apptsRes, techRes, whRes] = await Promise.all([
     client.from("vans").select("*").eq("id", vanId).eq("user_id", user.id).single(),
     client.from("van_territories").select("*").eq("van_id", vanId).order("zip_code"),
@@ -2227,7 +2232,7 @@ vehiclesRouter.get("/v1/vans/:id/detail", async (c) => {
       .eq("assigned_van_id", vanId)
       .order("scheduled_date", { ascending: false })
       .limit(50),
-    client.from("technicians").select("id, name").eq("user_id", user.id).eq("is_active", true).order("name"),
+    techQuery.order("name"),
     client.from("inventory_items").select("id, name, sku, quantity").eq("user_id", user.id).order("name"),
   ]);
   for (const res of [vanRes, terrRes, invRes, apptsRes, techRes, whRes]) {
@@ -4098,8 +4103,13 @@ vehiclesRouter.post("/v1/fleet/work-orders/generate-from-schedules", async (c) =
 
 vehiclesRouter.get("/v1/fleet/work-orders/:id/dispatch-score", async (c) => {
   const workOrderId = c.req.param("id");
-  const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  const { supabase, user, workspaceId } = await requireFleetScope(c, selectedWorkspaceHint(c));
   const db = supabase as any;
+  // Step 4 RESCOPE (SRC-F): the candidate list was filtered by
+  // is_active alone — it is now scoped to the caller's workspace.
+  const techWorkspaceId = workspaceId ?? (await resolveWorkspaceIdForUser(supabase, user.id));
+  let techQuery = db.from("technicians").select("id,name").eq("is_active", true);
+  if (techWorkspaceId) techQuery = techQuery.eq("workspace_id", techWorkspaceId);
 
   const [{ data: order }, { data: technicians }, { data: activeAssignments }] = await Promise.all([
     db
@@ -4108,7 +4118,7 @@ vehiclesRouter.get("/v1/fleet/work-orders/:id/dispatch-score", async (c) => {
       .eq("id", workOrderId)
       .eq("user_id", user.id)
       .maybeSingle(),
-    db.from("technicians").select("id,name").eq("is_active", true),
+    techQuery,
     db
       .from("fleet_work_orders")
       .select("assigned_technician_id,fleet_client_id,status")
@@ -6293,9 +6303,17 @@ function mapCoordinates(value: unknown): { lat: number; lng: number } | null {
 }
 
 vehiclesRouter.get("/v1/fleet/map-data", async (c) => {
-  const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  const { supabase, user, workspaceId } = await requireFleetScope(c, selectedWorkspaceHint(c));
   const db = supabase as any;
   const today = new Date().toISOString().slice(0, 10);
+  // Step 4 RESCOPE (SRC-F): workspace-scope the technician leg.
+  const techWorkspaceId = workspaceId ?? (await resolveWorkspaceIdForUser(supabase, user.id));
+  let techQuery = db
+    .from("technicians")
+    .select("id, name, status, current_location, avatar_url")
+    .eq("user_id", user.id)
+    .eq("is_active", true);
+  if (techWorkspaceId) techQuery = techQuery.eq("workspace_id", techWorkspaceId);
 
   const [vansRes, territoriesRes, techsRes, jobsRes] = await Promise.all([
     db
@@ -6304,11 +6322,7 @@ vehiclesRouter.get("/v1/fleet/map-data", async (c) => {
       .eq("user_id", user.id)
       .eq("is_active", true),
     db.from("van_territories").select("van_id, zip_code, is_primary"),
-    db
-      .from("technicians")
-      .select("id, name, status, current_location, avatar_url")
-      .eq("user_id", user.id)
-      .eq("is_active", true),
+    techQuery,
     db
       .from("appointments")
       .select("id, assigned_van_id")
@@ -7267,14 +7281,18 @@ vehiclesRouter.get("/v1/fleet/scheduler-window", async (c) => {
 });
 
 vehiclesRouter.get("/v1/fleet/vans-overview", async (c) => {
-  const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  const { supabase, user, workspaceId } = await requireFleetScope(c, selectedWorkspaceHint(c));
   const db = supabase as any;
+  // Step 4 RESCOPE (SRC-F): workspace-scope the technician leg.
+  const techWorkspaceId = workspaceId ?? (await resolveWorkspaceIdForUser(supabase, user.id));
+  let techQuery = db.from("technicians").select("id, name").eq("user_id", user.id).eq("is_active", true);
+  if (techWorkspaceId) techQuery = techQuery.eq("workspace_id", techWorkspaceId);
 
   const [vansRes, territoriesRes, inventoryRes, techRes] = await Promise.all([
     db.from("vans").select("*").eq("user_id", user.id).order("name"),
     db.from("van_territories").select("van_id"),
     db.from("van_inventory").select("van_id"),
-    db.from("technicians").select("id, name").eq("user_id", user.id).eq("is_active", true).order("name"),
+    techQuery.order("name"),
   ]);
 
   const technicians = (techRes.data as Array<{ id: string; name: string }> | null) ?? [];
@@ -7736,12 +7754,16 @@ vehiclesRouter.get("/v1/fleet/work-orders/:id/detail", async (c) => {
 });
 
 vehiclesRouter.get("/v1/fleet/assignable-technicians", async (c) => {
-  const { supabase } = await requireFleetScope(c, selectedWorkspaceHint(c));
-  const { data, error } = await (supabase as any)
+  const { supabase, user, workspaceId } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  // Step 4 RESCOPE (SRC-F): the handler held the fleet scope but the
+  // query carried no tenancy filter at all — add the workspace scope.
+  const techWorkspaceId = workspaceId ?? (await resolveWorkspaceIdForUser(supabase, user.id));
+  let query = (supabase as any)
     .from("technicians")
     .select("id,name")
-    .eq("is_active", true)
-    .order("name");
+    .eq("is_active", true);
+  if (techWorkspaceId) query = query.eq("workspace_id", techWorkspaceId);
+  const { data, error } = await query.order("name");
   if (error) throw error;
   return json({ data: data ?? [] });
 });
@@ -7800,15 +7822,19 @@ vehiclesRouter.get("/v1/fleet/work-orders", async (c) => {
 });
 
 vehiclesRouter.get("/v1/fleet/work-order-create-technicians", async (c) => {
-  const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  const { supabase, user, workspaceId } = await requireFleetScope(c, selectedWorkspaceHint(c));
   const db = supabase as any;
   const { data: ownerId } = await db.rpc("current_workspace_owner_user_id");
-  const { data, error } = await db
+  // Step 4 RESCOPE (SRC-F): add the workspace scope alongside the
+  // owner key (the owner's roster, in the caller's workspace).
+  const techWorkspaceId = workspaceId ?? (await resolveWorkspaceIdForUser(supabase, user.id));
+  let query = db
     .from("technicians")
     .select("id, name")
     .eq("user_id", String(ownerId || user.id))
-    .eq("is_active", true)
-    .order("name");
+    .eq("is_active", true);
+  if (techWorkspaceId) query = query.eq("workspace_id", techWorkspaceId);
+  const { data, error } = await query.order("name");
   if (error) throw error;
   return json({ data: data ?? [] });
 });

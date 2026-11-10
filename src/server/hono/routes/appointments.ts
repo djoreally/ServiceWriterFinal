@@ -1760,9 +1760,32 @@ appointmentsRouter.post("/v1/appointments/booking-contexts", async (c: Context) 
   const { business_user_id, location_context, session_id } = bookingContextInsertSchema.parse(await c.req.json());
   const { supabase } = await optionalAuthClient(c);
   const db = supabase as any;
+  // Step 4 translation: booking_contexts is workspace-tenanted and the
+  // public flow's only tenancy handle is business_user_id (the business
+  // owner's user id). Resolve the owner's home workspace server-side
+  // through the admin client — the guest/anon client cannot read
+  // workspace_members under RLS. A multi-workspace owner resolves to
+  // their first owner workspace deterministically (ordered); NEED-S4-8
+  // keeps the booking-profile disambiguation question open.
+  const admin = createSupabaseAdminClient();
+  const { data: ownerMembership, error: ownerError } = await (admin as any)
+    .from("workspace_members")
+    .select("workspace_id")
+    .eq("user_id", business_user_id)
+    .eq("role", "owner")
+    .eq("is_active", true)
+    .order("workspace_id", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (ownerError) return json({ data: null, error: serializeDataError(ownerError) });
+  const workspaceId = (ownerMembership as { workspace_id?: string } | null)?.workspace_id;
+  if (!workspaceId) {
+    return json({ data: null, error: { message: "Business workspace could not be resolved", code: "workspace_unresolved" } });
+  }
   const { data, error } = await db
     .from("booking_contexts")
     .insert({
+      workspace_id: workspaceId,
       business_user_id,
       location_context: location_context ?? null,
       session_id: session_id ?? null,
@@ -3487,6 +3510,9 @@ appointmentsRouter.post("/v1/dispatch-runs", async (c: Context) => {
     .insert({
       workspace_id: workspaceId,
       technician_id,
+      // Step 4: the list read filters .eq("user_id", ...) — stamp it
+      // alongside created_by so the shipped filter is honest.
+      user_id,
       van_id: van_id ?? null,
       run_date,
       status: "draft",
@@ -3512,6 +3538,7 @@ appointmentsRouter.post("/v1/dispatch-runs/:id/stops", async (c: Context) => {
   const { data, error } = await (supabase as any)
     .from("route_stops")
     .insert({
+      workspace_id: workspaceId,
       dispatch_run_id: id,
       work_order_id,
       sequence_order,

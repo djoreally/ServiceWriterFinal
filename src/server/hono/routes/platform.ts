@@ -4465,9 +4465,20 @@ platformRouter.post("/v1/platform/weather-guard/seed-rules", async (c) => {
 
 platformRouter.get("/v1/platform/weather-guard/dispatch-rules", async (c) => {
   const { supabase } = await requireAuth(c);
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return json([]);
+  // Step 4 RESCOPE: dispatch_rules was created without a tenant column
+  // and this read returned every rule in the system. The workspace now
+  // resolves the same way the sibling shop-context handler does
+  // (resolveWorkspaceIdForUser). NEED-S4-7 caveat stands: the
+  // weather-guard caller's site-to-workspace mapping is confirmed only
+  // to this canonical resolver, not to a per-site mapping.
+  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id);
+  if (!workspaceId) return json([]);
   const { data, error } = await (supabase as any)
     .from("dispatch_rules")
     .select("*")
+    .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: true });
   if (error) throw error;
   return json(data ?? []);
@@ -4475,8 +4486,21 @@ platformRouter.get("/v1/platform/weather-guard/dispatch-rules", async (c) => {
 
 platformRouter.patch("/v1/platform/weather-guard/dispatch-rules/:id", async (c) => {
   const { supabase } = await requireAuth(c);
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new ApiError(401, "Authentication required", "unauthorized");
+  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id);
+  if (!workspaceId) throw new ApiError(403, "No active workspace for caller.", "forbidden");
   const patch = z.record(z.string(), z.unknown()).parse(await c.req.json());
-  const { error } = await (supabase as any).from("dispatch_rules").update(patch).eq("id", c.req.param("id"));
+  // Step 4 GUARD: a dispatch rule can only be edited inside the
+  // caller's workspace, and the patch cannot move it or re-key its
+  // ownership (NEED-S4-7 resolver caveat as on the GET).
+  delete patch.workspace_id;
+  delete patch.user_id;
+  const { error } = await (supabase as any)
+    .from("dispatch_rules")
+    .update(patch)
+    .eq("id", c.req.param("id"))
+    .eq("workspace_id", workspaceId);
   if (error) throw error;
   return json({ data: { ok: true } });
 });
