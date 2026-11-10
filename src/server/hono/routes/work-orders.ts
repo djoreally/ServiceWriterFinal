@@ -1399,25 +1399,6 @@ workOrdersRouter.get("/v1/command-center/technicians", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// Dispatcher fleet work orders — GET /v1/fleet/dispatcher-work-orders
-// ---------------------------------------------------------------------------
-
-workOrdersRouter.get("/v1/fleet/dispatcher-work-orders", async (c) => {
-  const { supabase, user } = await requireAuth(c);
-  const todayStart = new Date();
-  todayStart.setUTCHours(0, 0, 0, 0);
-  const { data, error } = await (supabase.from("appointments") as any)
-    .select("id, user_id, title, status, service_catalog_id, customer_id, vehicle_id, fleet_vehicle_id, starts_at, ends_at, address, notes, metadata, priority, dispatch_status, assigned_technician_id")
-    .eq("user_id", user.id)
-    .in("status", ["scheduled", "in_progress"])
-    .gte("starts_at", todayStart.toISOString())
-    .order("starts_at", { ascending: true })
-    .limit(200);
-  if (error) throw error;
-  return json({ data: data ?? [] });
-});
-
-// ---------------------------------------------------------------------------
 // Service search for linking — GET /v1/services/search-for-linking
 // ---------------------------------------------------------------------------
 
@@ -2078,7 +2059,7 @@ workOrdersRouter.post("/v1/tech-app/job-transitions", async (c) => {
   const { supabase } = await requireAuth(c);
   const body = z.object({
     job_id: z.string().min(1),
-    source: z.string().min(1),
+    source: z.literal("appointment"),
     next_status: z.string().min(1),
     notes: z.string().nullable().optional(),
     idempotency_key: z.string().nullable().optional(),
@@ -3308,60 +3289,6 @@ workOrdersRouter.get("/v1/tech-app/job-detail", async (c) => {
     }
   }
 
-  if (!job && source !== "appointment") {
-    const { data: f, error } = await (supabase as any)
-      .from("fleet_work_orders")
-      .select(`
-        id, scheduled_date, scheduled_time, status, priority, service_type, description, notes, technician_notes,
-        fleet_client_id, fleet_vehicle_id, fleet_location_id, user_id,
-        fleet_clients(company_name, phone),
-        fleet_vehicles(year, make, model, color, vin, license_plate, mileage),
-        fleet_locations(address, name, latitude, longitude),
-        technicians(id, name),
-        vans(name)
-      `)
-      .eq("id", jobId)
-      .maybeSingle();
-    if (!error && f) {
-      job = {
-        id: f.id,
-        scheduled_date: f.scheduled_date,
-        scheduled_time: f.scheduled_time,
-        estimated_duration_minutes: 60,
-        dispatch_status: f.status,
-        status: f.status,
-        job_priority: f.priority,
-        location_address: f.fleet_locations?.address || f.fleet_locations?.name,
-        location_lat: f.fleet_locations?.latitude ?? null,
-        location_lng: f.fleet_locations?.longitude ?? null,
-        notes: f.technician_notes,
-        dispatch_notes: f.description,
-        estimated_cost: null,
-        payment_status: null,
-        user_id: f.user_id,
-        customer_id: null,
-        vehicle_id: f.fleet_vehicle_id,
-        customers: { name: f.fleet_clients?.company_name, phone: f.fleet_clients?.phone, email: null },
-        vehicles: f.fleet_vehicles,
-        service_catalog: { name: f.service_type || "Fleet Service" },
-        technicians: f.technicians,
-        vans: f.vans,
-        is_fleet: true,
-      };
-      const { data: lineItems } = await (supabase as any)
-        .from("fleet_work_order_line_items")
-        .select("id, description, quantity, unit_price")
-        .eq("fleet_work_order_id", jobId);
-      services = ((lineItems ?? []) as Array<{ id: string; description: string | null; quantity: number | null; unit_price: number | null }>)
-        .map((li) => ({
-          id: li.id,
-          service_catalog: { name: li.description, price: li.unit_price },
-          quantity: li.quantity,
-          is_prepaid: false,
-        }));
-    }
-  }
-
   return json({
     data: {
       job,
@@ -3372,44 +3299,6 @@ workOrdersRouter.get("/v1/tech-app/job-detail", async (c) => {
       photosError,
     },
   });
-});
-
-workOrdersRouter.get("/v1/tech-app/fleet-assignments", async (c) => {
-  const { supabase, user } = await requireAuth(c);
-  const params = new URL(c.req.url).searchParams;
-  const techId = params.get("tech_id") || null;
-  const isAdmin = params.get("is_admin") === "true";
-  const scopeUserId = params.get("user_id") || null;
-  const db = supabase as any;
-
-  // Technician path: fleet_work_orders is owner-scoped under RLS, so the
-  // assigned technician (a different auth user) cannot read it directly.
-  // The SECURITY DEFINER RPC enforces tech-or-ops-member access and returns
-  // the same nested shape the client maps.
-  if (techId && !isAdmin) {
-    const { data, error } = await db.rpc("get_tech_fleet_assignments_v1", {
-      p_technician_id: techId,
-    });
-    if (error) throw error;
-    return json({ data: data ?? [] });
-  }
-
-  // Admin/owner queue view: rows owned by the scope user (RLS permits the
-  // owner to read their own rows).
-  let query = db
-    .from("fleet_work_orders")
-    .select(`id, order_number, scheduled_date, scheduled_time, status, priority, service_type, description, total, fleet_job_id,
-       fleet_jobs(job_number),
-       fleet_clients(company_name),
-       fleet_locations(name, address),
-       fleet_vehicles(year, make, model, unit_number, license_plate)`)
-    .order("scheduled_date", { ascending: true })
-    .order("scheduled_time", { ascending: true })
-    .limit(200);
-  query = scopeUserId ? query.eq("user_id", scopeUserId) : query.eq("user_id", user.id);
-  const { data, error } = await query;
-  if (error) throw error;
-  return json({ data: data ?? [] });
 });
 
 // ---------------------------------------------------------------------------
@@ -3528,7 +3417,7 @@ workOrdersRouter.post("/v1/tech-app/job-transition", async (c) => {
   const { supabase } = await requireAuth(c);
   const body = z.object({
     job_id: z.string().min(1),
-    source: z.enum(["appointment", "fleet_work_order"]),
+    source: z.literal("appointment"),
     next_status: z.string().min(1),
     notes: z.string().nullable().optional(),
     idempotency_key: z.string().min(1),
@@ -3627,16 +3516,7 @@ workOrdersRouter.post("/v1/tech-app/job-notes", async (c) => {
   const body = z.object({
     job_id: z.string().min(1),
     notes: z.string(),
-    is_fleet: z.boolean().default(false),
   }).parse(await c.req.json());
-  if (body.is_fleet) {
-    const { data, error } = await (supabase.rpc as any)("save_technician_fleet_job_notes_v1", {
-      p_job_id: body.job_id,
-      p_notes: body.notes,
-    });
-    if (error) throw error;
-    return json({ data: data ?? null });
-  }
   const { data, error } = await (supabase as any)
     .from("appointments")
     .update({ notes: body.notes, updated_at: new Date().toISOString() })
