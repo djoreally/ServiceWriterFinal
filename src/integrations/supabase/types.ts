@@ -14,6 +14,197 @@ export type Database = {
   }
   public: {
     Tables: {
+      job_comments: {
+        Row: {
+          appointment_id: string | null
+          author_id: string | null
+          author_name: string | null
+          body: string | null
+          created_at: string | null
+          id: string
+          workspace_id: string
+        }
+        Insert: {
+          appointment_id?: string | null
+          author_id?: string | null
+          author_name?: string | null
+          body?: string | null
+          created_at?: string | null
+          id?: string
+          workspace_id: string
+        }
+        Update: {
+          appointment_id?: string | null
+          author_id?: string | null
+          author_name?: string | null
+          body?: string | null
+          created_at?: string | null
+          id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_comments_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_comments_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      },
+      job_execution_checklist: {
+        Row: {
+          appointment_id: string | null
+          completed_at: string | null
+          completed_by: string | null
+          evidence_url: string | null
+          id: string
+          label: string | null
+          status: string | null
+          step_key: string | null
+          step_order: number | null
+          workspace_id: string
+        }
+        Insert: {
+          appointment_id?: string | null
+          completed_at?: string | null
+          completed_by?: string | null
+          evidence_url?: string | null
+          id?: string
+          label?: string | null
+          status?: string | null
+          step_key?: string | null
+          step_order?: number | null
+          workspace_id: string
+        }
+        Update: {
+          appointment_id?: string | null
+          completed_at?: string | null
+          completed_by?: string | null
+          evidence_url?: string | null
+          id?: string
+          label?: string | null
+          status?: string | null
+          step_key?: string | null
+          step_order?: number | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_execution_checklist_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_execution_checklist_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      },
+      job_thread_attachments: {
+        Row: {
+          asset_id: string | null
+          id: string
+          thread_id: string | null
+          workspace_id: string | null
+        }
+        Insert: {
+          asset_id?: string | null
+          id?: string
+          thread_id?: string | null
+          workspace_id?: string | null
+        }
+        Update: {
+          asset_id?: string | null
+          id?: string
+          thread_id?: string | null
+          workspace_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_thread_attachments_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_thread_attachments_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      },
+      service_record_assets: {
+        Row: {
+          asset_id: string
+          id: string
+          service_id: string
+        }
+        Insert: {
+          asset_id: string
+          id?: string
+          service_id: string
+        }
+        Update: {
+          asset_id?: string
+          id?: string
+          service_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_record_assets_asset_id_fkey"
+            columns: ["asset_id"]
+            isOneToOne: false
+            referencedRelation: "assets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_record_assets_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "service_records"
+            referencedColumns: ["id"]
+          },
+        ]
+      },
+      service_record_items: {
+        Row: {
+          id: string
+          service_id: string
+        }
+        Insert: {
+          id?: string
+          service_id: string
+        }
+        Update: {
+          id?: string
+          service_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_record_items_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "service_records"
+            referencedColumns: ["id"]
+          },
+        ]
+      },
       service_records: {
         Row: {
           appointment_id: string
@@ -8088,9 +8279,10 @@ export type Database = {
           status: string
           step_key: string
           step_name: string
-          step_order: number
+          step_order: number | null
           updated_at: string
           user_id: string
+          workspace_id: string
         }
         Insert: {
           completed_at?: string | null
@@ -8100,15 +8292,16 @@ export type Database = {
           id?: string
           is_required?: boolean
           job_id: string
-          job_source?: string
+          job_source: string
           notes?: string | null
           requires_photo?: boolean
-          status?: string
+          status: string
           step_key: string
           step_name: string
-          step_order?: number
+          step_order?: number | null
           updated_at?: string
           user_id: string
+          workspace_id: string
         }
         Update: {
           completed_at?: string | null
@@ -8124,12 +8317,21 @@ export type Database = {
           status?: string
           step_key?: string
           step_name?: string
-          step_order?: number
+          step_order?: number | null
           updated_at?: string
           user_id?: string
+          workspace_id?: string
         }
-        Relationships: []
-      }
+        Relationships: [
+          {
+            foreignKeyName: "job_execution_checklists_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      },
       job_message_deliveries: {
         Row: {
           attempt_count: number
@@ -8202,6 +8404,7 @@ export type Database = {
       job_photos: {
         Row: {
           appointment_id: string
+          business_user_id: string | null
           caption: string | null
           captured_at: string | null
           created_at: string | null
@@ -8211,12 +8414,16 @@ export type Database = {
           is_required: boolean | null
           location: Json | null
           photo_type: string
+          photo_url: string | null
           storage_path: string
           technician_id: string | null
+          uploaded_by: string | null
           user_id: string
+          workspace_id: string
         }
         Insert: {
           appointment_id: string
+          business_user_id?: string | null
           caption?: string | null
           captured_at?: string | null
           created_at?: string | null
@@ -8226,12 +8433,16 @@ export type Database = {
           is_required?: boolean | null
           location?: Json | null
           photo_type: string
+          photo_url?: string | null
           storage_path: string
           technician_id?: string | null
+          uploaded_by?: string | null
           user_id: string
+          workspace_id: string
         }
         Update: {
           appointment_id?: string
+          business_user_id?: string | null
           caption?: string | null
           captured_at?: string | null
           created_at?: string | null
@@ -8241,9 +8452,12 @@ export type Database = {
           is_required?: boolean | null
           location?: Json | null
           photo_type?: string
+          photo_url?: string | null
           storage_path?: string
           technician_id?: string | null
+          uploaded_by?: string | null
           user_id?: string
+          workspace_id?: string
         }
         Relationships: [
           {
@@ -8260,8 +8474,15 @@ export type Database = {
             referencedRelation: "technicians"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "job_photos_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
         ]
-      }
+      },
       job_queue: {
         Row: {
           attempt_count: number
@@ -8405,7 +8626,7 @@ export type Database = {
           message_type: string
           recipient: string | null
           sender_id: string
-          sender_role: Database["public"]["Enums"]["job_thread_participant_role"]
+          sender_role: string
           thread_id: string
         }
         Insert: {
@@ -8417,10 +8638,10 @@ export type Database = {
           deleted_at?: string | null
           edited_at?: string | null
           id?: string
-          message_type?: string
+          message_type: string
           recipient?: string | null
           sender_id: string
-          sender_role?: Database["public"]["Enums"]["job_thread_participant_role"]
+          sender_role: string
           thread_id: string
         }
         Update: {
@@ -8435,7 +8656,7 @@ export type Database = {
           message_type?: string
           recipient?: string | null
           sender_id?: string
-          sender_role?: Database["public"]["Enums"]["job_thread_participant_role"]
+          sender_role?: string
           thread_id?: string
         }
         Relationships: [
@@ -8447,14 +8668,14 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
+      },
       job_thread_participants: {
         Row: {
           created_at: string
           id: string
           last_read_at: string | null
           removed_at: string | null
-          role: Database["public"]["Enums"]["job_thread_participant_role"]
+          role: string
           thread_id: string
           user_id: string
         }
@@ -8463,7 +8684,7 @@ export type Database = {
           id?: string
           last_read_at?: string | null
           removed_at?: string | null
-          role?: Database["public"]["Enums"]["job_thread_participant_role"]
+          role: string
           thread_id: string
           user_id: string
         }
@@ -8472,7 +8693,7 @@ export type Database = {
           id?: string
           last_read_at?: string | null
           removed_at?: string | null
-          role?: Database["public"]["Enums"]["job_thread_participant_role"]
+          role?: string
           thread_id?: string
           user_id?: string
         }
@@ -8485,7 +8706,7 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
+      },
       job_threads: {
         Row: {
           appointment_id: string | null
@@ -8494,11 +8715,14 @@ export type Database = {
           created_by: string | null
           fleet_work_order_id: string | null
           id: string
+          kind: string
           last_message_at: string | null
           owner_user_id: string
+          service_record_id: string | null
           title: string | null
-          type: Database["public"]["Enums"]["job_thread_type"]
+          type: string | null
           updated_at: string
+          workspace_id: string
         }
         Insert: {
           appointment_id?: string | null
@@ -8507,11 +8731,14 @@ export type Database = {
           created_by?: string | null
           fleet_work_order_id?: string | null
           id?: string
+          kind: string
           last_message_at?: string | null
           owner_user_id: string
+          service_record_id?: string | null
           title?: string | null
-          type?: Database["public"]["Enums"]["job_thread_type"]
+          type?: string | null
           updated_at?: string
+          workspace_id: string
         }
         Update: {
           appointment_id?: string | null
@@ -8520,11 +8747,14 @@ export type Database = {
           created_by?: string | null
           fleet_work_order_id?: string | null
           id?: string
+          kind?: string
           last_message_at?: string | null
           owner_user_id?: string
+          service_record_id?: string | null
           title?: string | null
-          type?: Database["public"]["Enums"]["job_thread_type"]
+          type?: string | null
           updated_at?: string
+          workspace_id?: string
         }
         Relationships: [
           {
@@ -8534,8 +8764,22 @@ export type Database = {
             referencedRelation: "appointments"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "job_threads_service_record_id_fkey"
+            columns: ["service_record_id"]
+            isOneToOne: false
+            referencedRelation: "service_records"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_threads_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
         ]
-      }
+      },
       journal_entries: {
         Row: {
           created_at: string
@@ -13425,6 +13669,7 @@ export type Database = {
           id: string
           service_id: string
           user_id: string
+          workspace_id: string
         }
         Insert: {
           asset_id: string
@@ -13433,6 +13678,7 @@ export type Database = {
           id?: string
           service_id: string
           user_id: string
+          workspace_id: string
         }
         Update: {
           asset_id?: string
@@ -13441,6 +13687,7 @@ export type Database = {
           id?: string
           service_id?: string
           user_id?: string
+          workspace_id?: string
         }
         Relationships: [
           {
@@ -13451,14 +13698,14 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "service_assets_service_id_fkey"
-            columns: ["service_id"]
+            foreignKeyName: "service_assets_workspace_id_fkey"
+            columns: ["workspace_id"]
             isOneToOne: false
-            referencedRelation: "services"
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
-      }
+      },
       service_catalog: {
         Row: {
           allows_manual_fitment: boolean
@@ -16907,6 +17154,50 @@ export type Database = {
           },
         ]
       }
+      threads: {
+        Row: {
+          created_at: string | null
+          created_by: string | null
+          deleted_at: string | null
+          id: string
+          job_id: string | null
+          job_source: string | null
+          subject: string | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          created_by?: string | null
+          deleted_at?: string | null
+          id?: string
+          job_id?: string | null
+          job_source?: string | null
+          subject?: string | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string | null
+          created_by?: string | null
+          deleted_at?: string | null
+          id?: string
+          job_id?: string | null
+          job_source?: string | null
+          subject?: string | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "threads_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      },
       time_clock_entries: {
         Row: {
           approved_at: string | null
@@ -18776,6 +19067,7 @@ export type Database = {
         Row: {
           completed_at: string | null
           completed_by: string | null
+          created_at: string
           evidence_url: string | null
           execution_phase: string
           id: string
@@ -18786,28 +19078,32 @@ export type Database = {
           requires_photo: boolean
           status: string
           step_name: string
-          step_order: number
+          step_order: number | null
+          updated_at: string
           work_order_id: string
         }
         Insert: {
           completed_at?: string | null
           completed_by?: string | null
+          created_at?: string
           evidence_url?: string | null
-          execution_phase?: string
+          execution_phase: string
           id?: string
           is_mandatory?: boolean
           is_unlocked?: boolean
           notes?: string | null
           playbook_id?: string | null
           requires_photo?: boolean
-          status?: string
+          status: string
           step_name: string
-          step_order?: number
+          step_order?: number | null
+          updated_at?: string
           work_order_id: string
         }
         Update: {
           completed_at?: string | null
           completed_by?: string | null
+          created_at?: string
           evidence_url?: string | null
           execution_phase?: string
           id?: string
@@ -18818,17 +19114,11 @@ export type Database = {
           requires_photo?: boolean
           status?: string
           step_name?: string
-          step_order?: number
+          step_order?: number | null
+          updated_at?: string
           work_order_id?: string
         }
         Relationships: [
-          {
-            foreignKeyName: "work_order_checklist_items_playbook_id_fkey"
-            columns: ["playbook_id"]
-            isOneToOne: false
-            referencedRelation: "service_playbooks"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "work_order_checklist_items_work_order_id_fkey"
             columns: ["work_order_id"]
@@ -18837,7 +19127,7 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
+      },
       work_orders: {
         Row: {
           appointment_id: string | null

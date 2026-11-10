@@ -458,12 +458,19 @@ workOrdersRouter.patch("/v1/assets/bulk-move", async (c) => {
 });
 
 workOrdersRouter.post("/v1/assets/attach", async (c) => {
-  const { supabase, user } = await requireAuth(c);
   const body = z.object({
     service_id: z.string().min(1),
     asset_ids: z.array(z.string().uuid()).min(1).max(500),
+    workspace_id: z.string().uuid().optional(),
   }).parse(await c.req.json());
+  // Step 5 STAMP (NEED-L1): service_assets is workspace-rooted; the
+  // workspace is resolved server-side from the caller's active
+  // memberships (Step 4's resolveCallerWorkspaceId idiom — a
+  // client-supplied id is only a disambiguation hint, never an
+  // authorization input) because the live client command sends none.
+  const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c, body.workspace_id);
   const rows = body.asset_ids.map((asset_id) => ({
+    workspace_id: workspaceId,
     service_id: body.service_id,
     asset_id,
     user_id: user.id,
@@ -475,12 +482,16 @@ workOrdersRouter.post("/v1/assets/attach", async (c) => {
 });
 
 workOrdersRouter.delete("/v1/assets/attach", async (c) => {
-  const { supabase, user } = await requireAuth(c);
   const body = z.object({
     service_id: z.string().min(1),
     asset_id: z.string().uuid(),
+    workspace_id: z.string().uuid().optional(),
   }).parse(await c.req.json());
+  // Step 5 RESCOPE (NEED-L1): the delete is scoped to the caller's
+  // resolved workspace; the user_id filter stays as the actor check.
+  const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c, body.workspace_id);
   const { error } = await (supabase.from("service_assets") as any).delete()
+    .eq("workspace_id", workspaceId)
     .eq("service_id", body.service_id).eq("asset_id", body.asset_id).eq("user_id", user.id);
   if (error) throw error;
   return json({ data: { ok: true } });
@@ -2006,6 +2017,12 @@ workOrdersRouter.post("/v1/tech-app/job-photos", async (c) => {
   const isRequired = form.get("is_required") === "true";
   if (!(file instanceof File)) throw new ApiError(400, "A photo file is required", "file_required");
   if (!appointmentId) throw new ApiError(400, "appointment_id is required", "appointment_id_required");
+  // Step 5 STAMP: job_photos is workspace-rooted; the workspace derives
+  // from the appointment row (the design's paired change for both
+  // duplicate handlers — finding F1 stands, neither is removed).
+  const { data: appointment } = await (supabase.from("appointments") as any)
+    .select("workspace_id").eq("id", appointmentId).maybeSingle();
+  if (!appointment?.workspace_id) throw new ApiError(404, "Appointment not found", "appointment_not_found");
   const storagePath = `${businessUserId}/job-photos/${appointmentId}/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
   const { error: uploadError } = await supabase.storage.from("job-photos").upload(storagePath, file, {
     contentType: file.type || undefined,
@@ -2015,6 +2032,11 @@ workOrdersRouter.post("/v1/tech-app/job-photos", async (c) => {
   const { data: urlData } = supabase.storage.from("job-photos").getPublicUrl(storagePath);
   const { data, error } = await (supabase.from("job_photos") as any).insert({
     appointment_id: appointmentId,
+    workspace_id: appointment.workspace_id,
+    // user_id is the types-required actor column this handler omitted
+    // (it stamped uploaded_by only); the Step 5 design's "neither
+    // handler errors on shape" intent requires stamping it too.
+    user_id: user.id,
     business_user_id: businessUserId,
     photo_type: photoType,
     photo_url: urlData.publicUrl,
@@ -3460,6 +3482,11 @@ workOrdersRouter.post("/v1/tech-app/job-photos", async (c) => {
   }
   const { data: tech } = await (supabase as any)
     .from("technicians").select("id").eq("auth_user_id", user.id).maybeSingle();
+  // Step 5 STAMP: workspace derives from the appointment row (the
+  // design's paired change for both duplicate handlers — finding F1).
+  const { data: appointment } = await (supabase as any)
+    .from("appointments").select("workspace_id").eq("id", appointmentId).maybeSingle();
+  if (!appointment?.workspace_id) throw new ApiError(404, "Appointment not found", "appointment_not_found");
   const fileExt = file.name.includes(".") ? file.name.split(".").pop() : "bin";
   const storagePath = `${businessUserId}/${appointmentId}/${photoType}-${Date.now()}.${fileExt}`;
   const { error: uploadError } = await supabase.storage
@@ -3470,6 +3497,7 @@ workOrdersRouter.post("/v1/tech-app/job-photos", async (c) => {
     .from("job_photos")
     .insert({
       appointment_id: appointmentId,
+      workspace_id: appointment.workspace_id,
       user_id: businessUserId,
       technician_id: tech?.id ?? null,
       photo_type: photoType,
