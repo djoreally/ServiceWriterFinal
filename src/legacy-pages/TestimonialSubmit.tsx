@@ -47,7 +47,7 @@ const TestimonialSubmit = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!businessProfile) {
+    if (!businessProfile || !slug) {
       toast.error("Business not found");
       return;
     }
@@ -61,6 +61,7 @@ const TestimonialSubmit = () => {
     try {
       await submitTestimonial({
         user_id: businessProfile.user_id,
+        slug,
         customer_name: formData.name,
         customer_email: formData.email || null,
         content: formData.content,
