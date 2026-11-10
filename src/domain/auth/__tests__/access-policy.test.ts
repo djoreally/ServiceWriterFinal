@@ -65,9 +65,9 @@ describe("access-policy", () => {
       expect(canAccessRoute("admin", "/some-new-secret-route")).toBe(true);
     });
 
-    it("grants fleet managers the fleet surface but not dispatch-only office areas", () => {
+    it("grants fleet managers the vans surface but not the stripped Fleet OS", () => {
       expect(canAccessRoute("fleet_manager", "/fleet")).toBe(true);
-      expect(canAccessRoute("fleet_manager", "/fleet-os/work-orders")).toBe(true);
+      expect(canAccessRoute("fleet_manager", "/fleet-os/work-orders")).toBe(false);
       expect(canAccessRoute("fleet_manager", "/financials")).toBe(false);
     });
   });

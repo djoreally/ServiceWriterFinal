@@ -44,16 +44,20 @@ describe("role-by-route authorization contract", () => {
     expect(canAccessRoute(role, "/services")).toBe(board);
   });
 
-  it("splits Fleet OS between the board and the commercial back office", () => {
+  it("closes the stripped Fleet OS surface to every non-admin role", () => {
+    // S1 removed every /fleet-os/* rule from the access policy, so the
+    // surface now behaves like any unlisted route: deny-by-default, with
+    // the admin-only fallback the deny-by-default contract defines.
     expect(canAccessRoute("dispatcher", "/fleet-os/dispatch")).toBe(false);
-    expect(canAccessRoute("dispatcher", "/fleet-os/scheduler")).toBe(true);
+    expect(canAccessRoute("dispatcher", "/fleet-os/scheduler")).toBe(false);
     expect(canAccessRoute("dispatcher", "/fleet-os/contracts")).toBe(false);
     expect(canAccessRoute("dispatcher", "/fleet-os/invoices")).toBe(false);
-    expect(canAccessRoute("manager", "/fleet-os/contracts")).toBe(true);
-    expect(canAccessRoute("fleet_manager", "/fleet-os/scheduler")).toBe(true);
-    expect(canAccessRoute("fleet_manager", "/fleet-os/vehicles")).toBe(true);
-    expect(canAccessRoute("fleet_manager", "/fleet-os/contracts")).toBe(true);
+    expect(canAccessRoute("manager", "/fleet-os/contracts")).toBe(false);
+    expect(canAccessRoute("fleet_manager", "/fleet-os/scheduler")).toBe(false);
+    expect(canAccessRoute("fleet_manager", "/fleet-os/vehicles")).toBe(false);
+    expect(canAccessRoute("fleet_manager", "/fleet-os/contracts")).toBe(false);
     expect(canAccessRoute("fleet_manager", "/settings")).toBe(false);
+    expect(canAccessRoute("admin", "/fleet-os/scheduler")).toBe(true);
   });
 
   it.each(roles)("contains technicians in their dedicated workspace (%s)", (role) =>
@@ -69,8 +73,8 @@ describe("role-by-route authorization contract", () => {
     expect(canWrite("customer", "invoices")).toBe(false);
   });
 
-  it("keeps fleet managers in Fleet OS and customers in self-service", () => {
-    expect(canAccessRoute("fleet_manager", "/fleet-os")).toBe(true);
+  it("keeps fleet managers out of the stripped Fleet OS and customers in self-service", () => {
+    expect(canAccessRoute("fleet_manager", "/fleet-os")).toBe(false);
     expect(canAccessRoute("fleet_manager", "/invitations")).toBe(false);
     expect(canAccessRoute("customer", "/customer/profile")).toBe(true);
     expect(canAccessRoute("customer", "/invitations")).toBe(false);
