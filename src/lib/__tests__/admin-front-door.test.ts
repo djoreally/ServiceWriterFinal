@@ -71,6 +71,25 @@ describe("get_platform_stats migration", () => {
     expect(migration).toContain("from public.workspaces where is_active");
   });
 
+  it("counts users as distinct active workspace members (business_profiles is empty in production)", () => {
+    // Corrected by 20261110203000 after the first live verify returned
+    // usersCount 0: business_profiles has zero rows in production, so
+    // the original definition would have shown a false "0 users".
+    const correction = readFileSync(
+      join(
+        process.cwd(),
+        "supabase/migrations/20261110203000_platform_stats_users_definition.sql",
+      ),
+      "utf8",
+    );
+    expect(correction).toContain(
+      "count(distinct user_id) from public.workspace_members where is_active",
+    );
+    expect(correction).toContain(
+      "create or replace function public.get_platform_stats()",
+    );
+  });
+
   it("grants execute to authenticated, never leaves it public", () => {
     expect(migration).toContain(
       "revoke all on function public.get_platform_stats() from public",
