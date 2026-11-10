@@ -2,7 +2,7 @@
  * Grey-box tests for the appointments Hono router.
  * Drives the router over HTTP with Supabase + messaging pipelines mocked.
  */
-import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import { installWebGlobals as mockInstallWebGlobals } from "../test-support/webGlobals";
 import { makeServerApiMock as mockMakeServerApiMock } from "../test-support/serverApiMock";
 import {
@@ -1157,6 +1157,86 @@ describe("appointments router", () => {
         expect(body.data).toHaveLength(1);
         expect(body.data[0].job_total).toBe(133.83);
         expect(body.data[0].job_due).toBe(0);
+      });
+    });
+
+    describe("POST /v1/appointments/geocode-backfill", () => {
+      const originalFetch = global.fetch;
+      const originalToken = process.env.NEXT_PUBLIC_MAPBOX_PUBLIC_TOKEN;
+
+      beforeEach(() => {
+        process.env.NEXT_PUBLIC_MAPBOX_PUBLIC_TOKEN = `pk.${"x".repeat(30)}`;
+        global.fetch = (async () => ({
+          ok: true,
+          statusText: "OK",
+          json: async () => ({ features: [{ center: [-75.1125, 40.0369] }] }),
+        })) as unknown as typeof fetch;
+        db.workspace_members = {
+          data: [{ workspace_id: WS_ID }],
+          error: null,
+        };
+      });
+
+      afterEach(() => {
+        global.fetch = originalFetch;
+        if (originalToken === undefined) delete process.env.NEXT_PUBLIC_MAPBOX_PUBLIC_TOKEN;
+        else process.env.NEXT_PUBLIC_MAPBOX_PUBLIC_TOKEN = originalToken;
+      });
+
+      it("geocodes from metadata/locations and writes coordinates into metadata only (no phantom columns)", async () => {
+        // Real production shape: no location_address / location_lat /
+        // location_lng / deleted_at columns on appointments.
+        db.appointments = {
+          data: [
+            {
+              // Address in metadata, no coordinates anywhere: backfilled.
+              id: APPT_ID,
+              metadata: { location_address: "6815 Lawnton St, Philadelphia, PA 19128", title: "Oil change" },
+              locations: null,
+            },
+            {
+              // Coordinates already on the locations row: skipped.
+              id: "990e8400-e29b-41d4-a716-446655440002",
+              metadata: {},
+              locations: {
+                address_line1: "428 Railroad Ave",
+                address_line2: null,
+                city: "Ambler",
+                region: "PA",
+                postal_code: "19002",
+                latitude: 40.1604,
+                longitude: -75.2337,
+              },
+            },
+            {
+              // No address anywhere: skipped, not an error.
+              id: "990e8400-e29b-41d4-a716-446655440003",
+              metadata: {},
+              locations: null,
+            },
+          ],
+          error: null,
+        };
+        const res = await appointmentsRouter.request("/v1/appointments/geocode-backfill", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body).toEqual({ scanned: 1, geocoded: 1, failed: 0, remaining: 0 });
+        const appointmentUpdates = calls.updates.filter((u) => u.table === "appointments");
+        expect(appointmentUpdates).toHaveLength(1);
+        // The write touches ONLY the metadata column — the coordinates
+        // land in metadata.location_lat/location_lng, where the
+        // canonical readers look — and the existing metadata survives.
+        expect(Object.keys(appointmentUpdates[0].patch as Record<string, unknown>)).toEqual(["metadata"]);
+        expect((appointmentUpdates[0].patch as { metadata: Record<string, unknown> }).metadata).toEqual({
+          location_address: "6815 Lawnton St, Philadelphia, PA 19128",
+          title: "Oil change",
+          location_lat: 40.0369,
+          location_lng: -75.1125,
+        });
       });
     });
   });
