@@ -78,10 +78,22 @@ export function isProviderSyncArtifact(row: AppointmentPaymentRow): boolean {
   return row.source === "provider_sync" || row.stripe_sync_status != null;
 }
 
-/** Cents actually collected per the resolved rows (succeeded rows only). */
+/**
+ * A cash-closeout waiver row: the manual-payment flow records the waived
+ * difference as its own succeeded row (metadata.source =
+ * "manual_adjustment") so the invoice can settle PAID, but no money was
+ * collected on it. Collected means succeeded payments that are NOT
+ * adjustments. Null-tolerant: `source` is null whenever the row's
+ * metadata carried no source, and null never matches.
+ */
+export function isManualAdjustmentRow(row: AppointmentPaymentRow): boolean {
+  return row.source === "manual_adjustment";
+}
+
+/** Cents actually collected per the resolved rows (succeeded, non-adjustment rows only). */
 export function sumSucceededPaymentsCents(rows: AppointmentPaymentRow[]): number {
   return rows
-    .filter((row) => row.status === "succeeded")
+    .filter((row) => row.status === "succeeded" && !isManualAdjustmentRow(row))
     .reduce((sum, row) => sum + row.amount, 0);
 }
 
