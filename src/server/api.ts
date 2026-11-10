@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createSupabaseRequestClient, createSupabaseServerClient } from "@/lib/supabase";
+import { captureServerError, type ServerErrorContext } from "@/server/sentry";
 
 export const workspaceIdSchema = z.string().uuid();
 
@@ -70,8 +71,15 @@ export function toError(value: unknown): Error {
   return error;
 }
 
-export function errorResponse(error: unknown) {
-  if (error instanceof ApiError) return json({ error: { code: error.code, message: error.message } }, { status: error.status });
+export function errorResponse(error: unknown, requestContext: ServerErrorContext = {}) {
+  if (error instanceof ApiError) {
+    // Deliberately raised API errors are expected outcomes; only a 5xx
+    // ApiError is a server fault worth reporting to Sentry.
+    if (error.status >= 500) {
+      captureServerError(error, { ...requestContext, code: error.code, status: error.status });
+    }
+    return json({ error: { code: error.code, message: error.message } }, { status: error.status });
+  }
 
   // Postgres raise_exception from RPCs (e.g. technician_transition_job_v1
   // INVALID_TRANSITION / CONFLICT_ERROR). Surface the RPC's own message as a
@@ -131,12 +139,18 @@ export function errorResponse(error: unknown) {
   // data. Postgres SQLSTATEs are deliberately NOT swept in here — they
   // keep the mappings above (or internal_error) unchanged.
   if (typeof code === "string" && /^PGRST\d+$/.test(code)) {
+    // A 503 from the database gateway is a server-side fault (missing RPC,
+    // stale schema cache, pool failure) — report it with its real code.
+    captureServerError(error, { ...requestContext, code, status: 503 });
     return json(
       { error: { code, message: candidate?.message ?? "The request could not be completed." } },
       { status: 503 },
     );
   }
   if (candidate?.status && candidate.status >= 400 && candidate.status < 600) {
+    if (candidate.status >= 500) {
+      captureServerError(error, { ...requestContext, code: code ?? "request_failed", status: candidate.status });
+    }
     return json({ error: { code: code ?? "request_failed", message: candidate.message ?? "The request could not be completed." } }, { status: candidate.status });
   }
 
@@ -153,6 +167,10 @@ export function errorResponse(error: unknown) {
         }
       : { type: typeof error };
   console.error("[api] unexpected error", diagnostic);
+  // The internal_error fallthrough is the class that used to vanish (e.g.
+  // the 2026-11-10 phantom-column 42703 sat here unseen for six hours).
+  // Report it under its real diagnostic identity before masking it.
+  captureServerError(error, { ...requestContext, code: code ?? "internal_error", status: 500 });
   return json({ error: { code: "internal_error", message: "An unexpected error occurred." } }, { status: 500 });
 }
 

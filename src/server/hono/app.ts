@@ -18,6 +18,7 @@
  */
 import { Hono } from "hono";
 import { corsHeaders, errorResponse, toError } from "@/server/api";
+import { initSentry } from "@/server/sentry";
 import { agentApiRouter } from "./routes/agent-api";
 import { appointmentsRouter } from "./routes/appointments";
 import { billingRouter } from "./routes/billing";
@@ -32,10 +33,31 @@ import { websiteBookingsRouter } from "./routes/website-bookings";
 import { workOrdersRouter } from "./routes/work-orders";
 
 export function createHonoApp(): Hono {
+  // Server boot: initialize Sentry once (no-op when SENTRY_DSN is unset).
+  initSentry();
+
   const app = new Hono().basePath("/api");
 
+  // Deliberate-error probe for the Sentry wiring proof. Registered ONLY
+  // when SENTRY_TEST=1 is set in the environment — it cannot fire in
+  // production by accident, and the route does not exist otherwise.
+  if (process.env.SENTRY_TEST === "1") {
+    app.get("/v1/__sentry-test", () => {
+      throw new Error("Sentry wiring test error (deliberate)");
+    });
+  }
+
   // Preserve the exact error contract of the original route handlers.
-  app.onError((error) => errorResponse(error));
+  // The request context (route, method, workspace id when the request
+  // carried one) rides along so 5xx captures in errorResponse are useful;
+  // it never changes the response shape.
+  app.onError((error, c) =>
+    errorResponse(error, {
+      route: c.req.path,
+      method: c.req.method,
+      workspaceId: c.req.query("workspace_id"),
+    }),
+  );
 
   // Hono only routes `instanceof Error` throws to onError. PostgREST errors
   // are plain objects, so without this a route's `if (error) throw error`
