@@ -1973,7 +1973,7 @@ crmRouter.post("/v1/crm/marketing/email-campaigns/:id/send", async (c) => {
   const { data: profile } = await supabase
     .from("business_profiles")
     .select("business_name, email, booking_slug")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspace_id)
     .maybeSingle();
 
   const emailQueue = recipients.map((customer) => ({
@@ -2022,10 +2022,11 @@ crmRouter.post("/v1/crm/marketing/email-campaigns/:id/test", async (c) => {
     .eq("user_id", user.id)
     .single();
   if (campaignError || !campaign) throw campaignError ?? new ApiError(404, "Campaign not found", "not_found");
+  const workspaceId = await resolveSettingsWorkspaceId(c);
   const { data: profile } = await supabase
     .from("business_profiles")
     .select("business_name, email, booking_slug")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .maybeSingle();
   // Thin server-side proxy for the existing send-email edge function; the
   // messaging worker owns the sending mechanism itself.
@@ -2060,8 +2061,9 @@ crmRouter.get("/v1/crm/marketing/testimonials", async (c) => {
 });
 
 crmRouter.get("/v1/crm/marketing/business-slug", async (c) => {
-  const { supabase, user } = await requireAuth(c);
-  const { data } = await supabase.from("business_profiles").select("booking_slug").eq("user_id", user.id).maybeSingle();
+  const { supabase } = await requireAuth(c);
+  const workspaceId = await resolveSettingsWorkspaceId(c);
+  const { data } = await supabase.from("business_profiles").select("booking_slug").eq("workspace_id", workspaceId).maybeSingle();
   return json({ data: { booking_slug: data?.booking_slug ?? null } });
 });
 
@@ -2391,11 +2393,12 @@ const marketingSettingsSchema = z.object({
 });
 
 crmRouter.get("/v1/crm/marketing/settings", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase } = await requireAuth(c);
+  const workspaceId = await resolveSettingsWorkspaceId(c);
   const { data, error } = await supabase
     .from("business_profiles")
     .select("google_review_url, yelp_review_url, review_request_delay_hours, appointment_reminder_hours, service_reminder_months")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .maybeSingle();
   if (error) throw error;
   if (!data) return json({ data: null });
@@ -2412,7 +2415,8 @@ crmRouter.get("/v1/crm/marketing/settings", async (c) => {
 
 crmRouter.patch("/v1/crm/marketing/settings", async (c) => {
   const body = marketingSettingsSchema.parse(await c.req.json());
-  const { supabase, user } = await requireAuth(c);
+  const { supabase } = await requireAuth(c);
+  const workspaceId = await resolveSettingsWorkspaceId(c);
   const { error } = await supabase
     .from("business_profiles")
     .update({
@@ -2422,7 +2426,7 @@ crmRouter.patch("/v1/crm/marketing/settings", async (c) => {
       appointment_reminder_hours: body.appointment_reminder_hours,
       service_reminder_months: body.service_reminder_months,
     })
-    .eq("user_id", user.id);
+    .eq("workspace_id", workspaceId);
   if (error) throw error;
   return json({ data: { updated: true } });
 });
@@ -2616,11 +2620,12 @@ crmRouter.put("/v1/crm/maintenance-reminders/settings", async (c) => {
 // /v1/crm/receptionist/* — AI receptionist profile + provisioning proxies
 // ---------------------------------------------------------------------------
 crmRouter.get("/v1/crm/receptionist/profile", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase } = await requireAuth(c);
+  const workspaceId = await resolveSettingsWorkspaceId(c);
   const { data, error } = await supabase
     .from("business_profiles")
-    .select("user_id, business_name, elevenlabs_agent_id, receptionist_phone_number, receptionist_phone_number_id, receptionist_voice_id, receptionist_system_prompt, receptionist_first_message, receptionist_status, receptionist_provisioned_at")
-    .eq("user_id", user.id)
+    .select("business_name, elevenlabs_agent_id, receptionist_phone_number, receptionist_phone_number_id, receptionist_voice_id, receptionist_system_prompt, receptionist_first_message, receptionist_status, receptionist_provisioned_at")
+    .eq("workspace_id", workspaceId)
     .maybeSingle();
   if (error) throw error;
   return json({ data: data ?? null });
