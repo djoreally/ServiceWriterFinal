@@ -13,6 +13,7 @@
  * `/v1/work-orders/:id` so they cannot be swallowed by the param route.
  */
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { z } from "zod";
 import { ApiError, json, paginationSchema } from "@/server/api";
 import { createSupabaseAdminClient, createSupabaseAnonServerClient } from "@/lib/supabase";
@@ -1485,6 +1486,44 @@ workOrdersRouter.post("/v1/inline-service-writer/appointment-items", async (c) =
 });
 
 // ---------------------------------------------------------------------------
+// Step 4 workspace resolution (SRC-A mirror of appointments.ts's
+// resolveCallerWorkspaceId): the workspace is resolved server-side from
+// the caller's active workspace_members rows; a client-supplied id is
+// only a disambiguation hint, never an authorization input.
+// ---------------------------------------------------------------------------
+
+async function resolveCallerWorkspaceId(supabase: any, userId: string, selectedWorkspaceId?: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("workspace_members")
+    .select("workspace_id")
+    .eq("user_id", userId)
+    .eq("is_active", true)
+    .order("workspace_id", { ascending: true });
+  if (error) throw error;
+  const ids = ((data ?? []) as Array<{ workspace_id: string }>).map((row) => row.workspace_id);
+  if (selectedWorkspaceId && ids.includes(selectedWorkspaceId)) return selectedWorkspaceId;
+  return ids[0] ?? null;
+}
+
+async function requireCallerWorkspaceId(c: Context, hint?: string): Promise<{ supabase: any; user: any; workspaceId: string }> {
+  const { supabase, user } = await requireAuth(c);
+  const selected = hint ?? new URL(c.req.url).searchParams.get("workspace_id") ?? undefined;
+  const workspaceId = await resolveCallerWorkspaceId(supabase, user.id, selected);
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
+  return { supabase, user, workspaceId };
+}
+
+/** SRC-T: a satellite row's workspace comes from its parent technician row. */
+async function technicianWorkspaceId(supabase: any, technicianId: string): Promise<string> {
+  const { data, error } = await (supabase.from("technicians") as any)
+    .select("workspace_id").eq("id", technicianId).maybeSingle();
+  if (error) throw error;
+  const workspaceId = (data as { workspace_id?: string } | null)?.workspace_id;
+  if (!workspaceId) throw new ApiError(404, "Technician not found.", "not_found");
+  return workspaceId;
+}
+
+// ---------------------------------------------------------------------------
 // Team members — GET/POST /v1/team/members, PATCH/DELETE /v1/team/members/:id
 // ---------------------------------------------------------------------------
 
@@ -1492,32 +1531,54 @@ workOrdersRouter.get("/v1/team/members", async (c) => {
   const { supabase, user } = await requireAuth(c);
   const userId = z.string().min(1).parse(new URL(c.req.url).searchParams.get("user_id") ?? "");
   if (userId !== user.id) throw new ApiError(403, "You can only list your own team members", "team_members_forbidden");
+  // Step 4 RESCOPE: the read's tenancy filter is the caller's workspace,
+  // not the owner user key.
+  const workspaceId = await resolveCallerWorkspaceId(supabase, user.id);
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
   const { data, error } = await (supabase.from("team_members") as any)
-    .select("*").eq("user_id", userId).order("created_at", { ascending: false });
+    .select("*").eq("workspace_id", workspaceId).order("created_at", { ascending: false });
   if (error) throw error;
   return json({ data: data ?? [] });
 });
 
 workOrdersRouter.post("/v1/team/members", async (c) => {
-  const { supabase } = await requireAuth(c);
+  const { supabase, user } = await requireAuth(c);
   const body = z.record(z.string(), z.unknown()).parse(await c.req.json());
-  const { data, error } = await (supabase.from("team_members") as any).insert(body).select().single();
+  // Step 4 STAMP: tenancy is forced server-side; any workspace_id in the
+  // passthrough body is only a disambiguation hint, never trusted.
+  const workspaceId = await resolveCallerWorkspaceId(
+    supabase,
+    user.id,
+    typeof body.workspace_id === "string" ? body.workspace_id : undefined,
+  );
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
+  const { data, error } = await (supabase.from("team_members") as any)
+    .insert({ ...body, workspace_id: workspaceId }).select().single();
   if (error) throw error;
   return json({ data }, { status: 201 });
 });
 
 workOrdersRouter.patch("/v1/team/members/:id", async (c) => {
-  const { supabase } = await requireAuth(c);
+  const { supabase, user } = await requireAuth(c);
   const body = z.record(z.string(), z.unknown()).parse(await c.req.json());
+  // Step 4 GUARD: pin the payload's tenancy and scope the row by it.
+  const workspaceId = await resolveCallerWorkspaceId(
+    supabase,
+    user.id,
+    typeof body.workspace_id === "string" ? body.workspace_id : undefined,
+  );
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
   const { data, error } = await (supabase.from("team_members") as any)
-    .update(body).eq("id", c.req.param("id")).select().single();
+    .update({ ...body, workspace_id: workspaceId })
+    .eq("id", c.req.param("id")).eq("workspace_id", workspaceId).select().single();
   if (error) throw error;
   return json({ data });
 });
 
 workOrdersRouter.delete("/v1/team/members/:id", async (c) => {
-  const { supabase } = await requireAuth(c);
-  const { error } = await (supabase.from("team_members") as any).delete().eq("id", c.req.param("id"));
+  const { supabase, workspaceId } = await requireCallerWorkspaceId(c);
+  const { error } = await (supabase.from("team_members") as any)
+    .delete().eq("id", c.req.param("id")).eq("workspace_id", workspaceId);
   if (error) throw error;
   return json({ data: { ok: true } });
 });
@@ -1570,16 +1631,18 @@ workOrdersRouter.get("/v1/team/dashboard/assignments", async (c) => {
 });
 
 workOrdersRouter.patch("/v1/team/dashboard/profile/:techId", async (c) => {
-  const { supabase } = await requireAuth(c);
+  const { supabase, workspaceId } = await requireCallerWorkspaceId(c);
   const body = z.record(z.string(), z.unknown()).parse(await c.req.json());
+  // Step 4 GUARD: pin tenancy in the passthrough payload + scope by it.
   const { data, error } = await (supabase.from("technicians") as any)
-    .update(body).eq("id", c.req.param("techId")).select().single();
+    .update({ ...body, workspace_id: workspaceId })
+    .eq("id", c.req.param("techId")).eq("workspace_id", workspaceId).select().single();
   if (error) throw error;
   return json({ data });
 });
 
 workOrdersRouter.post("/v1/team/dashboard/drivers-license", async (c) => {
-  const { supabase } = await requireAuth(c);
+  const { supabase, user } = await requireAuth(c);
   const form = await c.req.raw.formData();
   const file = form.get("file");
   const userId = typeof form.get("user_id") === "string" ? (form.get("user_id") as string).trim() : "";
@@ -1590,8 +1653,12 @@ workOrdersRouter.post("/v1/team/dashboard/drivers-license", async (c) => {
   const { error: uploadError } = await supabase.storage.from("team-documents").upload(filePath, file, { upsert: true });
   if (uploadError) throw uploadError;
   const { data } = supabase.storage.from("team-documents").getPublicUrl(filePath);
+  // Step 4 GUARD: the license write is scoped to the caller's workspace.
+  const workspaceId = await resolveCallerWorkspaceId(supabase, user.id);
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
   const { data: updated, error: updateError } = await (supabase.from("technicians") as any)
-    .update({ drivers_license_url: data.publicUrl }).eq("id", techId).select().single();
+    .update({ drivers_license_url: data.publicUrl }).eq("id", techId)
+    .eq("workspace_id", workspaceId).select().single();
   if (updateError) throw updateError;
   return json({ data: { public_url: data.publicUrl, technician: updated } });
 });
@@ -1699,8 +1766,12 @@ workOrdersRouter.get("/v1/jobs/:id/runtime", async (c) => {
 
 workOrdersRouter.get("/v1/tech-app/context", async (c) => {
   const { supabase, user } = await requireAuth(c);
+  // Step 4 RESCOPE: the self read is additionally scoped to the
+  // caller's workspace (the user key stays as the self narrowing).
+  const workspaceId = await resolveCallerWorkspaceId(supabase, user.id);
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
   const { data: technician, error: techError } = await (supabase.from("technicians") as any)
-    .select("*").eq("user_id", user.id).maybeSingle();
+    .select("*").eq("user_id", user.id).eq("workspace_id", workspaceId).maybeSingle();
   if (techError && techError.code !== "PGRST116") throw techError;
   const [vanRes, clockRes, prefsRes] = await Promise.all([
     (supabase.from("vans") as any).select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
@@ -1880,8 +1951,12 @@ workOrdersRouter.put("/v1/tech-app/notification-settings", async (c) => {
     enabled: z.boolean(),
     types: z.array(z.string()),
   }).parse(await c.req.json());
+  // Step 4 STAMP: the upsert carries the technician's own workspace
+  // (SRC-T — the row's tenancy follows its parent technician).
+  const workspaceId = await technicianWorkspaceId(supabase, body.tech_id);
   const { data, error } = await (supabase.from("technician_notification_preferences") as any)
     .upsert({
+      workspace_id: workspaceId,
       technician_id: body.tech_id,
       enabled: body.enabled,
       notification_types: body.types,
@@ -2144,10 +2219,12 @@ workOrdersRouter.get("/v1/tech-os/workspace-owner", async (c) => {
 });
 
 workOrdersRouter.patch("/v1/tech-os/technicians/:id", async (c) => {
-  const { supabase } = await requireAuth(c);
+  const { supabase, workspaceId } = await requireCallerWorkspaceId(c);
   const body = z.record(z.string(), z.unknown()).parse(await c.req.json());
+  // Step 4 GUARD: pin tenancy in the passthrough payload + scope by it.
   const { data, error } = await (supabase.from("technicians") as any)
-    .update(body).eq("id", c.req.param("id")).select();
+    .update({ ...body, workspace_id: workspaceId })
+    .eq("id", c.req.param("id")).eq("workspace_id", workspaceId).select();
   if (error) throw error;
   return json({ data: data ?? [] });
 });
@@ -2168,18 +2245,18 @@ workOrdersRouter.post("/v1/tech-os/van-assignments", async (c) => {
 });
 
 workOrdersRouter.patch("/v1/tech-os/technicians/:id/status", async (c) => {
-  const { supabase } = await requireAuth(c);
+  const { supabase, workspaceId } = await requireCallerWorkspaceId(c);
   const body = z.object({ status: z.string().min(1) }).parse(await c.req.json());
   const { data, error } = await (supabase.from("technicians") as any)
-    .update({ status: body.status }).eq("id", c.req.param("id")).select();
+    .update({ status: body.status }).eq("id", c.req.param("id")).eq("workspace_id", workspaceId).select();
   if (error) throw error;
   return json({ data: data ?? [] });
 });
 
 workOrdersRouter.patch("/v1/tech-os/payroll-cycles/:id/pay", async (c) => {
-  const { supabase } = await requireAuth(c);
+  const { supabase, workspaceId } = await requireCallerWorkspaceId(c);
   const { data, error } = await (supabase.from("technician_payroll_cycles") as any)
-    .update({ payout_status: "paid" }).eq("id", c.req.param("id")).select();
+    .update({ payout_status: "paid" }).eq("id", c.req.param("id")).eq("workspace_id", workspaceId).select();
   if (error) throw error;
   return json({ data: data ?? [] });
 });
@@ -2198,8 +2275,25 @@ workOrdersRouter.post("/v1/tech-os/technicians", async (c) => {
   const { supabase } = await requireAuth(c);
   const body = z.object({ user_id: z.string().min(1), profile: z.record(z.string(), z.unknown()) })
     .parse(await c.req.json());
+  // Step 4 STAMP (SRC-P): the row's tenancy follows the owning user it
+  // is keyed to — resolved from body.user_id's owner membership (the
+  // exercised flow passes the caller's own id as the owner key, and
+  // keying the stamp to the same user keeps the pair consistent even
+  // if a manager ever creates on an owner's behalf). A workspace_id
+  // smuggled inside profile is overridden by the spread order.
+  const { data: ownerMembership, error: ownerError } = await (supabase.from("workspace_members") as any)
+    .select("workspace_id")
+    .eq("user_id", body.user_id)
+    .eq("role", "owner")
+    .eq("is_active", true)
+    .order("workspace_id", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (ownerError) throw ownerError;
+  const workspaceId = (ownerMembership as { workspace_id?: string } | null)?.workspace_id;
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
   const { data, error } = await (supabase.from("technicians") as any)
-    .insert({ user_id: body.user_id, ...body.profile }).select().single();
+    .insert({ user_id: body.user_id, ...body.profile, workspace_id: workspaceId }).select().single();
   if (error) {
     if (error.message === "seat_limit_reached") {
       throw new ApiError(403, "Technician seat limit reached for current plan.", "seat_limit_reached");
@@ -2274,8 +2368,16 @@ function techOsInsertRoute(path: string, table: string, build: (techId: string, 
   workOrdersRouter.post(path, async (c) => {
     const { supabase } = await requireAuth(c);
     const body = techOsInsertSchema.parse(await c.req.json());
+    const row = build(body.tech_id, body.user_id, body.data);
+    // Step 4 STAMP (SRC-T): this step's satellites (technician_skills,
+    // technician_payroll_cycles) are workspace-tenanted — stamp from the
+    // parent technician's row. The helper's other tables belong to
+    // later family steps and are inserted exactly as before.
+    if (table === "technician_skills" || table === "technician_payroll_cycles") {
+      row.workspace_id = await technicianWorkspaceId(supabase, body.tech_id);
+    }
     const { data, error } = await (supabase.from(table) as any)
-      .insert(build(body.tech_id, body.user_id, body.data)).select();
+      .insert(row).select();
     if (error) throw error;
     return json({ data: data ?? [] }, { status: 201 });
   });
@@ -2296,20 +2398,22 @@ workOrdersRouter.post("/v1/tech-os/onboarding-tasks", async (c) => {
     user_id: z.string().min(1),
     tasks: z.array(z.object({ name: z.string().min(1), category: z.string().min(1) })).min(1).max(200),
   }).parse(await c.req.json());
+  // Step 4 STAMP (SRC-T): tasks inherit the technician's workspace.
+  const workspaceId = await technicianWorkspaceId(supabase, body.tech_id);
   const { data, error } = await (supabase.from("technician_onboarding_tasks") as any).insert(
-    body.tasks.map((t) => ({ technician_id: body.tech_id, user_id: body.user_id, task_name: t.name, category: t.category })),
+    body.tasks.map((t) => ({ workspace_id: workspaceId, technician_id: body.tech_id, user_id: body.user_id, task_name: t.name, category: t.category })),
   ).select();
   if (error) throw error;
   return json({ data: data ?? [] }, { status: 201 });
 });
 
 workOrdersRouter.patch("/v1/tech-os/onboarding-tasks/:id", async (c) => {
-  const { supabase } = await requireAuth(c);
+  const { supabase, workspaceId } = await requireCallerWorkspaceId(c);
   const body = z.object({ completed: z.boolean() }).parse(await c.req.json());
   const { data, error } = await (supabase.from("technician_onboarding_tasks") as any).update({
     is_completed: body.completed,
     completed_at: body.completed ? new Date().toISOString() : null,
-  }).eq("id", c.req.param("id")).select();
+  }).eq("id", c.req.param("id")).eq("workspace_id", workspaceId).select();
   if (error) throw error;
   return json({ data: data ?? [] });
 });
@@ -2375,15 +2479,19 @@ workOrdersRouter.get("/v1/technicians", async (c) => {
   const { supabase, user } = await requireAuth(c);
   const userId = z.string().min(1).parse(new URL(c.req.url).searchParams.get("user_id") ?? "");
   if (userId !== user.id) throw new ApiError(403, "You can only list your own technicians", "technicians_forbidden");
+  // Step 4 RESCOPE: the admin list's tenancy filter is the workspace.
+  const workspaceId = await resolveCallerWorkspaceId(supabase, user.id);
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
   const { data, error } = await (supabase.from("technicians") as any)
-    .select("*").eq("user_id", userId).order("name", { ascending: true });
+    .select("*").eq("workspace_id", workspaceId).order("name", { ascending: true });
   if (error) throw error;
   return json({ data: data ?? [] });
 });
 
 workOrdersRouter.delete("/v1/tech-os/technicians/:id", async (c) => {
-  const { supabase } = await requireAuth(c);
-  const { error } = await (supabase.from("technicians") as any).delete().eq("id", c.req.param("id"));
+  const { supabase, workspaceId } = await requireCallerWorkspaceId(c);
+  const { error } = await (supabase.from("technicians") as any)
+    .delete().eq("id", c.req.param("id")).eq("workspace_id", workspaceId);
   if (error) throw error;
   return json({ data: { ok: true } });
 });
@@ -3336,9 +3444,12 @@ workOrdersRouter.post("/v1/tech-app/notification-settings", async (c) => {
     customer_email_enabled: z.boolean(),
     offline_cache_enabled: z.boolean(),
   }).parse(await c.req.json());
+  // Step 4 STAMP: the user-keyed upsert carries the caller's workspace.
+  const workspaceId = await resolveCallerWorkspaceId(supabase, user.id);
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
   const { data, error } = await (supabase as any)
     .from("technician_notification_preferences")
-    .upsert({ user_id: user.id, ...body }, { onConflict: "user_id" })
+    .upsert({ user_id: user.id, workspace_id: workspaceId, ...body }, { onConflict: "user_id" })
     .select()
     .single();
   if (error) throw error;
