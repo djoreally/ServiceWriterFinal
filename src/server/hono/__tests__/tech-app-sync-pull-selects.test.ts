@@ -50,7 +50,17 @@ describe("GET /v1/tech-app/sync/pull — registration + scoping", () => {
   it("keys assignment on assigned_user_id, never a user_id column", () => {
     const block = handlerBlock();
     expect(block).toContain('.eq("assigned_user_id", user.id)');
-    expect(block).not.toContain('.eq("user_id", user.id)');
+    // The appointments reads must never key on user_id (appointments
+    // has no such live column for assignment). The technicians read
+    // in SYNC-1b legitimately keys on technicians.user_id — that is
+    // that table's real column — so the negative check is scoped to
+    // the appointments segments only.
+    const appointmentSegments = block.split('.from("appointments")').slice(1);
+    expect(appointmentSegments.length).toBeGreaterThan(0);
+    for (const segment of appointmentSegments) {
+      const statement = segment.slice(0, segment.indexOf(";"));
+      expect(statement).not.toContain('.eq("user_id", user.id)');
+    }
   });
 });
 
@@ -80,7 +90,69 @@ describe("GET /v1/tech-app/sync/pull — protocol shape", () => {
   it("buckets through the pure sync query module and returns changes + timestamp", () => {
     const block = handlerBlock();
     expect(block).toContain("bucketJobChanges(composed, lastPulledAt, extraDeletedIds)");
-    expect(block).toContain("json({ data: { changes: { jobs: changes }, timestamp } })");
+    expect(block).toContain("jobs: jobChanges");
     expect(block).toContain('searchParams.get("last_pulled_at")');
+  });
+});
+
+describe("tech-app window horizon (Ty's ruling, 2026-11-11)", () => {
+  it("both tech-app doors look +31 days out, never +8", () => {
+    // At +8 days the Nov 21 and Nov 23 jobs were invisible on the
+    // phone no matter their assignment; Ty ruled the phone shows
+    // the whole coming month. Pin the horizon so it cannot shrink
+    // back silently.
+    expect(SOURCE.match(/31 \* 24 \* 60 \* 60 \* 1000/g) ?? []).toHaveLength(2);
+    expect(SOURCE).not.toContain("8 * 24 * 60 * 60 * 1000");
+  });
+});
+
+describe("GET /v1/tech-app/sync/pull — SYNC-1b child selects (live census)", () => {
+  it("selects service_inspections by appointment scope", () => {
+    const block = handlerBlock();
+    expect(block).toContain(
+      "id, appointment_id, user_id, notes, status, created_at, updated_at",
+    );
+    expect(block).toContain('.from("service_inspections")');
+    expect(block).toContain('.in("appointment_id", scopedAppointmentIds)');
+  });
+
+  it("selects inspection_results by inspection scope, ordered by sort_order", () => {
+    const block = handlerBlock();
+    expect(block).toContain(
+      "id, inspection_id, item_name, item_category, status, notes, sort_order, created_at",
+    );
+    expect(block).toContain('.from("inspection_results")');
+    expect(block).toContain('.in("inspection_id", inspectionIds)');
+  });
+
+  it("selects service_recommendations and job_photos by appointment scope", () => {
+    const block = handlerBlock();
+    expect(block).toContain(
+      "id, appointment_id, inspection_id, inspection_result_id, description, technician_notes, price, created_at, updated_at",
+    );
+    expect(block).toContain('.from("service_recommendations")');
+    expect(block).toContain(
+      "id, appointment_id, technician_id, user_id, photo_type, photo_url, storage_path, caption, created_at",
+    );
+    expect(block).toContain('.from("job_photos")');
+  });
+
+  it("scopes locations to the caller's technicians row, never a workspace column location_history lacks", () => {
+    const block = handlerBlock();
+    expect(block).toContain(
+      "id, technician_id, latitude, longitude, accuracy, heading, speed, recorded_at",
+    );
+    expect(block).toContain('.from("location_history")');
+    expect(block).toContain('.eq("technician_id", technicianRes.data.id as string)');
+    expect(block).toContain('.gte("recorded_at", windowStart)');
+  });
+
+  it("returns all six synced tables in the change set", () => {
+    const block = handlerBlock();
+    expect(block).toContain("inspection_reports: reportChanges");
+    expect(block).toContain("inspection_steps: stepChanges");
+    expect(block).toContain("recommendations: recommendationChanges");
+    expect(block).toContain("job_photos: photoChanges");
+    expect(block).toContain("technician_locations: locationChanges");
   });
 });

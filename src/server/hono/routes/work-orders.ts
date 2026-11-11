@@ -19,9 +19,19 @@ import { ApiError, json, paginationSchema } from "@/server/api";
 import { createSupabaseAdminClient, createSupabaseAnonServerClient } from "@/lib/supabase";
 import { requireAuth, requireWorkspaceAuth } from "@/server/hono/middleware/auth";
 import {
+  bucketInspectionReports,
+  bucketInspectionSteps,
   bucketJobChanges,
+  bucketJobPhotos,
+  bucketLocations,
+  bucketRecommendations,
   composeVehicleDisplay,
   type ComposedSyncAppointment,
+  type ServerInspectionResultRow,
+  type ServerInspectionRow,
+  type ServerJobPhotoRow,
+  type ServerLocationRow,
+  type ServerRecommendationRow,
 } from "@/application/queries/tech-app-sync.query";
 
 export const workOrdersRouter = new Hono();
@@ -1894,7 +1904,10 @@ workOrdersRouter.get("/v1/tech-app/jobs", async (c) => {
   const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c);
   const now = Date.now();
   const windowStart = new Date(now - 36 * 60 * 60 * 1000).toISOString();
-  const windowEnd = new Date(now + 8 * 24 * 60 * 60 * 1000).toISOString();
+  // Forward horizon is +31 days (widened from +8 on 2026-11-11, Ty's
+  // ruling): the phone must show the whole coming month — at +8 the
+  // Nov 21 and Nov 23 jobs were invisible no matter their assignment.
+  const windowEnd = new Date(now + 31 * 24 * 60 * 60 * 1000).toISOString();
   const { data: appointments, error: appointmentsError } = await (supabase.from("appointments") as any)
     .select("id, workspace_id, customer_id, vehicle_id, assigned_user_id, status, dispatch_status, starts_at, ends_at, source, confirmation_code, notes, metadata, created_at")
     .eq("workspace_id", workspaceId)
@@ -2007,11 +2020,14 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
   // against last_pulled_at; the pure mapping/bucketing lives in
   // src/application/queries/tech-app-sync.query.ts.
   //
-  // Scope v1: the jobs table only — the same window the jobs door
-  // serves (starts_at from 36h ago through +8 days). Inspections,
-  // photos and locations join the pull in SYNC-1b; until then their
-  // absence reads as "no changes" to the client. Deletes: cancelled
-  // appointments, plus (on incremental pulls) appointments in the
+  // Scope: the jobs table (SYNC-1) plus inspections, inspection
+  // steps, recommendations, photos and the caller's own location
+  // pings (SYNC-1b, 2026-11-11). Child rows are scoped to the same
+  // appointment window — the caller's assigned appointments plus,
+  // on incremental pulls, the moved-away ids whose jobs are being
+  // deleted, so their child rows delete too. Locations are scoped
+  // to the caller's technicians row and the same 36h look-back.
+  // Deletes: cancelled appointments, plus (on incremental pulls) appointments in the
   // window changed since last_pulled_at that are no longer assigned
   // to the caller — deleting an id the device never held is a
   // Watermelon no-op, so the wider net is safe. Composition mirrors
@@ -2024,7 +2040,9 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
   const lastPulledAt = Number.isFinite(parsedLast) && parsedLast > 0 ? Math.floor(parsedLast) : 0;
 
   const windowStart = new Date(timestamp - 36 * 60 * 60 * 1000).toISOString();
-  const windowEnd = new Date(timestamp + 8 * 24 * 60 * 60 * 1000).toISOString();
+  // Forward horizon +31 days — same widening as the jobs door above
+  // (2026-11-11, Ty's ruling: show the whole coming month).
+  const windowEnd = new Date(timestamp + 31 * 24 * 60 * 60 * 1000).toISOString();
   const { data: appointments, error: appointmentsError } = await (supabase.from("appointments") as any)
     .select("id, workspace_id, customer_id, vehicle_id, assigned_user_id, status, dispatch_status, starts_at, ends_at, source, confirmation_code, notes, metadata, created_at, updated_at")
     .eq("workspace_id", workspaceId)
@@ -2129,8 +2147,98 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
     };
   });
 
-  const changes = bucketJobChanges(composed, lastPulledAt, extraDeletedIds);
-  return json({ data: { changes: { jobs: changes }, timestamp } });
+  const jobChanges = bucketJobChanges(composed, lastPulledAt, extraDeletedIds);
+
+  // SYNC-1b: the child tables. Every read is workspace-scoped and
+  // keyed to the appointment ids this pull already covers (the
+  // caller's window appointments + the moved-away delete ids).
+  const deletedJobIds = new Set(jobChanges.deleted);
+  const scopedAppointmentIds = Array.from(new Set([...appointmentIds, ...extraDeletedIds]));
+  const [inspectionsRes, recommendationsRes, photosRes, technicianRes] = await Promise.all([
+    scopedAppointmentIds.length > 0
+      ? (supabase.from("service_inspections") as any)
+        .select("id, appointment_id, user_id, notes, status, created_at, updated_at")
+        .eq("workspace_id", workspaceId)
+        .in("appointment_id", scopedAppointmentIds)
+      : Promise.resolve(empty),
+    scopedAppointmentIds.length > 0
+      ? (supabase.from("service_recommendations") as any)
+        .select("id, appointment_id, inspection_id, inspection_result_id, description, technician_notes, price, created_at, updated_at")
+        .eq("workspace_id", workspaceId)
+        .in("appointment_id", scopedAppointmentIds)
+      : Promise.resolve(empty),
+    scopedAppointmentIds.length > 0
+      ? (supabase.from("job_photos") as any)
+        .select("id, appointment_id, technician_id, user_id, photo_type, photo_url, storage_path, caption, created_at")
+        .eq("workspace_id", workspaceId)
+        .in("appointment_id", scopedAppointmentIds)
+      : Promise.resolve(empty),
+    (supabase.from("technicians") as any)
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("workspace_id", workspaceId)
+      .maybeSingle(),
+  ]);
+  const childError = inspectionsRes.error || recommendationsRes.error || photosRes.error || technicianRes.error;
+  if (childError) throw childError;
+
+  const inspectionRows = (inspectionsRes.data ?? []) as unknown as ServerInspectionRow[];
+  const reportChanges = bucketInspectionReports(inspectionRows, lastPulledAt, deletedJobIds);
+  const inspectionIds = inspectionRows.map((row) => row.id);
+
+  const [resultsRes, locationsRes] = await Promise.all([
+    inspectionIds.length > 0
+      ? (supabase.from("inspection_results") as any)
+        .select("id, inspection_id, item_name, item_category, status, notes, sort_order, created_at")
+        .eq("workspace_id", workspaceId)
+        .in("inspection_id", inspectionIds)
+        .order("sort_order", { ascending: true })
+      : Promise.resolve(empty),
+    technicianRes.data?.id
+      ? (supabase.from("location_history") as any)
+        .select("id, technician_id, latitude, longitude, accuracy, heading, speed, recorded_at")
+        .eq("technician_id", technicianRes.data.id as string)
+        .gte("recorded_at", windowStart)
+        .order("recorded_at", { ascending: true })
+        .limit(1000)
+      : Promise.resolve(empty),
+  ]);
+  const stepError = resultsRes.error || locationsRes.error;
+  if (stepError) throw stepError;
+
+  const stepChanges = bucketInspectionSteps(
+    (resultsRes.data ?? []) as unknown as ServerInspectionResultRow[],
+    reportChanges,
+    lastPulledAt,
+  );
+  const recommendationChanges = bucketRecommendations(
+    (recommendationsRes.data ?? []) as unknown as ServerRecommendationRow[],
+    lastPulledAt,
+    deletedJobIds,
+  );
+  const photoChanges = bucketJobPhotos(
+    (photosRes.data ?? []) as unknown as ServerJobPhotoRow[],
+    lastPulledAt,
+    deletedJobIds,
+  );
+  const locationChanges = bucketLocations(
+    (locationsRes.data ?? []) as unknown as ServerLocationRow[],
+    lastPulledAt,
+  );
+
+  return json({
+    data: {
+      changes: {
+        jobs: jobChanges,
+        inspection_reports: reportChanges,
+        inspection_steps: stepChanges,
+        recommendations: recommendationChanges,
+        job_photos: photoChanges,
+        technician_locations: locationChanges,
+      },
+      timestamp,
+    },
+  });
 });
 
 workOrdersRouter.get("/v1/tech-app/technician-id", async (c) => {
