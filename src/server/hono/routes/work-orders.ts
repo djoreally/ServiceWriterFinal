@@ -2645,12 +2645,22 @@ workOrdersRouter.delete("/v1/catalog/items/:id", async (c) => {
 // around a service record. This endpoint returns all raw pieces in one
 // round trip; the client keeps its mapping/adapter logic. Returns
 // `{ data: null }` when the record does not exist.
+//
+// This is the ONLY registration of this route (Item #9 Step 2): the
+// shadowed twin in vehicles.ts was deleted. Workspace membership is
+// enforced via requireWorkspaceAuth, ported from that serving copy.
+// The catalog embed reads the live `estimated_minutes` column (Step 8
+// schema translation) and the bundle renames it to the client's
+// `estimated_duration` field, matching the rename pattern used by the
+// catalog queries — the legacy `estimated_duration` column does not
+// exist on service_catalog, and embedding it made PostgREST reject the
+// whole bundle for every appointment-linked record.
 // ---------------------------------------------------------------------------
 
 workOrdersRouter.get("/v1/service-records/:id/detail-full", async (c) => {
-  const { supabase } = await requireAuth(c);
-  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id") ?? "");
-  const serviceId = c.req.param("id");
+  const serviceId = z.string().uuid().parse(c.req.param("id"));
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const { data: service, error: serviceError } = await (supabase.from("service_records") as any)
     .select("*").eq("workspace_id", workspaceId).eq("id", serviceId).maybeSingle();
   if (serviceError) throw serviceError;
@@ -2698,11 +2708,29 @@ workOrdersRouter.get("/v1/service-records/:id/detail-full", async (c) => {
   let firstAppointmentItem: unknown = null;
   if (service.appointment_id) {
     const itemRes = await (supabase.from("appointment_items") as any)
-      .select("service_catalog_id,description,quantity,unit_price,service_catalog(name,description,estimated_duration)")
+      .select("service_catalog_id,description,quantity,unit_price,service_catalog(name,description,estimated_minutes)")
       .eq("workspace_id", workspaceId).eq("appointment_id", service.appointment_id)
       .order("created_at").limit(1);
     if (itemRes.error) throw itemRes.error;
-    firstAppointmentItem = (itemRes.data ?? [])[0] ?? null;
+    const rawItem = (itemRes.data ?? [])[0] ?? null;
+    if (rawItem) {
+      const catalog = rawItem.service_catalog as
+        | { name: string | null; description: string | null; estimated_minutes: number | null }
+        | null;
+      firstAppointmentItem = {
+        service_catalog_id: rawItem.service_catalog_id ?? null,
+        description: rawItem.description ?? null,
+        quantity: rawItem.quantity ?? null,
+        unit_price: rawItem.unit_price ?? null,
+        service_catalog: catalog
+          ? {
+              name: catalog.name ?? null,
+              description: catalog.description ?? null,
+              estimated_duration: catalog.estimated_minutes ?? null,
+            }
+          : null,
+      };
+    }
   }
 
   return json({

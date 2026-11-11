@@ -150,18 +150,39 @@ interface ServiceDetailBundle {
   } | null;
 }
 
-export async function fetchServiceDetail(serviceId: string): Promise<ServiceDetailResult | null> {
-  const { data: { user } } = await getCurrentAuthUser();
-  if (!user) return null;
-  const context = await resolveCurrentWorkspace();
-  if (!context) return null;
+/**
+ * Load outcome for the detail page (Item #9 Step 2, CHAIR-3): "not_found"
+ * is the endpoint's documented `{ data: null }` answer for a record that
+ * does not exist; "error" is any failure to load at all (HTTP error,
+ * network, no session/workspace). The two must never collapse into one
+ * another — collapsing them is what made every server break read as
+ * "Service not found" while the record itself was fine.
+ */
+export type ServiceDetailLoadResult =
+  | { status: "ok"; detail: ServiceDetailResult }
+  | { status: "not_found" }
+  | { status: "error"; message: string };
 
-  const response = await apiClient.get<{ data: ServiceDetailBundle | null }>(
-    `/v1/service-records/${serviceId}/detail-full`,
-    { query: { workspace_id: context.workspaceId } },
-  ).catch(() => ({ data: null as ServiceDetailBundle | null }));
-  const bundle = response.data;
-  if (!bundle) return null;
+export async function fetchServiceDetail(serviceId: string): Promise<ServiceDetailLoadResult> {
+  const { data: { user } } = await getCurrentAuthUser();
+  if (!user) return { status: "error", message: "You are not signed in." };
+  const context = await resolveCurrentWorkspace();
+  if (!context) return { status: "error", message: "No active workspace is selected." };
+
+  let bundle: ServiceDetailBundle | null;
+  try {
+    const response = await apiClient.get<{ data: ServiceDetailBundle | null }>(
+      `/v1/service-records/${serviceId}/detail-full`,
+      { query: { workspace_id: context.workspaceId } },
+    );
+    bundle = response.data;
+  } catch (err) {
+    return {
+      status: "error",
+      message: err instanceof Error ? err.message : "The service record could not be loaded.",
+    };
+  }
+  if (!bundle) return { status: "not_found" };
 
   const row = bundle.service;
   const metadata = object(row.metadata);
@@ -259,16 +280,19 @@ export async function fetchServiceDetail(serviceId: string): Promise<ServiceDeta
   ];
 
   return {
-    service,
-    customer,
-    vehicle,
-    laborItems,
-    timeline,
-    businessName: bundle.workspace_name || "",
-    businessEmail: bundle.workspace_email || "",
-    guestInfo,
-    catalogDescription,
-    catalogLaborHours,
-    oilType,
+    status: "ok",
+    detail: {
+      service,
+      customer,
+      vehicle,
+      laborItems,
+      timeline,
+      businessName: bundle.workspace_name || "",
+      businessEmail: bundle.workspace_email || "",
+      guestInfo,
+      catalogDescription,
+      catalogLaborHours,
+      oilType,
+    },
   };
 }
