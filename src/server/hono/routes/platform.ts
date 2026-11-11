@@ -2555,10 +2555,15 @@ platformRouter.post("/v1/platform/onboarding/site-import", async (c) => {
 
 platformRouter.get("/v1/platform/onboarding/site-import/latest", async (c) => {
   const { supabase, user } = await requireAuth(c);
+  // Step 12 translation: onboarding_site_imports is workspace-tenanted
+  // (user_id remains the legacy creator column); resolve the caller's
+  // workspace the same way the neighboring dashboard route does.
+  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id);
+  if (!workspaceId) return json(null);
   const { data, error } = await (supabase as any)
     .from("onboarding_site_imports")
     .select("payload, warnings, status")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .eq("status", "completed")
     .order("created_at", { ascending: false })
     .limit(1)
