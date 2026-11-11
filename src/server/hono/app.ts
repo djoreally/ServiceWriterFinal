@@ -15,6 +15,11 @@
  *   actually runs for every route.
  * - Global `OPTIONS *` returns 204 with the same CORS headers the original
  *   `json()` helper sets, so preflight behavior is unchanged.
+ * - CORS is origin-aware (see `corsHeaders` in `@/server/api`): a
+ *   middleware reflects the request `Origin` onto every response when —
+ *   and only when — it is allowlisted (the technician app's origin is the
+ *   reason this exists), and strips CORS headers for non-allowlisted
+ *   origins so no route helper can leak them.
  */
 import { Hono } from "hono";
 import { corsHeaders, errorResponse, toError } from "@/server/api";
@@ -52,11 +57,15 @@ export function createHonoApp(): Hono {
   // carried one) rides along so 5xx captures in errorResponse are useful;
   // it never changes the response shape.
   app.onError((error, c) =>
-    errorResponse(error, {
-      route: c.req.path,
-      method: c.req.method,
-      workspaceId: c.req.query("workspace_id"),
-    }),
+    errorResponse(
+      error,
+      {
+        route: c.req.path,
+        method: c.req.method,
+        workspaceId: c.req.query("workspace_id"),
+      },
+      c.req.header("origin"),
+    ),
   );
 
   // Hono only routes `instanceof Error` throws to onError. PostgREST errors
@@ -71,8 +80,29 @@ export function createHonoApp(): Hono {
     }
   });
 
-  // CORS preflight: mirror the headers the original `json()` helper sets.
-  app.options("*", () => new Response(null, { status: 204, headers: corsHeaders() }));
+  // CORS: reflect the request Origin onto the response when it is
+  // allowlisted, and guarantee a non-allowlisted origin receives no
+  // Access-Control-Allow-Origin even if a route helper emitted one.
+  // Requests without an Origin header (same-origin browser calls,
+  // non-browser clients) pass through untouched. Thrown errors bypass
+  // this middleware on the way to onError, which applies the same
+  // allowlist via errorResponse's origin parameter.
+  app.use(async (c, next) => {
+    await next();
+    const origin = c.req.header("origin");
+    if (!origin) return;
+    const reflected = corsHeaders(origin);
+    if (reflected.get("Access-Control-Allow-Origin")) {
+      reflected.forEach((value, key) => c.res.headers.set(key, value));
+    } else {
+      c.res.headers.delete("Access-Control-Allow-Origin");
+      c.res.headers.delete("Access-Control-Allow-Credentials");
+    }
+  });
+
+  // CORS preflight: mirror the headers the original `json()` helper sets,
+  // reflected for allowlisted origins only.
+  app.options("*", (c) => new Response(null, { status: 204, headers: corsHeaders(c.req.header("origin")) }));
 
   // ---------------------------------------------------------------------------
   // Domain routers. Each router registers paths relative to `/api` (the

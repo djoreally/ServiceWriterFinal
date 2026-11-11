@@ -11,11 +11,51 @@ export class ApiError extends Error {
   }
 }
 
-export function corsHeaders() {
+/**
+ * CORS is origin-aware: a request's `Origin` is reflected ONLY when it is
+ * on the allowlist. The office app is same-origin and never needed this;
+ * the technician app (a separate origin) is blocked by the browser
+ * without a reflected `Access-Control-Allow-Origin`, which is why this
+ * allowlist exists. Non-allowlisted origins receive no CORS headers at
+ * all, and credentials are only ever paired with a reflected allowlisted
+ * origin — never a wildcard.
+ */
+const DEFAULT_CORS_ORIGINS: readonly string[] = [
+  "https://www.servicewriter.xyz",
+  "https://servicewriter.xyz",
+  "https://lovable-tech-partner.vercel.app",
+  "https://techapp.servicewriter.xyz",
+];
+
+/** Origins configured via NEXT_PUBLIC_CORS_ORIGIN (comma-separated list; a single value keeps working). */
+function configuredCorsOrigins(): string[] {
+  return (process.env.NEXT_PUBLIC_CORS_ORIGIN ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0);
+}
+
+export function corsAllowedOrigins(): string[] {
+  return [...DEFAULT_CORS_ORIGINS, ...configuredCorsOrigins()];
+}
+
+export function corsHeaders(requestOrigin?: string | null) {
   const headers = new Headers();
-  const origin = process.env.NEXT_PUBLIC_CORS_ORIGIN;
-  if (origin) {
-    headers.set("Access-Control-Allow-Origin", origin);
+  let allowOrigin: string | undefined;
+  if (requestOrigin) {
+    // A browser request: reflect the origin only if it is allowlisted.
+    if (corsAllowedOrigins().includes(requestOrigin)) {
+      allowOrigin = requestOrigin;
+    }
+  } else {
+    // No request Origin to judge (non-browser client, or a caller that
+    // does not have the request in hand): preserve the historical
+    // behavior — emit the env-configured origin when one is set, and
+    // nothing when it is not.
+    allowOrigin = configuredCorsOrigins()[0];
+  }
+  if (allowOrigin) {
+    headers.set("Access-Control-Allow-Origin", allowOrigin);
     headers.set("Access-Control-Allow-Credentials", "true");
     headers.set("Access-Control-Allow-Headers", "authorization, content-type");
     headers.set("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS");
@@ -24,8 +64,8 @@ export function corsHeaders() {
   return headers;
 }
 
-export function json<T>(data: T, init?: ResponseInit) {
-  const headers = corsHeaders();
+export function json<T>(data: T, init?: ResponseInit, requestOrigin?: string | null) {
+  const headers = corsHeaders(requestOrigin);
   new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
   return NextResponse.json(data, { ...init, headers });
 }
@@ -71,14 +111,19 @@ export function toError(value: unknown): Error {
   return error;
 }
 
-export function errorResponse(error: unknown, requestContext: ServerErrorContext = {}) {
+export function errorResponse(error: unknown, requestContext: ServerErrorContext = {}, requestOrigin?: string | null) {
+  // Every envelope below is built through this helper so the CORS
+  // treatment matches json(): the request origin is reflected only when
+  // allowlisted (see corsHeaders).
+  const respond = (data: unknown, init?: ResponseInit) => json(data, init, requestOrigin);
+
   if (error instanceof ApiError) {
     // Deliberately raised API errors are expected outcomes; only a 5xx
     // ApiError is a server fault worth reporting to Sentry.
     if (error.status >= 500) {
       captureServerError(error, { ...requestContext, code: error.code, status: error.status });
     }
-    return json({ error: { code: error.code, message: error.message } }, { status: error.status });
+    return respond({ error: { code: error.code, message: error.message } }, { status: error.status });
   }
 
   // Postgres raise_exception from RPCs (e.g. technician_transition_job_v1
@@ -93,7 +138,7 @@ export function errorResponse(error: unknown, requestContext: ServerErrorContext
     const detail = firstIssue
       ? `${firstIssue.path.join(".") || "input"}: ${firstIssue.message}`
       : "Invalid request input.";
-    return json({ error: { code: "invalid_input", message: detail } }, { status: 400 });
+    return respond({ error: { code: "invalid_input", message: detail } }, { status: 400 });
   }
 
   const candidate = error as {
@@ -106,26 +151,26 @@ export function errorResponse(error: unknown, requestContext: ServerErrorContext
   } | null;
   const code = candidate?.code;
   if (code === "PGRST116") {
-    return json({ error: { code: "not_found", message: "The requested record is no longer available." } }, { status: 404 });
+    return respond({ error: { code: "not_found", message: "The requested record is no longer available." } }, { status: 404 });
   }
   if (code === "23505") {
-    return json({ error: { code: "conflict", message: "This record already exists." } }, { status: 409 });
+    return respond({ error: { code: "conflict", message: "This record already exists." } }, { status: 409 });
   }
   if (code === "23503") {
-    return json({ error: { code: "invalid_reference", message: "A related record could not be found." } }, { status: 409 });
+    return respond({ error: { code: "invalid_reference", message: "A related record could not be found." } }, { status: 409 });
   }
   if (code === "P0001") {
     const sanitized = sanitizeRpcMessage(candidate?.message);
-    return json({ error: { code: sanitized.code, message: sanitized.message } }, { status: 409 });
+    return respond({ error: { code: sanitized.code, message: sanitized.message } }, { status: 409 });
   }
   if (code === "23P01") {
-    return json(
+    return respond(
       { error: { code: "schedule_conflict", message: "The requested time overlaps an existing appointment or buffer." } },
       { status: 409 },
     );
   }
   if (code === "22P02" || code === "22007" || code === "22023") {
-    return json({ error: { code: "invalid_input", message: "One or more values are invalid." } }, { status: 400 });
+    return respond({ error: { code: "invalid_input", message: "One or more values are invalid." } }, { status: 400 });
   }
   // PostgREST's own error codes (PGRST*) mean the database gateway could
   // not serve the request as asked — most importantly PGRST202, "function
@@ -142,7 +187,7 @@ export function errorResponse(error: unknown, requestContext: ServerErrorContext
     // A 503 from the database gateway is a server-side fault (missing RPC,
     // stale schema cache, pool failure) — report it with its real code.
     captureServerError(error, { ...requestContext, code, status: 503 });
-    return json(
+    return respond(
       { error: { code, message: candidate?.message ?? "The request could not be completed." } },
       { status: 503 },
     );
@@ -151,7 +196,7 @@ export function errorResponse(error: unknown, requestContext: ServerErrorContext
     if (candidate.status >= 500) {
       captureServerError(error, { ...requestContext, code: code ?? "request_failed", status: candidate.status });
     }
-    return json({ error: { code: code ?? "request_failed", message: candidate.message ?? "The request could not be completed." } }, { status: candidate.status });
+    return respond({ error: { code: code ?? "request_failed", message: candidate.message ?? "The request could not be completed." } }, { status: candidate.status });
   }
 
   const diagnostic = error instanceof Error
@@ -171,7 +216,7 @@ export function errorResponse(error: unknown, requestContext: ServerErrorContext
   // the 2026-11-10 phantom-column 42703 sat here unseen for six hours).
   // Report it under its real diagnostic identity before masking it.
   captureServerError(error, { ...requestContext, code: code ?? "internal_error", status: 500 });
-  return json({ error: { code: "internal_error", message: "An unexpected error occurred." } }, { status: 500 });
+  return respond({ error: { code: "internal_error", message: "An unexpected error occurred." } }, { status: 500 });
 }
 
 export async function requireUser(request?: Request) {

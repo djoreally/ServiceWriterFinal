@@ -109,7 +109,7 @@ describe("corsHeaders", () => {
     delete process.env.NEXT_PUBLIC_CORS_ORIGIN;
   });
 
-  it("sets the full CORS header set when an origin is configured", () => {
+  it("sets the full CORS header set when an origin is configured (no request origin)", () => {
     process.env.NEXT_PUBLIC_CORS_ORIGIN = "https://app.example.com";
     const headers = corsHeaders();
     expect(headers.get("Access-Control-Allow-Origin")).toBe("https://app.example.com");
@@ -119,10 +119,74 @@ describe("corsHeaders", () => {
     expect(headers.get("Vary")).toBe("Origin");
   });
 
-  it("returns empty headers when no origin is configured", () => {
+  it("returns empty headers when no origin is configured and no request origin is given", () => {
     const headers = corsHeaders();
     expect(headers.get("Access-Control-Allow-Origin")).toBeNull();
     expect([...headers.keys()]).toHaveLength(0);
+  });
+
+  it("reflects the technician app origin from the default allowlist without any env config", () => {
+    const headers = corsHeaders("https://lovable-tech-partner.vercel.app");
+    expect(headers.get("Access-Control-Allow-Origin")).toBe("https://lovable-tech-partner.vercel.app");
+    expect(headers.get("Access-Control-Allow-Credentials")).toBe("true");
+    expect(headers.get("Access-Control-Allow-Headers")).toBe("authorization, content-type");
+    expect(headers.get("Access-Control-Allow-Methods")).toBe("GET,POST,PATCH,PUT,DELETE,OPTIONS");
+    expect(headers.get("Vary")).toBe("Origin");
+  });
+
+  it("reflects the office app origins from the default allowlist", () => {
+    expect(corsHeaders("https://www.servicewriter.xyz").get("Access-Control-Allow-Origin")).toBe(
+      "https://www.servicewriter.xyz",
+    );
+    expect(corsHeaders("https://servicewriter.xyz").get("Access-Control-Allow-Origin")).toBe(
+      "https://servicewriter.xyz",
+    );
+  });
+
+  it("reflects the tech app's own subdomain from the default allowlist", () => {
+    const headers = corsHeaders("https://techapp.servicewriter.xyz");
+    expect(headers.get("Access-Control-Allow-Origin")).toBe("https://techapp.servicewriter.xyz");
+    expect(headers.get("Access-Control-Allow-Credentials")).toBe("true");
+  });
+
+  it("returns no CORS headers for a non-allowlisted origin", () => {
+    const headers = corsHeaders("https://evil.example.com");
+    expect(headers.get("Access-Control-Allow-Origin")).toBeNull();
+    expect(headers.get("Access-Control-Allow-Credentials")).toBeNull();
+    expect([...headers.keys()]).toHaveLength(0);
+  });
+
+  it("does not reflect a non-allowlisted origin even when env config names a different one", () => {
+    process.env.NEXT_PUBLIC_CORS_ORIGIN = "https://app.example.com";
+    const headers = corsHeaders("https://evil.example.com");
+    expect(headers.get("Access-Control-Allow-Origin")).toBeNull();
+    expect([...headers.keys()]).toHaveLength(0);
+  });
+
+  it("reflects the request origin, not the env value, when both are allowlisted", () => {
+    process.env.NEXT_PUBLIC_CORS_ORIGIN = "https://app.example.com";
+    const headers = corsHeaders("https://lovable-tech-partner.vercel.app");
+    expect(headers.get("Access-Control-Allow-Origin")).toBe("https://lovable-tech-partner.vercel.app");
+  });
+
+  it("extends the allowlist from a single-value env config", () => {
+    process.env.NEXT_PUBLIC_CORS_ORIGIN = "https://app.example.com";
+    expect(corsHeaders("https://app.example.com").get("Access-Control-Allow-Origin")).toBe("https://app.example.com");
+  });
+
+  it("extends the allowlist from a comma-separated env config, trimming whitespace", () => {
+    process.env.NEXT_PUBLIC_CORS_ORIGIN = "https://a.example.com, https://b.example.com ,https://c.example.com";
+    expect(corsHeaders("https://a.example.com").get("Access-Control-Allow-Origin")).toBe("https://a.example.com");
+    expect(corsHeaders("https://b.example.com").get("Access-Control-Allow-Origin")).toBe("https://b.example.com");
+    expect(corsHeaders("https://c.example.com").get("Access-Control-Allow-Origin")).toBe("https://c.example.com");
+    expect(corsHeaders("https://d.example.com").get("Access-Control-Allow-Origin")).toBeNull();
+  });
+
+  it("treats a null request origin like an absent one (legacy env behavior)", () => {
+    process.env.NEXT_PUBLIC_CORS_ORIGIN = "https://app.example.com";
+    expect(corsHeaders(null).get("Access-Control-Allow-Origin")).toBe("https://app.example.com");
+    delete process.env.NEXT_PUBLIC_CORS_ORIGIN;
+    expect(corsHeaders(null).get("Access-Control-Allow-Origin")).toBeNull();
   });
 });
 
@@ -144,9 +208,36 @@ describe("json", () => {
     const res = json({ ok: true });
     expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://app.example.com");
   });
+
+  it("reflects an allowlisted request origin", () => {
+    const res = json({ ok: true }, undefined, "https://lovable-tech-partner.vercel.app");
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://lovable-tech-partner.vercel.app");
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+  });
+
+  it("emits no CORS headers for a non-allowlisted request origin", () => {
+    const res = json({ ok: true }, undefined, "https://evil.example.com");
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+  });
 });
 
 describe("errorResponse", () => {
+  it("reflects an allowlisted request origin on the error envelope", async () => {
+    const res = errorResponse(new ApiError(404, "nope", "not_found"), {}, "https://lovable-tech-partner.vercel.app");
+    expect(res.status).toBe(404);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://lovable-tech-partner.vercel.app");
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+    await expect(res.json()).resolves.toEqual({ error: { code: "not_found", message: "nope" } });
+  });
+
+  it("emits no CORS headers on the envelope for a non-allowlisted origin", async () => {
+    const res = errorResponse(new ApiError(404, "nope", "not_found"), {}, "https://evil.example.com");
+    expect(res.status).toBe(404);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    await expect(res.json()).resolves.toEqual({ error: { code: "not_found", message: "nope" } });
+  });
+
   it("maps ApiError to its status, code, and message", async () => {
     const res = errorResponse(new ApiError(422, "orphan row", "orphan_customer"));
     expect(res.status).toBe(422);
