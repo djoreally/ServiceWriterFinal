@@ -25,6 +25,7 @@ import { ApiError, json, paginationSchema, requireWorkspaceMember } from "@/serv
 import { requireAuth, requireWorkspaceAuth } from "@/server/hono/middleware/auth";
 import type { Context } from "hono";
 import { getNextFleetWorkOrderStatus } from "@/domain/fleet/work-order-lifecycle";
+import { decodePlateWithVehicleDatabases } from "@/server/hono/lib/vehicle-databases";
 import { toDollars } from "@/lib/money";
 
 export const vehiclesRouter = new Hono();
@@ -1438,7 +1439,8 @@ vehiclesRouter.post("/v1/tire-pricing/public-inventory", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// VIN (dead provider edge functions keep their unavailable contract)
+// VIN (ocr/decode remain dead provider stubs; plate-lookup is LIVE —
+// it runs on Vehicle Databases behind VEHICLE_DATABASES_API_KEY)
 // ---------------------------------------------------------------------------
 
 vehiclesRouter.post("/v1/vin/ocr", async (c) => {
@@ -1451,9 +1453,34 @@ vehiclesRouter.post("/v1/vin/decode", async (c) => {
   return providerUnavailable("vin-decode");
 });
 
+const plateLookupSchema = z.object({
+  licensePlate: z.string().trim().min(1).max(20),
+  state: z.string().trim().min(2).max(2),
+});
+
 vehiclesRouter.post("/v1/vin/plate-lookup", async (c) => {
   await requireAuth(c);
-  return providerUnavailable("carfax-quickvin");
+  const body = await c.req.json().catch(() => null);
+  const parsed = plateLookupSchema.safeParse(body ?? {});
+  if (!parsed.success) {
+    throw new ApiError(400, "licensePlate and state are required", "invalid_request");
+  }
+  const apiKey = process.env.VEHICLE_DATABASES_API_KEY;
+  if (!apiKey) {
+    // House contract (the VehicleSpecs caller and the CARFAX query
+    // both read it this way): a missing key answers 200 with
+    // integrationUnavailable, so callers show "not configured"
+    // instead of treating it as a lookup failure.
+    return json({
+      data: { success: false, integrationUnavailable: true, error: "Plate lookup is not configured" },
+    });
+  }
+  const result = await decodePlateWithVehicleDatabases(
+    parsed.data.licensePlate.toUpperCase(),
+    parsed.data.state.toUpperCase(),
+    apiKey,
+  );
+  return json({ data: result });
 });
 
 // ---------------------------------------------------------------------------
