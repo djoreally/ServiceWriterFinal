@@ -18,6 +18,11 @@ import { z } from "zod";
 import { ApiError, json, paginationSchema } from "@/server/api";
 import { createSupabaseAdminClient, createSupabaseAnonServerClient } from "@/lib/supabase";
 import { requireAuth, requireWorkspaceAuth } from "@/server/hono/middleware/auth";
+import {
+  bucketJobChanges,
+  composeVehicleDisplay,
+  type ComposedSyncAppointment,
+} from "@/application/queries/tech-app-sync.query";
 
 export const workOrdersRouter = new Hono();
 
@@ -1992,6 +1997,140 @@ workOrdersRouter.get("/v1/tech-app/jobs", async (c) => {
     };
   });
   return json({ data: jobs });
+});
+
+workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
+  // Tech app sync pull (SYNC-1, 2026-11-11): the server half of the
+  // Watermelon synchronize() protocol the external tech app already
+  // calls (lovable-tech-partner src/lib/swSync.ts). Returns the
+  // caller's OWN assigned jobs as local-shape change sets bucketed
+  // against last_pulled_at; the pure mapping/bucketing lives in
+  // src/application/queries/tech-app-sync.query.ts.
+  //
+  // Scope v1: the jobs table only — the same window the jobs door
+  // serves (starts_at from 36h ago through +8 days). Inspections,
+  // photos and locations join the pull in SYNC-1b; until then their
+  // absence reads as "no changes" to the client. Deletes: cancelled
+  // appointments, plus (on incremental pulls) appointments in the
+  // window changed since last_pulled_at that are no longer assigned
+  // to the caller — deleting an id the device never held is a
+  // Watermelon no-op, so the wider net is safe. Composition mirrors
+  // the jobs door above (title from the first item's catalog name;
+  // address from appointment metadata, then the customer's fields).
+  const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c);
+  const timestamp = Date.now();
+  const rawLast = new URL(c.req.url).searchParams.get("last_pulled_at");
+  const parsedLast = rawLast ? Number(rawLast) : 0;
+  const lastPulledAt = Number.isFinite(parsedLast) && parsedLast > 0 ? Math.floor(parsedLast) : 0;
+
+  const windowStart = new Date(timestamp - 36 * 60 * 60 * 1000).toISOString();
+  const windowEnd = new Date(timestamp + 8 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: appointments, error: appointmentsError } = await (supabase.from("appointments") as any)
+    .select("id, workspace_id, customer_id, vehicle_id, assigned_user_id, status, dispatch_status, starts_at, ends_at, source, confirmation_code, notes, metadata, created_at, updated_at")
+    .eq("workspace_id", workspaceId)
+    .eq("assigned_user_id", user.id)
+    .gte("starts_at", windowStart)
+    .lt("starts_at", windowEnd)
+    .order("starts_at", { ascending: true });
+  if (appointmentsError) throw appointmentsError;
+  const rows = (appointments ?? []) as Array<Record<string, any>>;
+
+  let extraDeletedIds: string[] = [];
+  if (lastPulledAt > 0) {
+    const sinceIso = new Date(lastPulledAt).toISOString();
+    const { data: moved, error: movedError } = await (supabase.from("appointments") as any)
+      .select("id")
+      .eq("workspace_id", workspaceId)
+      .or(`assigned_user_id.is.null,assigned_user_id.neq.${user.id}`)
+      .gte("starts_at", windowStart)
+      .lt("starts_at", windowEnd)
+      .gt("updated_at", sinceIso);
+    if (movedError) throw movedError;
+    extraDeletedIds = ((moved ?? []) as Array<Record<string, any>>).map((r) => r.id as string);
+  }
+
+  const customerIds = Array.from(new Set(rows.map((r) => r.customer_id).filter((id: unknown): id is string => typeof id === "string")));
+  const vehicleIds = Array.from(new Set(rows.map((r) => r.vehicle_id).filter((id: unknown): id is string => typeof id === "string")));
+  const appointmentIds = rows.map((r) => r.id as string);
+  const empty = { data: [], error: null };
+  const [customersRes, vehiclesRes, itemsRes] = await Promise.all([
+    customerIds.length > 0
+      ? (supabase.from("customers") as any)
+        .select("id, first_name, last_name, company_name, email, phone, address_line1, address_line2, city, region, postal_code")
+        .in("id", customerIds).eq("workspace_id", workspaceId)
+      : Promise.resolve(empty),
+    vehicleIds.length > 0
+      ? (supabase.from("vehicles") as any)
+        .select("id, vin, year, make, model, trim, mileage")
+        .in("id", vehicleIds).eq("workspace_id", workspaceId)
+      : Promise.resolve(empty),
+    appointmentIds.length > 0
+      ? (supabase.from("appointment_items") as any)
+        .select("id, appointment_id, service_catalog_id, item_type, description, quantity, unit_price, sort_order, service_catalog(id, name)")
+        .in("appointment_id", appointmentIds).eq("workspace_id", workspaceId)
+        .order("sort_order", { ascending: true })
+      : Promise.resolve(empty),
+  ]);
+  const joinError = customersRes.error || vehiclesRes.error || itemsRes.error;
+  if (joinError) throw joinError;
+  const customersById = new Map<string, Record<string, any>>(((customersRes.data ?? []) as Array<Record<string, any>>).map((r) => [r.id as string, r]));
+  const vehiclesById = new Map<string, Record<string, any>>(((vehiclesRes.data ?? []) as Array<Record<string, any>>).map((r) => [r.id as string, r]));
+  const itemsByAppointment = new Map<string, Array<Record<string, any>>>();
+  for (const item of (itemsRes.data ?? []) as Array<Record<string, any>>) {
+    const list = itemsByAppointment.get(item.appointment_id as string) ?? [];
+    list.push(item);
+    itemsByAppointment.set(item.appointment_id as string, list);
+  }
+
+  const composed: ComposedSyncAppointment[] = rows.map((appt) => {
+    const customer = appt.customer_id ? customersById.get(appt.customer_id as string) ?? null : null;
+    const vehicle = appt.vehicle_id ? vehiclesById.get(appt.vehicle_id as string) ?? null : null;
+    const metadata = (appt.metadata ?? {}) as Record<string, any>;
+    const services = (itemsByAppointment.get(appt.id as string) ?? []).map((item) => ({
+      name: (item.service_catalog as Record<string, any> | null)?.name ?? item.description ?? "Service",
+      price: Number(item.unit_price ?? 0) * Number(item.quantity ?? 1),
+    }));
+    const customerName = customer
+      ? [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim() || (customer.company_name as string | null) || null
+      : (metadata.customer_name as string | undefined) ?? (metadata.guest_name as string | undefined) ?? null;
+    const customerPhone = (customer?.phone as string | null) ?? (metadata.guest_phone as string | undefined) ?? (metadata.customer_phone as string | undefined) ?? null;
+    const customerAddress = customer
+      ? [customer.address_line1, customer.address_line2, customer.city, customer.region, customer.postal_code].filter(Boolean).join(", ") || null
+      : null;
+    const startsAt = appt.starts_at as string;
+    const endsAt = (appt.ends_at as string | null) ?? null;
+    const durationMinutes = endsAt
+      ? Math.round((new Date(endsAt).getTime() - new Date(startsAt).getTime()) / 60000)
+      : null;
+    const estimatedCost = typeof metadata.estimated_cost === "number"
+      ? metadata.estimated_cost
+      : services.length > 0
+        ? services.reduce((sum, s) => sum + s.price, 0)
+        : null;
+    return {
+      id: appt.id as string,
+      serverStatus: (appt.status as string | null) ?? null,
+      title: services[0]?.name ?? (metadata.service_name as string | undefined) ?? "Service Appointment",
+      customerName,
+      customerPhone,
+      customerEmail: (customer?.email as string | null) ?? null,
+      vehicleDisplay: composeVehicleDisplay(vehicle),
+      vin: (vehicle?.vin as string | null) ?? null,
+      mileageIn: typeof vehicle?.mileage === "number" ? (vehicle.mileage as number) : null,
+      address: (metadata.service_address as string | undefined) ?? (metadata.address as string | undefined) ?? customerAddress,
+      startsAt,
+      endsAt,
+      durationMinutes,
+      estimatedCost,
+      notes: (appt.notes as string | null) ?? null,
+      services,
+      createdAt: appt.created_at as string,
+      updatedAt: (appt.updated_at as string | null) ?? null,
+    };
+  });
+
+  const changes = bucketJobChanges(composed, lastPulledAt, extraDeletedIds);
+  return json({ data: { changes: { jobs: changes }, timestamp } });
 });
 
 workOrdersRouter.get("/v1/tech-app/technician-id", async (c) => {
