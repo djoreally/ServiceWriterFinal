@@ -55,6 +55,7 @@ import {
   type WebsiteBookingsConfig,
 } from "./client";
 import { sendShopBookingNotification } from "@/server/messaging/booking-confirmation";
+import { attemptAutoDispatchNewAppointment } from "@/server/appointments/auto-dispatch";
 
 /** Coordinates plus the structured address parts the push passes to the
  * booking RPC's profile-merge params (Cycle 7 S2). */
@@ -1089,6 +1090,20 @@ export async function executePushes(
     try {
       await stampWebsiteBookingPushed(config, bookingId, createdId);
       await notifyShopOfPushedBooking(supabase, ctx, booking, createdId);
+      // Auto-dispatch (2026-11-11): a pushed website booking is a NEW
+      // appointment, but its creation happens inside the booking RPC —
+      // neither bookAppointmentCore nor the public-booking route ever
+      // sees it, so this boundary runs the same fail-soft attempt those
+      // paths run. Flag-gated inside the helper (a workspace with
+      // auto-dispatch off is untouched), creation-time only (the Link
+      // path above never reaches here), and it can never fail the
+      // push: the helper converts every failure into null + a Sentry
+      // report. Without this call, website bookings — the shop's main
+      // intake — landed unassigned and invisible on the tech's phone.
+      await attemptAutoDispatchNewAppointment(
+        { workspaceId, appointmentId: createdId },
+        supabase,
+      );
       results.push({
         booking_id: bookingId,
         status: "created",

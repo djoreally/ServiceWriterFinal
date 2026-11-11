@@ -28,7 +28,12 @@ jest.mock("@/server/website-bookings/client", () => {
   };
 });
 
+jest.mock("@/server/appointments/auto-dispatch", () => ({
+  attemptAutoDispatchNewAppointment: jest.fn(async () => null),
+}));
+
 import * as client from "@/server/website-bookings/client";
+import { attemptAutoDispatchNewAppointment } from "@/server/appointments/auto-dispatch";
 import { executeAutoPush, executePushes, parseAddressParts } from "@/server/website-bookings/service";
 import type { WebsiteBooking } from "@/lib/website-bookings";
 
@@ -43,6 +48,7 @@ const NEW_VEHICLE_ID = "e5555555-5555-4555-8555-555555555555";
 const fetchBookings = client.fetchWebsiteBookings as jest.Mock;
 const stampPushed = client.stampWebsiteBookingPushed as jest.Mock;
 const recordFailure = client.recordWebsiteBookingAutoPushFailure as jest.Mock;
+const attemptAutoDispatch = attemptAutoDispatchNewAppointment as jest.Mock;
 
 let bookingSeq = 0;
 const booking = (overrides: Partial<WebsiteBooking> = {}): WebsiteBooking => {
@@ -241,6 +247,14 @@ describe("executeAutoPush (auto-push pipeline)", () => {
     expect(rpcCalls[0].args.p_service_catalog_id).toBe(CATALOG_ID);
     expect(stampPushed).toHaveBeenCalledWith(expect.objectContaining({ baseUrl: "https://backend.test" }), b.id, CREATED_ID);
     expect(recordFailure).not.toHaveBeenCalled();
+    // Auto-dispatch wiring (2026-11-11): a created push runs the same
+    // fail-soft auto-dispatch attempt the other creation paths run —
+    // creation inside the RPC is invisible to them otherwise.
+    expect(attemptAutoDispatch).toHaveBeenCalledTimes(1);
+    expect(attemptAutoDispatch).toHaveBeenCalledWith(
+      { workspaceId: WS_ID, appointmentId: CREATED_ID },
+      supabase,
+    );
   });
 
   it("push writes ONLY the customer's own notes into the appointment (Ty's rule)", async () => {
@@ -384,6 +398,9 @@ describe("executeAutoPush (auto-push pipeline)", () => {
     expect(result.appointment_id).toBe(EXISTING_APPT_ID);
     expect(rpcCalls).toHaveLength(0);
     expect(stampPushed).toHaveBeenCalledWith(expect.anything(), b.id, EXISTING_APPT_ID);
+    // A Link creates nothing, so auto-dispatch never runs for it —
+    // creation-time only, existing appointments are never swept.
+    expect(attemptAutoDispatch).not.toHaveBeenCalled();
   });
 });
 
