@@ -11074,16 +11074,18 @@ export type Database = {
           updated_at: string
           user_id: string
           warnings: Json
+          workspace_id: string
         }
         Insert: {
           created_at?: string
           id?: string
           payload?: Json
           source_url: string
-          status?: string
+          status: string
           updated_at?: string
           user_id: string
           warnings?: Json
+          workspace_id: string
         }
         Update: {
           created_at?: string
@@ -11094,8 +11096,17 @@ export type Database = {
           updated_at?: string
           user_id?: string
           warnings?: Json
+          workspace_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "onboarding_site_imports_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       operational_alerts: {
         Row: {
@@ -15031,6 +15042,59 @@ export type Database = {
         ]
       }
 
+      shop_agent_ledger: {
+        Row: {
+          action: string
+          actor: string
+          created_at: string
+          event_hash: string
+          event_id: string
+          evidence: Json
+          id: string
+          input_hash: string
+          occurred_at: string
+          output_hash: string | null
+          parent_hash: string
+          workspace_id: string
+        }
+        Insert: {
+          action: string
+          actor: string
+          created_at?: string
+          event_hash: string
+          event_id: string
+          evidence?: Json
+          id?: string
+          input_hash: string
+          occurred_at?: string
+          output_hash?: string | null
+          parent_hash: string
+          workspace_id: string
+        }
+        Update: {
+          action?: string
+          actor?: string
+          created_at?: string
+          event_hash?: string
+          event_id?: string
+          evidence?: Json
+          id?: string
+          input_hash?: string
+          occurred_at?: string
+          output_hash?: string | null
+          parent_hash?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shop_agent_ledger_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       shop_pricing_rules: {
         Row: {
           created_at: string | null
@@ -17728,13 +17792,13 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          applies_to?: Database["public"]["Enums"]["training_credit_applies_to"]
+          applies_to: Database["public"]["Enums"]["training_credit_applies_to"]
           created_at?: string
           currency?: string
-          enabled?: boolean
+          enabled: boolean
           id?: string
-          lifetime_cap_cents?: number
-          monthly_cap_cents?: number
+          lifetime_cap_cents: number
+          monthly_cap_cents: number
           singleton?: boolean
           updated_at?: string
         }
@@ -19197,6 +19261,7 @@ export type Database = {
           risk_score: number
           snapshot_id: string | null
           user_id: string
+          workspace_id: string
         }
         Insert: {
           appointment_id: string
@@ -19208,6 +19273,7 @@ export type Database = {
           risk_score?: number
           snapshot_id?: string | null
           user_id: string
+          workspace_id: string
         }
         Update: {
           appointment_id?: string
@@ -19219,6 +19285,7 @@ export type Database = {
           risk_score?: number
           snapshot_id?: string | null
           user_id?: string
+          workspace_id?: string
         }
         Relationships: [
           {
@@ -19229,10 +19296,10 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "weather_risk_logs_snapshot_id_fkey"
-            columns: ["snapshot_id"]
+            foreignKeyName: "weather_risk_logs_workspace_id_fkey"
+            columns: ["workspace_id"]
             isOneToOne: false
-            referencedRelation: "weather_snapshots"
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
