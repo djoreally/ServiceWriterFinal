@@ -301,4 +301,59 @@ describe("createHonoApp CORS (origin-aware allowlist)", () => {
     expect(res.status).toBe(401);
     expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
   });
+
+  // The tech app's identity legs: /v1/tech-app/session and
+  // /v1/tech-app/profile are Hono-only registrations (no legacy route.ts
+  // shadows them), so the middleware/onError treatment above must cover
+  // them on success AND error responses.
+  it("reflects an allowlisted origin on the tech-app session GET response", async () => {
+    const app = createHonoApp();
+    const res = await app.request("/api/v1/tech-app/session", {
+      headers: { Origin: TECH_APP_ORIGIN },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(TECH_APP_ORIGIN);
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+  });
+
+  it("reflects an allowlisted origin on the tech-app profile GET response", async () => {
+    const app = createHonoApp();
+    const res = await app.request("/api/v1/tech-app/profile", {
+      headers: { Origin: TECH_APP_ORIGIN },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(TECH_APP_ORIGIN);
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+  });
+
+  it("sends no Access-Control-Allow-Origin on the tech-app profile GET for a non-allowlisted origin", async () => {
+    const app = createHonoApp();
+    const res = await app.request("/api/v1/tech-app/profile", {
+      headers: { Origin: STRANGER_ORIGIN },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+  });
+
+  it("reflects an allowlisted origin on the tech-app profile error response", async () => {
+    const app = createHonoApp();
+    authState.mode = "unauthorized";
+    const res = await app.request("/api/v1/tech-app/profile", {
+      headers: { Origin: TECH_APP_ORIGIN },
+    });
+    expect(res.status).toBe(401);
+    expect((await res.json()).error.code).toBe("unauthenticated");
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(TECH_APP_ORIGIN);
+  });
+
+  it("sends no Access-Control-Allow-Origin on the tech-app session error response for a non-allowlisted origin", async () => {
+    const app = createHonoApp();
+    authState.mode = "unauthorized";
+    const res = await app.request("/api/v1/tech-app/session", {
+      headers: { Origin: STRANGER_ORIGIN },
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
 });
