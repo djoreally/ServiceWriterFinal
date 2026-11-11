@@ -19,6 +19,11 @@ import { ApiError, json, paginationSchema } from "@/server/api";
 import { createSupabaseAdminClient, createSupabaseAnonServerClient } from "@/lib/supabase";
 import { requireAuth, requireWorkspaceAuth } from "@/server/hono/middleware/auth";
 import {
+  decodePlateWithVehicleDatabases,
+  decodeVinWithVehicleDatabases,
+} from "@/server/hono/lib/vehicle-databases";
+import { getVehicleCatalogSpecs } from "@/server/hono/routes/vehicles";
+import {
   bucketInspectionReports,
   bucketInspectionSteps,
   bucketJobChanges,
@@ -1798,6 +1803,240 @@ workOrdersRouter.get("/v1/tech-app/context", async (c) => {
       clock_entries: clockRes.data ?? [],
       notification_prefs: prefsRes.data ?? null,
     },
+  });
+});
+
+type DataCenterVehicle = {
+  vin: string | null;
+  year: number | null;
+  make: string | null;
+  model: string | null;
+  engine: string | null;
+};
+
+type DataCenterSpecs = {
+  oilType: string | null;
+  oilCapacityQuarts: number | null;
+  oilFilter: string | null;
+  drainPlugTorqueFtLbs: number | null;
+  tireSize: string | null;
+  tirePressurePsi: number | null;
+  coolantType: string | null;
+  batteryGroup: string | null;
+};
+
+function metadataRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function metadataValue(metadata: Record<string, unknown>, ...keys: string[]): unknown {
+  for (const key of keys) {
+    if (metadata[key] !== undefined && metadata[key] !== null && metadata[key] !== "") return metadata[key];
+  }
+  return null;
+}
+
+function textValue(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  return null;
+}
+
+function numericValue(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return null;
+  const match = value.trim().match(/^(-?\d+(?:\.\d+)?)(?:\s*(?:psi))?$/i);
+  return match ? Number(match[1]) : null;
+}
+
+function oilCapacityQuarts(value: unknown): number | null {
+  if (typeof value !== "string") return null;
+  const match = value.trim().match(/^(\d+(?:\.\d+)?)\s*(qts?|quarts?|liters?|litres?|l)\b/i);
+  if (!match) return null;
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount)) return null;
+  return /^(?:l|lit)/i.test(match[2]) ? Math.round(amount * 1.056688 * 10) / 10 : amount;
+}
+
+function torqueFtLbs(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return null;
+  const match = value.match(/(-?\d+(?:\.\d+)?)\s*(?:ft\.?\s*(?:lbs?|pounds?)|lb-ft)\b/i);
+  return match ? Number(match[1]) : null;
+}
+
+function engineDisplacement(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const explicit = value.match(/(\d+(?:\.\d+)?)\s*(?:l|liters?|litres?)\b/i)
+    ?? value.match(/\bturbo\s*(\d+(?:\.\d+)?)/i);
+  if (explicit) return Number(explicit[1]);
+  const numbers = value.match(/\d+(?:\.\d+)?/g) ?? [];
+  return numbers.length === 1 ? Number(numbers[0]) : null;
+}
+
+function selectCatalogEngine<T extends { engine: string | null }>(rows: T[], engine: string | null): T | null {
+  if (rows.length === 0) return null;
+  if (!engine) return rows.length === 1 ? rows[0] : null;
+  const exact = rows.find((row) => row.engine?.trim().toLowerCase() === engine.trim().toLowerCase());
+  if (exact) return exact;
+  const displacement = engineDisplacement(engine);
+  if (displacement === null) return null;
+  const candidates = rows.filter((row) => engineDisplacement(row.engine) === displacement);
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
+function assembleSpecs(row: Record<string, unknown> | null, catalog?: {
+  oil_type?: string | null;
+  oil_capacity?: string | null;
+  oil_filter?: string | null;
+  additional_specs?: Record<string, unknown>;
+} | null): DataCenterSpecs | null {
+  const metadata = metadataRecord(row?.metadata);
+  const catalogMetadata = catalog?.additional_specs ?? {};
+  const first = (...values: unknown[]) => values.find((value) => value !== undefined && value !== null && value !== "") ?? null;
+  const specs: DataCenterSpecs = {
+    oilType: textValue(first(row?.oil_type, catalog?.oil_type)),
+    oilCapacityQuarts: oilCapacityQuarts(first(row?.oil_capacity, catalog?.oil_capacity)),
+    oilFilter: textValue(first(row?.oil_filter, catalog?.oil_filter)),
+    drainPlugTorqueFtLbs: torqueFtLbs(first(
+      metadataValue(metadata, "oil_plug_torque", "drain_plug_torque_ft_lbs", "drainPlugTorqueFtLbs"),
+      metadataValue(catalogMetadata, "oil_plug_torque", "drain_plug_torque_ft_lbs", "drainPlugTorqueFtLbs"),
+    )),
+    tireSize: textValue(first(
+      metadataValue(metadata, "tire_size", "tireSize"),
+      catalog && (catalog as Record<string, unknown>).tire_size,
+      metadataValue(catalogMetadata, "tire_size", "tireSize"),
+    )),
+    tirePressurePsi: numericValue(first(
+      metadataValue(metadata, "tire_pressure_psi", "tirePressurePsi"),
+      metadataValue(catalogMetadata, "tire_pressure_psi", "tirePressurePsi"),
+    )),
+    coolantType: textValue(first(
+      metadataValue(metadata, "coolant_type", "coolantType"),
+      metadataValue(catalogMetadata, "coolant_type", "coolantType"),
+    )),
+    batteryGroup: textValue(first(
+      metadataValue(metadata, "battery_group", "batteryGroup"),
+      metadataValue(catalogMetadata, "battery_group", "batteryGroup"),
+    )),
+  };
+  return Object.values(specs).some((value) => value !== null) ? specs : null;
+}
+
+// One authenticated composer for saved vehicles, VIN decode and plate lookup.
+workOrdersRouter.get("/v1/tech-app/data-center/vehicle", async (c) => {
+  const params = new URL(c.req.url).searchParams;
+  const vinValues = params.getAll("vin");
+  const plateValues = params.getAll("plate");
+  const stateValues = params.getAll("state");
+  const idValues = params.getAll("vehicle_id");
+  const hasVin = vinValues.length === 1 && !!vinValues[0]?.trim();
+  const hasPlate = plateValues.length === 1 && !!plateValues[0]?.trim() && stateValues.length === 1 && !!stateValues[0]?.trim();
+  const hasVehicleId = idValues.length === 1 && !!idValues[0]?.trim();
+  const selectorCount = Number(hasVin) + Number(hasPlate) + Number(hasVehicleId);
+  if (selectorCount !== 1 || (plateValues.length > 0) !== (stateValues.length > 0)) {
+    return json({ success: false, reason: "Provide exactly one of vin, plate plus state, or vehicle_id" }, { status: 400 });
+  }
+
+  const { supabase, workspaceId } = await requireCallerWorkspaceId(c);
+  const db = supabase as any;
+  let vehicle: DataCenterVehicle | null = null;
+  let workspaceVehicleId: string | null = null;
+  let decodedEngine: string | null = null;
+  let vehicleOrigin: "workspace" | "decode" = "decode";
+
+  if (hasVehicleId) {
+    const { data, error } = await db.from("vehicles")
+      .select("id,vin,year,make,model")
+      .eq("workspace_id", workspaceId)
+      .eq("id", idValues[0])
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return json({ success: false, reason: "Vehicle not found in this workspace" });
+    vehicleOrigin = "workspace";
+    workspaceVehicleId = data.id;
+    vehicle = { vin: data.vin ?? null, year: data.year ?? null, make: data.make ?? null, model: data.model ?? null, engine: null };
+  } else {
+    const apiKey = process.env.VEHICLE_DATABASES_API_KEY;
+    if (!apiKey) return json({ success: false, reason: "Vehicle lookup is not configured" });
+
+    let decoded: { success: true; vehicle: { vin: string; year: number; make: string; model: string; engine?: string | null } } | { success: false; error: string };
+    if (hasVin) {
+      const normalizedVin = vinValues[0].trim().toUpperCase();
+      if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(normalizedVin)) {
+        return json({ success: false, reason: "A valid 17-character VIN is required" }, { status: 400 });
+      }
+      decoded = await decodeVinWithVehicleDatabases(normalizedVin, apiKey);
+    } else {
+      const plate = plateValues[0].trim().toUpperCase();
+      const state = stateValues[0].trim().toUpperCase();
+      if (state.length !== 2) return json({ success: false, reason: "A two-character state code is required" }, { status: 400 });
+      decoded = await decodePlateWithVehicleDatabases(plate, state, apiKey);
+    }
+    if (decoded.success === false) return json({ success: false, reason: decoded.error });
+
+    vehicle = {
+      vin: decoded.vehicle.vin,
+      year: decoded.vehicle.year,
+      make: decoded.vehicle.make,
+      model: decoded.vehicle.model,
+      engine: "engine" in decoded.vehicle ? decoded.vehicle.engine ?? null : null,
+    };
+    decodedEngine = vehicle.engine;
+
+    const { data, error } = await db.from("vehicles")
+      .select("id,vin,year,make,model")
+      .eq("workspace_id", workspaceId)
+      .eq("vin", vehicle.vin)
+      .maybeSingle();
+    if (error) throw error;
+    if (data) workspaceVehicleId = data.id;
+  }
+
+  if (!vehicle) return json({ success: false, reason: "Vehicle not found" });
+
+  let workspaceSpecs: Record<string, unknown> | null = null;
+  if (workspaceVehicleId) {
+    const { data, error } = await db.from("vehicle_service_specs")
+      .select("engine,oil_type,oil_capacity,oil_filter,metadata")
+      .eq("workspace_id", workspaceId)
+      .eq("vehicle_id", workspaceVehicleId)
+      .maybeSingle();
+    if (error) throw error;
+    workspaceSpecs = data ?? null;
+  }
+
+  let catalogSpec: Awaited<ReturnType<typeof getVehicleCatalogSpecs>>[number] | null = null;
+  if (vehicle.year && vehicle.make && vehicle.model) {
+    try {
+      const catalogRows = await getVehicleCatalogSpecs(vehicle.year, vehicle.make, vehicle.model);
+      const knownEngine = textValue(workspaceSpecs?.engine) ?? decodedEngine;
+      catalogSpec = selectCatalogEngine(catalogRows, knownEngine);
+      if (!catalogSpec && vehicle.model.includes(" ")) {
+        // Decode vendors can append trim/drive text after the catalog's model family.
+        const familyRows = await getVehicleCatalogSpecs(vehicle.year, vehicle.make, vehicle.model.split(/\s+/)[0]);
+        catalogSpec = selectCatalogEngine(familyRows, knownEngine);
+      }
+    } catch {
+      catalogSpec = null;
+    }
+  }
+
+  const specs = assembleSpecs(workspaceSpecs, catalogSpec);
+  const workspaceHasSpecs = assembleSpecs(workspaceSpecs) !== null;
+  const catalogHasSpecs = !workspaceHasSpecs && assembleSpecs(null, catalogSpec) !== null;
+  return json({
+    success: true,
+    vehicle: {
+      vin: vehicle.vin,
+      year: vehicle.year,
+      make: vehicle.make,
+      model: vehicle.model,
+      engine: textValue(workspaceSpecs?.engine) ?? catalogSpec?.engine ?? decodedEngine,
+    },
+    specs,
+    source: workspaceHasSpecs ? "workspace" : catalogHasSpecs ? "catalog" : vehicleOrigin,
   });
 });
 
