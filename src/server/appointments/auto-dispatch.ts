@@ -52,7 +52,10 @@
  */
 import { createSupabaseAdminClient } from "@/lib/supabase";
 import { captureServerError } from "@/server/sentry";
-import { dispatchAppointmentLifecycle } from "@/server/messaging/appointment-events";
+import {
+  dispatchAppointmentLifecycle,
+  type AppointmentLifecycleRecord,
+} from "@/server/messaging/appointment-events";
 import { LIFECYCLE_EVENT_KEYS } from "@/server/messaging/lifecycle-events";
 import { technicianJobUrl } from "@/server/messaging/lifecycle-action-urls";
 
@@ -160,7 +163,7 @@ async function sendTechnicianAssignedNotice(
   db: any,
   input: {
     workspaceId: string;
-    appointment: Record<string, any>;
+    appointment: AppointmentLifecycleRecord;
     technician: EligibleTechnician;
     technicianName: string | null;
     technicianEmail: string | null;
@@ -321,10 +324,14 @@ export async function autoDispatchNewAppointment(
  */
 export async function attemptAutoDispatchNewAppointment(
   input: AutoDispatchInput,
-  db: any = createSupabaseAdminClient(),
+  db?: any,
 ): Promise<AutoDispatchOutcome | null> {
   try {
-    return await autoDispatchNewAppointment(db, input);
+    // The admin client is constructed inside the try on purpose: building it
+    // can itself throw (missing env), and this wrapper's contract is that it
+    // never throws — a dispatch failure must never fail the booking.
+    const client = db ?? createSupabaseAdminClient();
+    return await autoDispatchNewAppointment(client, input);
   } catch (error) {
     console.error("[AutoDispatch] auto-dispatch failed; the booking is unaffected", error);
     captureServerError(error, {
