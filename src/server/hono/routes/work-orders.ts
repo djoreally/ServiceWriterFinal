@@ -1904,7 +1904,10 @@ workOrdersRouter.get("/v1/tech-app/jobs", async (c) => {
   const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c);
   const now = Date.now();
   const windowStart = new Date(now - 36 * 60 * 60 * 1000).toISOString();
-  const windowEnd = new Date(now + 8 * 24 * 60 * 60 * 1000).toISOString();
+  // Forward horizon is +31 days (widened from +8 on 2026-11-11, Ty's
+  // ruling): the phone must show the whole coming month — at +8 the
+  // Nov 21 and Nov 23 jobs were invisible no matter their assignment.
+  const windowEnd = new Date(now + 31 * 24 * 60 * 60 * 1000).toISOString();
   const { data: appointments, error: appointmentsError } = await (supabase.from("appointments") as any)
     .select("id, workspace_id, customer_id, vehicle_id, assigned_user_id, status, dispatch_status, starts_at, ends_at, source, confirmation_code, notes, metadata, created_at")
     .eq("workspace_id", workspaceId)
@@ -2037,7 +2040,9 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
   const lastPulledAt = Number.isFinite(parsedLast) && parsedLast > 0 ? Math.floor(parsedLast) : 0;
 
   const windowStart = new Date(timestamp - 36 * 60 * 60 * 1000).toISOString();
-  const windowEnd = new Date(timestamp + 8 * 24 * 60 * 60 * 1000).toISOString();
+  // Forward horizon +31 days — same widening as the jobs door above
+  // (2026-11-11, Ty's ruling: show the whole coming month).
+  const windowEnd = new Date(timestamp + 31 * 24 * 60 * 60 * 1000).toISOString();
   const { data: appointments, error: appointmentsError } = await (supabase.from("appointments") as any)
     .select("id, workspace_id, customer_id, vehicle_id, assigned_user_id, status, dispatch_status, starts_at, ends_at, source, confirmation_code, notes, metadata, created_at, updated_at")
     .eq("workspace_id", workspaceId)

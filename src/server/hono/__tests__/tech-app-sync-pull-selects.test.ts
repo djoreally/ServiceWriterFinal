@@ -95,6 +95,17 @@ describe("GET /v1/tech-app/sync/pull — protocol shape", () => {
   });
 });
 
+describe("tech-app window horizon (Ty's ruling, 2026-11-11)", () => {
+  it("both tech-app doors look +31 days out, never +8", () => {
+    // At +8 days the Nov 21 and Nov 23 jobs were invisible on the
+    // phone no matter their assignment; Ty ruled the phone shows
+    // the whole coming month. Pin the horizon so it cannot shrink
+    // back silently.
+    expect(SOURCE.match(/31 \* 24 \* 60 \* 60 \* 1000/g) ?? []).toHaveLength(2);
+    expect(SOURCE).not.toContain("8 * 24 * 60 * 60 * 1000");
+  });
+});
+
 describe("GET /v1/tech-app/sync/pull — SYNC-1b child selects (live census)", () => {
   it("selects service_inspections by appointment scope", () => {
     const block = handlerBlock();
