@@ -3,7 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
-import { Plus, FileText, Search, AlertCircle, TriangleAlert } from "lucide-react";
+import { Plus, FileText, Search, AlertCircle, TriangleAlert, Eye } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { useAuth } from "@packages/auth";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
@@ -397,6 +397,21 @@ export function InvoicesTab() {
                 rows={pagedRows}
                 rowKey={(r) => r.id}
                 onViewRecord={(r) => setViewId(r.id)}
+                // Desktop door into InvoiceDetailDialog: ResponsiveTable only
+                // consumes onViewRecord in its mobile-card branch — on desktop
+                // the row affordance is rowActions (hover/focus reveal).
+                rowActions={(r) => (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setViewId(r.id)}
+                    aria-label={`View invoice ${r.invoice_number}`}
+                    title="View invoice"
+                  >
+                    <Eye className="h-4 w-4" />
+                  </Button>
+                )}
                 emptyState={
                   <p className="py-8 text-center text-sm text-muted-foreground">
                     No invoices match.
