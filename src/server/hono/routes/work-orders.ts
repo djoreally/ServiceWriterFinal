@@ -1869,6 +1869,131 @@ workOrdersRouter.get("/v1/tech-app/job-workspace-v2", async (c) => {
   return json({ data: { appointment, items: itemsRes.data ?? [], thread: threadsRes.data ?? null } });
 });
 
+workOrdersRouter.get("/v1/tech-app/jobs", async (c) => {
+  // Tech app jobs list (S1 jobs wire, 2026-11-11): the caller's OWN assigned
+  // appointments in the canonical TechOperationalJob shape
+  // (src/application/queries/tech-app.query.ts mapOperationalRowToTechJob),
+  // plus the raw fields the external tech app stores locally (starts_at /
+  // ends_at, estimated_cost, customer email, vehicle VIN, priced services).
+  // Before this door the external tech app could only show on-device demo
+  // data: an assignment existed in the office app but was invisible where
+  // the technician works (Ty's ruling, 2026-11-11: a write nobody can see
+  // is not a working workflow). Columns are the LIVE production shape
+  // (2026-11-10 census, pinned by tech-app-jobs-selects.test.ts):
+  // appointments carries no title, so the title comes from the first
+  // appointment item's catalog name; the address coalesces from the
+  // appointment metadata (website-push shape), then the customer's
+  // address fields. Assignment keys on assigned_user_id — the column the
+  // canonical assign write (assign_dispatch_job_v1's appointment branch)
+  // stamps with the assignee's auth id.
+  const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c);
+  const now = Date.now();
+  const windowStart = new Date(now - 36 * 60 * 60 * 1000).toISOString();
+  const windowEnd = new Date(now + 8 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: appointments, error: appointmentsError } = await (supabase.from("appointments") as any)
+    .select("id, workspace_id, customer_id, vehicle_id, assigned_user_id, status, dispatch_status, starts_at, ends_at, source, confirmation_code, notes, metadata, created_at")
+    .eq("workspace_id", workspaceId)
+    .eq("assigned_user_id", user.id)
+    .neq("status", "cancelled")
+    .gte("starts_at", windowStart)
+    .lt("starts_at", windowEnd)
+    .order("starts_at", { ascending: true });
+  if (appointmentsError) throw appointmentsError;
+  const rows = (appointments ?? []) as Array<Record<string, any>>;
+  const customerIds = Array.from(new Set(rows.map((r) => r.customer_id).filter((id: unknown): id is string => typeof id === "string")));
+  const vehicleIds = Array.from(new Set(rows.map((r) => r.vehicle_id).filter((id: unknown): id is string => typeof id === "string")));
+  const appointmentIds = rows.map((r) => r.id as string);
+  const empty = { data: [], error: null };
+  const [customersRes, vehiclesRes, itemsRes] = await Promise.all([
+    customerIds.length > 0
+      ? (supabase.from("customers") as any)
+        .select("id, first_name, last_name, company_name, email, phone, address_line1, address_line2, city, region, postal_code")
+        .in("id", customerIds).eq("workspace_id", workspaceId)
+      : Promise.resolve(empty),
+    vehicleIds.length > 0
+      ? (supabase.from("vehicles") as any)
+        .select("id, vin, year, make, model, trim")
+        .in("id", vehicleIds).eq("workspace_id", workspaceId)
+      : Promise.resolve(empty),
+    appointmentIds.length > 0
+      ? (supabase.from("appointment_items") as any)
+        .select("id, appointment_id, service_catalog_id, item_type, description, quantity, unit_price, sort_order, service_catalog(id, name)")
+        .in("appointment_id", appointmentIds).eq("workspace_id", workspaceId)
+        .order("sort_order", { ascending: true })
+      : Promise.resolve(empty),
+  ]);
+  const joinError = customersRes.error || vehiclesRes.error || itemsRes.error;
+  if (joinError) throw joinError;
+  const customersById = new Map<string, Record<string, any>>(((customersRes.data ?? []) as Array<Record<string, any>>).map((r) => [r.id as string, r]));
+  const vehiclesById = new Map<string, Record<string, any>>(((vehiclesRes.data ?? []) as Array<Record<string, any>>).map((r) => [r.id as string, r]));
+  const itemsByAppointment = new Map<string, Array<Record<string, any>>>();
+  for (const item of (itemsRes.data ?? []) as Array<Record<string, any>>) {
+    const list = itemsByAppointment.get(item.appointment_id as string) ?? [];
+    list.push(item);
+    itemsByAppointment.set(item.appointment_id as string, list);
+  }
+  const jobs = rows.map((appt) => {
+    const customer = appt.customer_id ? customersById.get(appt.customer_id as string) ?? null : null;
+    const vehicle = appt.vehicle_id ? vehiclesById.get(appt.vehicle_id as string) ?? null : null;
+    const metadata = (appt.metadata ?? {}) as Record<string, any>;
+    const services = (itemsByAppointment.get(appt.id as string) ?? []).map((item) => ({
+      name: (item.service_catalog as Record<string, any> | null)?.name ?? item.description ?? "Service",
+      price: Number(item.unit_price ?? 0) * Number(item.quantity ?? 1),
+    }));
+    const customerName = customer
+      ? [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim() || (customer.company_name as string | null) || null
+      : (metadata.customer_name as string | undefined) ?? (metadata.guest_name as string | undefined) ?? null;
+    const customerPhone = (customer?.phone as string | null) ?? (metadata.guest_phone as string | undefined) ?? (metadata.customer_phone as string | undefined) ?? null;
+    const customerAddress = customer
+      ? [customer.address_line1, customer.address_line2, customer.city, customer.region, customer.postal_code].filter(Boolean).join(", ") || null
+      : null;
+    const startsAt = appt.starts_at as string;
+    const endsAt = (appt.ends_at as string | null) ?? null;
+    const durationMinutes = endsAt
+      ? Math.round((new Date(endsAt).getTime() - new Date(startsAt).getTime()) / 60000)
+      : null;
+    const estimatedCost = typeof metadata.estimated_cost === "number"
+      ? metadata.estimated_cost
+      : services.length > 0
+        ? services.reduce((sum, s) => sum + s.price, 0)
+        : null;
+    return {
+      id: appt.id as string,
+      source: "appointment",
+      title: services[0]?.name ?? (metadata.service_name as string | undefined) ?? "Service Appointment",
+      scheduled_date: startsAt.slice(0, 10),
+      scheduled_time: startsAt.slice(11, 16),
+      starts_at: startsAt,
+      ends_at: endsAt,
+      estimated_duration_minutes: durationMinutes,
+      dispatch_status: (appt.dispatch_status as string | null) ?? (metadata.dispatch_status as string | undefined) ?? "assigned",
+      status: (appt.status as string | null) ?? "scheduled",
+      job_priority: "normal",
+      location_address: (metadata.service_address as string | undefined) ?? (metadata.address as string | undefined) ?? customerAddress,
+      location_lat: null,
+      location_lng: null,
+      notes: (appt.notes as string | null) ?? null,
+      confirmation_code: (appt.confirmation_code as string | null) ?? null,
+      customers: customerName || customerPhone
+        ? { name: customerName ?? "Customer", phone: customerPhone }
+        : null,
+      customer_email: (customer?.email as string | null) ?? null,
+      vehicles: vehicle
+        ? { year: (vehicle.year as number | null) ?? 0, make: (vehicle.make as string | null) ?? "", model: (vehicle.model as string | null) ?? "" }
+        : null,
+      vehicle_vin: (vehicle?.vin as string | null) ?? null,
+      service_catalog: services[0] ? { name: services[0].name } : null,
+      services,
+      estimated_cost: estimatedCost,
+      is_fleet: false,
+      fleet_job_id: null,
+      fleet_job_number: null,
+      fleet_vehicle_count: null,
+    };
+  });
+  return json({ data: jobs });
+});
+
 workOrdersRouter.get("/v1/tech-app/technician-id", async (c) => {
   const { supabase, user } = await requireAuth(c);
   const { data, error } = await (supabase.from("technicians") as any)
