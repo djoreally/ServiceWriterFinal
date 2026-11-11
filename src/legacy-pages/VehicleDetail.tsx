@@ -1028,7 +1028,7 @@ const VehicleDetail = () => {
                           <TableCell>{formatCurrency(inv.total_cost)}</TableCell>
                           <TableCell>{getStatusBadge(inv.status)}</TableCell>
                           <TableCell>
-                            <Button variant="link" size="sm" onClick={() => navigate("/invoices")}>View</Button>
+                            <Button variant="link" size="sm" onClick={() => navigate(`/invoices?view=${inv.id}`)}>View</Button>
                           </TableCell>
                         </TableRow>
                       ))}
