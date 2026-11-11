@@ -2138,14 +2138,22 @@ vehiclesRouter.post("/v1/vehicle-recommendations", async (c) => {
 
 vehiclesRouter.post("/v1/vehicle-recommendations/generate", async (c) => {
   const body = await c.req.json().catch(() => ({}));
-  const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  const { supabase, user, workspaceId: scopedWorkspaceId } = await requireFleetScope(c, selectedWorkspaceHint(c));
   const vehicleId = body.vehicle_id;
   const currentMileage = body.current_mileage ?? null;
   const intervals = body.intervals ?? [];
   if (!vehicleId) return json({ data: { count: 0 } });
   const client = supabase as any;
+  // Step 8 translation: services is workspace-keyed (no user_id column).
+  // Use the scope the fleet gate already resolved; with no hint, fall
+  // back to the caller's first active membership (resolveWorkspaceIdForUser's
+  // own behavior). No workspace at all -> empty history, and generation
+  // proceeds without it, exactly as an empty history behaves.
+  const servicesWorkspaceId = scopedWorkspaceId ?? (await resolveWorkspaceIdForUser(supabase, user.id));
   const [servicesRes, existingRes] = await Promise.all([
-    client.from("services").select("*").eq("vehicle_id", vehicleId).eq("user_id", user.id).order("service_date", { ascending: false }),
+    servicesWorkspaceId
+      ? client.from("services").select("*").eq("vehicle_id", vehicleId).eq("workspace_id", servicesWorkspaceId).order("service_date", { ascending: false })
+      : Promise.resolve({ data: [], error: null }),
     client.from("vehicle_recommendations").select("recommendation_type").eq("vehicle_id", vehicleId).eq("user_id", user.id).eq("is_dismissed", false),
   ]);
   const services = servicesRes.data || [];

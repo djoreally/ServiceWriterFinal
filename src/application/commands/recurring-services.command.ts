@@ -7,6 +7,7 @@
  */
 import { apiClient } from "@/lib/api-client";
 import type { CreateRecurringServiceInput, RecurringServiceRecord } from "@/application/queries/recurring-services.query";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
 function addInterval(date: Date, frequency: CreateRecurringServiceInput["frequency"], interval: number): Date {
@@ -21,12 +22,14 @@ function addInterval(date: Date, frequency: CreateRecurringServiceInput["frequen
 export async function createRecurringService(input: CreateRecurringServiceInput): Promise<RecurringServiceRecord> {
   const { data: { user } } = await getCurrentAuthUser();
   if (!user) throw new Error("Authentication required");
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("No active workspace is available.");
 
   const startDate = new Date(input.start_date);
   const nextDueDate = addInterval(startDate, input.frequency, input.interval).toISOString().split("T")[0];
 
   const response = await apiClient.post<{ data: RecurringServiceRecord }>("/v1/recurring-services", {
-    user_id: user.id,
+    workspace_id: context.workspaceId,
     service_catalog_id: input.service_catalog_id,
     customer_id: input.customer_id || null,
     vehicle_id: input.vehicle_id || null,

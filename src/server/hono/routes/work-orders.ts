@@ -995,19 +995,22 @@ workOrdersRouter.get("/v1/recurring-services/lookup", async (c) => {
 });
 
 workOrdersRouter.get("/v1/recurring-services", async (c) => {
-  const { supabase } = await requireAuth(c);
-  const userId = z.string().min(1).parse(new URL(c.req.url).searchParams.get("user_id") ?? "");
+  // Step 8 translation: recurring_services is workspace-keyed. The old
+  // handler accepted any user_id as an unauthenticated query parameter
+  // naming ANY user; the read is now gated on the caller's membership
+  // in the workspace it names.
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id") ?? "");
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId, undefined);
   const { data, error } = await (supabase.from("recurring_services") as any)
     .select("id, service_catalog_id, customer_id, vehicle_id, frequency, interval, start_date, next_due_date, is_active, created_at")
-    .eq("user_id", userId).order("created_at", { ascending: false });
+    .eq("workspace_id", workspaceId).order("created_at", { ascending: false });
   if (error) throw error;
   return json({ data: data ?? [] });
 });
 
 workOrdersRouter.post("/v1/recurring-services", async (c) => {
-  const { supabase } = await requireAuth(c);
   const body = z.object({
-    user_id: z.string().min(1),
+    workspace_id: z.string().uuid(),
     service_catalog_id: z.string().min(1),
     customer_id: z.string().nullable().optional(),
     vehicle_id: z.string().nullable().optional(),
@@ -1016,8 +1019,9 @@ workOrdersRouter.post("/v1/recurring-services", async (c) => {
     start_date: z.string().min(1),
     next_due_date: z.string().min(1),
   }).parse(await c.req.json());
+  const { supabase } = await requireWorkspaceAuth(c, body.workspace_id, undefined);
   const { data, error } = await (supabase.from("recurring_services") as any).insert({
-    user_id: body.user_id,
+    workspace_id: body.workspace_id,
     service_catalog_id: body.service_catalog_id,
     customer_id: body.customer_id ?? null,
     vehicle_id: body.vehicle_id ?? null,
@@ -1103,19 +1107,26 @@ workOrdersRouter.post("/v1/detailing-pricing/rules-for-service", async (c) => {
 // ---------------------------------------------------------------------------
 
 workOrdersRouter.get("/v1/services", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  // Step 8 translation: services is workspace-keyed (the user_id column
+  // is not created). The request contract changes accordingly: callers
+  // name the workspace and are gated on membership in it (spec NEED 1 —
+  // no in-repo consumer calls this endpoint; the SPA uses
+  // service_records).
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id") ?? "");
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId, undefined);
   const { data, error } = await (supabase.from("services") as any)
-    .select("id, title, customer_id, vehicle_id, status, service_type, service_date, estimated_cost, metadata, appointment_id, notes, assigned_technician, payment_status, created_at, updated_at, user_id")
-    .eq("user_id", user.id).order("created_at", { ascending: false });
+    .select("id, title, customer_id, vehicle_id, status, service_type, service_date, estimated_cost, metadata, appointment_id, notes, assigned_technician, payment_status, created_at, updated_at, workspace_id")
+    .eq("workspace_id", workspaceId).order("created_at", { ascending: false });
   if (error) throw error;
   return json({ data: data ?? [] });
 });
 
 workOrdersRouter.get("/v1/services/:id", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id") ?? "");
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId, undefined);
   const { data, error } = await (supabase.from("services") as any)
-    .select("id, title, customer_id, vehicle_id, status, service_type, service_date, estimated_cost, metadata, appointment_id, notes, assigned_technician, payment_status, created_at, updated_at, user_id")
-    .eq("id", c.req.param("id")).eq("user_id", user.id).maybeSingle();
+    .select("id, title, customer_id, vehicle_id, status, service_type, service_date, estimated_cost, metadata, appointment_id, notes, assigned_technician, payment_status, created_at, updated_at, workspace_id")
+    .eq("id", c.req.param("id")).eq("workspace_id", workspaceId).maybeSingle();
   if (error) throw error;
   return json({ data: data ?? null });
 });
@@ -2717,17 +2728,18 @@ workOrdersRouter.get("/v1/service-records/:id/detail-full", async (c) => {
 // ---------------------------------------------------------------------------
 
 workOrdersRouter.get("/v1/repair-pricing/catalog-benchmarks", async (c) => {
-  const { supabase } = await requireAuth(c);
+  // Step 8 translation: service_catalog_benchmarks is workspace-keyed.
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id") ?? "");
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId, undefined);
   const { data, error } = await (supabase.from("service_catalog_benchmarks") as any)
-    .select("*").order("captured_at", { ascending: false });
+    .select("*").eq("workspace_id", workspaceId).order("captured_at", { ascending: false });
   if (error) throw error;
   return json({ data: data ?? [] });
 });
 
 workOrdersRouter.post("/v1/repair-pricing/catalog-benchmarks", async (c) => {
-  const { supabase } = await requireAuth(c);
   const body = z.object({
-    user_id: z.string().min(1),
+    workspace_id: z.string().uuid(),
     service_catalog_id: z.string().min(1),
     vin: z.string().nullable(),
     vehicle_label: z.string().nullable(),
@@ -2736,6 +2748,7 @@ workOrdersRouter.post("/v1/repair-pricing/catalog-benchmarks", async (c) => {
     dealer_low: z.number(), dealer_avg: z.number(), dealer_high: z.number(),
     shop_price: z.number().nullable(),
   }).parse(await c.req.json());
+  const { supabase } = await requireWorkspaceAuth(c, body.workspace_id, undefined);
   const { data, error } = await (supabase.from("service_catalog_benchmarks") as any).upsert(
     { ...body, captured_at: new Date().toISOString() },
     { onConflict: "service_catalog_id,vin" },
@@ -2745,22 +2758,26 @@ workOrdersRouter.post("/v1/repair-pricing/catalog-benchmarks", async (c) => {
 });
 
 workOrdersRouter.get("/v1/repair-pricing/shop-quote-requests", async (c) => {
-  const { supabase } = await requireAuth(c);
+  // Step 8 translation: quote_requests is workspace-keyed (it carries
+  // guest PII; the workspace scope is the protection).
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id") ?? "");
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId, undefined);
   const { data, error } = await (supabase.from("quote_requests") as any)
-    .select("*").order("created_at", { ascending: false }).limit(200);
+    .select("*").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).limit(200);
   if (error) throw error;
   return json({ data: data ?? [] });
 });
 
 workOrdersRouter.patch("/v1/repair-pricing/shop-quote-requests/:id", async (c) => {
-  const { supabase } = await requireAuth(c);
   const body = z.object({
+    workspace_id: z.string().uuid(),
     status: z.string().min(1),
     converted_quote_id: z.string().nullable().optional(),
   }).parse(await c.req.json());
+  const { supabase } = await requireWorkspaceAuth(c, body.workspace_id, undefined);
   const { data, error } = await (supabase.from("quote_requests") as any)
     .update({ status: body.status, ...(body.converted_quote_id ? { converted_quote_id: body.converted_quote_id } : {}) })
-    .eq("id", c.req.param("id")).select().single();
+    .eq("id", c.req.param("id")).eq("workspace_id", body.workspace_id).select().single();
   if (error) throw error;
   return json({ data });
 });

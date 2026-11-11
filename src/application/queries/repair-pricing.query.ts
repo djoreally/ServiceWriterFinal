@@ -3,7 +3,19 @@
  * estimate-only quote requests.
  */
 import { apiClient } from "@/lib/api-client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 import type { PricingTier } from "@/domain/pricing/repair-estimate";
+
+/**
+ * Step 8: the shop pair (service_catalog_benchmarks / quote_requests) is
+ * workspace-keyed. The workspace is resolved inside this module — the
+ * recurring-services precedent — so page/component callers do not change.
+ */
+async function requireWorkspaceId(): Promise<string> {
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("No active workspace is available.");
+  return context.workspaceId;
+}
 
 export interface CatalogBenchmark {
   id: string;
@@ -24,7 +36,10 @@ export interface CatalogBenchmark {
 /** All benchmarks for the current shop, keyed by catalog item id (latest first). */
 export async function fetchCatalogBenchmarks(): Promise<Record<string, CatalogBenchmark>> {
   try {
-    const response = await apiClient.get<{ data: CatalogBenchmark[] }>("/v1/repair-pricing/catalog-benchmarks");
+    const workspaceId = await requireWorkspaceId();
+    const response = await apiClient.get<{ data: CatalogBenchmark[] }>("/v1/repair-pricing/catalog-benchmarks", {
+      query: { workspace_id: workspaceId },
+    });
     const byItem: Record<string, CatalogBenchmark> = {};
     for (const row of response.data ?? []) {
       if (!byItem[row.service_catalog_id]) byItem[row.service_catalog_id] = row;
@@ -37,7 +52,6 @@ export async function fetchCatalogBenchmarks(): Promise<Record<string, CatalogBe
 }
 
 export interface SaveBenchmarkInput {
-  userId: string;
   serviceCatalogId: string;
   vin: string | null;
   vehicleLabel: string | null;
@@ -49,8 +63,9 @@ export interface SaveBenchmarkInput {
 
 /** Upsert the latest benchmark for a catalog item + vehicle. */
 export async function saveCatalogBenchmark(input: SaveBenchmarkInput) {
+  const workspaceId = await requireWorkspaceId();
   const response = await apiClient.post<{ data: CatalogBenchmark }>("/v1/repair-pricing/catalog-benchmarks", {
-    user_id: input.userId,
+    workspace_id: workspaceId,
     service_catalog_id: input.serviceCatalogId,
     vin: input.vin,
     vehicle_label: input.vehicleLabel,
@@ -91,7 +106,10 @@ export interface QuoteRequest {
 /** Estimate-only requests for the current shop. */
 export async function fetchQuoteRequests(): Promise<QuoteRequest[]> {
   try {
-    const response = await apiClient.get<{ data: QuoteRequest[] }>("/v1/repair-pricing/shop-quote-requests");
+    const workspaceId = await requireWorkspaceId();
+    const response = await apiClient.get<{ data: QuoteRequest[] }>("/v1/repair-pricing/shop-quote-requests", {
+      query: { workspace_id: workspaceId },
+    });
     return response.data ?? [];
   } catch (error) {
     console.warn("[fetchQuoteRequests]", error instanceof Error ? error.message : error);
@@ -104,9 +122,10 @@ export async function updateQuoteRequestStatus(
   status: QuoteRequest["status"],
   convertedQuoteId?: string,
 ) {
+  const workspaceId = await requireWorkspaceId();
   const response = await apiClient.patch<{ data: QuoteRequest }>(
     `/v1/repair-pricing/shop-quote-requests/${id}`,
-    { status, ...(convertedQuoteId ? { converted_quote_id: convertedQuoteId } : {}) },
+    { workspace_id: workspaceId, status, ...(convertedQuoteId ? { converted_quote_id: convertedQuoteId } : {}) },
   );
   return { data: response.data, error: null };
 }

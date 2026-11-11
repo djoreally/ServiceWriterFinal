@@ -4166,25 +4166,56 @@ platformRouter.post("/v1/platform/service-packages/load-templates", async (c) =>
 
 // ---------------------------------------------------------------------------
 // Service playbooks (migrated from playbooks.command.ts and
-// playbook-seed.command.ts). User-scoped like the marketplace dashboard.
+// playbook-seed.command.ts). Workspace-scoped since the Step 8
+// translation: service_playbooks is workspace-keyed, and these handlers
+// run on the admin client, so the membership check in
+// requirePlaybookWorkspace IS the boundary (403 on mismatch, preserving
+// the old user-scope gate's 403 contract).
 // ---------------------------------------------------------------------------
 
-async function requirePlaybookUser(c: Context, userId?: string | null): Promise<string> {
+/**
+ * The Step 8 admin-client boundary: handlers in this family run on the
+ * service-role client, so membership in the addressed workspace is
+ * verified explicitly before any read or write (403 on mismatch).
+ */
+async function assertCallerWorkspaceMembership(
+  admin: any,
+  uid: string,
+  workspaceId: string,
+): Promise<void> {
+  const { data: membership, error } = await admin
+    .from("workspace_members")
+    .select("workspace_id")
+    .eq("workspace_id", workspaceId)
+    .eq("user_id", uid)
+    .eq("is_active", true)
+    .maybeSingle();
+  if (error) throw error;
+  if (!membership) throw new ApiError(403, "Not authorized for this workspace", "forbidden");
+}
+
+async function requirePlaybookWorkspace(
+  c: Context,
+  workspaceId?: string | null,
+): Promise<{ uid: string; workspaceId: string }> {
   const auth = await requireAuth(c);
   const uid = (await auth.supabase.auth.getUser()).data.user?.id ?? null;
   if (!uid) throw new ApiError(401, "Not authenticated", "not_authenticated");
-  if (userId && userId !== uid) throw new ApiError(403, "Not authorized for this provider", "forbidden");
-  return uid;
+  const parsed = z.string().uuid().safeParse(workspaceId ?? "");
+  if (!parsed.success) throw new ApiError(400, "workspace_id is required", "workspace_id_required");
+  const admin = createSupabaseAdminClient() as any;
+  await assertCallerWorkspaceMembership(admin, uid, parsed.data);
+  return { uid, workspaceId: parsed.data };
 }
 
 platformRouter.get("/v1/platform/playbooks", async (c) => {
   const url = new URL(c.req.url);
-  const userId = await requirePlaybookUser(c, url.searchParams.get("user_id"));
+  const { workspaceId } = await requirePlaybookWorkspace(c, url.searchParams.get("workspace_id"));
   const admin = createSupabaseAdminClient() as any;
   const { data, error } = await admin
     .from("service_playbooks")
     .select("*, service_catalog(id, name)")
-    .eq("user_id", userId)
+    .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false });
   if (error) throw error;
   return json({ data: data ?? [], error: null });
@@ -4192,14 +4223,19 @@ platformRouter.get("/v1/platform/playbooks", async (c) => {
 
 platformRouter.post("/v1/platform/playbooks", async (c) => {
   const body = z.object({
-    user_id: z.string().min(1).optional(),
+    workspace_id: z.string().uuid(),
     row: z.record(z.string(), z.unknown()),
   }).parse(await c.req.json());
-  const userId = await requirePlaybookUser(c, body.user_id);
+  const { workspaceId } = await requirePlaybookWorkspace(c, body.workspace_id);
   const admin = createSupabaseAdminClient() as any;
+  // The row may not smuggle a tenant key: the gate's workspace is the
+  // only one stamped.
+  const row = { ...body.row };
+  delete row.user_id;
+  delete row.workspace_id;
   const { data, error } = await admin
     .from("service_playbooks")
-    .insert({ ...body.row, user_id: userId })
+    .insert({ ...row, workspace_id: workspaceId })
     .select("id")
     .single();
   if (error) throw new Error(`Failed to create playbook: ${error.message}`);
@@ -4208,28 +4244,31 @@ platformRouter.post("/v1/platform/playbooks", async (c) => {
 
 platformRouter.patch("/v1/platform/playbooks/:id", async (c) => {
   const body = z.object({
-    user_id: z.string().min(1).optional(),
+    workspace_id: z.string().uuid(),
     updates: z.record(z.string(), z.unknown()),
   }).parse(await c.req.json());
-  const userId = await requirePlaybookUser(c, body.user_id);
+  const { workspaceId } = await requirePlaybookWorkspace(c, body.workspace_id);
   const admin = createSupabaseAdminClient() as any;
-  const { error } = await admin.from("service_playbooks").update(body.updates).eq("id", c.req.param("id")).eq("user_id", userId);
+  const updates = { ...body.updates };
+  delete updates.user_id;
+  delete updates.workspace_id;
+  const { error } = await admin.from("service_playbooks").update(updates).eq("id", c.req.param("id")).eq("workspace_id", workspaceId);
   if (error) throw new Error(`Failed to update playbook: ${error.message}`);
   return json({ data: { ok: true } });
 });
 
 platformRouter.delete("/v1/platform/playbooks/:id", async (c) => {
   const url = new URL(c.req.url);
-  const userId = await requirePlaybookUser(c, url.searchParams.get("user_id"));
+  const { workspaceId } = await requirePlaybookWorkspace(c, url.searchParams.get("workspace_id"));
   const admin = createSupabaseAdminClient() as any;
-  const { error } = await admin.from("service_playbooks").delete().eq("id", c.req.param("id")).eq("user_id", userId);
+  const { error } = await admin.from("service_playbooks").delete().eq("id", c.req.param("id")).eq("workspace_id", workspaceId);
   if (error) throw new Error(`Failed to delete playbook: ${error.message}`);
   return json({ data: { ok: true } });
 });
 
 platformRouter.post("/v1/platform/playbooks/seed", async (c) => {
-  const { user_id } = z.object({ user_id: z.string().min(1).optional() }).parse(await c.req.json());
-  const userId = await requirePlaybookUser(c, user_id ?? null);
+  const { workspace_id } = z.object({ workspace_id: z.string().uuid() }).parse(await c.req.json());
+  const { workspaceId } = await requirePlaybookWorkspace(c, workspace_id);
   const admin = createSupabaseAdminClient() as any;
 
   const { data: templates } = await admin
@@ -4242,14 +4281,14 @@ platformRouter.post("/v1/platform/playbooks/seed", async (c) => {
   const { data: catalogItems } = await admin
     .from("service_catalog")
     .select("id, name, category")
-    .eq("user_id", userId)
+    .eq("workspace_id", workspaceId)
     .eq("is_active", true);
   if (!catalogItems?.length) return json({ data: 0 });
 
   const { data: existing } = await admin
     .from("service_playbooks")
     .select("name, service_catalog_id")
-    .eq("user_id", userId);
+    .eq("workspace_id", workspaceId);
   const existingSet = new Set((existing ?? []).map((p: { name: string; service_catalog_id: string | null }) => `${p.name}::${p.service_catalog_id}`));
 
   const categoryMap: Record<string, string> = {
@@ -4272,7 +4311,7 @@ platformRouter.post("/v1/platform/playbooks/seed", async (c) => {
       if (existingSet.has(key)) return;
       existingSet.add(key);
       toInsert.push({
-        user_id: userId,
+        workspace_id: workspaceId,
         service_catalog_id: catalogIds[idx],
         name: template.name,
         description: template.description,
@@ -4421,9 +4460,21 @@ platformRouter.post("/v1/platform/service-images/upload-url", async (c) => {
 platformRouter.get("/v1/platform/service-images", async (c) => {
   const auth = await requireAuth(c);
   const uid = (await auth.supabase.auth.getUser()).data.user?.id ?? null;
+  if (!uid) throw new ApiError(401, "Not authenticated", "not_authenticated");
   const url = new URL(c.req.url);
   const serviceId = z.string().min(1).parse(url.searchParams.get("service_id") ?? "");
   const admin = createSupabaseAdminClient() as any;
+  // Step 8 gate: service_images is workspace-keyed and this handler runs
+  // on the admin client — resolve the parent service's workspace and
+  // verify the caller belongs to it before returning rows.
+  const { data: parent, error: parentError } = await admin
+    .from("services")
+    .select("workspace_id")
+    .eq("id", serviceId)
+    .maybeSingle();
+  if (parentError) throw parentError;
+  if (!parent) throw new ApiError(404, "Service not found", "service_not_found");
+  await assertCallerWorkspaceMembership(admin, uid, parent.workspace_id as string);
   const { data, error } = await admin
     .from("service_images")
     .select("*")
@@ -4441,15 +4492,28 @@ platformRouter.post("/v1/platform/service-images", async (c) => {
   const file = form.get("file");
   const serviceId = z.string().min(1).parse(form.get("service_id") ?? "");
   if (!(file instanceof File)) throw new ApiError(400, "file is required", "invalid_file");
+  const admin = createSupabaseAdminClient() as any;
+  // Step 8: the row's workspace_id is derived from the parent services
+  // row (the FK guarantees the parent exists); the same lookup gates the
+  // write on the caller's membership in that workspace. user_id stays as
+  // the stamped actor column.
+  const { data: parent, error: parentError } = await admin
+    .from("services")
+    .select("workspace_id")
+    .eq("id", serviceId)
+    .maybeSingle();
+  if (parentError) throw parentError;
+  if (!parent) throw new ApiError(404, "Service not found", "service_not_found");
+  await assertCallerWorkspaceMembership(admin, uid, parent.workspace_id as string);
   const fileExt = file.name.split(".").pop() || "jpg";
   const fileName = `${uid}/${serviceId}/${Date.now()}.${fileExt}`;
   const storage = createSupabaseAdminClient().storage.from(SERVICE_IMAGES_BUCKET);
   const { error: uploadError } = await storage.upload(fileName, file);
   if (uploadError) throw new Error(uploadError.message);
   const { data: { publicUrl } } = storage.getPublicUrl(fileName);
-  const admin = createSupabaseAdminClient() as any;
   const { error: dbError } = await admin.from("service_images").insert({
     user_id: uid,
+    workspace_id: parent.workspace_id,
     service_id: serviceId,
     image_url: publicUrl,
     caption: typeof form.get("caption") === "string" ? form.get("caption") : null,
@@ -4461,9 +4525,22 @@ platformRouter.post("/v1/platform/service-images", async (c) => {
 });
 
 platformRouter.delete("/v1/platform/service-images/:id", async (c) => {
+  const auth = await requireAuth(c);
+  const uid = (await auth.supabase.auth.getUser()).data.user?.id ?? null;
+  if (!uid) throw new ApiError(401, "Not authenticated", "not_authenticated");
   const url = new URL(c.req.url);
   const imageUrl = url.searchParams.get("image_url") ?? "";
   const admin = createSupabaseAdminClient() as any;
+  // Step 8 gate: this delete previously checked nothing at all. Load the
+  // image row and verify membership in its workspace before deleting.
+  const { data: image, error: imageError } = await admin
+    .from("service_images")
+    .select("workspace_id")
+    .eq("id", c.req.param("id"))
+    .maybeSingle();
+  if (imageError) throw imageError;
+  if (!image) throw new ApiError(404, "Service image not found", "service_image_not_found");
+  await assertCallerWorkspaceMembership(admin, uid, image.workspace_id as string);
   const urlParts = imageUrl.split("/service-images/");
   if (urlParts[1]) {
     await admin.storage.from(SERVICE_IMAGES_BUCKET).remove([urlParts[1]]);
