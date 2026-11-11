@@ -61,3 +61,18 @@ export async function createCustomerAccount(
 export async function resetPassword(email: string, redirectTo: string) {
   return authSupabase.auth.resetPasswordForEmail(email, { redirectTo });
 }
+
+/**
+ * Set a new password for the user holding the current session. Used by the
+ * customer recovery flow: a password-reset email link lands back on
+ * CustomerAuth with a short-lived recovery session, and this is the only
+ * moment the new password may be written.
+ */
+export async function updateCustomerPassword(password: string) {
+  return authSupabase.auth.updateUser({ password });
+}
+
+/** End the current (recovery) session so the new password must be proven at sign-in. */
+export async function signOutCustomer() {
+  return authSupabase.auth.signOut();
+}
