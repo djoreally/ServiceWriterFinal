@@ -1528,10 +1528,14 @@ interface DataCenterVehicle {
 
 vehiclesRouter.get("/v1/tech-app/data-center/vehicle", async (c) => {
   const fail = (error: string) => c.json({ success: false, error }, 200);
+  // Auth stays OUTSIDE the fail-soft try: an unauthenticated call must
+  // answer 401 like every sibling route, not a 200 lookup failure —
+  // the app reads 200 + success:false as "specs unavailable", which
+  // would mask an expired session. Only the lookup itself fails soft.
+  const { supabase, user } = await requireAuth(c);
+  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id);
+  if (!workspaceId) return fail("No active workspace");
   try {
-    const { supabase, user } = await requireAuth(c);
-    const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id);
-    if (!workspaceId) return fail("No active workspace");
 
     const url = new URL(c.req.url);
     const vinParam = url.searchParams.get("vin")?.trim().toUpperCase() || null;

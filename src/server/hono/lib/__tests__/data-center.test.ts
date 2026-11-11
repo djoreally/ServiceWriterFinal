@@ -175,6 +175,13 @@ describe("GET /v1/tech-app/data-center/vehicle — route contract", () => {
     expect(block).toContain("await requireAuth(c)");
   });
 
+  it("keeps auth outside the fail-soft try (401 stays a 401)", () => {
+    const authAt = block.indexOf("await requireAuth(c)");
+    const tryAt = block.indexOf("try {", authAt);
+    expect(authAt).toBeGreaterThan(-1);
+    expect(tryAt).toBeGreaterThan(authAt);
+  });
+
   it("reads both provider keys from the environment, never hardcoded", () => {
     expect(block).toContain("process.env.VEHICLE_DATABASES_API_KEY");
     expect(block).toContain("process.env.WHEEL_SIZE_API_KEY");
