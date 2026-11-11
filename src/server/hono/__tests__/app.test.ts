@@ -199,3 +199,106 @@ describe("createHonoApp composition", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("createHonoApp CORS (origin-aware allowlist)", () => {
+  const TECH_APP_ORIGIN = "https://lovable-tech-partner.vercel.app";
+  const STRANGER_ORIGIN = "https://evil.example.com";
+
+  afterEach(() => {
+    delete process.env.NEXT_PUBLIC_CORS_ORIGIN;
+  });
+
+  it("answers preflight from an allowlisted origin with the reflected origin and credentials", async () => {
+    const app = createHonoApp();
+    const res = await app.request("/api/v1/tech-app/session", {
+      method: "OPTIONS",
+      headers: {
+        Origin: TECH_APP_ORIGIN,
+        "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Headers": "authorization",
+      },
+    });
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(TECH_APP_ORIGIN);
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+    expect(res.headers.get("Access-Control-Allow-Methods")).toContain("GET");
+    expect(res.headers.get("Access-Control-Allow-Headers")).toContain("authorization");
+  });
+
+  it("answers preflight from the tech app subdomain with the reflected origin", async () => {
+    const app = createHonoApp();
+    const res = await app.request("/api/v1/tech-app/session", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "https://techapp.servicewriter.xyz",
+        "Access-Control-Request-Method": "GET",
+        "Access-Control-Request-Headers": "authorization",
+      },
+    });
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://techapp.servicewriter.xyz");
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+  });
+
+  it("answers preflight from a non-allowlisted origin with no Access-Control-Allow-Origin", async () => {
+    const app = createHonoApp();
+    const res = await app.request("/api/v1/tech-app/session", {
+      method: "OPTIONS",
+      headers: { Origin: STRANGER_ORIGIN, "Access-Control-Request-Method": "GET" },
+    });
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+  });
+
+  it("answers preflight without an Origin header exactly as before (no CORS headers)", async () => {
+    const app = createHonoApp();
+    const res = await app.request("/api/v1/appointments", { method: "OPTIONS" });
+    expect(res.status).toBe(204);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+
+  it("reflects an allowlisted origin on a normal GET response", async () => {
+    const app = createHonoApp();
+    const res = await app.request("/api/v1/health", { headers: { Origin: TECH_APP_ORIGIN } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(TECH_APP_ORIGIN);
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+  });
+
+  it("sends no Access-Control-Allow-Origin on a GET from a non-allowlisted origin", async () => {
+    const app = createHonoApp();
+    const res = await app.request("/api/v1/health", { headers: { Origin: STRANGER_ORIGIN } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+  });
+
+  it("sends no CORS headers on a GET without an Origin header", async () => {
+    const app = createHonoApp();
+    const res = await app.request("/api/v1/health");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+
+  it("reflects an allowlisted origin on error responses (onError threading)", async () => {
+    const app = createHonoApp();
+    authState.mode = "unauthorized";
+    const res = await app.request(`/api/v1/payments?workspace_id=${WS_ID}`, {
+      headers: { Origin: TECH_APP_ORIGIN },
+    });
+    expect(res.status).toBe(401);
+    expect((await res.json()).error.code).toBe("unauthenticated");
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe(TECH_APP_ORIGIN);
+  });
+
+  it("sends no Access-Control-Allow-Origin on error responses for a non-allowlisted origin", async () => {
+    const app = createHonoApp();
+    authState.mode = "unauthorized";
+    const res = await app.request(`/api/v1/payments?workspace_id=${WS_ID}`, {
+      headers: { Origin: STRANGER_ORIGIN },
+    });
+    expect(res.status).toBe(401);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+});
