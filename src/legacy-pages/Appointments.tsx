@@ -361,18 +361,19 @@ const AppointmentsPage = () => {
           const autoDispatchResult = await tryAutoDispatchAppointment(
             result.appointmentId,
             formData,
+            result.autoDispatch,
           );
 
-          if (autoDispatchResult.autoDispatchEnabled) {
-            if (autoDispatchResult.topRecommendationName) {
-              toast.success(
-                `⚡ Auto-assigned to ${autoDispatchResult.topRecommendationName}`,
-              );
-            } else {
-              toast.info(
-                "⚡ Auto-dispatch: no eligible technician found — assign manually",
-              );
-            }
+          if (autoDispatchResult.assigned) {
+            toast.success(
+              autoDispatchResult.topRecommendationName
+                ? `⚡ Auto-assigned to ${autoDispatchResult.topRecommendationName}`
+                : "⚡ Auto-assigned",
+            );
+          } else if (autoDispatchResult.autoDispatchEnabled) {
+            toast.info(
+              "⚡ Auto-dispatch: no eligible technician found — assign manually",
+            );
           }
         } catch {
           // Auto-dispatch failure is non-fatal

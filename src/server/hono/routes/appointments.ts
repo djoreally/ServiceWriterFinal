@@ -114,7 +114,7 @@ appointmentsRouter.post("/v1/appointments", async (c: Context) => {
   const { supabase, user } = await requireWorkspaceAuth(c, body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher"]);
   // One booking path: validation + availability checks + insert all live in
   // bookAppointmentCore. Auth (membership + role list) stays on the route.
-  const result = await bookAppointmentCore(supabase, body, { createdBy: user.id });
+  const result = await bookAppointmentCore(supabase, body, { createdBy: user.id, requestUrl: c.req.url });
   if ("error" in result) return result.error;
   const created = result.data as { id?: unknown; workspace_id?: unknown } | null;
   logMutation({
@@ -133,7 +133,17 @@ appointmentsRouter.post("/v1/appointments", async (c: Context) => {
   if (typeof createdId === "string" && createdId) {
     await syncAppointmentToGoogleCalendar({ supabase, userId: user.id, appointmentId: createdId });
   }
-  return json({ data: result.data }, { status: 201 });
+  // Auto-dispatch ran inside the booking core; its verdict rides along so
+  // the staff UI can report the assignment truthfully. Absent when the
+  // create carried an explicit assignee or auto-dispatch itself failed
+  // (fail-soft: the booking succeeded either way).
+  return json(
+    {
+      data: result.data,
+      ...(result.autoDispatch ? { auto_dispatch: result.autoDispatch } : {}),
+    },
+    { status: 201 },
+  );
 });
 
 // ---------------------------------------------------------------------------
