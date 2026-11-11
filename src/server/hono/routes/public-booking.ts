@@ -2,7 +2,11 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
 import { errorResponse, json, toError } from "@/server/api";
-import { createSupabaseAnonServerClient } from "@/lib/supabase";
+import { createSupabaseAdminClient, createSupabaseAnonServerClient } from "@/lib/supabase";
+import {
+  attemptAutoDispatchNewAppointment,
+  type AutoDispatchOutcome,
+} from "@/server/appointments/auto-dispatch";
 
 export const publicBookingRouter = new Hono();
 
@@ -73,5 +77,38 @@ publicBookingRouter.post("/v1/public-bookings/appointments", async (c: Context) 
   });
 
   if (error) return errorResponse(toError(error));
-  return json({ data, error: null });
+
+  // Auto-dispatch v1 (creation-time only): the v3 RPC returns just the
+  // new appointment id, so the workspace is resolved from the created
+  // row with the service-role client before the attempt. The attempt is
+  // fail-soft — a dispatch failure never fails the booking — and the
+  // verdict rides along in the response for observability.
+  let autoDispatch: AutoDispatchOutcome | null = null;
+  const appointmentId = typeof data === "string" ? data : null;
+  if (appointmentId) {
+    try {
+      const admin = createSupabaseAdminClient() as any;
+      const { data: created } = await admin
+        .from("appointments")
+        .select("workspace_id")
+        .eq("id", appointmentId)
+        .maybeSingle();
+      const workspaceId = (created as { workspace_id?: string } | null)?.workspace_id;
+      if (workspaceId) {
+        autoDispatch = await attemptAutoDispatchNewAppointment(
+          {
+            workspaceId,
+            appointmentId,
+            performedBy: null,
+            requestUrl: c.req.url,
+          },
+          admin,
+        );
+      }
+    } catch {
+      // Auto-dispatch is best-effort at this boundary; the booking stands.
+      autoDispatch = null;
+    }
+  }
+  return json({ data, error: null, ...(autoDispatch ? { auto_dispatch: autoDispatch } : {}) });
 });

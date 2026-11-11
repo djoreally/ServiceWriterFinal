@@ -114,6 +114,7 @@ export {
   type SaveAppointmentOptions,
   type SaveAppointmentResult,
   type AutoDispatchResult,
+  type AutoDispatchServerOutcome,
 } from './appointments.command';
 
 // Onboarding and payment-provider setup.
@@ -159,7 +160,6 @@ export {
 // Unified Service Writer Dispatch / Command Center.
 export {
   assignDispatchJob,
-  autoDispatchPublicBooking,
   assignTechnician,
   assignWorkOrderTechnician,
   unassignAppointment,

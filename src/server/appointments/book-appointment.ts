@@ -16,6 +16,10 @@ import { z } from "zod";
 import { json } from "@/server/api";
 import { normalizeAppointmentStatus } from "@/lib/status-vocabulary";
 import { MANUAL_QUOTE_PRICING_STATE, roundToCents } from "@/lib/price-lock";
+import {
+  attemptAutoDispatchNewAppointment,
+  type AutoDispatchOutcome,
+} from "@/server/appointments/auto-dispatch";
 
 // ---------------------------------------------------------------------------
 // Input schema — identical to the former route-local appointmentSchema.
@@ -263,7 +267,9 @@ export async function validateAppointmentReferences(supabase: any, body: Appoint
 // The core.
 // ---------------------------------------------------------------------------
 
-export type BookAppointmentResult = { data: unknown } | { error: Response };
+export type BookAppointmentResult =
+  | { data: unknown; autoDispatch?: AutoDispatchOutcome | null }
+  | { error: Response };
 
 export interface BookAppointmentOptions {
   /**
@@ -273,6 +279,12 @@ export interface BookAppointmentOptions {
    * created_by, so a null here is consistent with existing booking paths.
    */
   createdBy?: string | null;
+  /**
+   * The creating request's URL, forwarded to auto-dispatch so its
+   * technician notice builds action URLs the same way the manual
+   * dispatch handler does. Absent for non-HTTP callers (Shop Agent).
+   */
+  requestUrl?: string | null;
 }
 
 /**
@@ -408,5 +420,20 @@ export async function bookAppointmentCore(
   if (lockedQuote !== null) {
     await seedManualQuoteItem(supabase, body, (data as { id: string }).id, lockedQuote);
   }
-  return { data };
+
+  // Auto-dispatch v1 (creation-time only): when the workspace flag is on
+  // and exactly one eligible technician exists, the new appointment is
+  // assigned to them. An explicitly assigned create is left exactly as
+  // the caller set it. Fail-soft by construction — the attempt never
+  // throws, so a dispatch failure can never fail the booking.
+  let autoDispatch: AutoDispatchOutcome | null = null;
+  if (!body.assigned_user_id) {
+    autoDispatch = await attemptAutoDispatchNewAppointment({
+      workspaceId: body.workspace_id,
+      appointmentId: (data as { id: string }).id,
+      performedBy: opts.createdBy ?? null,
+      requestUrl: opts.requestUrl ?? null,
+    });
+  }
+  return autoDispatch ? { data, autoDispatch } : { data };
 }

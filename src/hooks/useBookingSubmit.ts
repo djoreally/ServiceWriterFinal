@@ -36,7 +36,7 @@ import { format } from "date-fns";
 import { normalizePhoneToE164 } from "@/lib/phone";
 import { bookingSchema, getFirstError } from "@/lib/validation";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/mapbox";
-import { autoDispatchPublicBooking, startCheckout } from "@/application/commands";
+import { startCheckout } from "@/application/commands";
 import { completeBookingContext } from "@/application/commands/booking-context.command";
 import {
   resolveBookingFilterMatch,
@@ -546,23 +546,11 @@ export function useBookingSubmit(deps: SubmitDeps) {
         if (customerId) updatePayload.customer_id = customerId;
         if (filterMatchNote) updatePayload.dispatch_notes = filterMatchNote;
 
-        if (zipCode) {
-          try {
-            // Single server-side dispatch boundary for public bookings: works for
-            // guests (anon) and signed-in customers alike.
-            const dispatchResult = await autoDispatchPublicBooking({
-              businessUserId: business.user_id,
-              appointmentId,
-              zipCode,
-              notes: filterMatchNote ?? null,
-            });
-            if (!dispatchResult.assigned) {
-              console.info("[Booking] Auto-dispatch skipped:", dispatchResult.reason);
-            }
-          } catch (e) {
-            console.warn("Van auto-assignment failed:", e);
-          }
-        }
+        // Auto-dispatch happens server-side at the creation boundary
+        // (Auto-Dispatch v1): the public-booking route assigns the new
+        // appointment when the workspace flag is on and exactly one
+        // eligible technician exists. The retired client stub that used
+        // to sit here always answered "manual_dispatch_required".
 
         if (Object.keys(updatePayload).length > 0) {
           try {
