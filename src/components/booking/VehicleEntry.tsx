@@ -19,6 +19,7 @@ import { TireInventorySelector } from "@/components/booking/TireInventorySelecto
 import { TireQuantitySelector } from "@/components/booking/TireQuantitySelector";
 import { uploadBookingAssessmentPhoto } from "@/application/commands/booking-assessment.command";
 import { resolveDetailingRule, type DetailingPricingRule } from "@/lib/detailing-pricing";
+import { vehicleHasRequiredIdentification, VIN_FORMAT_PATTERN } from "@/lib/booking-requirements";
 import { getInitialTireQuantities, getRequestedTireQuantity, reconcileTireQuantitiesForFitment } from "@/lib/tire-quantity";
 
 export interface VehicleData {
@@ -147,6 +148,15 @@ export function VehicleEntry({
 
   const activeVehicle = vehicles.find(v => v.id === activeVehicleId) || vehicles[0];
   const activeDetailingRule = activeVehicle ? resolveDetailingRule(detailingRules, activeVehicle) : null;
+
+  // Owner identification rule (standard flow): VIN or license plate identifies
+  // the vehicle; with neither, the engine is required on the manual path.
+  const identifiedByVinOrPlate = Boolean(activeVehicle) && (
+    VIN_FORMAT_PATTERN.test((activeVehicle?.vin || "").trim().toUpperCase()) ||
+    (activeVehicle?.licensePlate || "").trim().length > 0
+  );
+  const engineStillNeeded = !identifiedByVinOrPlate;
+  const showIdentificationNotice = !isTireFlow && Boolean(activeVehicle?.year && activeVehicle?.make && activeVehicle?.model) && !(activeVehicle && vehicleHasRequiredIdentification(activeVehicle));
 
   // Use vehicle specs from database for dropdowns (makes, models, engines)
   // Note: years come from generateYears() to show full range 1990-2026
@@ -647,7 +657,7 @@ export function VehicleEntry({
 
                 {engines.length > 1 && (
                   <div>
-                    <Label>Engine</Label>
+                    <Label>Engine{engineStillNeeded ? " *" : ""}</Label>
                     <Select 
                       value={activeVehicle?.engine || ""} 
                       onValueChange={handleEngineChange}
@@ -793,7 +803,7 @@ export function VehicleEntry({
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label>Engine (Optional)</Label>
+                    <Label>{engineStillNeeded ? "Engine *" : "Engine (Optional)"}</Label>
                     <Input
                       value={activeVehicle?.engine || ""}
                       onChange={(e) => updateVehicle(activeVehicle.id, { engine: e.target.value })}
@@ -937,15 +947,21 @@ export function VehicleEntry({
 
             {entryMode === "manual" && (
               <div>
-                <Label>VIN (Optional)</Label>
+                <Label>VIN</Label>
                 <Input
                   value={activeVehicle?.vin || ""}
                   onChange={(e) => updateVehicle(activeVehicle.id, { vin: e.target.value.toUpperCase() })}
-                  placeholder="Optional - 17 characters"
+                  placeholder="17 characters"
                   maxLength={17}
                   className="mt-1 font-mono"
                 />
               </div>
+            )}
+
+            {showIdentificationNotice && (
+              <p className="text-sm text-destructive">
+                This vehicle still needs one of these: its VIN, its license plate, or its engine selected above.
+              </p>
             )}
           </div>
 

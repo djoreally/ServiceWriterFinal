@@ -11,6 +11,22 @@ export function mergeBookingRequirements(requirementSets: Array<BookingRequireme
   return Array.from(merged);
 }
 
+/** Canonical VIN format (same charset/length as the platform VIN helper). */
+export const VIN_FORMAT_PATTERN = /^[A-HJ-NPR-Z0-9]{17}$/;
+
+/**
+ * Owner-ruled vehicle identification for the public booking flow: a vehicle
+ * counts as identified when the customer gives ONE of the VIN or the license
+ * plate (either alone is enough — both are never required). When neither is
+ * given, the customer is on the manual year/make/model path and the engine is
+ * required as well.
+ */
+export function vehicleHasRequiredIdentification(vehicle: VehicleData): boolean {
+  if (VIN_FORMAT_PATTERN.test((vehicle.vin || "").trim().toUpperCase())) return true;
+  if ((vehicle.licensePlate || "").trim().length > 0) return true;
+  return Boolean(vehicle.year && vehicle.make && vehicle.model && vehicle.engine?.trim());
+}
+
 export function vehicleMeetsBookingRequirements(vehicle: VehicleData, requirements: BookingRequirement[]): boolean {
   if (!vehicle.year || !vehicle.make || !vehicle.model) return false;
   if (requirements.includes("tire_fitment") && !TIRE_SIZE_PATTERN.test(vehicle.tireSize?.trim() || "")) return false;

@@ -36,7 +36,7 @@ import {
   type PublicSubscriptionPlan,
 } from "@/application/queries/public-booking.query";
 import type { BookingRequirement } from "@/lib/service-category-policy";
-import { mergeBookingRequirements, vehicleMeetsBookingRequirements } from "@/lib/booking-requirements";
+import { mergeBookingRequirements, vehicleHasRequiredIdentification, vehicleMeetsBookingRequirements } from "@/lib/booking-requirements";
 import type { DetailingPricingRule } from "@/lib/detailing-pricing";
 import { fetchPublicDetailingPricingRules } from "@/application/queries/detailing-pricing.query";
 import { Button } from "@/components/ui/button";
@@ -436,6 +436,8 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
 
   const needsTireFitment = bookingRequirements.includes("tire_fitment");
   const needsOilFitment = bookingRequirements.includes("oil_fitment") && categoryPolicy.showsFluidSpecs;
+  /** Tire-only bookings identify the vehicle by fitment and have no engine field. */
+  const isTireOnlyFlow = needsTireFitment && !needsOilFitment;
 
   /** Ids of selected services whose category requires a detailing assessment. */
   const detailingServiceIds = useMemo(() => services
@@ -1019,7 +1021,14 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
         return !!bs.customerAddress.trim() && !!bs.city.trim() && !!bs.state.trim() && !!bs.zipCode.trim();
       case 2: {
         const enteredVehicles = bs.vehicles.filter((vehicle) => vehicle.year || vehicle.make || vehicle.model);
-        return enteredVehicles.length > 0 && enteredVehicles.every((vehicle) => vehicleMeetsBookingRequirements(vehicle, ["basic_vehicle"]));
+        if (enteredVehicles.length === 0) return false;
+        if (!enteredVehicles.every((vehicle) => vehicleMeetsBookingRequirements(vehicle, ["basic_vehicle"]))) return false;
+        // Owner rule: every vehicle must be identifiable — its VIN or its
+        // license plate (one or the other, never both). With neither, the
+        // manual year/make/model path also requires the engine. The tire-only
+        // flow has no engine field and identifies by fitment, so it is exempt.
+        if (!isTireOnlyFlow && !enteredVehicles.every((vehicle) => vehicleHasRequiredIdentification(vehicle))) return false;
+        return true;
       }
       case 3: {
         const enteredVehicles = bs.vehicles.filter((vehicle) => vehicle.year && vehicle.make && vehicle.model);
@@ -1048,8 +1057,17 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
     switch (bs.step) {
       case 1:
         return "Enter your full address to check the service area.";
-      case 2:
+      case 2: {
+        const enteredVehicles = bs.vehicles.filter((vehicle) => vehicle.year || vehicle.make || vehicle.model);
+        if (enteredVehicles.length === 0) return "Add at least one vehicle to continue.";
+        if (!enteredVehicles.every((vehicle) => vehicleMeetsBookingRequirements(vehicle, ["basic_vehicle"]))) {
+          return "Select year, make and model for each vehicle to continue.";
+        }
+        if (!isTireOnlyFlow && !enteredVehicles.every((vehicle) => vehicleHasRequiredIdentification(vehicle))) {
+          return "Add the VIN or license plate for each vehicle — or select its engine — to continue.";
+        }
         return "Add at least one vehicle to continue.";
+      }
       case 3:
         return "Choose a service to continue.";
       case 4:
