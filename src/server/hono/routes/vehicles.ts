@@ -25,7 +25,7 @@ import { ApiError, json, paginationSchema, requireWorkspaceMember } from "@/serv
 import { requireAuth, requireWorkspaceAuth } from "@/server/hono/middleware/auth";
 import type { Context } from "hono";
 import { getNextFleetWorkOrderStatus } from "@/domain/fleet/work-order-lifecycle";
-import { decodePlateWithVehicleDatabases } from "@/server/hono/lib/vehicle-databases";
+import { decodePlateWithVehicleDatabases, decodeVinWithVehicleDatabases } from "@/server/hono/lib/vehicle-databases";
 import { toDollars } from "@/lib/money";
 
 export const vehiclesRouter = new Hono();
@@ -982,6 +982,12 @@ function getCatalog() {
   return catalogPromise;
 }
 
+/** Shared by authenticated data-center lookups and the public catalog route. */
+export async function getVehicleCatalogSpecs(year: number, make: string, model: string): Promise<VehicleCatalogRow[]> {
+  const catalog = await getCatalog();
+  return catalog.specsByYmm.get(ymmKey(year, make, model)) ?? [];
+}
+
 vehiclesRouter.post("/v1/public-vehicle-catalog", async (c) => {
   try {
     const parsed = requestSchema.safeParse(await c.req.json().catch(() => ({})));
@@ -1450,7 +1456,31 @@ vehiclesRouter.post("/v1/vin/ocr", async (c) => {
 
 vehiclesRouter.post("/v1/vin/decode", async (c) => {
   await requireAuth(c);
-  return providerUnavailable("vin-decode");
+  const body = await c.req.json().catch(() => null);
+  const parsed = z.object({ vin: z.string().trim().regex(/^[A-HJ-NPR-Z0-9]{17}$/i) }).safeParse(body ?? {});
+  if (!parsed.success) throw new ApiError(400, "A valid 17-character VIN is required", "invalid_request");
+  const apiKey = process.env.VEHICLE_DATABASES_API_KEY;
+  if (!apiKey) {
+    return json({
+      data: { success: false, error: "VIN decode is not configured", integrationUnavailable: true },
+    });
+  }
+  const result = await decodeVinWithVehicleDatabases(parsed.data.vin, apiKey);
+  if (result.success === false) return json({ data: { success: false, error: result.error } });
+  return json({
+    data: {
+      vin: result.vehicle.vin,
+      year: result.vehicle.year,
+      make: result.vehicle.make,
+      model: result.vehicle.model,
+      trim: result.vehicle.trim,
+      engine: result.vehicle.engine,
+      transmission: result.vehicle.transmission,
+      driveType: result.vehicle.driveType,
+      fuelType: result.vehicle.fuelType,
+      bodyClass: result.vehicle.bodyClass,
+    },
+  });
 });
 
 const plateLookupSchema = z.object({

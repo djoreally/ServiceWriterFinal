@@ -1,7 +1,9 @@
 import { describe, it, expect } from "@jest/globals";
 import {
   decodePlateWithVehicleDatabases,
+  decodeVinWithVehicleDatabases,
   mapVehicleDatabasesResponse,
+  mapVehicleDatabasesVinResponse,
 } from "../vehicle-databases";
 
 describe("mapVehicleDatabasesResponse", () => {
@@ -94,5 +96,49 @@ describe("decodePlateWithVehicleDatabases", () => {
       success: false,
       error: "Plate lookup failed",
     });
+  });
+});
+
+describe("Vehicle Databases VIN decode", () => {
+  it("maps the provider's nested VIN/basic/engine response without fabricating fields", () => {
+    expect(mapVehicleDatabasesVinResponse({
+      status: "success",
+      data: {
+        intro: { vin: "5UXCR6C09N9K12345" },
+        basic: { make: "BMW", model: "X5", year: "2022", trim: "xDrive40i", body_type: "SUV" },
+        engine: { engine_description: "3.0L I6", transmission: "Automatic", fuel_type: "Gasoline" },
+      },
+    })).toEqual({
+      success: true,
+      vehicle: {
+        vin: "5UXCR6C09N9K12345",
+        year: 2022,
+        make: "BMW",
+        model: "X5",
+        trim: "xDrive40i",
+        engine: "3.0L I6",
+        transmission: "Automatic",
+        driveType: null,
+        fuelType: "Gasoline",
+        bodyClass: "SUV",
+      },
+    });
+  });
+
+  it("calls the documented VIN decode endpoint with the same key header", async () => {
+    const seen: { url: string; key: string } = { url: "", key: "" };
+    const fetchFn = async (url: string, init?: RequestInit) => {
+      seen.url = url;
+      seen.key = ((init?.headers ?? {}) as Record<string, string>)["x-AuthKey"];
+      return ({
+        ok: true,
+        status: 200,
+        json: async () => ({ data: { vin: "5UXCR6C09N9K12345", year: 2022, make: "BMW", model: "X5", engine: "3.0L I6" } }),
+      }) as Response;
+    };
+    const result = await decodeVinWithVehicleDatabases("5uxcr6c09n9k12345", "secret-key", fetchFn as never);
+    expect(seen.url).toBe("https://api.vehicledatabases.com/vin-decode/5UXCR6C09N9K12345");
+    expect(seen.key).toBe("secret-key");
+    expect(result.success).toBe(true);
   });
 });
