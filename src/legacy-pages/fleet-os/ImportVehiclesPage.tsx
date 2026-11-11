@@ -14,6 +14,7 @@ import { VehicleImportReview } from "@/components/fleet/vehicle-import/VehicleIm
 import { VehicleImportResults } from "@/components/fleet/vehicle-import/VehicleImportResults";
 import { useVehicleImportWorkflow } from "@/features/vehicle-import/useVehicleImportWorkflow";
 import { listImportHistory } from "@/features/vehicle-import/services/staging-persistence.service";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
 const rolesAllowedToImport = new Set(["admin", "provider_owner", "dispatcher", "ops_manager", "fleet_manager"]);
 
@@ -101,11 +102,11 @@ export default function ImportVehiclesPage() {
           <VehicleImportLanding
             onFileSelected={async (file) => {
               console.info("vehicle_import_started", { source: "file", fileName: file.name });
-              await workflow.loadFile(file, user?.id || "unknown-user");
+              await workflow.loadFile(file, user?.id || "unknown-user", getSelectedWorkspaceId());
             }}
             onPasteImported={(input) => {
               console.info("vehicle_import_started", { source: "paste", chars: input.length });
-              void workflow.loadPaste(input, user?.id || "unknown-user");
+              void workflow.loadPaste(input, user?.id || "unknown-user", getSelectedWorkspaceId());
             }}
           />
         )}

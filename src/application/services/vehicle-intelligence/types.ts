@@ -19,6 +19,8 @@ export type VehicleIntelligenceDefaults = {
 export type VehicleIntelligenceInput = {
   vehicleId: string;
   userId: string;
+  /** Step 9: tenancy for vehicle_intelligence_profiles (user_id stays the actor). */
+  workspaceId: string | null;
   vin?: string | null;
   year?: number | null;
   make?: string | null;

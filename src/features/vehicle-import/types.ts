@@ -127,6 +127,8 @@ export type VehicleImportBatch = {
   status: BatchStatus;
   createdAt: string;
   createdBy: string;
+  /** Step 9: tenancy for the staging trio (createdBy stays the actor). */
+  workspaceId: string | null;
   mapping: FieldMapping[];
   headers: string[];
   /** Client name suggested by the sheet title, when the list had no client column. */

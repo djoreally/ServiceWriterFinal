@@ -37,6 +37,8 @@ function toServiceDefaults(defaults: VehicleIntelligenceDefaults, source: Servic
 export async function resolveServiceDefaultsForVehicle(input: {
   vehicleId: string;
   userId: string;
+  /** Step 9: profiles are workspace-keyed; null means no workspace context. */
+  workspaceId: string | null;
   vin?: string | null;
   year?: number | null;
   make?: string | null;
@@ -47,12 +49,17 @@ export async function resolveServiceDefaultsForVehicle(input: {
   fuelTypePrimary?: string | null;
   vehicleType?: string | null;
 }): Promise<ServiceDefaults | null> {
-  const { data } = await db
-    .from("vehicle_intelligence_profiles")
-    .select("derived_defaults,effective_defaults")
-    .eq("vehicle_id", input.vehicleId)
-    .eq("user_id", input.userId)
-    .maybeSingle();
+  // Step 9 translation: the profile read keys on workspace_id, not the
+  // actor's user_id. With no workspace context there is no profile to
+  // read — fall through to the derived fallback below.
+  const { data } = input.workspaceId
+    ? await db
+        .from("vehicle_intelligence_profiles")
+        .select("derived_defaults,effective_defaults")
+        .eq("vehicle_id", input.vehicleId)
+        .eq("workspace_id", input.workspaceId)
+        .maybeSingle()
+    : { data: null };
 
   const fromProfile = data as IntelligenceRow | null;
   if (fromProfile?.effective_defaults) {
@@ -66,6 +73,7 @@ export async function resolveServiceDefaultsForVehicle(input: {
   const intelligenceInput: VehicleIntelligenceInput = {
     vehicleId: input.vehicleId,
     userId: input.userId,
+    workspaceId: input.workspaceId,
     vin: input.vin || null,
     year: input.year || null,
     make: input.make || null,

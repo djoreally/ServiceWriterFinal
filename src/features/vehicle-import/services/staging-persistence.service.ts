@@ -29,6 +29,7 @@ function fingerprintKey(hash: string) {
 export async function persistImportBatch(batch: VehicleImportBatch): Promise<void> {
   const { error } = await db.from("vehicle_import_batches").upsert({
     id: batch.id,
+    workspace_id: batch.workspaceId,
     source_file_name: batch.sourceFileName,
     source_file_type: batch.sourceFileType,
     total_rows: batch.totalRows,
@@ -55,11 +56,14 @@ export async function persistImportBatch(batch: VehicleImportBatch): Promise<voi
   }
 }
 
-export async function persistImportRows(rows: VehicleImportRow[]): Promise<void> {
+// Step 9: rows carry no workspace of their own — the caller passes the
+// owning batch's workspaceId (rows are workspace-denormalized from it).
+export async function persistImportRows(rows: VehicleImportRow[], workspaceId: string | null): Promise<void> {
   if (!rows.length) return;
 
   const payload = rows.map((row) => ({
     id: row.id,
+    workspace_id: workspaceId,
     batch_id: row.batchId,
     row_index: row.rowIndex,
     raw_payload: row.rawPayload,
@@ -97,6 +101,7 @@ type PersistedBatchRow = {
   status: VehicleImportBatch["status"];
   created_at: string;
   created_by: string;
+  workspace_id: string | null;
   mapping_payload: VehicleImportBatch["mapping"];
   headers_payload: string[];
   context_payload?: {
@@ -168,6 +173,7 @@ export async function hydrateImportSession(batchId: string): Promise<{ batch: Ve
       status: batchRow.status,
       createdAt: batchRow.created_at,
       createdBy: batchRow.created_by,
+      workspaceId: batchRow.workspace_id,
       mapping: batchRow.mapping_payload || [],
       headers: batchRow.headers_payload || [],
       sheetTitle: batchRow.context_payload?.sheetTitle ?? null,
@@ -228,9 +234,11 @@ export async function appendImportAuditLog(input: {
     | "commit_failed";
   details: Record<string, unknown>;
   actorId: string;
+  workspaceId: string | null;
 }): Promise<void> {
   const { error } = await db.from("vehicle_import_audit_log").insert({
     batch_id: input.batchId,
+    workspace_id: input.workspaceId,
     row_id: input.rowId || null,
     event_type: input.eventType,
     details: input.details,

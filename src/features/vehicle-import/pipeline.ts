@@ -26,6 +26,7 @@ export function createInitialSession(input: {
   sourceFileName: string;
   sourceFileType: "csv" | "xlsx" | "paste";
   createdBy: string;
+  workspaceId: string | null;
   sheetTitle?: string | null;
   footnotes?: string[];
   droppedRows?: number;

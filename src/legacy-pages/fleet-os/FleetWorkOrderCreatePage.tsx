@@ -12,6 +12,7 @@ import { ArrowLeft, Calendar, Car, ClipboardList, FileCheck2, Plus, Send } from 
 import { fetchFleetWorkOrderCreateOptions, fetchAvailability, type FleetWorkOrderCreateOptions } from "@/application/queries";
 import { createFleetWorkOrder, type CreateFleetWorkOrderResult } from "@/application/commands";
 import { resolveServiceDefaultsForVehicle } from "@/application/services/service-defaults/service-defaults.service";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 import { logAudit } from "@/lib/security/audit";
 import { useAuth } from "@packages/auth";
 import { AddVehicleDialog } from "@/components/fleet/AddVehicleDialog";
@@ -188,6 +189,7 @@ const FleetWorkOrderCreatePage = () => {
     const defaults = await resolveServiceDefaultsForVehicle({
       vehicleId: vehicle.id,
       userId,
+      workspaceId: getSelectedWorkspaceId(),
       vin: vehicle.vin,
       year: vehicle.year,
       make: vehicle.make,

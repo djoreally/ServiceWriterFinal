@@ -188,6 +188,7 @@ export async function commitRows(session: VehicleImportSession, userId: string):
       return {
         vehicleId: insertedVehicleId,
         userId,
+        workspaceId: session.batch.workspaceId,
         vin: extractVinCandidate(merged.vin) || null,
         year: merged.year || null,
         make: merged.make || null,
@@ -330,12 +331,27 @@ export async function rollbackImportedBatch(batchId: string, userId: string): Pr
     if (!error) reversed += 1;
   }
 
-  await supabase.from("vehicle_import_audit_log").insert({
-    batch_id: batchId,
-    event_type: "rollback_completed",
-    details: { reversed, blocked: blockedVehicleIds.size },
-    actor_id: userId,
-  });
+  // Step 9: the audit row is workspace-keyed; this path receives only a
+  // batch id, so the batch's own workspace_id is the stamp. If the batch
+  // row is gone there is no honest workspace to stamp — skip the audit
+  // insert (fail-soft, like the rest of this feature) rather than write
+  // a tenant-less row.
+  const { data: batchRow } = await supabase
+    .from("vehicle_import_batches")
+    .select("workspace_id")
+    .eq("id", batchId)
+    .maybeSingle();
+  if (batchRow?.workspace_id) {
+    await supabase.from("vehicle_import_audit_log").insert({
+      batch_id: batchId,
+      workspace_id: batchRow.workspace_id,
+      event_type: "rollback_completed",
+      details: { reversed, blocked: blockedVehicleIds.size },
+      actor_id: userId,
+    });
+  } else {
+    console.warn("[vehicle-import] rollback audit skipped: batch workspace not found", batchId);
+  }
 
   return { reversed, blocked: blockedVehicleIds.size };
 }

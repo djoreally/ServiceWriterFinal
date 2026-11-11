@@ -5,6 +5,7 @@ function input(overrides: Partial<VehicleIntelligenceInput> = {}): VehicleIntell
   return {
     vehicleId: "v-1",
     userId: "u-1",
+    workspaceId: null,
     year: 2020,
     make: "Toyota",
     model: "Camry",

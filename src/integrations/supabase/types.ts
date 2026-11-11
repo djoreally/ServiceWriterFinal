@@ -4323,9 +4323,9 @@ export type Database = {
           year_start: number
         }
         Insert: {
-          brand?: Database["public"]["Enums"]["filter_brand"]
+          brand: Database["public"]["Enums"]["filter_brand"]
           created_at?: string
-          engine?: string
+          engine: string
           engine_code?: string | null
           filter_type: Database["public"]["Enums"]["filter_type"]
           id?: string
@@ -18164,6 +18164,7 @@ export type Database = {
           event_type: string
           id: string
           row_id: string | null
+          workspace_id: string
         }
         Insert: {
           actor_id: string
@@ -18173,6 +18174,7 @@ export type Database = {
           event_type: string
           id?: string
           row_id?: string | null
+          workspace_id: string
         }
         Update: {
           actor_id?: string
@@ -18182,6 +18184,7 @@ export type Database = {
           event_type?: string
           id?: string
           row_id?: string | null
+          workspace_id?: string
         }
         Relationships: [
           {
@@ -18196,6 +18199,13 @@ export type Database = {
             columns: ["row_id"]
             isOneToOne: false
             referencedRelation: "vehicle_import_rows"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vehicle_import_audit_log_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
@@ -18219,25 +18229,27 @@ export type Database = {
           total_rows: number
           updated_at: string
           warning_rows: number
+          workspace_id: string
         }
         Insert: {
           committed_rows?: number
-          context_payload?: Json
+          context_payload: Json
           created_at?: string
           created_by: string
           duplicate_rows?: number
           error_rows?: number
-          headers_payload?: Json
+          headers_payload: Json
           id?: string
-          mapping_payload?: Json
+          mapping_payload: Json
           parsed_rows?: number
           ready_rows?: number
           source_file_name: string
           source_file_type: string
-          status?: string
+          status: string
           total_rows?: number
           updated_at?: string
           warning_rows?: number
+          workspace_id: string
         }
         Update: {
           committed_rows?: number
@@ -18257,8 +18269,17 @@ export type Database = {
           total_rows?: number
           updated_at?: string
           warning_rows?: number
+          workspace_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "vehicle_import_batches_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       vehicle_import_rows: {
         Row: {
@@ -18280,6 +18301,7 @@ export type Database = {
           updated_at: string
           validation_messages: Json
           validation_status: string
+          workspace_id: string
         }
         Insert: {
           batch_id: string
@@ -18290,16 +18312,17 @@ export type Database = {
           duplicate_status: string
           existing_vehicle_id?: string | null
           id?: string
-          mapped_payload?: Json
-          normalized_payload?: Json
+          mapped_payload: Json
+          normalized_payload: Json
           previous_validation_status?: string | null
-          raw_payload?: Json
+          raw_payload: Json
           resolution_payload?: Json | null
           row_index: number
           spec_payload?: Json | null
           updated_at?: string
-          validation_messages?: Json
+          validation_messages: Json
           validation_status: string
+          workspace_id: string
         }
         Update: {
           batch_id?: string
@@ -18320,6 +18343,7 @@ export type Database = {
           updated_at?: string
           validation_messages?: Json
           validation_status?: string
+          workspace_id?: string
         }
         Relationships: [
           {
@@ -18336,6 +18360,13 @@ export type Database = {
             referencedRelation: "fleet_vehicles"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "vehicle_import_rows_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
         ]
       }
       vehicle_intelligence_profiles: {
@@ -18350,6 +18381,7 @@ export type Database = {
           user_id: string
           vehicle_id: string
           vin: string | null
+          workspace_id: string
         }
         Insert: {
           created_at?: string
@@ -18357,11 +18389,12 @@ export type Database = {
           effective_defaults?: Json | null
           id?: string
           override_defaults?: Json | null
-          source_profile?: Json
+          source_profile: Json
           updated_at?: string
           user_id: string
           vehicle_id: string
           vin?: string | null
+          workspace_id: string
         }
         Update: {
           created_at?: string
@@ -18374,6 +18407,7 @@ export type Database = {
           user_id?: string
           vehicle_id?: string
           vin?: string | null
+          workspace_id?: string
         }
         Relationships: [
           {
@@ -18381,6 +18415,13 @@ export type Database = {
             columns: ["vehicle_id"]
             isOneToOne: true
             referencedRelation: "fleet_vehicles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vehicle_intelligence_profiles_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
@@ -18405,6 +18446,7 @@ export type Database = {
           vehicle_kind: string
           verified_at: string | null
           verified_by: string | null
+          workspace_id: string
         }
         Insert: {
           brand?: string | null
@@ -18425,6 +18467,7 @@ export type Database = {
           vehicle_kind: string
           verified_at?: string | null
           verified_by?: string | null
+          workspace_id: string
         }
         Update: {
           brand?: string | null
@@ -18445,6 +18488,7 @@ export type Database = {
           vehicle_kind?: string
           verified_at?: string | null
           verified_by?: string | null
+          workspace_id?: string
         }
         Relationships: [
           {
@@ -18466,6 +18510,13 @@ export type Database = {
             columns: ["vehicle_id"]
             isOneToOne: false
             referencedRelation: "vehicles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vehicle_part_assignments_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
@@ -18490,6 +18541,7 @@ export type Database = {
           updated_at: string
           user_id: string
           vehicle_id: string
+          workspace_id: string
         }
         Insert: {
           created_at?: string
@@ -18504,12 +18556,13 @@ export type Database = {
           is_dismissed?: boolean
           last_service_date?: string | null
           last_service_mileage?: number | null
-          priority?: string
+          priority: string
           recommendation_type: string
           title: string
           updated_at?: string
           user_id: string
           vehicle_id: string
+          workspace_id: string
         }
         Update: {
           created_at?: string
@@ -18530,8 +18583,17 @@ export type Database = {
           updated_at?: string
           user_id?: string
           vehicle_id?: string
+          workspace_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "vehicle_recommendations_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       vehicle_repairs_api_audit_logs: {
         Row: {
