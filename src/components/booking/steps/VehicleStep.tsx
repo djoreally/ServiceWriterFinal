@@ -65,7 +65,7 @@ export function VehicleStep({
         <p className="text-muted-foreground">
           {isTireFlow
             ? "We'll confirm your factory tire size — you can override it if your tires are different"
-            : "Select year, make, model and engine, or enter the VIN"}
+            : "We identify each vehicle by its VIN or its license plate — one or the other is enough. Entering year, make and model instead? Then the engine is required too."}
         </p>
       </div>
 
