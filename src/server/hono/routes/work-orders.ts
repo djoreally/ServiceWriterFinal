@@ -33,6 +33,21 @@ import {
   type ServerLocationRow,
   type ServerRecommendationRow,
 } from "@/application/queries/tech-app-sync.query";
+import {
+  adoptId,
+  asNumber,
+  asString,
+  changeSetFor,
+  emptyCounts,
+  isLocalOnlyReference,
+  isUuid,
+  jobTransitionFor,
+  parseWireDate,
+  serverReportStatus,
+  serverStepStatus,
+  type PushChanges,
+  type TableCounts,
+} from "@/application/queries/tech-app-sync-push.query";
 
 export const workOrdersRouter = new Hono();
 
@@ -2239,6 +2254,498 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
       timestamp,
     },
   });
+});
+
+workOrdersRouter.post("/v1/tech-app/sync/push", async (c) => {
+  // Tech app sync push (SYNC-2, 2026-11-11): the applying half of
+  // the Watermelon synchronize() protocol — the device change sets
+  // land in the server tables. Pure mapping lives in
+  // src/application/queries/tech-app-sync-push.query.ts.
+  //
+  // Semantics, decided with the pull: auth + workspace resolution
+  // stay OUTSIDE the per-table applies (an unauthenticated call
+  // answers 401 like every sibling door); inside, each table
+  // applies independently — a failure is counted and named in the
+  // response's errors map, never poisoning the whole sync, and the
+  // answer is always 200 with per-table counts. Scope is the
+  // caller's own assigned appointments: anything addressed outside
+  // that set is skipped, never applied. Jobs are server-born —
+  // the push creates and deletes none; status changes ride the
+  // canonical technician_transition_job_v1 RPC.
+  const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c);
+  const db = supabase as any;
+  const body = z
+    .object({
+      changes: z.record(z.string(), z.unknown()).optional(),
+      last_pulled_at: z.unknown().optional(),
+    })
+    .parse(await c.req.json().catch(() => ({})));
+  const changes = (body.changes ?? {}) as unknown as PushChanges;
+
+  const applied: Record<string, TableCounts> = {};
+  const errors: Record<string, string> = {};
+  const note = (table: string, err: unknown) => {
+    if (!(table in errors)) {
+      errors[table] = err instanceof Error ? err.message : String(err);
+    }
+  };
+  const nowIso = () => new Date().toISOString();
+
+  const { data: technicianRow } = await db
+    .from("technicians")
+    .select("id")
+    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  const technicianId: string | null = (technicianRow?.id as string | undefined) ?? null;
+
+  const jobsSet = changeSetFor(changes, "jobs");
+  const reportsSet = changeSetFor(changes, "inspection_reports");
+  const stepsSet = changeSetFor(changes, "inspection_steps");
+  const mediaSet = changeSetFor(changes, "inspection_media");
+  const recsSet = changeSetFor(changes, "recommendations");
+  const photosSet = changeSetFor(changes, "job_photos");
+  const locationsSet = changeSetFor(changes, "technician_locations");
+
+  // Scope: the appointments this push may touch — the caller's own
+  // assigned set, resolved once for every table below.
+  const referencedAppointmentIds = new Set<string>();
+  for (const row of [...jobsSet.created, ...jobsSet.updated]) {
+    if (typeof row.id === "string") referencedAppointmentIds.add(row.id);
+    if (typeof row.server_id === "string") referencedAppointmentIds.add(row.server_id);
+  }
+  for (const row of [...reportsSet.created, ...reportsSet.updated]) {
+    if (typeof row.appointment_id === "string") referencedAppointmentIds.add(row.appointment_id);
+  }
+  for (const row of [...photosSet.created, ...photosSet.updated]) {
+    if (typeof row.appointment_id === "string") referencedAppointmentIds.add(row.appointment_id);
+  }
+  const assigned = new Map<
+    string,
+    { vehicle_id: string | null; status: string | null; dispatch_status: string | null }
+  >();
+  if (referencedAppointmentIds.size > 0) {
+    const { data: appts } = await db
+      .from("appointments")
+      .select("id, vehicle_id, status, dispatch_status")
+      .eq("workspace_id", workspaceId)
+      .eq("assigned_user_id", user.id)
+      .in("id", [...referencedAppointmentIds]);
+    for (const appt of (appts ?? []) as Array<Record<string, any>>) {
+      assigned.set(appt.id as string, {
+        vehicle_id: (appt.vehicle_id as string | null) ?? null,
+        status: (appt.status as string | null) ?? null,
+        dispatch_status: (appt.dispatch_status as string | null) ?? null,
+      });
+    }
+  }
+
+  // --- jobs: status transitions only ---------------------------------
+  {
+    const counts = emptyCounts();
+    applied.jobs = counts;
+    counts.skipped += jobsSet.created.length + jobsSet.deleted.length;
+    for (const row of jobsSet.updated) {
+      const appointmentId =
+        typeof row.server_id === "string" && assigned.has(row.server_id)
+          ? row.server_id
+          : typeof row.id === "string" && assigned.has(row.id)
+            ? row.id
+            : null;
+      const transition = jobTransitionFor(row.status);
+      if (!appointmentId || !transition) {
+        counts.skipped += 1;
+        continue;
+      }
+      const current = assigned.get(appointmentId)!;
+      const alreadyThere =
+        (transition === "en_route" &&
+          (current.dispatch_status === "en_route" || current.status === "en_route")) ||
+        (transition === "started" &&
+          (current.status === "in_progress" || current.status === "started")) ||
+        (transition === "completed" && current.status === "completed");
+      if (alreadyThere) {
+        counts.skipped += 1;
+        continue;
+      }
+      try {
+        const { error } = await db.rpc("technician_transition_job_v1", {
+          p_job_id: appointmentId,
+          p_source: "appointment",
+          p_next_status: transition,
+          p_notes: null,
+          p_idempotency_key: null,
+          p_expected_updated_at: null,
+        });
+        if (error) throw error;
+        counts.updated += 1;
+      } catch (err) {
+        counts.skipped += 1;
+        note("jobs", err);
+      }
+    }
+  }
+
+  // --- inspection_reports: upsert ------------------------------------
+  const reportServerId = new Map<string, string>();
+  const reportAppointment = new Map<string, string>();
+  {
+    const counts = emptyCounts();
+    applied.inspection_reports = counts;
+    const upserts = [
+      ...reportsSet.created.map((row) => ({ row, isNew: true })),
+      ...reportsSet.updated.map((row) => ({ row, isNew: false })),
+    ];
+    for (const { row, isNew } of upserts) {
+      const appointmentId = typeof row.appointment_id === "string" ? row.appointment_id : null;
+      if (!appointmentId || !assigned.has(appointmentId)) {
+        counts.skipped += 1;
+        continue;
+      }
+      const serverId = adoptId(row.id, () => crypto.randomUUID());
+      if (typeof row.id === "string") reportServerId.set(row.id, serverId);
+      reportAppointment.set(serverId, appointmentId);
+      const createdAt = parseWireDate(row.created_at) ?? nowIso();
+      try {
+        const { error } = await db.from("service_inspections").upsert(
+          {
+            id: serverId,
+            workspace_id: workspaceId,
+            appointment_id: appointmentId,
+            user_id: user.id,
+            vehicle_id: assigned.get(appointmentId)!.vehicle_id,
+            service_id: null,
+            template_id: null,
+            template_name: "Tech App Inspection",
+            inspector_name: null,
+            inspection_date: createdAt.slice(0, 10),
+            notes: asString(row.overall_notes),
+            status: serverReportStatus(row.status),
+            created_at: createdAt,
+            updated_at: parseWireDate(row.updated_at) ?? createdAt,
+          },
+          { onConflict: "id" },
+        );
+        if (error) throw error;
+        if (isNew) counts.created += 1;
+        else counts.updated += 1;
+      } catch (err) {
+        counts.skipped += 1;
+        note("inspection_reports", err);
+      }
+    }
+    for (const localId of reportsSet.deleted) {
+      const serverId = reportServerId.get(localId) ?? (isUuid(localId) ? localId : null);
+      if (!serverId) {
+        counts.skipped += 1;
+        continue;
+      }
+      try {
+        const { error } = await db
+          .from("service_inspections")
+          .update({ status: "cancelled" })
+          .eq("id", serverId)
+          .eq("workspace_id", workspaceId);
+        if (error) throw error;
+        counts.deleted += 1;
+      } catch (err) {
+        counts.skipped += 1;
+        note("inspection_reports", err);
+      }
+    }
+  }
+
+  const resolveReportAppointment = async (serverReportId: string): Promise<string | null> => {
+    const known = reportAppointment.get(serverReportId);
+    if (known) return known;
+    const { data } = await db
+      .from("service_inspections")
+      .select("appointment_id")
+      .eq("id", serverReportId)
+      .eq("workspace_id", workspaceId)
+      .maybeSingle();
+    const appointmentId = (data?.appointment_id as string | null | undefined) ?? null;
+    if (appointmentId) reportAppointment.set(serverReportId, appointmentId);
+    return appointmentId;
+  };
+  const serverReportIdFor = (localId: unknown): string | null =>
+    typeof localId === "string"
+      ? (reportServerId.get(localId) ?? (isUuid(localId) ? localId : null))
+      : null;
+
+  // Media parse (no writes yet): the first uploaded photo per step
+  // becomes that step's image_url when the steps land below.
+  const firstPhotoByLocalStepId = new Map<string, string>();
+  for (const row of [...mediaSet.created, ...mediaSet.updated]) {
+    if (asString(row.kind) !== "photo") continue;
+    const mediaUrl = asString(row.media_url);
+    const stepId = typeof row.step_id === "string" ? row.step_id : null;
+    if (!mediaUrl || !stepId || isLocalOnlyReference(mediaUrl)) continue;
+    if (!firstPhotoByLocalStepId.has(stepId)) firstPhotoByLocalStepId.set(stepId, mediaUrl);
+  }
+
+  // --- inspection_steps: replace-by-report ---------------------------
+  const stepServerId = new Map<string, string>();
+  const stepLabel = new Map<string, string>();
+  const stepAppointment = new Map<string, string>();
+  {
+    const counts = emptyCounts();
+    applied.inspection_steps = counts;
+    counts.skipped += stepsSet.deleted.length; // the replace below covers deletes
+    const byReport = new Map<string, Array<Record<string, unknown>>>();
+    for (const row of [...stepsSet.created, ...stepsSet.updated]) {
+      const serverReportId = serverReportIdFor(row.report_id);
+      if (!serverReportId) {
+        counts.skipped += 1;
+        continue;
+      }
+      const list = byReport.get(serverReportId) ?? [];
+      list.push(row);
+      byReport.set(serverReportId, list);
+    }
+    for (const [serverReportId, list] of byReport) {
+      const appointmentId = await resolveReportAppointment(serverReportId);
+      if (!appointmentId || !assigned.has(appointmentId)) {
+        counts.skipped += list.length;
+        continue;
+      }
+      try {
+        const { error: deleteError } = await db
+          .from("inspection_results")
+          .delete()
+          .eq("inspection_id", serverReportId)
+          .eq("workspace_id", workspaceId);
+        if (deleteError) throw deleteError;
+        const inserts = list.map((row) => {
+          const serverStepId = adoptId(row.id, () => crypto.randomUUID());
+          if (typeof row.id === "string") {
+            stepServerId.set(row.id, serverStepId);
+            stepLabel.set(serverStepId, asString(row.label) ?? "Inspection item");
+            stepAppointment.set(serverStepId, appointmentId);
+          }
+          return {
+            id: serverStepId,
+            workspace_id: workspaceId,
+            inspection_id: serverReportId,
+            appointment_id: appointmentId,
+            item_name: asString(row.label) ?? "Inspection item",
+            item_category: asString(row.category),
+            status: serverStepStatus(row.status),
+            notes: asString(row.notes),
+            sort_order: typeof row.sort_index === "number" ? row.sort_index : 0,
+            image_url:
+              (typeof row.id === "string" ? firstPhotoByLocalStepId.get(row.id) : undefined) ??
+              null,
+            created_at: parseWireDate(row.created_at) ?? nowIso(),
+          };
+        });
+        const { error } = await db.from("inspection_results").insert(inserts);
+        if (error) throw error;
+        counts.created += inserts.length;
+      } catch (err) {
+        counts.skipped += list.length;
+        note("inspection_steps", err);
+      }
+    }
+  }
+
+  // --- inspection_media: every uploaded file also lands as a photo ---
+  {
+    const counts = emptyCounts();
+    applied.inspection_media = counts;
+    counts.skipped += mediaSet.deleted.length;
+    for (const row of [...mediaSet.created, ...mediaSet.updated]) {
+      const mediaUrl = asString(row.media_url);
+      if (!mediaUrl || isLocalOnlyReference(mediaUrl)) {
+        counts.skipped += 1;
+        continue;
+      }
+      const localStepId = typeof row.step_id === "string" ? row.step_id : null;
+      const serverStepId = localStepId
+        ? (stepServerId.get(localStepId) ?? (isUuid(localStepId) ? localStepId : null))
+        : null;
+      const appointmentId = serverStepId ? stepAppointment.get(serverStepId) : undefined;
+      if (!serverStepId || !appointmentId) {
+        counts.skipped += 1;
+        continue;
+      }
+      try {
+        const { error } = await db.from("job_photos").insert({
+          id: adoptId(row.id, () => crypto.randomUUID()),
+          workspace_id: workspaceId,
+          appointment_id: appointmentId,
+          user_id: user.id,
+          technician_id: technicianId,
+          photo_type: "inspection",
+          photo_url: null,
+          storage_path: mediaUrl,
+          caption: `${asString(row.kind) ?? "photo"} — ${stepLabel.get(serverStepId) ?? "inspection step"}`,
+          created_at: parseWireDate(row.created_at) ?? nowIso(),
+        });
+        if (error) throw error;
+        counts.created += 1;
+      } catch (err) {
+        counts.skipped += 1;
+        note("inspection_media", err);
+      }
+    }
+  }
+
+  // --- recommendations: upsert ---------------------------------------
+  {
+    const counts = emptyCounts();
+    applied.recommendations = counts;
+    const upserts = [
+      ...recsSet.created.map((row) => ({ row, isNew: true })),
+      ...recsSet.updated.map((row) => ({ row, isNew: false })),
+    ];
+    for (const { row, isNew } of upserts) {
+      const serverReportId = serverReportIdFor(row.report_id);
+      const appointmentId = serverReportId
+        ? await resolveReportAppointment(serverReportId)
+        : null;
+      if (!serverReportId || !appointmentId || !assigned.has(appointmentId)) {
+        counts.skipped += 1;
+        continue;
+      }
+      const localStepId = typeof row.step_id === "string" ? row.step_id : null;
+      const serverStepId = localStepId
+        ? (stepServerId.get(localStepId) ?? (isUuid(localStepId) ? localStepId : null))
+        : null;
+      const createdAt = parseWireDate(row.created_at) ?? nowIso();
+      try {
+        const { error } = await db.from("service_recommendations").upsert(
+          {
+            id: adoptId(row.id, () => crypto.randomUUID()),
+            workspace_id: workspaceId,
+            appointment_id: appointmentId,
+            inspection_id: serverReportId,
+            inspection_result_id: serverStepId,
+            description: asString(row.recommended_service) ?? "Recommended service",
+            technician_notes: asString(row.notes),
+            price: asNumber(row.estimated_cost),
+            created_at: createdAt,
+            updated_at: parseWireDate(row.updated_at) ?? createdAt,
+          },
+          { onConflict: "id" },
+        );
+        if (error) throw error;
+        if (isNew) counts.created += 1;
+        else counts.updated += 1;
+      } catch (err) {
+        counts.skipped += 1;
+        note("recommendations", err);
+      }
+    }
+    for (const localId of recsSet.deleted) {
+      if (!isUuid(localId)) {
+        counts.skipped += 1;
+        continue;
+      }
+      try {
+        const { error } = await db
+          .from("service_recommendations")
+          .delete()
+          .eq("id", localId)
+          .eq("workspace_id", workspaceId);
+        if (error) throw error;
+        counts.deleted += 1;
+      } catch (err) {
+        counts.skipped += 1;
+        note("recommendations", err);
+      }
+    }
+  }
+
+  // --- job_photos: adopt server-referenced rows -----------------------
+  {
+    const counts = emptyCounts();
+    applied.job_photos = counts;
+    counts.skipped += photosSet.updated.length; // photos are create-only on the wire
+    for (const row of photosSet.created) {
+      const photoUrl = asString(row.photo_url);
+      const appointmentId = typeof row.appointment_id === "string" ? row.appointment_id : null;
+      if (!photoUrl || isLocalOnlyReference(photoUrl) || !appointmentId || !assigned.has(appointmentId)) {
+        counts.skipped += 1;
+        continue;
+      }
+      try {
+        const { error } = await db.from("job_photos").insert({
+          id: adoptId(row.id, () => crypto.randomUUID()),
+          workspace_id: workspaceId,
+          appointment_id: appointmentId,
+          user_id: user.id,
+          technician_id: technicianId,
+          photo_type: asString(row.photo_type) ?? "general",
+          photo_url: photoUrl,
+          storage_path: asString(row.local_path) ?? photoUrl,
+          caption: asString(row.caption),
+          created_at: parseWireDate(row.created_at) ?? nowIso(),
+        });
+        if (error) throw error;
+        counts.created += 1;
+      } catch (err) {
+        counts.skipped += 1;
+        note("job_photos", err);
+      }
+    }
+    for (const localId of photosSet.deleted) {
+      if (!isUuid(localId)) {
+        counts.skipped += 1;
+        continue;
+      }
+      try {
+        const { error } = await db
+          .from("job_photos")
+          .delete()
+          .eq("id", localId)
+          .eq("workspace_id", workspaceId)
+          .eq("user_id", user.id);
+        if (error) throw error;
+        counts.deleted += 1;
+      } catch (err) {
+        counts.skipped += 1;
+        note("job_photos", err);
+      }
+    }
+  }
+
+  // --- technician_locations: append-only inserts ----------------------
+  {
+    const counts = emptyCounts();
+    applied.technician_locations = counts;
+    counts.skipped += locationsSet.updated.length + locationsSet.deleted.length;
+    for (const row of locationsSet.created) {
+      const latitude = asNumber(row.latitude);
+      const longitude = asNumber(row.longitude);
+      if (!technicianId || latitude === null || longitude === null) {
+        counts.skipped += 1;
+        continue;
+      }
+      try {
+        const { error } = await db.from("location_history").insert({
+          id: adoptId(row.id, () => crypto.randomUUID()),
+          technician_id: technicianId,
+          latitude,
+          longitude,
+          accuracy: asNumber(row.accuracy),
+          heading: asNumber(row.heading),
+          speed: asNumber(row.speed),
+          recorded_at: parseWireDate(row.recorded_at) ?? nowIso(),
+          appointment_id: null,
+          activity_type: null,
+          altitude: null,
+        });
+        if (error) throw error;
+        counts.created += 1;
+      } catch (err) {
+        counts.skipped += 1;
+        note("technician_locations", err);
+      }
+    }
+  }
+
+  return json({ data: { applied, errors, timestamp: Date.now() } });
 });
 
 workOrdersRouter.get("/v1/tech-app/technician-id", async (c) => {
