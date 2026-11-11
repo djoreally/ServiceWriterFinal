@@ -187,3 +187,443 @@ export function bucketJobChanges(
 
   return { created, updated, deleted: [...deleted] };
 }
+
+// ---------------------------------------------------------------------------
+// SYNC-1b (2026-11-11): inspections, recommendations, photos, locations.
+//
+// Server sources, all pinned to the live production shape by the
+// selects test (tech-app-sync-pull-selects.test.ts):
+// - service_inspections: the report header. status vocabulary is
+//   draft | completed | cancelled (repo DDL
+//   20260917215245_reconcile_inspection_runtime). There is NO
+//   completed_at column; a completed report's updated_at is the
+//   completion stamp the wire carries.
+// - inspection_results: the per-step rows. NO updated_at — change
+//   detection rides on the parent report (below). status is the
+//   production union vocabulary (migration
+//   20261110170000_inspection_results_status_vocabulary):
+//   attention, fail, good, not_applicable, not_checked, pass,
+//   urgent, warning.
+// - service_recommendations: the office's advisory rows (migration
+//   20260917233000_vehicle_scoped_service_recommendations), with
+//   real created_at/updated_at.
+// - job_photos: NO updated_at; rows are create-only on the wire
+//   (updated_at mirrors created_at, as the local schema requires
+//   the column).
+// - location_history: append-only pings keyed by technicians.id
+//   (NOT the auth id — the column the client's own GPS hook stamps,
+//   AuthContext technicianId = technicians.id ?? auth id). NO
+//   created_at/updated_at; recorded_at fills all three wire stamps.
+//
+// Watermelon's applyRemoteChanges (verified in the client's own
+// @nozbe/watermelondb 0.28 sources) is forgiving in both
+// directions: a "created" row that already exists locally is
+// updated in place, and an "updated" row missing locally is
+// created. The bucketers below lean on that: when in doubt, send
+// the row. Deletes of ids the device never held are no-ops.
+// ---------------------------------------------------------------------------
+
+/** Shared change-set shape for the SYNC-1b tables. */
+export interface SyncChangeSet<Raw> {
+  created: Raw[];
+  updated: Raw[];
+  deleted: string[];
+}
+
+/**
+ * created_at/updated_at bucketing, the same rule bucketJobChanges
+ * applies: first pull (lastPulledAt <= 0) creates everything; a row
+ * created after last_pulled_at is "created"; a row that existed
+ * before but changed after it is "updated"; unchanged rows omit.
+ */
+function bucketByTimestamps<Row extends { created_at: string; updated_at: string }>(
+  rows: Row[],
+  lastPulledAtMs: number,
+): { created: Row[]; updated: Row[] } {
+  const created: Row[] = [];
+  const updated: Row[] = [];
+  for (const row of rows) {
+    const createdMs = Date.parse(row.created_at);
+    const updatedMs = Date.parse(row.updated_at);
+    if (lastPulledAtMs <= 0 || (Number.isFinite(createdMs) && createdMs > lastPulledAtMs)) {
+      created.push(row);
+    } else if (Number.isFinite(updatedMs) && updatedMs > lastPulledAtMs) {
+      updated.push(row);
+    }
+  }
+  return { created, updated };
+}
+
+/** created_at-only bucketing for append-only tables (photos, locations). */
+function bucketByCreatedAt<Row extends { created_at: string }>(
+  rows: Row[],
+  lastPulledAtMs: number,
+): Row[] {
+  if (lastPulledAtMs <= 0) return [...rows];
+  return rows.filter((row) => {
+    const createdMs = Date.parse(row.created_at);
+    return Number.isFinite(createdMs) && createdMs > lastPulledAtMs;
+  });
+}
+
+// --- inspection_reports ← service_inspections ------------------------------
+
+export interface ServerInspectionRow {
+  id: string;
+  appointment_id: string | null;
+  user_id: string | null;
+  notes: string | null;
+  status: string | null;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface LocalInspectionReportRaw {
+  id: string;
+  appointment_id: string;
+  technician_id: string;
+  overall_notes: string | null;
+  status: string;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Server inspection status → the local report vocabulary
+ * (in_progress | completed). "cancelled" never reaches the
+ * mapper — the bucketer routes cancelled reports to deleted.
+ */
+export function localReportStatus(serverStatus: string | null | undefined): string {
+  return (serverStatus ?? "").trim().toLowerCase() === "completed" ? "completed" : "in_progress";
+}
+
+export function mapInspectionToLocalReport(row: ServerInspectionRow): LocalInspectionReportRaw {
+  const status = localReportStatus(row.status);
+  const updatedAt = row.updated_at ?? row.created_at;
+  return {
+    id: row.id,
+    appointment_id: row.appointment_id ?? "",
+    technician_id: row.user_id ?? "",
+    overall_notes: row.notes,
+    status,
+    completed_at: status === "completed" ? updatedAt : null,
+    created_at: row.created_at,
+    updated_at: updatedAt,
+  };
+}
+
+export function bucketInspectionReports(
+  rows: ServerInspectionRow[],
+  lastPulledAtMs: number,
+  deletedAppointmentIds: ReadonlySet<string> = new Set(),
+): SyncChangeSet<LocalInspectionReportRaw> {
+  const deleted = new Set<string>();
+  const live: LocalInspectionReportRaw[] = [];
+  for (const row of rows) {
+    const cancelled = (row.status ?? "").trim().toLowerCase() === "cancelled";
+    if (cancelled || (row.appointment_id !== null && deletedAppointmentIds.has(row.appointment_id))) {
+      deleted.add(row.id);
+      continue;
+    }
+    live.push(mapInspectionToLocalReport(row));
+  }
+  const { created, updated } = bucketByTimestamps(live, lastPulledAtMs);
+  const upserted = new Set([...created, ...updated].map((row) => row.id));
+  for (const id of upserted) deleted.delete(id);
+  return { created, updated, deleted: [...deleted] };
+}
+
+// --- inspection_steps ← inspection_results ---------------------------------
+
+export interface ServerInspectionResultRow {
+  id: string;
+  inspection_id: string;
+  item_name: string;
+  item_category: string | null;
+  status: string | null;
+  notes: string | null;
+  sort_order: number | null;
+  created_at: string;
+}
+
+export interface LocalInspectionStepRaw {
+  id: string;
+  report_id: string;
+  step_key: string;
+  label: string;
+  category: string;
+  status: string;
+  notes: string | null;
+  sort_index: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Production result vocabulary → the local step vocabulary
+ * (pass | fail | warn | na | unchecked). The severity ladder is
+ * the legacy voice-inspection model (good < attention < urgent):
+ * good/pass are clean, attention/warning are the middle bucket,
+ * fail/urgent are the severe bucket.
+ */
+export function localStepStatus(serverStatus: string | null | undefined): string {
+  switch ((serverStatus ?? "").trim().toLowerCase()) {
+    case "good":
+    case "pass":
+      return "pass";
+    case "fail":
+    case "urgent":
+      return "fail";
+    case "attention":
+    case "warning":
+      return "warn";
+    case "not_applicable":
+      return "na";
+    case "not_checked":
+      return "unchecked";
+    default:
+      return "unchecked";
+  }
+}
+
+export function mapResultToLocalStep(row: ServerInspectionResultRow): LocalInspectionStepRaw {
+  const sortIndex = typeof row.sort_order === "number" ? row.sort_order : 0;
+  return {
+    id: row.id,
+    report_id: row.inspection_id,
+    // The server keys steps by item name, not by template-item id;
+    // sort_order is the only stable key the row carries. (SYNC-2's
+    // push owns translating local template keys back.)
+    step_key: String(sortIndex),
+    label: row.item_name,
+    category: row.item_category ?? "",
+    status: localStepStatus(row.status),
+    notes: row.notes,
+    sort_index: sortIndex,
+    created_at: row.created_at,
+    // inspection_results has no updated_at; the parent report's
+    // change stamp is what re-sends a step (see the bucketer).
+    updated_at: row.created_at,
+  };
+}
+
+/**
+ * Steps have no change stamp of their own, so they ride on their
+ * parent report: a step is sent when its report was created or
+ * updated in this pull, or when the step itself was created after
+ * last_pulled_at. Sent as "created" — the client's apply step
+ * upserts a created row that already exists locally, so a re-sent
+ * step updates in place instead of duplicating. Steps of a deleted
+ * report are deleted. Known limit: the office's full re-save
+ * (/perform adopt path) deletes and re-creates result rows under
+ * new ids, so a superseded id can linger on the device as a ghost
+ * step until the report itself is deleted; in-place step edits
+ * (§E advance) keep their ids and propagate through the parent.
+ */
+export function bucketInspectionSteps(
+  rows: ServerInspectionResultRow[],
+  reportChanges: SyncChangeSet<LocalInspectionReportRaw>,
+  lastPulledAtMs: number,
+): SyncChangeSet<LocalInspectionStepRaw> {
+  const changedReportIds = new Set([
+    ...reportChanges.created.map((row) => row.id),
+    ...reportChanges.updated.map((row) => row.id),
+  ]);
+  const deletedReportIds = new Set(reportChanges.deleted);
+  const created: LocalInspectionStepRaw[] = [];
+  const deleted = new Set<string>();
+  for (const row of rows) {
+    if (deletedReportIds.has(row.inspection_id)) {
+      deleted.add(row.id);
+      continue;
+    }
+    const step = mapResultToLocalStep(row);
+    const ownChange = bucketByCreatedAt([step], lastPulledAtMs).length > 0;
+    if (changedReportIds.has(row.inspection_id) || ownChange) {
+      created.push(step);
+    }
+  }
+  const upserted = new Set(created.map((row) => row.id));
+  for (const id of upserted) deleted.delete(id);
+  return { created, updated: [], deleted: [...deleted] };
+}
+
+// --- recommendations ← service_recommendations ------------------------------
+
+export interface ServerRecommendationRow {
+  id: string;
+  appointment_id: string | null;
+  inspection_id: string;
+  inspection_result_id: string | null;
+  description: string;
+  technician_notes: string | null;
+  price: number | string | null;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface LocalRecommendationRaw {
+  id: string;
+  report_id: string;
+  step_id: string | null;
+  recommended_service: string;
+  urgency: string | null;
+  estimated_cost: number | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export function mapRecommendationToLocal(row: ServerRecommendationRow): LocalRecommendationRaw {
+  const price = row.price === null || row.price === undefined ? NaN : Number(row.price);
+  return {
+    id: row.id,
+    report_id: row.inspection_id,
+    step_id: row.inspection_result_id,
+    recommended_service: row.description,
+    // The server's own status (pending/approved/declined/…) is a
+    // decision state, not an urgency — the local urgency stays
+    // null rather than inventing a severity the server never set.
+    urgency: null,
+    estimated_cost: Number.isFinite(price) ? price : null,
+    notes: row.technician_notes,
+    created_at: row.created_at,
+    updated_at: row.updated_at ?? row.created_at,
+  };
+}
+
+export function bucketRecommendations(
+  rows: ServerRecommendationRow[],
+  lastPulledAtMs: number,
+  deletedAppointmentIds: ReadonlySet<string> = new Set(),
+): SyncChangeSet<LocalRecommendationRaw> {
+  const deleted = new Set<string>();
+  const live: LocalRecommendationRaw[] = [];
+  for (const row of rows) {
+    if (row.appointment_id !== null && deletedAppointmentIds.has(row.appointment_id)) {
+      deleted.add(row.id);
+      continue;
+    }
+    live.push(mapRecommendationToLocal(row));
+  }
+  const { created, updated } = bucketByTimestamps(live, lastPulledAtMs);
+  const upserted = new Set([...created, ...updated].map((row) => row.id));
+  for (const id of upserted) deleted.delete(id);
+  return { created, updated, deleted: [...deleted] };
+}
+
+// --- job_photos ← job_photos -------------------------------------------------
+
+export interface ServerJobPhotoRow {
+  id: string;
+  appointment_id: string | null;
+  technician_id: string | null;
+  user_id: string | null;
+  photo_type: string | null;
+  photo_url: string | null;
+  storage_path: string | null;
+  caption: string | null;
+  created_at: string;
+}
+
+export interface LocalJobPhotoRaw {
+  id: string;
+  appointment_id: string;
+  technician_id: string;
+  photo_url: string;
+  local_path: string | null;
+  caption: string | null;
+  photo_type: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export function mapJobPhotoToLocal(row: ServerJobPhotoRow): LocalJobPhotoRaw {
+  return {
+    id: row.id,
+    appointment_id: row.appointment_id ?? "",
+    technician_id: row.technician_id ?? row.user_id ?? "",
+    // photo_url is the stored reference when the row carries one;
+    // otherwise the storage path is the reference (the same value
+    // the office's own photo reads key on).
+    photo_url: row.photo_url ?? row.storage_path ?? "",
+    local_path: null,
+    caption: row.caption,
+    photo_type: row.photo_type,
+    created_at: row.created_at,
+    updated_at: row.created_at,
+  };
+}
+
+export function bucketJobPhotos(
+  rows: ServerJobPhotoRow[],
+  lastPulledAtMs: number,
+  deletedAppointmentIds: ReadonlySet<string> = new Set(),
+): SyncChangeSet<LocalJobPhotoRaw> {
+  const deleted = new Set<string>();
+  const live: LocalJobPhotoRaw[] = [];
+  for (const row of rows) {
+    if (row.appointment_id !== null && deletedAppointmentIds.has(row.appointment_id)) {
+      deleted.add(row.id);
+      continue;
+    }
+    live.push(mapJobPhotoToLocal(row));
+  }
+  return { created: bucketByCreatedAt(live, lastPulledAtMs), updated: [], deleted: [...deleted] };
+}
+
+// --- technician_locations ← location_history ---------------------------------
+
+export interface ServerLocationRow {
+  id: string;
+  technician_id: string;
+  latitude: number | string;
+  longitude: number | string;
+  accuracy: number | string | null;
+  heading: number | string | null;
+  speed: number | string | null;
+  recorded_at: string;
+}
+
+export interface LocalTechnicianLocationRaw {
+  id: string;
+  technician_id: string;
+  latitude: number;
+  longitude: number;
+  accuracy: number | null;
+  heading: number | null;
+  speed: number | null;
+  recorded_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+function numericOrNull(value: number | string | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function mapLocationToLocal(row: ServerLocationRow): LocalTechnicianLocationRaw {
+  return {
+    id: row.id,
+    technician_id: row.technician_id,
+    latitude: numericOrNull(row.latitude) ?? 0,
+    longitude: numericOrNull(row.longitude) ?? 0,
+    accuracy: numericOrNull(row.accuracy),
+    heading: numericOrNull(row.heading),
+    speed: numericOrNull(row.speed),
+    recorded_at: row.recorded_at,
+    created_at: row.recorded_at,
+    updated_at: row.recorded_at,
+  };
+}
+
+export function bucketLocations(
+  rows: ServerLocationRow[],
+  lastPulledAtMs: number,
+): SyncChangeSet<LocalTechnicianLocationRaw> {
+  const mapped = rows.map(mapLocationToLocal);
+  return { created: bucketByCreatedAt(mapped, lastPulledAtMs), updated: [], deleted: [] };
+}
