@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -59,6 +60,9 @@ export function InvoicesTab() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const debouncedSearch = useDebounce(searchQuery, 250);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkViewId = searchParams.get("view");
+  const consumedDeepLinkRef = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -79,6 +83,26 @@ export function InvoicesTab() {
   useEffect(() => {
     void Promise.resolve().then(() => load());
   }, [load]);
+
+  // Item #9 Step 3 (CHAIR-1): /invoices/<id> deep links land here as
+  // ?view=<id>. Once the list has loaded, open the existing detail dialog
+  // when the id resolves to a loaded invoice; an unknown id simply lands
+  // on the plain list — no error toast. The param is consumed exactly once
+  // and cleared via replace either way, so refresh/back never re-trigger
+  // the open and the dialog's own close stays closed.
+  useEffect(() => {
+    if (!deepLinkViewId || loading) return;
+    if (consumedDeepLinkRef.current === deepLinkViewId) return;
+    consumedDeepLinkRef.current = deepLinkViewId;
+    if (rows.some((r) => r.id === deepLinkViewId)) {
+      // Deferred like the load/paging effects above: the open lands a
+      // microtask after the param clear, never synchronously in the effect.
+      void Promise.resolve().then(() => setViewId(deepLinkViewId));
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete("view");
+    setSearchParams(next, { replace: true });
+  }, [deepLinkViewId, loading, rows, searchParams, setSearchParams]);
 
   const stats = useMemo(() => {
     let outstandingAmount = 0;
