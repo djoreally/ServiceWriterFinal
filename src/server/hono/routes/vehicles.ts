@@ -30,6 +30,13 @@ import {
   type PlateDecodeResult,
 } from "@/server/hono/lib/vehicle-databases";
 import {
+  fetchFluidSpecs,
+  fetchMaintenanceSchedule,
+  fetchOilLookup,
+  type MaintenanceInterval,
+  type VehicleDataResult,
+} from "@/server/hono/lib/vehicle-databases-data";
+import {
   decodeVinWithNhtsa,
   type DecodedVehicle,
   type VinDecodeResult,
@@ -1508,10 +1515,14 @@ vehiclesRouter.post("/v1/vin/plate-lookup", async (c) => {
 // One endpoint behind the tech app's Data tab: given exactly one of
 // vin | plate+state | vehicle_id, answer the vehicle and its service
 // specs. Sources, in trust order: the workspace's own
-// vehicle_service_specs, the bundled specs catalog (the same index
+// vehicle_service_specs, the vehicle_specifications reference table
+// (~14k rows), the bundled specs catalog (the same index
 // POST /v1/public-vehicle-catalog serves), NHTSA vPIC for a bare VIN,
 // Vehicle Databases for plate -> VIN (PR #241's helper), Wheel-Size
-// for tire size + pressure. Never invent a spec: unknown stays null,
+// for tire size + pressure — and, for fields still unknown and only
+// against a full VIN, Vehicle Databases' oil lookup, fluids, and
+// factory maintenance schedule (those calls spend account credits,
+// so they are the last resort). Never invent a spec: unknown stays null,
 // and a total miss answers 200 + success:false (the house fail-soft
 // contract), never a 500. appliesTo follows the workspace's active
 // service catalog — the platform is customized per industry, so a
@@ -1655,6 +1666,36 @@ vehiclesRouter.get("/v1/tech-app/data-center/vehicle", async (c) => {
         if (typeof specRow.engine === "string" && specRow.engine) vehicle.engine = specRow.engine;
       }
     }
+    // The vehicle_specifications reference table is the house layer
+    // under the workspace's own records: same year/make/model query +
+    // engine-displacement resolution the office spec lookup uses.
+    if (vehicle.year && vehicle.make && vehicle.model) {
+      try {
+        const { data: specRows } = await db
+          .from("vehicle_specifications")
+          .select("year,make,model,engine,oil_type,oil_capacity,oil_filter")
+          .eq("year", vehicle.year)
+          .ilike("make", vehicle.make)
+          .ilike("model", vehicle.model)
+          .limit(25);
+        const norm = (value: unknown) => String(value ?? "").trim().toLowerCase();
+        const rows = (Array.isArray(specRows) ? specRows : []).filter(
+          (row: any) =>
+            row.year === vehicle.year &&
+            norm(row.make) === norm(vehicle.make) &&
+            norm(row.model) === norm(vehicle.model),
+        );
+        const picked = pickCatalogRow(rows, vehicle.engine);
+        if (picked) {
+          const filled = mergeSpecs(specs, specsFromCatalogRow(picked));
+          if (hasAnySpec(filled) && source === "decode") source = "catalog";
+          specs = filled;
+          if (!vehicle.engine && picked.engine) vehicle.engine = picked.engine;
+        }
+      } catch {
+        // Reference table unreachable — the remaining layers still answer.
+      }
+    }
     if (vehicle.year && vehicle.make && vehicle.model) {
       const catalog = await getCatalog();
       const rows = catalog.specsByYmm.get(ymmKey(vehicle.year, vehicle.make, vehicle.model)) ?? [];
@@ -1687,12 +1728,58 @@ vehiclesRouter.get("/v1/tech-app/data-center/vehicle", async (c) => {
       if (specs.tirePressurePsi === null) specs.tirePressurePsi = fitment.tirePressurePsi;
     }
 
+    // Vehicle Databases depth — the last resort, and only against a
+    // full VIN: the calls spend account credits, so each one fires
+    // only when its fields are still unknown. Oil lookup and fluids
+    // fill spec gaps; the factory maintenance schedule rides along
+    // when the shop does oil, filters, or inspections (or has made
+    // no selection at all). All three run in parallel, fail soft,
+    // and are never retried inside a request.
+    let maintenance: MaintenanceInterval[] | null = null;
+    const vdKey = process.env.VEHICLE_DATABASES_API_KEY;
+    const vin17 = vehicle.vin && vehicle.vin.length === 17 ? vehicle.vin : null;
+    if (vdKey && vin17) {
+      const wantsMaintenance =
+        appliesTo.length === 0 ||
+        appliesTo.includes("oil") ||
+        appliesTo.includes("filters") ||
+        appliesTo.includes("inspection");
+      const needsOil =
+        specs.oilType === null ||
+        specs.oilCapacityQuarts === null ||
+        specs.oilFilter === null ||
+        specs.tireSize === null;
+      const [oil, fluids, schedule] = await Promise.all([
+        needsOil ? fetchOilLookup(vin17, vdKey) : Promise.resolve(null),
+        specs.coolantType === null ? fetchFluidSpecs(vin17, vdKey) : Promise.resolve(null),
+        wantsMaintenance ? fetchMaintenanceSchedule(vin17, vdKey) : Promise.resolve(null),
+      ]);
+      if (oil?.success) {
+        specs = mergeSpecs(
+          specs,
+          (oil as Extract<VehicleDataResult<DataCenterSpecs>, { success: true }>).value,
+        );
+      }
+      if (fluids?.success) {
+        specs = mergeSpecs(
+          specs,
+          (fluids as Extract<VehicleDataResult<DataCenterSpecs>, { success: true }>).value,
+        );
+      }
+      if (schedule?.success) {
+        maintenance = (
+          schedule as Extract<VehicleDataResult<MaintenanceInterval[]>, { success: true }>
+        ).value;
+      }
+    }
+
     return c.json({
       success: true,
       vehicle,
       specs: hasAnySpec(specs) ? specs : null,
       source,
       appliesTo,
+      maintenance,
     });
   } catch {
     return fail("Data center lookup failed");
