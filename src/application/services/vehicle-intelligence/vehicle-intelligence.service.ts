@@ -25,6 +25,7 @@ export async function upsertVehicleIntelligenceProfiles(inputs: VehicleIntellige
   const payload = inputs.map((input) => ({
     vehicle_id: input.vehicleId,
     user_id: input.userId,
+    workspace_id: input.workspaceId,
     vin: input.vin || null,
     source_profile: input,
     derived_defaults: deriveVehicleIntelligence(input),

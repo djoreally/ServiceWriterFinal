@@ -75,7 +75,7 @@ export function useVehicleImportWorkflow(userId?: string) {
     return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
   };
 
-  const loadFile = async (file: File, createdBy: string) => {
+  const loadFile = async (file: File, createdBy: string, workspaceId: string | null) => {
     setLoading(true);
     const content = await file.text();
     const fileHash = await computeFingerprint(`${file.name}:${file.type}:${content}`);
@@ -92,13 +92,14 @@ export function useVehicleImportWorkflow(userId?: string) {
       sourceFileName: file.name,
       sourceFileType: parsed.fileType,
       createdBy,
+      workspaceId,
       sheetTitle: parsed.sheetTitle,
       footnotes: parsed.footnotes,
       droppedRows: parsed.droppedRows,
     });
     setSession(next);
     await persistImportBatch(next.batch);
-    await persistImportRows(next.rows);
+    await persistImportRows(next.rows, next.batch.workspaceId);
     await registerBatchFingerprint({
       userId: createdBy,
       fileHash,
@@ -108,6 +109,7 @@ export function useVehicleImportWorkflow(userId?: string) {
     });
     await appendImportAuditLog({
       batchId: next.batch.id,
+      workspaceId: next.batch.workspaceId,
       actorId: createdBy,
       eventType: "import_started",
       details: { sourceFileType: parsed.fileType, sourceFileName: file.name, totalRows: parsed.rows.length, file_hash: fileHash },
@@ -117,7 +119,7 @@ export function useVehicleImportWorkflow(userId?: string) {
     setLoading(false);
   };
 
-  const loadPaste = async (input: string, createdBy: string) => {
+  const loadPaste = async (input: string, createdBy: string, workspaceId: string | null) => {
     const fileHash = await computeFingerprint(`paste:${input}`);
     const existingBatchId = await findExistingBatchByFingerprint({ userId: createdBy, fileHash });
     if (existingBatchId) {
@@ -131,13 +133,14 @@ export function useVehicleImportWorkflow(userId?: string) {
       sourceFileName: "manual-paste",
       sourceFileType: "paste",
       createdBy,
+      workspaceId,
       sheetTitle: parsed.sheetTitle,
       footnotes: parsed.footnotes,
       droppedRows: parsed.droppedRows,
     });
     setSession(next);
     void persistImportBatch(next.batch);
-    void persistImportRows(next.rows);
+    void persistImportRows(next.rows, next.batch.workspaceId);
     void registerBatchFingerprint({
       userId: createdBy,
       fileHash,
@@ -147,6 +150,7 @@ export function useVehicleImportWorkflow(userId?: string) {
     });
     void appendImportAuditLog({
       batchId: next.batch.id,
+      workspaceId: next.batch.workspaceId,
       actorId: createdBy,
       eventType: "import_started",
       details: { sourceFileType: "paste", sourceFileName: "manual-paste", totalRows: parsed.rows.length, file_hash: fileHash },
@@ -161,9 +165,10 @@ export function useVehicleImportWorkflow(userId?: string) {
     const next = applyJobSetup(session, setup);
     setSession(next);
     void persistImportBatch(next.batch);
-    void persistImportRows(next.rows);
+    void persistImportRows(next.rows, next.batch.workspaceId);
     void appendImportAuditLog({
       batchId: next.batch.id,
+      workspaceId: next.batch.workspaceId,
       actorId: next.batch.createdBy,
       eventType: "mapping_applied",
       details: {
@@ -183,9 +188,10 @@ export function useVehicleImportWorkflow(userId?: string) {
     const next = remapSession(session, mapping);
     setSession(next);
     void persistImportBatch(next.batch);
-    void persistImportRows(next.rows);
+    void persistImportRows(next.rows, next.batch.workspaceId);
     void appendImportAuditLog({
       batchId: next.batch.id,
+      workspaceId: next.batch.workspaceId,
       actorId: next.batch.createdBy,
       eventType: "mapping_applied",
       details: { mappedColumns: mapping.length },
@@ -202,9 +208,10 @@ export function useVehicleImportWorkflow(userId?: string) {
       });
       setSession(processed);
       await persistImportBatch(processed.batch);
-      await persistImportRows(processed.rows);
+      await persistImportRows(processed.rows, processed.batch.workspaceId);
       await appendImportAuditLog({
         batchId: processed.batch.id,
+        workspaceId: processed.batch.workspaceId,
         actorId: processed.batch.createdBy,
         eventType: "decode_completed",
         details: {
@@ -214,6 +221,7 @@ export function useVehicleImportWorkflow(userId?: string) {
       });
       await appendImportAuditLog({
         batchId: processed.batch.id,
+        workspaceId: processed.batch.workspaceId,
         actorId: processed.batch.createdBy,
         eventType: "validation_completed",
         details: {
@@ -223,6 +231,7 @@ export function useVehicleImportWorkflow(userId?: string) {
       });
       await appendImportAuditLog({
         batchId: processed.batch.id,
+        workspaceId: processed.batch.workspaceId,
         actorId: processed.batch.createdBy,
         eventType: "duplicates_detected",
         details: {
@@ -237,6 +246,7 @@ export function useVehicleImportWorkflow(userId?: string) {
       await persistImportBatch(failed.batch);
       await appendImportAuditLog({
         batchId: failed.batch.id,
+        workspaceId: failed.batch.workspaceId,
         actorId: failed.batch.createdBy,
         eventType: "validation_completed",
         details: { failure: true, error: error instanceof Error ? error.message : "process failed" },
@@ -266,9 +276,10 @@ export function useVehicleImportWorkflow(userId?: string) {
       ),
     };
     setSession(next);
-    void persistImportRows(next.rows);
+    void persistImportRows(next.rows, next.batch.workspaceId);
     void appendImportAuditLog({
       batchId: session.batch.id,
+      workspaceId: session.batch.workspaceId,
       rowId: rowId,
       actorId: session.batch.createdBy,
       eventType: "row_resolution_updated",
@@ -292,9 +303,10 @@ export function useVehicleImportWorkflow(userId?: string) {
       ),
     };
     setSession(next);
-    void persistImportRows(next.rows);
+    void persistImportRows(next.rows, next.batch.workspaceId);
     void appendImportAuditLog({
       batchId: session.batch.id,
+      workspaceId: session.batch.workspaceId,
       rowId: rowId,
       actorId: session.batch.createdBy,
       eventType: "row_resolution_updated",
@@ -315,7 +327,7 @@ export function useVehicleImportWorkflow(userId?: string) {
       }),
     };
     setSession(next);
-    void persistImportRows(next.rows);
+    void persistImportRows(next.rows, next.batch.workspaceId);
   };
 
   /**
@@ -344,9 +356,10 @@ export function useVehicleImportWorkflow(userId?: string) {
         rows: session.rows.map((row) => (row.id === rowId ? validated : row)),
       };
       setSession(next);
-      void persistImportRows(next.rows);
+      void persistImportRows(next.rows, next.batch.workspaceId);
       void appendImportAuditLog({
         batchId: session.batch.id,
+        workspaceId: session.batch.workspaceId,
         rowId,
         actorId: session.batch.createdBy,
         eventType: "row_resolution_updated",
@@ -364,6 +377,7 @@ export function useVehicleImportWorkflow(userId?: string) {
     try {
       await appendImportAuditLog({
         batchId: session.batch.id,
+        workspaceId: session.batch.workspaceId,
         actorId: userId,
         eventType: "commit_started",
         details: {},
@@ -371,9 +385,10 @@ export function useVehicleImportWorkflow(userId?: string) {
       const committed = await commitImportSession(session, userId);
       setSession(committed);
       await persistImportBatch(committed.batch);
-      await persistImportRows(committed.rows);
+      await persistImportRows(committed.rows, committed.batch.workspaceId);
       await appendImportAuditLog({
         batchId: committed.batch.id,
+        workspaceId: committed.batch.workspaceId,
         actorId: userId,
         eventType: "commit_completed",
         details: {
@@ -389,6 +404,7 @@ export function useVehicleImportWorkflow(userId?: string) {
       await persistImportBatch(failed.batch);
       await appendImportAuditLog({
         batchId: session.batch.id,
+        workspaceId: session.batch.workspaceId,
         actorId: userId,
         eventType: "commit_failed",
         details: { error: error instanceof Error ? error.message : "commit failed" },
@@ -420,6 +436,7 @@ export function useVehicleImportWorkflow(userId?: string) {
       setWorkOrderResult(result);
       await appendImportAuditLog({
         batchId: session.batch.id,
+        workspaceId: session.batch.workspaceId,
         actorId: session.batch.createdBy,
         eventType: "commit_completed",
         details: {

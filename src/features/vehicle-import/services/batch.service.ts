@@ -26,6 +26,7 @@ export function buildBatch(args: {
   sourceFileName: string;
   sourceFileType: "csv" | "xlsx" | "paste";
   createdBy: string;
+  workspaceId: string | null;
   headers: string[];
   rows: Record<string, unknown>[];
   sheetTitle?: string | null;
@@ -63,6 +64,7 @@ export function buildBatch(args: {
     status: "parsed",
     createdAt: new Date().toISOString(),
     createdBy: args.createdBy,
+    workspaceId: args.workspaceId,
     mapping,
     headers: args.headers,
     sheetTitle: args.sheetTitle ?? null,

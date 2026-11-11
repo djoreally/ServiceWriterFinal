@@ -1858,22 +1858,31 @@ vehiclesRouter.post("/v1/vehicle-part-suggestions", async (c) => {
 
 vehiclesRouter.post("/v1/vehicle-part-assignments", async (c) => {
   const body = await c.req.json();
-  const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  const { supabase, user, workspaceId: scopedWorkspaceId } = await requireFleetScope(c, selectedWorkspaceHint(c));
   const kind = body.kind;
   const vehicleId = body.vehicle_id;
   if (kind !== "fleet" && kind !== "retail") throw new ApiError(400, "kind must be fleet or retail", "invalid_input");
   if (!vehicleId) throw new ApiError(400, "vehicle_id is required", "invalid_input");
   // Resolve the workspace owner that owns the vehicle row, so team members write valid rows.
+  // Step 9 translation: the parent vehicle row is also the tenancy anchor —
+  // its workspace_id stamps the assignment; the caller's resolved workspace
+  // is the fallback when the parent row's workspace_id is null.
   const ownerQuery =
     kind === "fleet"
-      ? (supabase as any).from("fleet_vehicles").select("user_id").eq("id", vehicleId).maybeSingle()
-      : (supabase as any).from("vehicles").select("user_id").eq("id", vehicleId).maybeSingle();
+      ? (supabase as any).from("fleet_vehicles").select("user_id, workspace_id").eq("id", vehicleId).maybeSingle()
+      : (supabase as any).from("vehicles").select("user_id, workspace_id").eq("id", vehicleId).maybeSingle();
   const { data: vehicle, error: vehicleError } = await ownerQuery;
   if (vehicleError) throw new Error(vehicleError.message);
   if (!vehicle?.user_id) throw new ApiError(404, "Vehicle not found", "not_found");
+  const workspaceId =
+    (vehicle.workspace_id as string | null) ??
+    scopedWorkspaceId ??
+    (await resolveWorkspaceIdForUser(supabase, user.id));
+  if (!workspaceId) throw new ApiError(403, "Select a workspace before assigning parts.", "forbidden");
   const input = body.input ?? {};
   const row = {
     user_id: vehicle.user_id,
+    workspace_id: workspaceId,
     vehicle_kind: kind,
     fleet_vehicle_id: kind === "fleet" ? vehicleId : null,
     vehicle_id: kind === "retail" ? vehicleId : null,
@@ -2084,12 +2093,16 @@ vehiclesRouter.get("/v1/vehicle-recommendations", async (c) => {
   const url = new URL(c.req.url);
   const vehicleId = url.searchParams.get("vehicle_id");
   if (!vehicleId) throw new ApiError(400, "vehicle_id is required", "invalid_input");
-  const { supabase, user } = await requireFleetScope(c, url.searchParams.get("selected_workspace_id"));
+  const { supabase, user, workspaceId: scopedWorkspaceId } = await requireFleetScope(c, url.searchParams.get("selected_workspace_id"));
+  // Step 9 translation: recommendations are workspace-keyed; with no hint
+  // the caller's first active membership stands in (the /generate idiom).
+  const workspaceId = scopedWorkspaceId ?? (await resolveWorkspaceIdForUser(supabase, user.id));
+  if (!workspaceId) return json({ data: [] });
   const { data, error } = await (supabase as any)
     .from("vehicle_recommendations")
     .select("*")
     .eq("vehicle_id", vehicleId)
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .eq("is_dismissed", false)
     .order("priority", { ascending: true });
   if (error) throw error;
@@ -2127,10 +2140,15 @@ vehiclesRouter.delete("/v1/vehicle-recommendations/:id", async (c) => {
 
 vehiclesRouter.post("/v1/vehicle-recommendations", async (c) => {
   const body = await c.req.json();
-  const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  const { supabase, user, workspaceId: scopedWorkspaceId } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  // Step 9 translation: workspace_id is stamped AFTER the body spread, so
+  // a client-supplied value can never smuggle a row into another workspace.
+  const workspaceId = scopedWorkspaceId ?? (await resolveWorkspaceIdForUser(supabase, user.id));
+  if (!workspaceId) throw new ApiError(403, "Select a workspace before adding recommendations.", "forbidden");
   const { error } = await (supabase as any).from("vehicle_recommendations").insert([{
     ...(body.rec ?? body),
     user_id: user.id,
+    workspace_id: workspaceId,
   }]);
   if (error) throw new Error("Failed to add recommendation");
   return json({ data: { ok: true } });
@@ -2154,7 +2172,11 @@ vehiclesRouter.post("/v1/vehicle-recommendations/generate", async (c) => {
     servicesWorkspaceId
       ? client.from("services").select("*").eq("vehicle_id", vehicleId).eq("workspace_id", servicesWorkspaceId).order("service_date", { ascending: false })
       : Promise.resolve({ data: [], error: null }),
-    client.from("vehicle_recommendations").select("recommendation_type").eq("vehicle_id", vehicleId).eq("user_id", user.id).eq("is_dismissed", false),
+    // Step 9 translation: the existing-recommendations check is keyed by
+    // the same resolved workspace as the services history read above.
+    servicesWorkspaceId
+      ? client.from("vehicle_recommendations").select("recommendation_type").eq("vehicle_id", vehicleId).eq("workspace_id", servicesWorkspaceId).eq("is_dismissed", false)
+      : Promise.resolve({ data: [], error: null }),
   ]);
   const services = servicesRes.data || [];
   const existingTypes = new Set((existingRes.data || []).map((r: { recommendation_type: string }) => r.recommendation_type));
@@ -2199,10 +2221,15 @@ vehiclesRouter.post("/v1/vehicle-recommendations/generate", async (c) => {
         last_service_mileage: null,
         last_service_date: lastService?.service_date || null,
         user_id: user.id,
+        workspace_id: servicesWorkspaceId,
       });
     }
   }
   if (newRecs.length > 0) {
+    // No resolved workspace -> nothing can be stamped; generation reports
+    // zero rather than writing tenant-less rows (mirrors the services
+    // leg's no-workspace treatment above).
+    if (!servicesWorkspaceId) return json({ data: { count: 0 } });
     const { error } = await client.from("vehicle_recommendations").insert(newRecs);
     if (error) throw new Error("Failed to generate recommendations");
   }
