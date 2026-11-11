@@ -3244,7 +3244,7 @@ appointmentsRouter.get("/v1/dispatch/settings", async (c: Context) => {
   if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
   const { data, error } = await (supabase as any)
     .from("business_profiles")
-    .select("auto_dispatch_enabled,dispatch_weight_distance,dispatch_weight_load,dispatch_weight_performance,dispatch_weight_fairness,dispatch_weight_route,dispatch_fleet_performance_threshold,default_technician_id")
+    .select("auto_dispatch_enabled,dispatch_weight_distance,dispatch_weight_load,dispatch_weight_performance,dispatch_weight_fairness,dispatch_weight_route,dispatch_fleet_performance_threshold")
     .eq("workspace_id", workspaceId)
     .maybeSingle();
   if (error) throw error;
