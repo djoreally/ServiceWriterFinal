@@ -70,19 +70,29 @@ const ServiceDetail = () => {
   const [businessName, setBusinessName] = useState<string>("");
   const [businessEmail, setBusinessEmail] = useState<string>("");
   const [sendingEmail, setSendingEmail] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
 
   const fetchData = useCallback(async () => {
     if (!id) return;
     setLoading(true);
+    setLoadError(null);
 
-    const result = await fetchServiceDetail(id);
-    if (!result) {
+    const outcome = await fetchServiceDetail(id);
+    if (outcome.status === "not_found") {
       toast.error("Service not found");
       navigate("/services");
       return;
     }
+    if (outcome.status === "error") {
+      // A load failure is not "not found": stay on the page with a
+      // distinct error state so the failure is diagnosable (CHAIR-3).
+      setLoadError(outcome.message);
+      setLoading(false);
+      return;
+    }
 
+    const result = outcome.detail;
     setService(result.service);
     setCustomer(result.customer);
     setVehicle(result.vehicle);
@@ -158,6 +168,21 @@ const ServiceDetail = () => {
       <AppLayout title="Loading...">
         <div className="flex items-center justify-center h-64">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <AppLayout title="Could Not Load">
+        <div className="text-center py-12">
+          <p className="text-base font-medium">This service record could not be loaded</p>
+          <p className="text-sm text-muted-foreground mt-2">{loadError}</p>
+          <div className="mt-4 flex items-center justify-center gap-3">
+            <Button onClick={() => void fetchData()}>Retry</Button>
+            <Button variant="outline" onClick={() => navigate("/services")}>Back to Services</Button>
+          </div>
         </div>
       </AppLayout>
     );
