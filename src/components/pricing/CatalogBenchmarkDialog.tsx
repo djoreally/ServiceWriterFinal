@@ -54,7 +54,6 @@ export function CatalogBenchmarkDialog({
       }
 
       const { error } = await saveCatalogBenchmark({
-        userId: user.id,
         serviceCatalogId,
         vin: cleanVin || null,
         vehicleLabel: null,

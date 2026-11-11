@@ -90,10 +90,10 @@ export async function fetchRecurringServicesLookupData(): Promise<RecurringServi
 }
 
 export async function fetchRecurringServices(): Promise<RecurringServiceRecord[]> {
-  const { userId } = await requireContext();
+  const { workspaceId } = await requireContext();
 
   const response = await apiClient.get<{ data: RecurringServiceRecord[] }>("/v1/recurring-services", {
-    query: { user_id: userId },
+    query: { workspace_id: workspaceId },
   });
   return response.data ?? [];
 }
