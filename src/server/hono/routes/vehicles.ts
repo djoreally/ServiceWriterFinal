@@ -25,7 +25,26 @@ import { ApiError, json, paginationSchema, requireWorkspaceMember } from "@/serv
 import { requireAuth, requireWorkspaceAuth } from "@/server/hono/middleware/auth";
 import type { Context } from "hono";
 import { getNextFleetWorkOrderStatus } from "@/domain/fleet/work-order-lifecycle";
-import { decodePlateWithVehicleDatabases } from "@/server/hono/lib/vehicle-databases";
+import {
+  decodePlateWithVehicleDatabases,
+  type PlateDecodeResult,
+} from "@/server/hono/lib/vehicle-databases";
+import {
+  decodeVinWithNhtsa,
+  type DecodedVehicle,
+  type VinDecodeResult,
+} from "@/server/hono/lib/vin-decode";
+import { fetchWheelSizeFitment } from "@/server/hono/lib/wheel-size";
+import {
+  appliesToFromCatalog,
+  hasAnySpec,
+  mergeSpecs,
+  pickCatalogRow,
+  specsFromCatalogRow,
+  specsFromWorkspaceRow,
+  EMPTY_SPECS,
+  type DataCenterSpecs,
+} from "@/server/hono/lib/data-center";
 import { toDollars } from "@/lib/money";
 
 export const vehiclesRouter = new Hono();
@@ -1481,6 +1500,199 @@ vehiclesRouter.post("/v1/vin/plate-lookup", async (c) => {
     apiKey,
   );
   return json({ data: result });
+});
+
+// ---------------------------------------------------------------------------
+// Tech app — Data Center (GET /v1/tech-app/data-center/vehicle)
+//
+// One endpoint behind the tech app's Data tab: given exactly one of
+// vin | plate+state | vehicle_id, answer the vehicle and its service
+// specs. Sources, in trust order: the workspace's own
+// vehicle_service_specs, the bundled specs catalog (the same index
+// POST /v1/public-vehicle-catalog serves), NHTSA vPIC for a bare VIN,
+// Vehicle Databases for plate -> VIN (PR #241's helper), Wheel-Size
+// for tire size + pressure. Never invent a spec: unknown stays null,
+// and a total miss answers 200 + success:false (the house fail-soft
+// contract), never a 500. appliesTo follows the workspace's active
+// service catalog — the platform is customized per industry, so a
+// tire shop's Data Center leads with tires, not oil.
+// ---------------------------------------------------------------------------
+
+interface DataCenterVehicle {
+  vin: string | null;
+  year: number | null;
+  make: string | null;
+  model: string | null;
+  engine: string | null;
+}
+
+vehiclesRouter.get("/v1/tech-app/data-center/vehicle", async (c) => {
+  const fail = (error: string) => c.json({ success: false, error }, 200);
+  try {
+    const { supabase, user } = await requireAuth(c);
+    const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id);
+    if (!workspaceId) return fail("No active workspace");
+
+    const url = new URL(c.req.url);
+    const vinParam = url.searchParams.get("vin")?.trim().toUpperCase() || null;
+    const plateParam = url.searchParams.get("plate")?.trim().toUpperCase() || null;
+    const stateParam = url.searchParams.get("state")?.trim().toUpperCase() || null;
+    const vehicleIdParam = url.searchParams.get("vehicle_id")?.trim() || null;
+
+    const provided = [vinParam, plateParam, vehicleIdParam].filter(Boolean).length;
+    if (provided !== 1) return fail("Provide exactly one of vin, plate+state, or vehicle_id");
+    if (plateParam && (!stateParam || stateParam.length !== 2)) {
+      return fail("Plate lookup needs a 2-letter state");
+    }
+
+    const db = supabase as any;
+
+    // The workspace's selected services drive what applies (industry
+    // customization); read them alongside the vehicle resolution.
+    const catalogPromise = (async () => {
+      try {
+        const res = await db
+          .from("service_catalog")
+          .select("name,category")
+          .eq("workspace_id", workspaceId)
+          .eq("is_active", true);
+        return Array.isArray(res?.data) ? res.data : [];
+      } catch {
+        return [];
+      }
+    })();
+
+    let vehicle: DataCenterVehicle = { vin: null, year: null, make: null, model: null, engine: null };
+    let vehicleRowId: string | null = null;
+    let source: "workspace" | "catalog" | "decode" = "decode";
+
+    const loadVehicleRow = async (column: string, value: string) => {
+      const { data } = await db
+        .from("vehicles")
+        .select("id,vin,year,make,model")
+        .eq("workspace_id", workspaceId)
+        .eq(column, value)
+        .maybeSingle();
+      return data ?? null;
+    };
+
+    const adoptRow = (row: any) => {
+      vehicleRowId = row.id ?? null;
+      vehicle = {
+        vin: typeof row.vin === "string" && row.vin ? row.vin.toUpperCase() : vehicle.vin,
+        year: typeof row.year === "number" ? row.year : vehicle.year,
+        make: typeof row.make === "string" && row.make ? row.make : vehicle.make,
+        model: typeof row.model === "string" && row.model ? row.model : vehicle.model,
+        engine: vehicle.engine,
+      };
+    };
+
+    const adoptDecoded = (decoded: DecodedVehicle) => {
+      vehicle = {
+        vin: decoded.vin,
+        year: decoded.year,
+        make: decoded.make,
+        model: decoded.model,
+        engine: decoded.engine ?? vehicle.engine,
+      };
+    };
+
+    if (vehicleIdParam) {
+      const row = await loadVehicleRow("id", vehicleIdParam);
+      if (!row) return fail("Vehicle not found");
+      adoptRow(row);
+    } else {
+      let vin = vinParam;
+      if (plateParam && stateParam) {
+        const apiKey = process.env.VEHICLE_DATABASES_API_KEY;
+        if (!apiKey) return fail("Plate lookup is not configured");
+        const plate = await decodePlateWithVehicleDatabases(plateParam, stateParam, apiKey);
+        if (plate.success) {
+          vin = plate.vehicle.vin;
+          vehicle = {
+            vin,
+            year: plate.vehicle.year,
+            make: plate.vehicle.make || null,
+            model: plate.vehicle.model || null,
+            engine: null,
+          };
+        } else {
+          return fail((plate as Extract<PlateDecodeResult, { success: false }>).error);
+        }
+      }
+      if (vin) {
+        vehicle.vin = vin;
+        const row = await loadVehicleRow("vin", vin);
+        if (row) {
+          adoptRow(row);
+        } else {
+          const decoded = await decodeVinWithNhtsa(vin);
+          if (decoded.success) {
+            adoptDecoded(decoded.vehicle);
+          } else if (!vehicle.year || !vehicle.make || !vehicle.model) {
+            return fail((decoded as Extract<VinDecodeResult, { success: false }>).error);
+          }
+        }
+      }
+    }
+
+    // Specs: the workspace's own records first, the catalog fills gaps.
+    let specs: DataCenterSpecs = { ...EMPTY_SPECS };
+    if (vehicleRowId) {
+      const { data: specRow } = await db
+        .from("vehicle_service_specs")
+        .select("*")
+        .eq("workspace_id", workspaceId)
+        .eq("vehicle_id", vehicleRowId)
+        .maybeSingle();
+      if (specRow) {
+        specs = specsFromWorkspaceRow(specRow);
+        if (hasAnySpec(specs)) source = "workspace";
+        if (typeof specRow.engine === "string" && specRow.engine) vehicle.engine = specRow.engine;
+      }
+    }
+    if (vehicle.year && vehicle.make && vehicle.model) {
+      const catalog = await getCatalog();
+      const rows = catalog.specsByYmm.get(ymmKey(vehicle.year, vehicle.make, vehicle.model)) ?? [];
+      const picked = pickCatalogRow(rows, vehicle.engine);
+      if (picked) {
+        const filled = mergeSpecs(specs, specsFromCatalogRow(picked));
+        if (hasAnySpec(filled) && source === "decode") source = "catalog";
+        specs = filled;
+        if (!vehicle.engine && picked.engine) vehicle.engine = picked.engine;
+      }
+    }
+
+    // Tires from Wheel-Size when the shop does tires (or has made no
+    // selection at all); only into fields still unknown.
+    const appliesTo = appliesToFromCatalog(await catalogPromise);
+    const wheelKey = process.env.WHEEL_SIZE_API_KEY;
+    if (
+      wheelKey &&
+      vehicle.year &&
+      vehicle.make &&
+      vehicle.model &&
+      (specs.tireSize === null || specs.tirePressurePsi === null) &&
+      (appliesTo.length === 0 || appliesTo.includes("tires"))
+    ) {
+      const fitment = await fetchWheelSizeFitment(
+        { year: vehicle.year, make: vehicle.make, model: vehicle.model },
+        wheelKey,
+      );
+      if (specs.tireSize === null) specs.tireSize = fitment.tireSize;
+      if (specs.tirePressurePsi === null) specs.tirePressurePsi = fitment.tirePressurePsi;
+    }
+
+    return c.json({
+      success: true,
+      vehicle,
+      specs: hasAnySpec(specs) ? specs : null,
+      source,
+      appliesTo,
+    });
+  } catch {
+    return fail("Data center lookup failed");
+  }
 });
 
 // ---------------------------------------------------------------------------
