@@ -61,6 +61,12 @@ import {
 import { syncCanonicalInvoiceToStripe } from "@/server/payments/stripe-invoice-sync";
 import { dispatchPaymentLifecycle, LIFECYCLE_EVENT_KEYS } from "@/server/messaging/quote-payment-events";
 import { planVehicleFieldUpdate } from "@/application/commands/tech-app-vehicle.command";
+import {
+  buildVinOcrProviderCall,
+  parseVinOcrProviderResponse,
+  planVinOcrRequest,
+  readVinOcrConfig,
+} from "@/application/commands/tech-app-vin-ocr.command";
 
 export const workOrdersRouter = new Hono();
 
@@ -3253,6 +3259,80 @@ workOrdersRouter.patch("/v1/tech-app/jobs/:appointmentId/vehicle", async (c) => 
       })(),
     },
   });
+});
+
+workOrdersRouter.post("/v1/tech-app/jobs/:appointmentId/vin-ocr", async (c) => {
+  // Tech app VIN photo decode (2026-11-12, Ty's ask): where the
+  // VIN is stamped numbers with no barcode, the tech photographs
+  // it and this door reads the characters, so typing all 17
+  // digits is the last resort. Same tech-app scope as the vehicle
+  // door above: the appointment must be the caller's OWN assigned
+  // job, in the caller's server-resolved workspace.
+  //
+  // The provider is ENV-CONFIGURED, never hardcoded (planning /
+  // config / parsing: src/application/commands/tech-app-vin-ocr.command.ts):
+  // GEMINI_API_KEY in the server environment is the primary key
+  // (Gemini vision); VIN_OCR_AI_API_KEY is a generic fallback for
+  // any OpenAI-compatible vision endpoint. With no key configured
+  // the door answers the house not-configured contract (200 +
+  // integrationUnavailable, the plate-lookup shape) so the app
+  // falls back to typing.
+  //
+  // Decode-only: the photo and the read are stored NOWHERE. The
+  // VIN goes back to the phone, the tech confirms or corrects it
+  // in the field, and the only write path stays the vehicle door.
+  const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c);
+  const appointmentId = z.string().uuid().parse(c.req.param("appointmentId"));
+  const body = await c.req.json().catch(() => null);
+  const plan = planVinOcrRequest(body);
+  if (!plan.request) throw new ApiError(400, plan.error ?? "Invalid photo.", "invalid_vin_photo");
+
+  const { data: appointment, error: appointmentError } = await (supabase.from("appointments") as any)
+    .select("id, assigned_user_id, status")
+    .eq("workspace_id", workspaceId)
+    .eq("id", appointmentId)
+    .maybeSingle();
+  if (appointmentError) throw appointmentError;
+  if (!appointment) throw new ApiError(404, "Job not found.", "job_not_found");
+  if ((appointment as { assigned_user_id?: string | null }).assigned_user_id !== user.id) {
+    throw new ApiError(403, "This job is not assigned to you.", "job_not_assigned");
+  }
+  if (String((appointment as { status?: string | null }).status ?? "").toLowerCase() === "cancelled") {
+    throw new ApiError(409, "This job is cancelled.", "job_cancelled");
+  }
+
+  const config = readVinOcrConfig(process.env);
+  if (!config) {
+    return json({
+      data: { success: false, integrationUnavailable: true, error: "Photo VIN reading is not configured" },
+    });
+  }
+
+  const call = buildVinOcrProviderCall(config, plan.request);
+  let providerBody: unknown = null;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const res = await fetch(call.url, { ...call.init, signal: controller.signal });
+      if (!res.ok) throw new Error(`provider HTTP ${res.status}`);
+      providerBody = await res.json().catch(() => null);
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch {
+    return json({
+      data: { success: false, error: "The photo reader didn't answer — try again, or type the VIN in." },
+    });
+  }
+
+  const { vin } = parseVinOcrProviderResponse(config.provider, providerBody);
+  if (!vin) {
+    return json({
+      data: { success: false, error: "No VIN could be read from that photo — try again closer, or type the VIN in." },
+    });
+  }
+  return json({ data: { success: true, vin } });
 });
 
 workOrdersRouter.get("/v1/tech-app/technician-id", async (c) => {
