@@ -6,8 +6,13 @@ import {
   bucketJobPhotos,
   bucketLocations,
   bucketRecommendations,
+  bucketSopSteps,
   composeVehicleDisplay,
+  effectiveJobStatus,
   localJobStatus,
+  localSopStatus,
+  playbookComponentNames,
+  playbookStepLabels,
   localReportStatus,
   localStepStatus,
   mapComposedAppointmentToLocalJob,
@@ -18,6 +23,7 @@ import {
   mapResultToLocalStep,
   type ComposedSyncAppointment,
   type ServerInspectionResultRow,
+  type ServerSopStepRow,
   type ServerInspectionRow,
   type ServerJobPhotoRow,
   type ServerLocationRow,
@@ -46,7 +52,7 @@ function appt(overrides: Partial<ComposedSyncAppointment> = {}): ComposedSyncApp
     durationMinutes: 45,
     estimatedCost: 133.83,
     notes: null,
-    services: [{ name: "Full Synthetic Oil Change", price: 119 }],
+    services: [{ name: "Full Synthetic Oil Change", price: 119, components: [], sopSteps: [] }],
     createdAt: new Date(T0).toISOString(),
     updatedAt: new Date(T0).toISOString(),
     ...overrides,
@@ -88,7 +94,9 @@ describe("mapComposedAppointmentToLocalJob", () => {
     const row = mapComposedAppointmentToLocalJob(appt());
     expect(row.id).toBe("appt-1");
     expect(row.server_id).toBe("appt-1");
-    expect(row.services_json).toBe(JSON.stringify([{ name: "Full Synthetic Oil Change", price: 119 }]));
+    expect(row.services_json).toBe(
+      JSON.stringify([{ name: "Full Synthetic Oil Change", price: 119, components: [], sopSteps: [] }]),
+    );
     expect(row.status).toBe("assigned");
   });
 
@@ -383,5 +391,105 @@ describe("mapLocationToLocal / bucketLocations", () => {
     expect(
       bucketLocations([location({ recorded_at: new Date(T2).toISOString() })], T1).created,
     ).toHaveLength(1);
+  });
+});
+
+describe("job flow — travel leg + SOP (2026-11-12)", () => {
+  it("effectiveJobStatus: the travel leg lives in dispatch_status until work starts", () => {
+    expect(effectiveJobStatus("confirmed", "en_route")).toBe("en_route");
+    expect(effectiveJobStatus("confirmed", "arrived")).toBe("arrived");
+    expect(effectiveJobStatus("confirmed", "assigned")).toBe("assigned");
+    expect(effectiveJobStatus("confirmed", null)).toBe("assigned");
+    // A started or finished job reports its own status, never a stale dispatch value.
+    expect(effectiveJobStatus("in_progress", "arrived")).toBe("in_progress");
+    expect(effectiveJobStatus("completed", "en_route")).toBe("completed");
+    expect(localJobStatus("arrived")).toBe("arrived");
+  });
+
+  it("mapComposed carries the address and the travel stamps to the local row", () => {
+    const row = mapComposedAppointmentToLocalJob(
+      appt({
+        serverStatus: "confirmed",
+        dispatchStatus: "arrived",
+        enRouteAt: "2026-11-12T12:40:00.000Z",
+        arrivedAt: "2026-11-12T13:05:00.000Z",
+        enRouteLat: 39.95,
+        enRouteLng: -75.16,
+        arrivedLat: null,
+        arrivedLng: null,
+      }),
+    );
+    expect(row.address).toBe("428 Railroad Ave, Ambler, PA");
+    expect(row.status).toBe("arrived");
+    expect(row.en_route_at).toBe("2026-11-12T12:40:00.000Z");
+    expect(row.arrived_at).toBe("2026-11-12T13:05:00.000Z");
+    expect(row.en_route_lat).toBe(39.95);
+    expect(row.arrived_lat).toBeNull();
+  });
+
+  it("playbook parsing accepts {label} objects and plain strings, drops blanks", () => {
+    expect(playbookStepLabels([{ label: "Drain the old engine oil" }, "Refill", { label: " " }, 42, null])).toEqual([
+      "Drain the old engine oil",
+      "Refill",
+    ]);
+    expect(playbookComponentNames(["Engine oil change", ""])).toEqual(["Engine oil change"]);
+    expect(playbookStepLabels(null)).toEqual([]);
+    expect(playbookStepLabels("nope")).toEqual([]);
+  });
+
+  it("services_json carries components and SOP steps — and no per-item prices beyond the lump", () => {
+    const row = mapComposedAppointmentToLocalJob(
+      appt({
+        services: [
+          {
+            name: "Oil Change Service",
+            price: 120,
+            components: ["Engine oil change", "Oil filter replacement"],
+            sopSteps: ["Drain the old engine oil"],
+          },
+        ],
+      }),
+    );
+    const parsed = JSON.parse(row.services_json!);
+    expect(parsed[0].components).toEqual(["Engine oil change", "Oil filter replacement"]);
+    expect(parsed[0].sopSteps).toEqual(["Drain the old engine oil"]);
+    expect(parsed[0].price).toBe(120);
+  });
+
+  function sopRow(overrides: Partial<ServerSopStepRow> = {}): ServerSopStepRow {
+    return {
+      id: "sop-1",
+      job_id: "appt-1",
+      step_key: "Drain the old engine oil",
+      step_name: "Drain the old engine oil",
+      step_order: 0,
+      status: "pending",
+      completed_at: null,
+      created_at: new Date(T0).toISOString(),
+      updated_at: new Date(T0).toISOString(),
+      ...overrides,
+    };
+  }
+
+  it("bucketSopSteps buckets by timestamps and deletes with the job", () => {
+    expect(localSopStatus("completed")).toBe("completed");
+    expect(localSopStatus("pending")).toBe("pending");
+    expect(localSopStatus(null)).toBe("pending");
+
+    const first = bucketSopSteps([sopRow()], 0);
+    expect(first.created.map((r) => r.id)).toEqual(["sop-1"]);
+    expect(first.created[0].status).toBe("pending");
+
+    const done = bucketSopSteps(
+      [sopRow({ status: "completed", completed_at: new Date(T2).toISOString(), updated_at: new Date(T2).toISOString() })],
+      T1,
+    );
+    expect(done.updated).toHaveLength(1);
+    expect(done.updated[0].status).toBe("completed");
+    expect(done.updated[0].completed_at).toBe(new Date(T2).toISOString());
+
+    const deleted = bucketSopSteps([sopRow()], 0, new Set(["appt-1"]));
+    expect(deleted.created).toHaveLength(0);
+    expect(deleted.deleted).toEqual(["sop-1"]);
   });
 });

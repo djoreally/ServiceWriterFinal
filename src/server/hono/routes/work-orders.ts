@@ -25,13 +25,17 @@ import {
   bucketJobPhotos,
   bucketLocations,
   bucketRecommendations,
+  bucketSopSteps,
   composeVehicleDisplay,
+  playbookComponentNames,
+  playbookStepLabels,
   type ComposedSyncAppointment,
   type ServerInspectionResultRow,
   type ServerInspectionRow,
   type ServerJobPhotoRow,
   type ServerLocationRow,
   type ServerRecommendationRow,
+  type ServerSopStepRow,
 } from "@/application/queries/tech-app-sync.query";
 import {
   adoptId,
@@ -44,6 +48,7 @@ import {
   jobTransitionFor,
   parseWireDate,
   serverReportStatus,
+  serverSopStatus,
   serverStepStatus,
   type PushChanges,
   type TableCounts,
@@ -2385,14 +2390,70 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
     itemsByAppointment.set(item.appointment_id as string, list);
   }
 
+  // Job flow (2026-11-12): each service carries its playbook —
+  // components (what's included) + SOP steps (how it's done). The
+  // workspace's own service_playbooks win by catalog id; the global
+  // service_playbook_templates are the fallback by service name.
+  const catalogIds = Array.from(
+    new Set(
+      ((itemsRes.data ?? []) as Array<Record<string, any>>)
+        .map((item) => item.service_catalog_id)
+        .filter((id: unknown): id is string => typeof id === "string"),
+    ),
+  );
+  const serviceNames = Array.from(
+    new Set(
+      ((itemsRes.data ?? []) as Array<Record<string, any>>).map(
+        (item) =>
+          ((item.service_catalog as Record<string, any> | null)?.name as string | undefined) ??
+          (item.description as string | undefined) ??
+          "Service",
+      ),
+    ),
+  );
+  const [playbooksRes, templatesRes] = await Promise.all([
+    catalogIds.length > 0
+      ? (supabase.from("service_playbooks") as any)
+          .select("id, service_catalog_id, steps, components")
+          .eq("workspace_id", workspaceId)
+          .eq("is_active", true)
+          .in("service_catalog_id", catalogIds)
+      : Promise.resolve(empty),
+    serviceNames.length > 0
+      ? (supabase.from("service_playbook_templates") as any)
+          .select("name, steps, components")
+          .eq("is_active", true)
+          .in("name", serviceNames)
+      : Promise.resolve(empty),
+  ]);
+  if (playbooksRes.error || templatesRes.error) throw playbooksRes.error || templatesRes.error;
+  const playbookByCatalogId = new Map<string, Record<string, any>>(
+    ((playbooksRes.data ?? []) as Array<Record<string, any>>)
+      .filter((row) => typeof row.service_catalog_id === "string")
+      .map((row) => [row.service_catalog_id as string, row]),
+  );
+  const templateByName = new Map<string, Record<string, any>>(
+    ((templatesRes.data ?? []) as Array<Record<string, any>>).map((row) => [row.name as string, row]),
+  );
+
   const composed: ComposedSyncAppointment[] = rows.map((appt) => {
     const customer = appt.customer_id ? customersById.get(appt.customer_id as string) ?? null : null;
     const vehicle = appt.vehicle_id ? vehiclesById.get(appt.vehicle_id as string) ?? null : null;
     const metadata = (appt.metadata ?? {}) as Record<string, any>;
-    const services = (itemsByAppointment.get(appt.id as string) ?? []).map((item) => ({
-      name: (item.service_catalog as Record<string, any> | null)?.name ?? item.description ?? "Service",
-      price: Number(item.unit_price ?? 0) * Number(item.quantity ?? 1),
-    }));
+    const services = (itemsByAppointment.get(appt.id as string) ?? []).map((item) => {
+      const name =
+        (item.service_catalog as Record<string, any> | null)?.name ?? item.description ?? "Service";
+      const playbook =
+        (typeof item.service_catalog_id === "string"
+          ? playbookByCatalogId.get(item.service_catalog_id as string)
+          : undefined) ?? templateByName.get(name);
+      return {
+        name,
+        price: Number(item.unit_price ?? 0) * Number(item.quantity ?? 1),
+        components: playbook ? playbookComponentNames(playbook.components) : [],
+        sopSteps: playbook ? playbookStepLabels(playbook.steps) : [],
+      };
+    });
     const customerName = customer
       ? [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim() || (customer.company_name as string | null) || null
       : (metadata.customer_name as string | undefined) ?? (metadata.guest_name as string | undefined) ?? null;
@@ -2413,6 +2474,14 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
     return {
       id: appt.id as string,
       serverStatus: (appt.status as string | null) ?? null,
+      dispatchStatus:
+        (metadata.dispatch_status as string | undefined) ?? (appt.dispatch_status as string | null) ?? null,
+      enRouteAt: (metadata.en_route_at as string | undefined) ?? null,
+      arrivedAt: (metadata.arrived_at as string | undefined) ?? null,
+      enRouteLat: typeof metadata.en_route_lat === "number" ? metadata.en_route_lat : null,
+      enRouteLng: typeof metadata.en_route_lng === "number" ? metadata.en_route_lng : null,
+      arrivedLat: typeof metadata.arrived_lat === "number" ? metadata.arrived_lat : null,
+      arrivedLng: typeof metadata.arrived_lng === "number" ? metadata.arrived_lng : null,
       title: services[0]?.name ?? (metadata.service_name as string | undefined) ?? "Service Appointment",
       customerName,
       customerPhone,
@@ -2472,7 +2541,7 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
   const reportChanges = bucketInspectionReports(inspectionRows, lastPulledAt, deletedJobIds);
   const inspectionIds = inspectionRows.map((row) => row.id);
 
-  const [resultsRes, locationsRes] = await Promise.all([
+  const [resultsRes, locationsRes, sopRes] = await Promise.all([
     inspectionIds.length > 0
       ? (supabase.from("inspection_results") as any)
         .select("id, inspection_id, item_name, item_category, status, notes, sort_order, created_at")
@@ -2488,8 +2557,16 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
         .order("recorded_at", { ascending: true })
         .limit(1000)
       : Promise.resolve(empty),
+    scopedAppointmentIds.length > 0
+      ? (supabase.from("job_execution_checklists") as any)
+          .select("id, job_id, step_key, step_name, step_order, status, completed_at, created_at, updated_at")
+          .eq("workspace_id", workspaceId)
+          .eq("job_source", "appointment")
+          .in("job_id", scopedAppointmentIds)
+          .order("step_order", { ascending: true })
+      : Promise.resolve(empty),
   ]);
-  const stepError = resultsRes.error || locationsRes.error;
+  const stepError = resultsRes.error || locationsRes.error || sopRes.error;
   if (stepError) throw stepError;
 
   const stepChanges = bucketInspectionSteps(
@@ -2511,6 +2588,11 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
     (locationsRes.data ?? []) as unknown as ServerLocationRow[],
     lastPulledAt,
   );
+  const sopChanges = bucketSopSteps(
+    (sopRes.data ?? []) as unknown as ServerSopStepRow[],
+    lastPulledAt,
+    deletedJobIds,
+  );
 
   return json({
     data: {
@@ -2521,6 +2603,7 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
         recommendations: recommendationChanges,
         job_photos: photoChanges,
         technician_locations: locationChanges,
+        sop_steps: sopChanges,
       },
       timestamp,
     },
@@ -2577,6 +2660,7 @@ workOrdersRouter.post("/v1/tech-app/sync/push", async (c) => {
   const recsSet = changeSetFor(changes, "recommendations");
   const photosSet = changeSetFor(changes, "job_photos");
   const locationsSet = changeSetFor(changes, "technician_locations");
+  const sopSet = changeSetFor(changes, "sop_steps");
 
   // Scope: the appointments this push may touch — the caller's own
   // assigned set, resolved once for every table below.
@@ -2590,6 +2674,9 @@ workOrdersRouter.post("/v1/tech-app/sync/push", async (c) => {
   }
   for (const row of [...photosSet.created, ...photosSet.updated]) {
     if (typeof row.appointment_id === "string") referencedAppointmentIds.add(row.appointment_id);
+  }
+  for (const row of [...sopSet.created, ...sopSet.updated]) {
+    if (typeof row.job_id === "string") referencedAppointmentIds.add(row.job_id);
   }
   const assigned = new Map<
     string,
@@ -2632,6 +2719,7 @@ workOrdersRouter.post("/v1/tech-app/sync/push", async (c) => {
       const alreadyThere =
         (transition === "en_route" &&
           (current.dispatch_status === "en_route" || current.status === "en_route")) ||
+        (transition === "arrived" && current.dispatch_status === "arrived") ||
         (transition === "started" &&
           (current.status === "in_progress" || current.status === "started")) ||
         (transition === "completed" && current.status === "completed");
@@ -2639,14 +2727,35 @@ workOrdersRouter.post("/v1/tech-app/sync/push", async (c) => {
         counts.skipped += 1;
         continue;
       }
+      // Job flow (2026-11-12): transitions ride v2 — ordered travel
+      // leg, travel stamps, and the clock-in gate. The tap location
+      // rides the job row's travel fields; a missing location stays
+      // null and the server records distance as not captured. The
+      // idempotency key is deterministic per (job, transition,
+      // device update stamp) so a re-push replays instead of
+      // double-applying (v1/v2 both require a non-empty key).
+      const tapLat =
+        transition === "en_route"
+          ? asNumber(row.en_route_lat)
+          : transition === "arrived"
+            ? asNumber(row.arrived_lat)
+            : null;
+      const tapLng =
+        transition === "en_route"
+          ? asNumber(row.en_route_lng)
+          : transition === "arrived"
+            ? asNumber(row.arrived_lng)
+            : null;
       try {
-        const { error } = await db.rpc("technician_transition_job_v1", {
+        const { error } = await db.rpc("technician_transition_job_v2", {
           p_job_id: appointmentId,
           p_source: "appointment",
           p_next_status: transition,
           p_notes: null,
-          p_idempotency_key: null,
+          p_idempotency_key: `sync-push:${appointmentId}:${transition}:${String(row.updated_at ?? "")}`,
           p_expected_updated_at: null,
+          p_lat: tapLat,
+          p_lng: tapLng,
         });
         if (error) throw error;
         counts.updated += 1;
@@ -3012,6 +3121,74 @@ workOrdersRouter.post("/v1/tech-app/sync/push", async (c) => {
       } catch (err) {
         counts.skipped += 1;
         note("technician_locations", err);
+      }
+    }
+  }
+
+  // --- sop_steps: upsert into job_execution_checklists ----------------
+  {
+    const counts = emptyCounts();
+    applied.sop_steps = counts;
+    const upserts = [
+      ...sopSet.created.map((row) => ({ row, isNew: true })),
+      ...sopSet.updated.map((row) => ({ row, isNew: false })),
+    ];
+    for (const { row, isNew } of upserts) {
+      const appointmentId = typeof row.job_id === "string" ? row.job_id : null;
+      const stepKey = asString(row.step_key);
+      const label = asString(row.label);
+      if (!appointmentId || !assigned.has(appointmentId) || !stepKey || !label) {
+        counts.skipped += 1;
+        continue;
+      }
+      const status = serverSopStatus(row.status);
+      const createdAt = parseWireDate(row.created_at) ?? nowIso();
+      try {
+        const { error } = await db.from("job_execution_checklists").upsert(
+          {
+            id: adoptId(row.id, () => crypto.randomUUID()),
+            workspace_id: workspaceId,
+            job_id: appointmentId,
+            job_source: "appointment",
+            step_key: stepKey,
+            step_name: label,
+            step_order: asNumber(row.sort_index) ?? 0,
+            status,
+            is_required: true,
+            completed_at: status === "completed" ? (parseWireDate(row.completed_at) ?? nowIso()) : null,
+            completed_by: status === "completed" ? user.id : null,
+            user_id: user.id,
+            created_at: createdAt,
+            updated_at: parseWireDate(row.updated_at) ?? createdAt,
+          },
+          { onConflict: "id" },
+        );
+        if (error) throw error;
+        if (isNew) counts.created += 1;
+        else counts.updated += 1;
+      } catch (err) {
+        counts.skipped += 1;
+        note("sop_steps", err);
+      }
+    }
+    for (const localId of sopSet.deleted) {
+      const serverId = isUuid(localId) ? localId : null;
+      if (!serverId) {
+        counts.skipped += 1;
+        continue;
+      }
+      try {
+        const { error } = await db
+          .from("job_execution_checklists")
+          .delete()
+          .eq("id", serverId)
+          .eq("workspace_id", workspaceId)
+          .eq("job_source", "appointment");
+        if (error) throw error;
+        counts.deleted += 1;
+      } catch (err) {
+        counts.skipped += 1;
+        note("sop_steps", err);
       }
     }
   }

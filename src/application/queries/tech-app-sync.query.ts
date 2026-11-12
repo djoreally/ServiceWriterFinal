@@ -21,7 +21,7 @@
  * reads.
  */
 
-export type LocalJobStatus = "assigned" | "en_route" | "in_progress" | "completed";
+export type LocalJobStatus = "assigned" | "en_route" | "arrived" | "in_progress" | "completed";
 
 /** A jobs row in the tech app's local (Watermelon) shape, dates as ISO strings. */
 export interface LocalJobRaw {
@@ -43,6 +43,14 @@ export interface LocalJobRaw {
   estimated_cost: number | null;
   notes: string | null;
   services_json: string | null;
+  /** Travel leg (job flow, 2026-11-12): stamped by technician_transition_job_v2. */
+  en_route_at: string | null;
+  arrived_at: string | null;
+  /** Null when the tap had no location — distance is then not captured, never estimated. */
+  en_route_lat: number | null;
+  en_route_lng: number | null;
+  arrived_lat: number | null;
+  arrived_lng: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -66,7 +74,22 @@ export interface ComposedSyncAppointment {
   durationMinutes: number | null;
   estimatedCost: number | null;
   notes: string | null;
-  services: Array<{ name: string; price: number }>;
+  services: Array<{
+    name: string;
+    price: number;
+    /** What the service includes, item by item (playbook components). */
+    components: string[];
+    /** The SOP procedure steps for the service (playbook steps). */
+    sopSteps: string[];
+  }>;
+  /** metadata.dispatch_status (en_route / arrived / started …), when set. */
+  dispatchStatus?: string | null;
+  enRouteAt?: string | null;
+  arrivedAt?: string | null;
+  enRouteLat?: number | null;
+  enRouteLng?: number | null;
+  arrivedLat?: number | null;
+  arrivedLng?: number | null;
   createdAt: string;
   updatedAt: string | null;
 }
@@ -82,6 +105,8 @@ export function localJobStatus(serverStatus: string | null | undefined): LocalJo
   switch ((serverStatus ?? "").trim().toLowerCase()) {
     case "en_route":
       return "en_route";
+    case "arrived":
+      return "arrived";
     case "in_progress":
       return "in_progress";
     case "completed":
@@ -89,6 +114,29 @@ export function localJobStatus(serverStatus: string | null | undefined): LocalJo
     default:
       return "assigned";
   }
+}
+
+/**
+ * The status the device should show for a composed appointment.
+ * The appointment's own status only moves at start/complete; the
+ * travel leg (en_route / arrived) lives in dispatch_status, so it
+ * wins whenever the job itself has not started or finished. A
+ * started/completed job reports its own status, never a stale
+ * dispatch value.
+ */
+export function effectiveJobStatus(
+  serverStatus: string | null | undefined,
+  dispatchStatus: string | null | undefined,
+): LocalJobStatus {
+  const server = (serverStatus ?? "").trim().toLowerCase();
+  if (server === "in_progress" || server === "completed" || server === "cancelled") {
+    return localJobStatus(server);
+  }
+  const dispatch = (dispatchStatus ?? "").trim().toLowerCase();
+  if (dispatch === "en_route" || dispatch === "arrived") {
+    return dispatch;
+  }
+  return localJobStatus(server);
 }
 
 /** "2022 BMW X5 xDrive40i" — the single display string the local schema stores. */
@@ -125,10 +173,16 @@ export function mapComposedAppointmentToLocalJob(appt: ComposedSyncAppointment):
     starts_at: appt.startsAt,
     ends_at: endsAt,
     duration_minutes: duration,
-    status: localJobStatus(appt.serverStatus),
+    status: effectiveJobStatus(appt.serverStatus, appt.dispatchStatus),
     estimated_cost: appt.estimatedCost,
     notes: appt.notes,
     services_json: appt.services.length > 0 ? JSON.stringify(appt.services) : null,
+    en_route_at: appt.enRouteAt ?? null,
+    arrived_at: appt.arrivedAt ?? null,
+    en_route_lat: appt.enRouteLat ?? null,
+    en_route_lng: appt.enRouteLng ?? null,
+    arrived_lat: appt.arrivedLat ?? null,
+    arrived_lng: appt.arrivedLng ?? null,
     created_at: appt.createdAt,
     updated_at: appt.updatedAt ?? appt.createdAt,
   };
@@ -629,4 +683,95 @@ export function bucketLocations(
 ): SyncChangeSet<LocalTechnicianLocationRaw> {
   const mapped = rows.map(mapLocationToLocal);
   return { created: bucketByCreatedAt(mapped, lastPulledAtMs), updated: [], deleted: [] };
+}
+
+// --- sop_steps ← job_execution_checklists (job flow, 2026-11-12) ------------
+//
+// The SOP checklist's performed record. Definitions live on the
+// service playbook (service_playbooks.steps / components, with the
+// global service_playbook_templates as fallback); the per-job
+// checked state lives in job_execution_checklists — the canonical
+// per-job step table (job_id + job_source 'appointment').
+
+/** Playbook steps jsonb → ordered labels. Entries are {label} objects or plain strings. */
+export function playbookStepLabels(steps: unknown): string[] {
+  if (!Array.isArray(steps)) return [];
+  const labels: string[] = [];
+  for (const entry of steps) {
+    if (typeof entry === "string" && entry.trim() !== "") labels.push(entry.trim());
+    else if (entry && typeof entry === "object" && typeof (entry as { label?: unknown }).label === "string") {
+      const label = ((entry as { label: string }).label ?? "").trim();
+      if (label !== "") labels.push(label);
+    }
+  }
+  return labels;
+}
+
+/** Playbook components jsonb → the itemized "what's included" list. */
+export function playbookComponentNames(components: unknown): string[] {
+  return playbookStepLabels(components);
+}
+
+export interface ServerSopStepRow {
+  id: string;
+  job_id: string;
+  step_key: string;
+  step_name: string;
+  step_order: number | string | null;
+  status: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export interface LocalSopStepRaw {
+  id: string;
+  job_id: string;
+  step_key: string;
+  label: string;
+  sort_index: number;
+  status: string;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Server checklist status → the local SOP vocabulary (pending | completed). */
+export function localSopStatus(serverStatus: string | null | undefined): string {
+  return (serverStatus ?? "").trim().toLowerCase() === "completed" ? "completed" : "pending";
+}
+
+export function mapExecutionChecklistToLocalSopStep(row: ServerSopStepRow): LocalSopStepRaw {
+  const order = typeof row.step_order === "number" ? row.step_order : Number(row.step_order ?? 0);
+  return {
+    id: row.id,
+    job_id: row.job_id,
+    step_key: row.step_key,
+    label: row.step_name,
+    sort_index: Number.isFinite(order) ? order : 0,
+    status: localSopStatus(row.status),
+    completed_at: row.completed_at,
+    created_at: row.created_at,
+    updated_at: row.updated_at ?? row.created_at,
+  };
+}
+
+export function bucketSopSteps(
+  rows: ServerSopStepRow[],
+  lastPulledAtMs: number,
+  deletedAppointmentIds: ReadonlySet<string> = new Set(),
+): SyncChangeSet<LocalSopStepRaw> {
+  const deleted = new Set<string>();
+  const live: LocalSopStepRaw[] = [];
+  for (const row of rows) {
+    if (deletedAppointmentIds.has(row.job_id)) {
+      deleted.add(row.id);
+      continue;
+    }
+    live.push(mapExecutionChecklistToLocalSopStep(row));
+  }
+  const { created, updated } = bucketByTimestamps(live, lastPulledAtMs);
+  const upserted = new Set([...created, ...updated].map((row) => row.id));
+  for (const id of upserted) deleted.delete(id);
+  return { created, updated, deleted: [...deleted] };
 }

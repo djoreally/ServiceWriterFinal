@@ -8,6 +8,7 @@ import {
   jobTransitionFor,
   parseWireDate,
   serverReportStatus,
+  serverSopStatus,
   serverStepStatus,
 } from "../tech-app-sync-push.query";
 
@@ -51,11 +52,18 @@ describe("status vocabularies", () => {
 
   it("maps job statuses to RPC transitions; assigned and unknown never move a job", () => {
     expect(jobTransitionFor("en_route")).toBe("en_route");
+    expect(jobTransitionFor("arrived")).toBe("arrived");
     expect(jobTransitionFor("in_progress")).toBe("started");
     expect(jobTransitionFor("completed")).toBe("completed");
     expect(jobTransitionFor("assigned")).toBeNull();
     expect(jobTransitionFor("cancelled")).toBeNull();
     expect(jobTransitionFor(null)).toBeNull();
+  });
+
+  it("maps SOP step statuses to job_execution_checklists values", () => {
+    expect(serverSopStatus("completed")).toBe("completed");
+    expect(serverSopStatus("pending")).toBe("pending");
+    expect(serverSopStatus(undefined)).toBe("pending");
   });
 });
 
