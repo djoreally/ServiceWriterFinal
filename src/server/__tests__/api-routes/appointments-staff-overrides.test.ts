@@ -153,6 +153,21 @@ function insertPayload(
 }
 
 describe("POST /v1/appointments — staff manual quote lock", () => {
+  // The scenario books Thursday 2026-11-12, the night these overrides
+  // were built for. The route rejects any start inside the minimum
+  // lead-time window — with this workspace's zero lead time that means
+  // any start in the past — so the clock is pinned to the build date
+  // (2026-11-03, the fixture date used across this file) to keep the
+  // booked slot in the future no matter when the suite runs.
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2026-11-03T12:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
   const createBody = (overrides: Record<string, unknown> = {}) => ({
     workspace_id: WS_ID,
     customer_id: CUSTOMER_ID,
