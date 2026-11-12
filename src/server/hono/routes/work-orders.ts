@@ -17,7 +17,7 @@ import type { Context } from "hono";
 import { z } from "zod";
 import { ApiError, json, paginationSchema } from "@/server/api";
 import { createSupabaseAdminClient, createSupabaseAnonServerClient } from "@/lib/supabase";
-import { requireAuth, requireWorkspaceAuth } from "@/server/hono/middleware/auth";
+import { requireAuth, requireWorkspaceAuth, requireWorkspacePaymentsAddonAuth } from "@/server/hono/middleware/auth";
 import {
   bucketInspectionReports,
   bucketInspectionSteps,
@@ -48,6 +48,13 @@ import {
   type PushChanges,
   type TableCounts,
 } from "@/application/queries/tech-app-sync-push.query";
+import {
+  deriveTechJobPaymentState,
+  type TechPaymentInvoiceLike,
+  type TechPaymentPaymentLike,
+} from "@/application/queries/tech-app-payment.query";
+import { syncCanonicalInvoiceToStripe } from "@/server/payments/stripe-invoice-sync";
+import { dispatchPaymentLifecycle, LIFECYCLE_EVENT_KEYS } from "@/server/messaging/quote-payment-events";
 
 export const workOrdersRouter = new Hono();
 
@@ -2025,6 +2032,268 @@ workOrdersRouter.get("/v1/tech-app/jobs", async (c) => {
     };
   });
   return json({ data: jobs });
+});
+
+// ---------------------------------------------------------------------------
+// Tech app — job payment (pay-by-link, 2026-11-12)
+//
+// Step 1 of the tech-app payment loop (Ty's approved direction:
+// pay-by-link first, tap-to-pay later). The technician is not a
+// payments-desk role, so the office door (POST /api/v1/payments/actions)
+// refuses techs by design. This door is the tech-scoped equivalent: it
+// resolves ONLY a job assigned to the caller, in the caller's workspace,
+// and then runs the exact canonical machinery the office door runs —
+// syncCanonicalInvoiceToStripe for the hosted invoice URL and
+// dispatchPaymentLifecycle for the customer email. No Stripe logic
+// lives here; nothing about amounts is computed here either — the state
+// comes from deriveTechJobPaymentState over the canonical rows.
+// ---------------------------------------------------------------------------
+
+interface TechJobPaymentResolution {
+  appointment: Record<string, any>;
+  invoice: TechPaymentInvoiceLike | null;
+  payment: TechPaymentPaymentLike | null;
+  customer: Record<string, any> | null;
+}
+
+async function resolveTechJobPayment(
+  supabase: any,
+  workspaceId: string,
+  userId: string,
+  jobId: string,
+): Promise<TechJobPaymentResolution> {
+  const { data: appointment, error: appointmentError } = await (supabase.from("appointments") as any)
+    .select("id, workspace_id, customer_id, assigned_user_id, status")
+    .eq("id", jobId)
+    .eq("workspace_id", workspaceId)
+    .eq("assigned_user_id", userId)
+    .maybeSingle();
+  if (appointmentError) throw appointmentError;
+  if (!appointment) throw new ApiError(404, "Job not found", "job_not_found");
+
+  const { data: invoiceRows, error: invoiceError } = await (supabase.from("invoices") as any)
+    .select("id, invoice_number, total, amount_paid, status, customer_id, metadata")
+    .eq("workspace_id", workspaceId)
+    .eq("metadata->>appointment_id", jobId)
+    .neq("status", "void")
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (invoiceError) throw invoiceError;
+  const invoice = (invoiceRows?.[0] as TechPaymentInvoiceLike | undefined) ?? null;
+
+  let payment: TechPaymentPaymentLike | null = null;
+  if (invoice) {
+    const { data: byInvoice, error: byInvoiceError } = await (supabase.from("payments") as any)
+      .select("id, invoice_id, customer_id, status, amount, currency_code, metadata")
+      .eq("workspace_id", workspaceId)
+      .eq("invoice_id", invoice.id)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    if (byInvoiceError) throw byInvoiceError;
+    payment = (byInvoice?.[0] as TechPaymentPaymentLike | undefined) ?? null;
+  }
+  if (!payment) {
+    const { data: byAppointment, error: byAppointmentError } = await (supabase.from("payments") as any)
+      .select("id, invoice_id, customer_id, status, amount, currency_code, metadata")
+      .eq("workspace_id", workspaceId)
+      .contains("metadata", { appointment_id: jobId })
+      .order("created_at", { ascending: false })
+      .limit(1);
+    if (byAppointmentError) throw byAppointmentError;
+    payment = (byAppointment?.[0] as TechPaymentPaymentLike | undefined) ?? null;
+  }
+
+  const customerId = (invoice?.customer_id as string | null) ?? (appointment.customer_id as string | null);
+  let customer: Record<string, any> | null = null;
+  if (customerId) {
+    const { data: customerRow, error: customerError } = await (supabase.from("customers") as any)
+      .select("id, first_name, last_name, email")
+      .eq("id", customerId)
+      .eq("workspace_id", workspaceId)
+      .maybeSingle();
+    if (customerError) throw customerError;
+    customer = (customerRow as Record<string, any> | null) ?? null;
+  }
+
+  return { appointment, invoice, payment, customer };
+}
+
+workOrdersRouter.get("/v1/tech-app/payment", async (c) => {
+  const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c);
+  const jobId = z.string().min(1).parse(new URL(c.req.url).searchParams.get("job_id") ?? "");
+  const resolved = await resolveTechJobPayment(supabase, workspaceId, user.id, jobId);
+  return json({
+    data: deriveTechJobPaymentState({
+      invoice: resolved.invoice,
+      payment: resolved.payment,
+      customerEmail: (resolved.customer?.email as string | null) ?? null,
+    }),
+  });
+});
+
+workOrdersRouter.post("/v1/tech-app/payment/send", async (c) => {
+  const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c);
+  const body = z.object({ job_id: z.string().min(1) }).parse(await c.req.json());
+  // Sending money requests carries the same workspace gate as the
+  // office payments door: an active Payments add-on (membership is
+  // implied — the caller's workspace was resolved from their rows).
+  await requireWorkspacePaymentsAddonAuth(c, workspaceId);
+
+  const resolved = await resolveTechJobPayment(supabase, workspaceId, user.id, body.job_id);
+  const { appointment, invoice, customer } = resolved;
+  let payment = resolved.payment;
+
+  const state = deriveTechJobPaymentState({
+    invoice,
+    payment,
+    customerEmail: (customer?.email as string | null) ?? null,
+  });
+  if (state.paid) {
+    return json({ error: { code: "already_paid", message: "This balance has already been paid." } }, { status: 409 });
+  }
+  if (!invoice) {
+    return json({ error: { code: "invoice_required", message: "This job has no invoice yet, so there is nothing to collect." } }, { status: 409 });
+  }
+
+  if (!payment) {
+    // The invoice exists but no receivable was ever opened for it
+    // (the office closeout opens the same record). Open the canonical
+    // pending receivable — dollars, invoice total, pay-at-service —
+    // then fall through to the canonical send.
+    const { data: created, error: createError } = await (supabase.from("payments") as any)
+      .insert({
+        workspace_id: workspaceId,
+        invoice_id: invoice.id,
+        customer_id: (invoice.customer_id as string | null) ?? (appointment.customer_id as string | null),
+        provider: null,
+        provider_payment_id: null,
+        status: "pending",
+        amount: Number(invoice.total ?? 0),
+        currency_code: "USD",
+        paid_at: null,
+        created_by: user.id,
+        metadata: { appointment_id: body.job_id, payment_type: "pay_at_service", source: "tech_app" },
+      })
+      .select("id, invoice_id, customer_id, status, amount, currency_code, metadata")
+      .single();
+    if (createError) throw createError;
+    payment = created as TechPaymentPaymentLike;
+  } else if (!payment.invoice_id) {
+    // Appointment-linked receivable that predates its invoice link:
+    // stamp the link so the canonical send can key on it.
+    const { data: linked, error: linkError } = await (supabase.from("payments") as any)
+      .update({ invoice_id: invoice.id })
+      .eq("workspace_id", workspaceId)
+      .eq("id", payment.id)
+      .select("id, invoice_id, customer_id, status, amount, currency_code, metadata")
+      .single();
+    if (linkError) throw linkError;
+    payment = linked as TechPaymentPaymentLike;
+  }
+
+  const paymentMetadata = (payment.metadata ?? {}) as Record<string, unknown>;
+  const sync = await syncCanonicalInvoiceToStripe({
+    supabase,
+    workspaceId,
+    appointmentId: body.job_id,
+    invoiceId: invoice.id as string,
+    paymentId: payment.id as string,
+  });
+  if (sync.provider !== "stripe") {
+    return json({ error: { code: "active_provider_not_stripe", message: `The active payment provider is ${sync.provider}; Stripe was not invoked.` } }, { status: 409 });
+  }
+  if (!sync.hostedInvoiceUrl) {
+    return json({ error: { code: "stripe_invoice_url_missing", message: "Stripe invoice was synchronized but did not return a hosted invoice URL." } }, { status: 502 });
+  }
+
+  const customerEmail = (customer?.email as string | null) ?? null;
+  if (!customerEmail) {
+    return json({ error: { code: "customer_email_required", message: "Customer email is required to send a payment request." } }, { status: 422 });
+  }
+  const customerName = [customer?.first_name, customer?.last_name].filter(Boolean).join(" ") || "Customer";
+
+  const sentAt = new Date().toISOString();
+  const { data: updated, error: updateError } = await (supabase.from("payments") as any)
+    .update({
+      provider: "stripe",
+      metadata: {
+        ...paymentMetadata,
+        payment_url: sync.hostedInvoiceUrl,
+        stripe_invoice_id: sync.stripeInvoiceId,
+        stripe_customer_id: sync.stripeCustomerId,
+        invoice_sent_at: sentAt,
+      },
+    })
+    .eq("workspace_id", workspaceId)
+    .eq("id", payment.id)
+    .select()
+    .single();
+  if (updateError) throw updateError;
+
+  const { data: workspace } = await (supabase.from("workspaces") as any)
+    .select("name,timezone")
+    .eq("id", workspaceId)
+    .single();
+  await dispatchPaymentLifecycle({
+    eventKey: LIFECYCLE_EVENT_KEYS.paymentRequested,
+    eventId: `${payment.id}:requested:${sync.stripeInvoiceId ?? invoice.id}`,
+    payment: {
+      ...updated,
+      customer_email: customerEmail,
+      customer_name: customerName,
+      invoice_number: invoice.invoice_number ?? null,
+    },
+    workspaceName: (workspace?.name as string | undefined) ?? "Service Writer",
+    workspaceTimezone: (workspace?.timezone as string | undefined) ?? "UTC",
+    actionUrl: sync.hostedInvoiceUrl,
+  });
+
+  const nextState = deriveTechJobPaymentState({
+    invoice,
+    payment: updated as TechPaymentPaymentLike,
+    customerEmail,
+  });
+  return json({
+    data: {
+      url: sync.hostedInvoiceUrl,
+      email_sent: true,
+      payment_id: payment.id,
+      invoice_id: invoice.id,
+      state: nextState,
+    },
+  });
+});
+
+workOrdersRouter.post("/v1/tech-app/payment/customer-email", async (c) => {
+  // Collect-step destination check (2026-11-12): the payment link and
+  // the receipt go to the customer's email, so a wrong address means
+  // the customer never gets either. The email is shown ONLY inside
+  // Collect, with this as its correction path: the assigned tech can
+  // fix the canonical customer record for their own job — nothing
+  // else about the customer is writable through this door.
+  const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c);
+  const body = z.object({
+    job_id: z.string().min(1),
+    email: z.string().trim().email().max(320),
+  }).parse(await c.req.json());
+  const resolved = await resolveTechJobPayment(supabase, workspaceId, user.id, body.job_id);
+  const customerId = (resolved.invoice?.customer_id as string | null) ?? (resolved.appointment.customer_id as string | null);
+  if (!customerId) {
+    return json({ error: { code: "customer_required", message: "This job has no customer record to correct." } }, { status: 409 });
+  }
+  const { data: updated, error: updateError } = await (supabase.from("customers") as any)
+    .update({ email: body.email })
+    .eq("id", customerId)
+    .eq("workspace_id", workspaceId)
+    .select("id, first_name, last_name, email")
+    .single();
+  if (updateError) throw updateError;
+  const state = deriveTechJobPaymentState({
+    invoice: resolved.invoice,
+    payment: resolved.payment,
+    customerEmail: (updated?.email as string | null) ?? body.email,
+  });
+  return json({ data: state });
 });
 
 workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
