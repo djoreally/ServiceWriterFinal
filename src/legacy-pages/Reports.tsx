@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { Fragment, useEffect, useMemo, useState, useCallback } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,8 @@ import { fetchBookingFunnel, type BookingFunnelData } from "@/application/querie
 import { fetchLocationDemographicCustomers, getCurrentUserId, type LocationDemographicCustomer } from "@/application/queries/customer-segmentation.query";
 import { GoogleInsightsConnections } from "@/components/reports/GoogleInsightsConnections";
 import { CustomerLifetimeValue } from "@/components/marketing/CustomerLifetimeValue";
-import { fetchCustomerAnalytics, fetchEarliestActivityDate, fetchTechniciansForReports, type CustomerAnalytics, type TechnicianRef } from "@/application/queries/reports-tabs.query";
+import { fetchCustomerAnalytics, fetchEarliestActivityDate, fetchTechniciansForReports, type CustomerAnalytics, type CustomerAnalyticsRow, type TechnicianRef } from "@/application/queries/reports-tabs.query";
+import { sendSmsMessage } from "@/application/commands/sms.command";
 import { fetchFleetReportPageData, type FleetReportPageData } from "@/application/queries/fleet-reports.query";
 import { backfillAppointmentCoordinates } from "@/application/commands/geocode-appointments.command";
 import { toast } from "@/hooks/use-toast";
@@ -113,6 +114,57 @@ export default function Reports() {
   const [loading, setLoading] = useState(true);
   const [rowDimension, setRowDimension] = useState<keyof DimensionSchema>("client_type");
   const [measure, setMeasure] = useState<keyof MeasureSchema>("total_billed");
+  // Reports Machine §4 (the Panel's idea): the outreach lives INSIDE the
+  // lists. One composer at a time, opened from a row; the send runs through
+  // the single outbound SMS door (consent, credits, provider), and a sent
+  // row remembers its send time for the session.
+  const [outreach, setOutreach] = useState<{ customerId: string; kind: "due" | "churn"; text: string } | null>(null);
+  const [outreachSending, setOutreachSending] = useState(false);
+  const [outreachError, setOutreachError] = useState<string | null>(null);
+  const [outreachSent, setOutreachSent] = useState<Record<string, string>>({});
+
+  const openOutreach = (row: CustomerAnalyticsRow, kind: "due" | "churn") => {
+    const first = row.name.split(" ")[0] || "there";
+    const text = kind === "due"
+      ? `Hi ${first}, it's been ${row.days_since_last_service ?? "a while"} days since your last service with us — your vehicle is due. Want us to get you booked in? Just reply here and we'll find you a time.`
+      : `Hi ${first}, we've been thinking of you — it's been a while since your last visit. We'd love to take care of your vehicle again. Reply here and we'll find you a time.`;
+    setOutreachError(null);
+    setOutreach({ customerId: row.id, kind, text });
+  };
+
+  const sendOutreach = async (row: CustomerAnalyticsRow) => {
+    if (!outreach || !row.phone) return;
+    setOutreachSending(true);
+    setOutreachError(null);
+    const result = await sendSmsMessage({
+      to: row.phone,
+      text: outreach.text,
+      customerId: row.id,
+      messageClass: "marketing",
+      messageType: outreach.kind === "due" ? "reports_outreach_due" : "reports_outreach_churn",
+    });
+    setOutreachSending(false);
+    if (result.success) {
+      setOutreachSent((prev) => ({ ...prev, [row.id]: format(new Date(), "h:mm a") }));
+      setOutreach(null);
+      toast({ title: "Outreach sent", description: `Text sent to ${row.name}.` });
+    } else {
+      setOutreachError(result.error ?? result.reason ?? "The message could not be sent.");
+    }
+  };
+
+  const outreachButton = (row: CustomerAnalyticsRow, kind: "due" | "churn") => {
+    const sentAt = outreachSent[row.id];
+    if (sentAt) return <span className="text-xs font-medium text-emerald-600">Sent · {sentAt}</span>;
+    if (!row.phone) return <span className="text-xs text-muted-foreground" title="No phone number on this customer record">No phone on file</span>;
+    const open = outreach?.customerId === row.id;
+    return <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={() => (open ? setOutreach(null) : openOutreach(row, kind))}>{open ? "Close" : "Reach out"}</Button>;
+  };
+
+  const outreachComposerRow = (row: CustomerAnalyticsRow, colSpan: number) => {
+    if (!outreach || outreach.customerId !== row.id || !row.phone) return null;
+    return <TableRow className="bg-muted/30"><TableCell colSpan={colSpan}><div className="space-y-2 py-1"><p className="text-xs text-muted-foreground">Texting {row.name} at {row.phone} — replies come right back to the shop. The consent door still applies: anyone who opted out is refused, and you see why.</p><textarea value={outreach.text} onChange={(event) => setOutreach({ ...outreach, text: event.target.value })} rows={3} maxLength={1000} className="w-full rounded-md border bg-background px-3 py-2 text-sm" /><div className="flex items-center gap-2">{outreachError && <span className="text-xs text-destructive">{outreachError}</span>}<span className="ml-auto text-xs text-muted-foreground">{outreach.text.length}/1000</span><Button size="sm" variant="ghost" onClick={() => setOutreach(null)} disabled={outreachSending}>Cancel</Button><Button size="sm" onClick={() => void sendOutreach(row)} disabled={outreachSending || !outreach.text.trim()}>{outreachSending ? "Sending…" : "Send text"}</Button></div></div></TableCell></TableRow>;
+  };
   const range = useMemo(() => buildRange(rangeKey, earliestActivity), [rangeKey, earliestActivity]);
 
   useEffect(() => {
@@ -294,8 +346,8 @@ export default function Reports() {
         <TabsContent value="customers" className="space-y-4"><div className="grid grid-cols-2 gap-3 lg:grid-cols-4"><StatCard label="Total customers" value={String(data.totalCustomers)} detail="Current customer records" /><StatCard label="New customers" value={String(data.newCustomers)} detail={`Created during ${data.periodLabel.toLowerCase()}`} /><StatCard label="Lifetime value" value={formatCurrency(customerAnalytics?.totalLifetimeValue ?? 0)} detail="Sum of customer lifetime value" tone="success" /><StatCard label="Repeat customers" value={String(customerAnalytics?.repeat ?? data.repeatCustomers)} detail={`${repeatRate.toFixed(1)}% of customers · ${customerAnalytics?.oneTime ?? 0} one-time`} /></div>
           {!customerAnalytics ? <EmptyState title="No customer records yet" description="Customer cohorts appear as soon as customers exist on this account." /> : <div className="grid gap-4 xl:grid-cols-2">
             <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Top customers by lifetime value</CardTitle></CardHeader><CardContent className="p-0"><Table density="compact"><TableHeader><TableRow><TableHead>Customer</TableHead><TableHead className="text-right">Services</TableHead><TableHead className="text-right">Lifetime value</TableHead><TableHead className="text-right">Avg order</TableHead></TableRow></TableHeader><TableBody>{customerAnalytics.topByValue.map((row) => <TableRow key={row.id}><TableCell className="font-medium">{row.name}</TableCell><TableCell className="text-right tabular-nums">{row.total_services}</TableCell><TableCell className="text-right font-medium tabular-nums">{formatCurrency(row.lifetime_value)}</TableCell><TableCell className="text-right tabular-nums">{formatCurrency(row.average_order_value)}</TableCell></TableRow>)}{customerAnalytics.topByValue.length === 0 && <TableRow><TableCell colSpan={4} className="py-6 text-center text-sm text-muted-foreground">No customers yet.</TableCell></TableRow>}</TableBody></Table></CardContent></Card>
-            <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Due for service (90+ days)</CardTitle></CardHeader><CardContent className="p-0"><Table density="compact"><TableHeader><TableRow><TableHead>Customer</TableHead><TableHead className="text-right">Days since</TableHead><TableHead className="text-right">Lifetime value</TableHead></TableRow></TableHeader><TableBody>{customerAnalytics.dueForService.map((row) => <TableRow key={row.id}><TableCell className="font-medium">{row.name}</TableCell><TableCell className="text-right tabular-nums">{row.days_since_last_service ?? "—"}</TableCell><TableCell className="text-right tabular-nums">{formatCurrency(row.lifetime_value)}</TableCell></TableRow>)}{customerAnalytics.dueForService.length === 0 && <TableRow><TableCell colSpan={3} className="py-6 text-center text-sm text-muted-foreground">No customer is past 90 days since their last service.</TableCell></TableRow>}</TableBody></Table></CardContent></Card>
-            <Card className="xl:col-span-2"><CardHeader className="pb-2"><CardTitle className="text-sm">Churn risk watchlist</CardTitle></CardHeader><CardContent className="p-0"><Table density="compact"><TableHeader><TableRow><TableHead>Customer</TableHead><TableHead>Segment</TableHead><TableHead>Risk</TableHead><TableHead className="text-right">Last service</TableHead><TableHead className="text-right">Lifetime value</TableHead></TableRow></TableHeader><TableBody>{customerAnalytics.churnRisk.map((row) => <TableRow key={row.id}><TableCell className="font-medium">{row.name}</TableCell><TableCell className="text-xs text-muted-foreground">{row.customer_segment || "Unsegmented"}</TableCell><TableCell className="capitalize">{row.churn_risk}</TableCell><TableCell className="text-right tabular-nums">{row.last_service_date ? safeDayLabel(row.last_service_date, "MMM d, yyyy") : "Never"}</TableCell><TableCell className="text-right tabular-nums">{formatCurrency(row.lifetime_value)}</TableCell></TableRow>)}{customerAnalytics.churnRisk.length === 0 && <TableRow><TableCell colSpan={5} className="py-6 text-center text-sm text-muted-foreground">No customer is currently flagged at medium or high churn risk.</TableCell></TableRow>}</TableBody></Table></CardContent></Card>
+            <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Due for service (90+ days)</CardTitle><p className="text-xs text-muted-foreground">Money sitting in a chair — reach them from the row.</p></CardHeader><CardContent className="p-0"><Table density="compact"><TableHeader><TableRow><TableHead>Customer</TableHead><TableHead className="text-right">Days since</TableHead><TableHead className="text-right">Lifetime value</TableHead><TableHead className="text-right">Outreach</TableHead></TableRow></TableHeader><TableBody>{customerAnalytics.dueForService.map((row) => <Fragment key={row.id}><TableRow><TableCell className="font-medium">{row.name}</TableCell><TableCell className="text-right tabular-nums">{row.days_since_last_service ?? "—"}</TableCell><TableCell className="text-right tabular-nums">{formatCurrency(row.lifetime_value)}</TableCell><TableCell className="text-right">{outreachButton(row, "due")}</TableCell></TableRow>{outreachComposerRow(row, 4)}</Fragment>)}{customerAnalytics.dueForService.length === 0 && <TableRow><TableCell colSpan={4} className="py-6 text-center text-sm text-muted-foreground">No customer is past 90 days since their last service.</TableCell></TableRow>}</TableBody></Table></CardContent></Card>
+            <Card className="xl:col-span-2"><CardHeader className="pb-2"><CardTitle className="text-sm">Churn risk watchlist</CardTitle><p className="text-xs text-muted-foreground">The machine ends in an action — reach them from the row.</p></CardHeader><CardContent className="p-0"><Table density="compact"><TableHeader><TableRow><TableHead>Customer</TableHead><TableHead>Segment</TableHead><TableHead>Risk</TableHead><TableHead className="text-right">Last service</TableHead><TableHead className="text-right">Lifetime value</TableHead><TableHead className="text-right">Outreach</TableHead></TableRow></TableHeader><TableBody>{customerAnalytics.churnRisk.map((row) => <Fragment key={row.id}><TableRow><TableCell className="font-medium">{row.name}</TableCell><TableCell className="text-xs text-muted-foreground">{row.customer_segment || "Unsegmented"}</TableCell><TableCell className="capitalize">{row.churn_risk}</TableCell><TableCell className="text-right tabular-nums">{row.last_service_date ? safeDayLabel(row.last_service_date, "MMM d, yyyy") : "Never"}</TableCell><TableCell className="text-right tabular-nums">{formatCurrency(row.lifetime_value)}</TableCell><TableCell className="text-right">{outreachButton(row, "churn")}</TableCell></TableRow>{outreachComposerRow(row, 6)}</Fragment>)}{customerAnalytics.churnRisk.length === 0 && <TableRow><TableCell colSpan={6} className="py-6 text-center text-sm text-muted-foreground">No customer is currently flagged at medium or high churn risk.</TableCell></TableRow>}</TableBody></Table></CardContent></Card>
           </div>}
         </TabsContent>
 
