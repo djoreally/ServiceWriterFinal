@@ -53,7 +53,7 @@ import {
   type TechPaymentInvoiceLike,
   type TechPaymentPaymentLike,
 } from "@/application/queries/tech-app-payment.query";
-import { syncCanonicalInvoiceToStripe } from "@/server/payments/stripe-invoice-sync";
+import { markStripeInvoicePaidOutOfBand, syncCanonicalInvoiceToStripe } from "@/server/payments/stripe-invoice-sync";
 import { dispatchPaymentLifecycle, LIFECYCLE_EVENT_KEYS } from "@/server/messaging/quote-payment-events";
 
 export const workOrdersRouter = new Hono();
@@ -2035,18 +2035,19 @@ workOrdersRouter.get("/v1/tech-app/jobs", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// Tech app — job payment (pay-by-link, 2026-11-12)
+// Tech app — job payment (pay-by-link + cash on the spot, 2026-11-12)
 //
 // Step 1 of the tech-app payment loop (Ty's approved direction:
 // pay-by-link first, tap-to-pay later). The technician is not a
 // payments-desk role, so the office door (POST /api/v1/payments/actions)
-// refuses techs by design. This door is the tech-scoped equivalent: it
-// resolves ONLY a job assigned to the caller, in the caller's workspace,
-// and then runs the exact canonical machinery the office door runs —
-// syncCanonicalInvoiceToStripe for the hosted invoice URL and
-// dispatchPaymentLifecycle for the customer email. No Stripe logic
-// lives here; nothing about amounts is computed here either — the state
-// comes from deriveTechJobPaymentState over the canonical rows.
+// refuses techs by design. These doors are the tech-scoped equivalent:
+// they resolve ONLY a job assigned to the caller, in the caller's
+// workspace, and then run the exact canonical machinery the office door
+// runs — syncCanonicalInvoiceToStripe + dispatchPaymentLifecycle for
+// the link send, and the manual_payment settle shape for cash. No
+// Stripe logic lives here; nothing about amounts is computed here
+// either — the state comes from deriveTechJobPaymentState over the
+// canonical rows.
 // ---------------------------------------------------------------------------
 
 interface TechJobPaymentResolution {
@@ -2294,6 +2295,149 @@ workOrdersRouter.post("/v1/tech-app/payment/customer-email", async (c) => {
     customerEmail: (updated?.email as string | null) ?? body.email,
   });
   return json({ data: state });
+});
+
+workOrdersRouter.post("/v1/tech-app/payment/cash", async (c) => {
+  // Cash on the spot (2026-11-12): the customer hands the tech cash
+  // at the vehicle, and the tech records it here. This is the office
+  // door's canonical manual_payment cash closeout (billing.ts),
+  // scoped to the caller's own assigned job — same receivable row,
+  // same settle shape (Stripe invoice marked paid out-of-band, then
+  // the row goes succeeded / provider "other" / paid_at stamped with
+  // payment_method "cash", recorded_manually, received_in_person in
+  // metadata; the invoice's paid state derives from the succeeded
+  // row). No parallel cash record exists anywhere.
+  //
+  // Cash doctrine: cash settles IN FULL — no partials, ever. The
+  // amount is therefore never an input: the door takes only the job
+  // id and records exactly the canonical due (invoice total −
+  // amount_paid) the state derivation reports. There is no
+  // shortfall path here either; settling for less is the office's
+  // adjustment call, not the field's.
+  const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c);
+  const body = z.object({ job_id: z.string().min(1) }).parse(await c.req.json());
+  await requireWorkspacePaymentsAddonAuth(c, workspaceId);
+
+  const resolved = await resolveTechJobPayment(supabase, workspaceId, user.id, body.job_id);
+  const { appointment, invoice, customer } = resolved;
+  let payment = resolved.payment;
+
+  const state = deriveTechJobPaymentState({
+    invoice,
+    payment,
+    customerEmail: (customer?.email as string | null) ?? null,
+  });
+  if (state.paid) {
+    return json({ error: { code: "already_paid", message: "This balance has already been paid." } }, { status: 409 });
+  }
+  if (!invoice) {
+    return json({ error: { code: "invoice_required", message: "This job has no invoice yet, so there is nothing to collect." } }, { status: 409 });
+  }
+  if (payment && (payment.status === "refunded" || payment.status === "partially_refunded")) {
+    return json({ error: { code: "invalid_payment_state", message: "A refunded payment cannot be recorded as a cash payment." } }, { status: 409 });
+  }
+  const amountDue = state.amount_due;
+  if (amountDue === null) {
+    return json({ error: { code: "amount_unavailable", message: "This invoice has no priced balance to collect." } }, { status: 409 });
+  }
+  if (amountDue <= 0) {
+    return json({ error: { code: "nothing_due", message: "There is no balance due on this job." } }, { status: 409 });
+  }
+
+  if (!payment) {
+    // The invoice exists but no receivable was ever opened for it
+    // (the office closeout opens the same record). Open the canonical
+    // pending receivable, then fall through to the settle below.
+    const { data: created, error: createError } = await (supabase.from("payments") as any)
+      .insert({
+        workspace_id: workspaceId,
+        invoice_id: invoice.id,
+        customer_id: (invoice.customer_id as string | null) ?? (appointment.customer_id as string | null),
+        provider: null,
+        provider_payment_id: null,
+        status: "pending",
+        amount: Number(invoice.total ?? 0),
+        currency_code: "USD",
+        paid_at: null,
+        created_by: user.id,
+        metadata: { appointment_id: body.job_id, payment_type: "pay_at_service", source: "tech_app" },
+      })
+      .select("id, invoice_id, customer_id, status, amount, currency_code, metadata")
+      .single();
+    if (createError) throw createError;
+    payment = created as TechPaymentPaymentLike;
+  } else if (!payment.invoice_id) {
+    // Appointment-linked receivable that predates its invoice link:
+    // stamp the link so the closeout keys on the canonical invoice.
+    const { data: linked, error: linkError } = await (supabase.from("payments") as any)
+      .update({ invoice_id: invoice.id })
+      .eq("workspace_id", workspaceId)
+      .eq("id", payment.id)
+      .select("id, invoice_id, customer_id, status, amount, currency_code, metadata")
+      .single();
+    if (linkError) throw linkError;
+    payment = linked as TechPaymentPaymentLike;
+  }
+
+  // Canonical closeout order (the office door's manual_payment):
+  // mark the Stripe invoice paid out-of-band first so an emailed
+  // link can never double-collect — non-blocking, with the outcome
+  // recorded in the payment metadata either way — then settle the
+  // receivable row itself at the full due.
+  let stripeSync: Record<string, unknown> = { status: "skipped" };
+  try {
+    stripeSync = await markStripeInvoicePaidOutOfBand({
+      supabase,
+      workspaceId,
+      invoiceId: invoice.id as string,
+    });
+  } catch (stripeError) {
+    stripeSync = {
+      status: "failed",
+      error: stripeError instanceof Error ? stripeError.message : "Stripe out-of-band reconciliation failed",
+    };
+  }
+
+  const paidAt = new Date().toISOString();
+  const paymentMetadata = (payment.metadata ?? {}) as Record<string, unknown>;
+  const { data: updated, error: updateError } = await (supabase.from("payments") as any)
+    .update({
+      amount: amountDue,
+      status: "succeeded",
+      provider: "other",
+      paid_at: paidAt,
+      metadata: {
+        ...paymentMetadata,
+        payment_method: "cash",
+        notes: null,
+        recorded_manually: true,
+        received_in_person: true,
+        recorded_via: "tech_app",
+        stripe_out_of_band_sync_status: stripeSync.status,
+        ...(stripeSync.status === "failed" ? { stripe_out_of_band_sync_error: stripeSync.error } : {}),
+      },
+    })
+    .eq("workspace_id", workspaceId)
+    .eq("id", payment.id)
+    .select()
+    .single();
+  if (updateError) throw updateError;
+
+  // Report the books' own read of the record, re-resolved after the
+  // write — never this handler's arithmetic about what it just did.
+  const after = await resolveTechJobPayment(supabase, workspaceId, user.id, body.job_id);
+  const nextState = deriveTechJobPaymentState({
+    invoice: after.invoice,
+    payment: after.payment,
+    customerEmail: (after.customer?.email as string | null) ?? null,
+  });
+  return json({
+    data: {
+      payment_id: updated.id,
+      invoice_id: invoice.id,
+      state: nextState,
+    },
+  });
 });
 
 workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {

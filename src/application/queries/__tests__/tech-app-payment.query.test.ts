@@ -113,4 +113,69 @@ describe("deriveTechJobPaymentState", () => {
       can_send: false,
     });
   });
+
+  it("reads paid, with the method showing, from a recorded cash payment", () => {
+    // The canonical cash closeout settles the receivable row as
+    // succeeded with payment_method "cash" in metadata — the exact
+    // row shape the cash door (and the office manual_payment) writes.
+    const state = deriveTechJobPaymentState({
+      invoice: { ...invoice, amount_paid: 197.05, status: "paid" },
+      payment: {
+        ...pendingPayment,
+        status: "succeeded",
+        metadata: {
+          appointment_id: "job-1",
+          payment_method: "cash",
+          recorded_manually: true,
+          received_in_person: true,
+        },
+      },
+      customerEmail: "a@example.com",
+    });
+    expect(state.paid).toBe(true);
+    expect(state.amount_due).toBe(0);
+    expect(state.payment_method).toBe("cash");
+    expect(state.can_send).toBe(false);
+    expect(state.can_record_cash).toBe(false);
+  });
+
+  it("carries no payment method when the row names none", () => {
+    const state = deriveTechJobPaymentState({ invoice, payment: pendingPayment, customerEmail: "a@example.com" });
+    expect(state.payment_method).toBeNull();
+  });
+
+  it("allows recording cash exactly when a priced balance is open", () => {
+    const open = deriveTechJobPaymentState({ invoice, payment: pendingPayment, customerEmail: null });
+    expect(open.can_record_cash).toBe(true);
+
+    const netted = deriveTechJobPaymentState({
+      invoice: { ...invoice, amount_paid: 50 },
+      payment: pendingPayment,
+      customerEmail: null,
+    });
+    expect(netted.amount_due).toBe(147.05);
+    expect(netted.can_record_cash).toBe(true);
+  });
+
+  it("blocks recording cash with no invoice, no price, or no balance", () => {
+    const noInvoice = deriveTechJobPaymentState({ invoice: null, payment: pendingPayment, customerEmail: null });
+    expect(noInvoice.can_record_cash).toBe(false);
+
+    const unpriced = deriveTechJobPaymentState({
+      invoice: { ...invoice, total: null },
+      payment: null,
+      customerEmail: null,
+    });
+    expect(unpriced.amount_due).toBeNull();
+    expect(unpriced.can_record_cash).toBe(false);
+
+    const zeroDue = deriveTechJobPaymentState({
+      invoice: { ...invoice, total: 0 },
+      payment: null,
+      customerEmail: null,
+    });
+    expect(zeroDue.amount_due).toBe(0);
+    expect(zeroDue.paid).toBe(false);
+    expect(zeroDue.can_record_cash).toBe(false);
+  });
 });

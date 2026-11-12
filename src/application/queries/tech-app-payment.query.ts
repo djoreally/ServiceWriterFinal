@@ -60,6 +60,18 @@ export interface TechJobPaymentState {
   customer_email_present: boolean;
   /** True when Send can actually run: invoice exists, unpaid, emailable. */
   can_send: boolean;
+  /**
+   * How the books say this job was paid (payments.metadata
+   * payment_method — "cash" for an in-person cash record), or null
+   * when the payment row carries no method.
+   */
+  payment_method: string | null;
+  /**
+   * True when Record cash can actually run: invoice exists, unpaid,
+   * and a priced balance is due. Cash settles in full only, so any
+   * positive due is recordable and no other state is.
+   */
+  can_record_cash: boolean;
 }
 
 function dollars(value: number | string | null | undefined): number | null {
@@ -111,5 +123,7 @@ export function deriveTechJobPaymentState(input: {
     customer_email: input.customerEmail && input.customerEmail.trim() ? input.customerEmail.trim() : null,
     customer_email_present: customerEmailPresent,
     can_send: !!invoice && !paid && customerEmailPresent,
+    payment_method: metadataText(payment?.metadata, "payment_method"),
+    can_record_cash: !!invoice && !paid && amountDue !== null && amountDue > 0,
   };
 }
