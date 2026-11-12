@@ -3263,9 +3263,11 @@ platformRouter.get("/v1/platform/reports/canonical-rows", async (c) => {
   }).parse(Object.fromEntries(new URL(c.req.url).searchParams));
   const db = supabase as any;
   const invoiceCols = "id,customer_id,status,subtotal,tax_total,total,amount_paid,issued_at,created_at,metadata";
+  const expenseCols = "id,total_amount,transaction_date,category_id,appointment_id,status";
   const [
     invoicesRes, openInvoicesRes, invoicesYtdRes, serviceRecordsRes,
     appointmentsRes, customersRes, vehiclesRes, invoiceLinesRes,
+    expenseRowsRes, expensePrevRowsRes,
   ] = await Promise.all([
     db.from("invoices").select(invoiceCols).eq("workspace_id", workspaceId)
       .in("status", ["issued", "partially_paid", "paid", "past_due"])
@@ -3293,8 +3295,24 @@ platformRouter.get("/v1/platform/reports/canonical-rows", async (c) => {
     db.from("invoice_lines")
       .select("invoice_id,description,quantity,unit_price")
       .eq("workspace_id", workspaceId),
+    // THE JOIN (Reports Machine §1): the cost side already lives in the
+    // Financials `expenses` table — Reports reads it, never duplicates it.
+    // Raw rows only; the canonical client query owns the semantics
+    // (rejected expenses excluded there, matching every other row type).
+    db.from("expenses")
+      .select(expenseCols)
+      .eq("workspace_id", workspaceId)
+      .is("deleted_at", null)
+      .gte("transaction_date", bounds.from_iso.slice(0, 10))
+      .lte("transaction_date", bounds.to_iso.slice(0, 10)),
+    db.from("expenses")
+      .select(expenseCols)
+      .eq("workspace_id", workspaceId)
+      .is("deleted_at", null)
+      .gte("transaction_date", bounds.prev_from_iso.slice(0, 10))
+      .lte("transaction_date", bounds.prev_to_iso.slice(0, 10)),
   ]);
-  for (const result of [invoicesRes, openInvoicesRes, invoicesYtdRes, serviceRecordsRes, appointmentsRes, customersRes, vehiclesRes, invoiceLinesRes]) {
+  for (const result of [invoicesRes, openInvoicesRes, invoicesYtdRes, serviceRecordsRes, appointmentsRes, customersRes, vehiclesRes, invoiceLinesRes, expenseRowsRes, expensePrevRowsRes]) {
     if (result.error) throw result.error;
   }
   return json({
@@ -3306,6 +3324,8 @@ platformRouter.get("/v1/platform/reports/canonical-rows", async (c) => {
     customerRows: customersRes.data ?? [],
     vehicleRows: vehiclesRes.data ?? [],
     invoiceLineRows: invoiceLinesRes.data ?? [],
+    expenseRows: expenseRowsRes.data ?? [],
+    expensePrevRows: expensePrevRowsRes.data ?? [],
   });
 });
 
