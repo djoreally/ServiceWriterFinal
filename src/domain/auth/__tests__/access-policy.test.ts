@@ -18,6 +18,15 @@ describe("access-policy", () => {
       expect(canAccessRoute("technician", "/invoices")).toBe(false);
     });
 
+    it("limits the built-in Analytics console to owners and admins — tracked users never see it", () => {
+      expect(canAccessRoute("owner", "/analytics")).toBe(true);
+      expect(canAccessRoute("admin", "/analytics")).toBe(true);
+      for (const role of ["manager", "viewer", "technician", "dispatcher", "service_advisor", "receptionist", "fleet_manager"] as const) {
+        expect(canAccessRoute(role, "/analytics")).toBe(false);
+      }
+      expect(canAccessRoute(null, "/analytics")).toBe(false);
+    });
+
     it("limits Agent Integrations to owners and admins", () => {
       expect(canAccessRoute("owner", "/agent-integrations")).toBe(true);
       expect(canAccessRoute("admin", "/agent-integrations")).toBe(true);

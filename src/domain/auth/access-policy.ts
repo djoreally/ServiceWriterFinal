@@ -71,6 +71,9 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
   { match: "/settings/import", roles: ADMIN },
 
   // --- owner / admin only ----------------------------------------------
+  // Built-in telemetry console: owners/admins only. Tracked users
+  // (viewers included) never see it — there is no self-activity view.
+  { match: "/analytics", roles: ADMIN },
   { match: "/settings", roles: ADMIN },
   { match: "/invitations", roles: ADMIN },
   { match: "/receptionist", roles: ADMIN },
