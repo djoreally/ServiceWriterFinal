@@ -64,6 +64,7 @@ interface InvoiceRow {
 
 interface ServiceRecordRow {
   id: string;
+  appointment_id?: string | null;
   customer_id: string | null;
   vehicle_id: string | null;
   status: string;
@@ -267,11 +268,31 @@ export async function fetchReportsCanonical(
   const completed = serviceRecords;
   const cancelled = appointments.filter((row) => row.status === "cancelled");
   const noShow = appointments.filter((row) => row.status === "no_show");
+  // Reports Machine §2 (timestamps law): the canonical start/complete RPCs
+  // stamp the APPOINTMENT metadata (actual_start_time / actual_end_time);
+  // service_records.started_at is legacy and usually null. Resolve the pair
+  // from every truthful source before calling a job stamp-less.
+  const appointmentById = new Map(appointments.map((row) => [row.id, row]));
+  const stampText = (value: unknown): string | null =>
+    typeof value === "string" && value ? value : null;
+  const resolveStart = (row: ServiceRecordRow): string | null => {
+    if (row.started_at) return row.started_at;
+    const appt = row.appointment_id ? appointmentById.get(row.appointment_id) : undefined;
+    return stampText(object(appt?.metadata).actual_start_time)
+      ?? stampText(object(object(row.metadata).appointment_metadata).actual_start_time);
+  };
+  const resolveEnd = (row: ServiceRecordRow): string | null => {
+    if (row.completed_at) return row.completed_at;
+    const appt = row.appointment_id ? appointmentById.get(row.appointment_id) : undefined;
+    return stampText(object(appt?.metadata).actual_end_time);
+  };
   const durations = completed
     .map((row) => {
-      if (!row.started_at || !row.completed_at) return 0;
-      const start = new Date(row.started_at).getTime();
-      const end = new Date(row.completed_at).getTime();
+      const startRaw = resolveStart(row);
+      const endRaw = resolveEnd(row);
+      if (!startRaw || !endRaw) return 0;
+      const start = new Date(startRaw).getTime();
+      const end = new Date(endRaw).getTime();
       return Number.isFinite(start) && Number.isFinite(end) && end >= start
         ? Math.round((end - start) / 60_000)
         : 0;
@@ -415,6 +436,7 @@ export interface ServiceWriterAuditResult {
   actualBugs: Array<{ label: string; count: number; detail: string }>;
   standardIssues: Array<{ label: string; count: number; detail: string }>;
   productionCleanup: Array<{ label: string; count: number; detail: string; action: string }>;
+  jobsMissingTimestamps: { total: number; jobs: Array<{ label: string; date: string; missing: string }> };
 }
 
 function placeholder(value: unknown): boolean {
@@ -491,6 +513,46 @@ export async function fetchServiceWriterAudit(): Promise<ServiceWriterAuditResul
     ...invoices.map((row) => row.created_at),
   ].filter((value) => value && value > "2100-01-01").length;
 
+  // Reports Machine §2: Data Quality NAMES the jobs missing timestamps —
+  // a count alone cannot be acted on. A job is stamp-less only when no
+  // truthful source carries the stamp: the record columns, the appointment's
+  // canonical actual_start_time / actual_end_time metadata, or the
+  // appointment snapshot frozen into the record at completion.
+  const auditAppointmentById = new Map(appointments.map((row) => [row.id, row]));
+  const auditCustomerName = (id: string | null): string => {
+    const customer = id ? customers.find((row) => row.id === id) : undefined;
+    if (!customer) return "Unknown customer";
+    return customer.company_name
+      || `${customer.first_name ?? ""} ${customer.last_name ?? ""}`.trim()
+      || customer.email
+      || "Unknown customer";
+  };
+  const stampTextAudit = (value: unknown): string | null =>
+    typeof value === "string" && value ? value : null;
+  const jobsMissingTimestampsAll = completedServices
+    .map((row) => {
+      const appt = row.appointment_id ? auditAppointmentById.get(row.appointment_id) : undefined;
+      const apptMeta = object(appt?.metadata);
+      const snapshotMeta = object(object(row.metadata).appointment_metadata);
+      const start = row.started_at
+        ?? stampTextAudit(apptMeta.actual_start_time)
+        ?? stampTextAudit(snapshotMeta.actual_start_time);
+      const end = row.completed_at
+        ?? stampTextAudit(apptMeta.actual_end_time);
+      if (start && end) return null;
+      return {
+        label: auditCustomerName(row.customer_id),
+        date: (appt?.starts_at ?? row.completed_at ?? "").slice(0, 10),
+        missing: !start && !end ? "start and end stamps" : !start ? "start stamp" : "end stamp",
+      };
+    })
+    .filter((row): row is { label: string; date: string; missing: string } => row !== null)
+    .sort((a, b) => b.date.localeCompare(a.date));
+  const jobsMissingTimestamps = {
+    total: jobsMissingTimestampsAll.length,
+    jobs: jobsMissingTimestampsAll.slice(0, 50),
+  };
+
   return {
     placeholderBadDefaults: [
       { label: "Fake/default customer fields", count: fakeCustomers.length, detail: "Customer identity/contact fields contain placeholder or demo values." },
@@ -520,5 +582,6 @@ export async function fetchServiceWriterAudit(): Promise<ServiceWriterAuditResul
       { label: "Invoices not linked to line items", count: invoicesWithoutLines, detail: "Invoice has no durable line-item evidence.", action: "Reconcile invoice lines to completed work." },
       { label: "Broken appointment references", count: brokenAppointmentLinks, detail: "Appointment links do not resolve inside the workspace.", action: "Repair customer and vehicle references." },
     ],
+    jobsMissingTimestamps,
   };
 }

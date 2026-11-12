@@ -3279,7 +3279,7 @@ platformRouter.get("/v1/platform/reports/canonical-rows", async (c) => {
       .in("status", ["issued", "partially_paid", "paid", "past_due"])
       .gte("issued_at", bounds.ytd_from_iso),
     db.from("service_records")
-      .select("id,customer_id,vehicle_id,status,started_at,completed_at,total_amount,metadata")
+      .select("id,appointment_id,customer_id,vehicle_id,status,started_at,completed_at,total_amount,metadata")
       .eq("workspace_id", workspaceId).eq("status", "completed")
       .gte("completed_at", bounds.from_iso).lte("completed_at", bounds.to_iso),
     db.from("appointments")
