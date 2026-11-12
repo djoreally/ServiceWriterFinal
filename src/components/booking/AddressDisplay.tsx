@@ -1,10 +1,20 @@
 import { useRef, useEffect, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { AddressAutofill } from "@mapbox/search-js-react";
 import { MAPBOX_ACCESS_TOKEN } from "@/lib/mapbox";
 import { CheckCircle2, AlertCircle } from "lucide-react";
+
+// @mapbox/search-js-react pulls in @mapbox/search-js-web, whose dist
+// evaluates `document.implementation.createHTMLDocument()` at module scope.
+// A static import therefore throws "document is not defined" during SSR and
+// takes down every route in the graph — that was the production 500 on
+// /book/<slug>. Load the autofill client-only; the rest of the form SSRs.
+const AddressAutofill = dynamic(
+  () => import("@mapbox/search-js-react").then((m) => m.AddressAutofill),
+  { ssr: false },
+);
 
 interface AddressDisplayProps {
   customerAddress: string;
