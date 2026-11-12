@@ -13,6 +13,9 @@ export interface ReportsKpi {
   grossMargin: number;
   marginRate: number;
   jobLinkedCosts: number;
+  arAging: Array<{ bucket: string; amount: number; count: number }>;
+  jobMargins: Array<{ customer: string; date: string; billed: number; consumed: number; kept: number }>;
+  jobMarginTotals: { billed: number; consumed: number; kept: number; jobs: number };
   outstanding: number;
   refunds: number;
   taxCollected: number;
@@ -265,7 +268,65 @@ export async function fetchReportsCanonical(
     0,
   );
 
+  // Reports Machine §3a (Kevin): receivables get their age. Same owed
+  // definition as the platform card (open status AND balance over $0.01),
+  // aged from the invoice's issued date.
+  const arBucketDefs = [
+    { bucket: "0–30 days", test: (days: number) => days <= 30 },
+    { bucket: "31–60 days", test: (days: number) => days > 30 && days <= 60 },
+    { bucket: "61–90 days", test: (days: number) => days > 60 && days <= 90 },
+    { bucket: "90+ days", test: (days: number) => days > 90 },
+  ];
+  const arAging = arBucketDefs.map((def) => ({ bucket: def.bucket, amount: 0, count: 0 }));
+  const nowMs = Date.now();
+  for (const row of openInvoices) {
+    const balance = Math.max(dollars(row.total) - dollars(row.amount_paid), 0);
+    if (balance <= 0.01) continue;
+    const issuedMs = new Date(row.issued_at ?? row.created_at).getTime();
+    const ageDays = Number.isFinite(issuedMs) ? Math.max(Math.floor((nowMs - issuedMs) / 86_400_000), 0) : 0;
+    const idx = arBucketDefs.findIndex((def) => def.test(ageDays));
+    arAging[idx === -1 ? 0 : idx].amount += balance;
+    arAging[idx === -1 ? 0 : idx].count += 1;
+  }
+
   const completed = serviceRecords;
+
+  // Reports Machine §3b (Kevin): margin per job, one row — what the job
+  // billed (service record total), what the job consumed (expenses recorded
+  // against its appointment, from the §1 join), what the job kept.
+  const costsByAppointment = new Map<string, number>();
+  for (const expense of expenseRows) {
+    if (!expense.appointment_id) continue;
+    costsByAppointment.set(
+      expense.appointment_id,
+      (costsByAppointment.get(expense.appointment_id) ?? 0) + dollars(expense.total_amount),
+    );
+  }
+  const customerNameById = new Map(customers.map((row) => [
+    row.id,
+    row.company_name || `${row.first_name ?? ""} ${row.last_name ?? ""}`.trim() || row.email || "Unknown customer",
+  ]));
+  const jobMarginRows = completed.map((row) => {
+    const billedJob = dollars(row.total_amount);
+    const consumed = row.appointment_id ? costsByAppointment.get(row.appointment_id) ?? 0 : 0;
+    return {
+      customer: row.customer_id ? customerNameById.get(row.customer_id) ?? "Unknown customer" : "Unknown customer",
+      date: dateKey(row.completed_at),
+      billed: billedJob,
+      consumed,
+      kept: billedJob - consumed,
+    };
+  });
+  const jobMarginTotals = {
+    billed: jobMarginRows.reduce((sum, row) => sum + row.billed, 0),
+    consumed: jobMarginRows.reduce((sum, row) => sum + row.consumed, 0),
+    kept: jobMarginRows.reduce((sum, row) => sum + row.kept, 0),
+    jobs: jobMarginRows.length,
+  };
+  const jobMargins = [...jobMarginRows]
+    .sort((a, b) => a.kept - b.kept)
+    .slice(0, 100);
+
   const cancelled = appointments.filter((row) => row.status === "cancelled");
   const noShow = appointments.filter((row) => row.status === "no_show");
   // Reports Machine §2 (timestamps law): the canonical start/complete RPCs
@@ -402,6 +463,9 @@ export async function fetchReportsCanonical(
     grossMargin,
     marginRate,
     jobLinkedCosts,
+    arAging,
+    jobMargins,
+    jobMarginTotals,
     outstanding,
     refunds,
     taxCollected,
