@@ -55,6 +55,7 @@ import {
 } from "@/application/queries/tech-app-payment.query";
 import { syncCanonicalInvoiceToStripe } from "@/server/payments/stripe-invoice-sync";
 import { dispatchPaymentLifecycle, LIFECYCLE_EVENT_KEYS } from "@/server/messaging/quote-payment-events";
+import { planVehicleFieldUpdate } from "@/application/commands/tech-app-vehicle.command";
 
 export const workOrdersRouter = new Hono();
 
@@ -2363,7 +2364,7 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
       : Promise.resolve(empty),
     vehicleIds.length > 0
       ? (supabase.from("vehicles") as any)
-        .select("id, vin, year, make, model, trim, mileage")
+        .select("id, vin, year, make, model, trim, mileage, license_plate")
         .in("id", vehicleIds).eq("workspace_id", workspaceId)
       : Promise.resolve(empty),
     appointmentIds.length > 0
@@ -2419,6 +2420,7 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
       vehicleDisplay: composeVehicleDisplay(vehicle),
       vin: (vehicle?.vin as string | null) ?? null,
       mileageIn: typeof vehicle?.mileage === "number" ? (vehicle.mileage as number) : null,
+      plate: (vehicle?.license_plate as string | null) ?? null,
       address: (metadata.service_address as string | undefined) ?? (metadata.address as string | undefined) ?? customerAddress,
       startsAt,
       endsAt,
@@ -3015,6 +3017,65 @@ workOrdersRouter.post("/v1/tech-app/sync/push", async (c) => {
   }
 
   return json({ data: { applied, errors, timestamp: Date.now() } });
+});
+
+workOrdersRouter.patch("/v1/tech-app/jobs/:appointmentId/vehicle", async (c) => {
+  // Tech app vehicle fields (2026-11-12, Ty's ask): standing at the
+  // vehicle, the technician corrects the odometer, VIN, and plate
+  // on the job's vehicle. The canonical PATCH /v1/vehicles/:id
+  // cannot serve this call: the app holds neither the vehicle id
+  // nor a workspace id (its local job rows are appointment-keyed),
+  // and that route checks workspace role only — this door adds the
+  // tech-app scope: the appointment must be the caller's OWN
+  // assigned job. The write itself lands on the same single
+  // vehicles row the office edits, with the same field rules
+  // (planning/validation: src/application/commands/tech-app-vehicle.command.ts).
+  // It never touches pricing or the appointment itself.
+  const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c);
+  const appointmentId = z.string().uuid().parse(c.req.param("appointmentId"));
+  const body = await c.req.json().catch(() => null);
+  const plan = planVehicleFieldUpdate(body);
+  if (!plan.patch) throw new ApiError(400, plan.error ?? "Invalid vehicle fields.", "invalid_vehicle_fields");
+
+  const { data: appointment, error: appointmentError } = await (supabase.from("appointments") as any)
+    .select("id, vehicle_id, assigned_user_id, status")
+    .eq("workspace_id", workspaceId)
+    .eq("id", appointmentId)
+    .maybeSingle();
+  if (appointmentError) throw appointmentError;
+  if (!appointment) throw new ApiError(404, "Job not found.", "job_not_found");
+  if ((appointment as { assigned_user_id?: string | null }).assigned_user_id !== user.id) {
+    throw new ApiError(403, "This job is not assigned to you.", "job_not_assigned");
+  }
+  if (String((appointment as { status?: string | null }).status ?? "").toLowerCase() === "cancelled") {
+    throw new ApiError(409, "This job is cancelled.", "job_cancelled");
+  }
+  const vehicleId = (appointment as { vehicle_id?: string | null }).vehicle_id;
+  if (!vehicleId) throw new ApiError(422, "This job has no vehicle on record.", "job_has_no_vehicle");
+
+  const { data: vehicle, error: vehicleError } = await (supabase.from("vehicles") as any)
+    .update(plan.patch as never)
+    .eq("workspace_id", workspaceId)
+    .eq("id", vehicleId)
+    .select("id, vin, license_plate, mileage")
+    .single();
+  if (vehicleError) throw vehicleError;
+
+  return json({
+    data: {
+      vehicle_id: (vehicle as { id: string }).id,
+      vin: (vehicle as { vin: string | null }).vin ?? null,
+      license_plate: (vehicle as { license_plate: string | null }).license_plate ?? null,
+      // vehicles.mileage is numeric — PostgREST may hand it back as
+      // a string; answer a real number either way.
+      mileage: (() => {
+        const raw = (vehicle as { mileage?: unknown }).mileage;
+        if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+        if (typeof raw === "string" && raw.trim() !== "" && Number.isFinite(Number(raw))) return Number(raw);
+        return null;
+      })(),
+    },
+  });
 });
 
 workOrdersRouter.get("/v1/tech-app/technician-id", async (c) => {

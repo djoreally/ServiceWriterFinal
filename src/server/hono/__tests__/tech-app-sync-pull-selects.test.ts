@@ -71,8 +71,8 @@ describe("GET /v1/tech-app/sync/pull — live-census selects", () => {
     );
   });
 
-  it("selects vehicles.mileage for the local mileage_in column", () => {
-    expect(handlerBlock()).toContain("id, vin, year, make, model, trim, mileage");
+  it("selects vehicles.mileage + license_plate for the local mileage_in / plate columns", () => {
+    expect(handlerBlock()).toContain("id, vin, year, make, model, trim, mileage, license_plate");
   });
 
   it("reuses the jobs door's customer and item selects verbatim", () => {
