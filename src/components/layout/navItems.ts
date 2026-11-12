@@ -31,6 +31,7 @@ const buildAllGroups = (terms: Terms): NavGroup[] => [
     { path: "/dashboard", label: "Command Center" },
     { path: "/command-center", label: "Live Operations" },
     { path: "/reports", label: "Reports" },
+    { path: "/analytics", label: "Analytics" },
   ]},
   { label: "Customers & Vehicles", items: [
     { path: "/customers", label: terms.customer + "s" },
