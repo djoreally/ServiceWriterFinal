@@ -124,6 +124,8 @@ export function jobTransitionFor(local: unknown): string | null {
   switch (typeof local === "string" ? local.trim().toLowerCase() : "") {
     case "en_route":
       return "en_route";
+    case "arrived":
+      return "arrived";
     case "in_progress":
       return "started";
     case "completed":
@@ -131,6 +133,13 @@ export function jobTransitionFor(local: unknown): string | null {
     default:
       return null;
   }
+}
+
+/** Local SOP step vocabulary → job_execution_checklists status. */
+export function serverSopStatus(local: unknown): string {
+  return typeof local === "string" && local.trim().toLowerCase() === "completed"
+    ? "completed"
+    : "pending";
 }
 
 /** A stored reference that never left the device (photoFiles.ts). */
@@ -147,6 +156,7 @@ export const PUSH_TABLES = [
   "recommendations",
   "job_photos",
   "technician_locations",
+  "sop_steps",
 ] as const;
 
 /** Read one table's change set out of the push body, defensively. */

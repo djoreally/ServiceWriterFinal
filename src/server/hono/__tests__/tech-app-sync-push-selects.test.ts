@@ -48,9 +48,9 @@ describe("POST /v1/tech-app/sync/push — registration + scoping", () => {
 });
 
 describe("POST /v1/tech-app/sync/push — apply semantics", () => {
-  it("moves job status only through technician_transition_job_v1", () => {
+  it("moves job status only through technician_transition_job_v2", () => {
     const block = handlerBlock();
-    expect(block).toContain('db.rpc("technician_transition_job_v1"');
+    expect(block).toContain('db.rpc("technician_transition_job_v2"');
     expect(block).toContain('p_source: "appointment"');
     // The push never inserts or deletes appointments.
     expect(block).not.toContain('.from("appointments").insert');
@@ -65,6 +65,7 @@ describe("POST /v1/tech-app/sync/push — apply semantics", () => {
       "service_recommendations",
       "job_photos",
       "location_history",
+      "job_execution_checklists",
     ]) {
       expect(block).toContain(`.from("${table}")`);
     }
