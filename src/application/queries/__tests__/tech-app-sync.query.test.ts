@@ -39,6 +39,7 @@ function appt(overrides: Partial<ComposedSyncAppointment> = {}): ComposedSyncApp
     vehicleDisplay: "2022 BMW X5 xDrive40i",
     vin: "5UXCR6C09N9K12345",
     mileageIn: 34250,
+    plate: "KXM-4821",
     address: "428 Railroad Ave, Ambler, PA",
     startsAt: "2026-11-12T13:00:00.000Z",
     endsAt: "2026-11-12T13:45:00.000Z",
@@ -89,6 +90,11 @@ describe("mapComposedAppointmentToLocalJob", () => {
     expect(row.server_id).toBe("appt-1");
     expect(row.services_json).toBe(JSON.stringify([{ name: "Full Synthetic Oil Change", price: 119 }]));
     expect(row.status).toBe("assigned");
+  });
+
+  it("carries the vehicle's plate through to the local row", () => {
+    expect(mapComposedAppointmentToLocalJob(appt()).plate).toBe("KXM-4821");
+    expect(mapComposedAppointmentToLocalJob(appt({ plate: null })).plate).toBeNull();
   });
 
   it("synthesizes ends_at from the fallback duration when the server has none", () => {

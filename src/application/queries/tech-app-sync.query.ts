@@ -34,6 +34,7 @@ export interface LocalJobRaw {
   vehicle: string;
   vin: string | null;
   mileage_in: number | null;
+  plate: string | null;
   address: string | null;
   starts_at: string;
   ends_at: string;
@@ -58,6 +59,7 @@ export interface ComposedSyncAppointment {
   vehicleDisplay: string;
   vin: string | null;
   mileageIn: number | null;
+  plate: string | null;
   address: string | null;
   startsAt: string;
   endsAt: string | null;
@@ -118,6 +120,7 @@ export function mapComposedAppointmentToLocalJob(appt: ComposedSyncAppointment):
     vehicle: appt.vehicleDisplay,
     vin: appt.vin,
     mileage_in: appt.mileageIn,
+    plate: appt.plate,
     address: appt.address,
     starts_at: appt.startsAt,
     ends_at: endsAt,
