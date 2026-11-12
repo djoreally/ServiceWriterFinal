@@ -17,6 +17,7 @@ import { GoogleInsightsConnections } from "@/components/reports/GoogleInsightsCo
 import { CustomerLifetimeValue } from "@/components/marketing/CustomerLifetimeValue";
 import { fetchCustomerAnalytics, fetchEarliestActivityDate, fetchTechniciansForReports, type CustomerAnalytics, type CustomerAnalyticsRow, type TechnicianRef } from "@/application/queries/reports-tabs.query";
 import { sendSmsMessage } from "@/application/commands/sms.command";
+import { sendMarketingEmail } from "@/application/commands/marketing.command";
 import { fetchFleetReportPageData, type FleetReportPageData } from "@/application/queries/fleet-reports.query";
 import { backfillAppointmentCoordinates } from "@/application/commands/geocode-appointments.command";
 import { toast } from "@/hooks/use-toast";
@@ -118,7 +119,7 @@ export default function Reports() {
   // lists. One composer at a time, opened from a row; the send runs through
   // the single outbound SMS door (consent, credits, provider), and a sent
   // row remembers its send time for the session.
-  const [outreach, setOutreach] = useState<{ customerId: string; kind: "due" | "churn"; text: string } | null>(null);
+  const [outreach, setOutreach] = useState<{ customerId: string; kind: "due" | "churn"; channel: "text" | "email"; subject: string; text: string } | null>(null);
   const [outreachSending, setOutreachSending] = useState(false);
   const [outreachError, setOutreachError] = useState<string | null>(null);
   const [outreachSent, setOutreachSent] = useState<Record<string, string>>({});
@@ -128,14 +129,31 @@ export default function Reports() {
     const text = kind === "due"
       ? `Hi ${first}, it's been ${row.days_since_last_service ?? "a while"} days since your last service with us — your vehicle is due. Want us to get you booked in? Just reply here and we'll find you a time.`
       : `Hi ${first}, we've been thinking of you — it's been a while since your last visit. We'd love to take care of your vehicle again. Reply here and we'll find you a time.`;
+    const subject = kind === "due" ? "Your vehicle is due for service" : "We've been thinking of you";
     setOutreachError(null);
-    setOutreach({ customerId: row.id, kind, text });
+    setOutreach({ customerId: row.id, kind, channel: row.phone ? "text" : "email", subject, text });
   };
 
   const sendOutreach = async (row: CustomerAnalyticsRow) => {
-    if (!outreach || !row.phone) return;
+    if (!outreach) return;
     setOutreachSending(true);
     setOutreachError(null);
+    if (outreach.channel === "email") {
+      if (!row.email) { setOutreachSending(false); setOutreachError("No email address on this customer record."); return; }
+      try {
+        const escapeHtml = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        const html = outreach.text.split(/\n{2,}/).map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, "<br />")}</p>`).join("");
+        await sendMarketingEmail({ to: row.email, subject: outreach.subject, html });
+        setOutreachSent((prev) => ({ ...prev, [row.id]: format(new Date(), "h:mm a") }));
+        setOutreach(null);
+        toast({ title: "Outreach sent", description: `Email sent to ${row.name}.` });
+      } catch (error) {
+        setOutreachError(errorMessage(error, "The email could not be sent."));
+      }
+      setOutreachSending(false);
+      return;
+    }
+    if (!row.phone) { setOutreachSending(false); setOutreachError("No phone number on this customer record."); return; }
     const result = await sendSmsMessage({
       to: row.phone,
       text: outreach.text,
@@ -156,14 +174,16 @@ export default function Reports() {
   const outreachButton = (row: CustomerAnalyticsRow, kind: "due" | "churn") => {
     const sentAt = outreachSent[row.id];
     if (sentAt) return <span className="text-xs font-medium text-emerald-600">Sent · {sentAt}</span>;
-    if (!row.phone) return <span className="text-xs text-muted-foreground" title="No phone number on this customer record">No phone on file</span>;
+    if (!row.phone && !row.email) return <span className="text-xs text-muted-foreground" title="No phone number or email on this customer record">No contact on file</span>;
     const open = outreach?.customerId === row.id;
     return <Button size="sm" variant="outline" className="h-7 px-2.5 text-xs" onClick={() => (open ? setOutreach(null) : openOutreach(row, kind))}>{open ? "Close" : "Reach out"}</Button>;
   };
 
   const outreachComposerRow = (row: CustomerAnalyticsRow, colSpan: number) => {
-    if (!outreach || outreach.customerId !== row.id || !row.phone) return null;
-    return <TableRow className="bg-muted/30"><TableCell colSpan={colSpan}><div className="space-y-2 py-1"><p className="text-xs text-muted-foreground">Texting {row.name} at {row.phone} — replies come right back to the shop. The consent door still applies: anyone who opted out is refused, and you see why.</p><textarea value={outreach.text} onChange={(event) => setOutreach({ ...outreach, text: event.target.value })} rows={3} maxLength={1000} className="w-full rounded-md border bg-background px-3 py-2 text-sm" /><div className="flex items-center gap-2">{outreachError && <span className="text-xs text-destructive">{outreachError}</span>}<span className="ml-auto text-xs text-muted-foreground">{outreach.text.length}/1000</span><Button size="sm" variant="ghost" onClick={() => setOutreach(null)} disabled={outreachSending}>Cancel</Button><Button size="sm" onClick={() => void sendOutreach(row)} disabled={outreachSending || !outreach.text.trim()}>{outreachSending ? "Sending…" : "Send text"}</Button></div></div></TableCell></TableRow>;
+    if (!outreach || outreach.customerId !== row.id) return null;
+    const isEmail = outreach.channel === "email";
+    const channelButton = (channel: "text" | "email", label: string, available: boolean, unavailableTitle: string) => <Button size="sm" variant={outreach.channel === channel ? "default" : "outline"} className="h-7 px-2.5 text-xs" disabled={!available} title={available ? undefined : unavailableTitle} onClick={() => setOutreach({ ...outreach, channel })}>{label}</Button>;
+    return <TableRow className="bg-muted/30"><TableCell colSpan={colSpan}><div className="space-y-2 py-1"><div className="flex items-center gap-2">{channelButton("text", "Text", Boolean(row.phone), "No phone number on this customer record")}{channelButton("email", "Email", Boolean(row.email), "No email address on this customer record")}<span className="text-xs text-muted-foreground">{isEmail ? `Emailing ${row.name} at ${row.email} through the shop's sending service.` : `Texting ${row.name} at ${row.phone} — replies come right back to the shop. The consent door still applies: anyone who opted out is refused, and you see why.`}</span></div>{isEmail && <input value={outreach.subject} onChange={(event) => setOutreach({ ...outreach, subject: event.target.value })} placeholder="Subject" maxLength={200} className="h-9 w-full rounded-md border bg-background px-3 text-sm" />}<textarea value={outreach.text} onChange={(event) => setOutreach({ ...outreach, text: event.target.value })} rows={isEmail ? 5 : 3} maxLength={isEmail ? 5000 : 1000} className="w-full rounded-md border bg-background px-3 py-2 text-sm" /><div className="flex items-center gap-2">{outreachError && <span className="text-xs text-destructive">{outreachError}</span>}<span className="ml-auto text-xs text-muted-foreground">{outreach.text.length}/{isEmail ? 5000 : 1000}</span><Button size="sm" variant="ghost" onClick={() => setOutreach(null)} disabled={outreachSending}>Cancel</Button><Button size="sm" onClick={() => void sendOutreach(row)} disabled={outreachSending || !outreach.text.trim() || (isEmail && !outreach.subject.trim())}>{outreachSending ? "Sending…" : isEmail ? "Send email" : "Send text"}</Button></div></div></TableCell></TableRow>;
   };
   const range = useMemo(() => buildRange(rangeKey, earliestActivity), [rangeKey, earliestActivity]);
 
