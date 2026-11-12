@@ -72,6 +72,7 @@ import { z } from "zod";
 import type { Context } from "hono";
 import { ApiError, json, requireWorkspaceMember } from "@/server/api";
 import { upsertBusinessProfile } from "@/server/business-profiles";
+import { sendMorningReads } from "@/server/reports/morning-read";
 import { requireAuth } from "@/server/hono/middleware/auth";
 import { createSupabaseAdminClient, createSupabaseRequestClient } from "@/lib/supabase";
 import { EnginemailerEmailAdapter } from "@/server/messaging/enginemailer";
@@ -927,6 +928,37 @@ messagingRouter.get("/internal/lifecycle/outbox", (c) => processLifecycleOutboxR
 // Exported for the domain's cron worker authorization tests (previously these
 // imported the GET handlers from the Next.js route files directly).
 export { processPushOutboxRequest, processLifecycleOutboxRequest };
+
+// ---------------------------------------------------------------------------
+// Morning read worker (Reports Machine §6): daily cron — the machine
+// reports to the owner. Emails each workspace's business email its
+// exception list ranked by dollars; quiet workspaces get no email.
+// ---------------------------------------------------------------------------
+
+async function processMorningReadRequest(request: Request) {
+  const secret = process.env.CRON_SECRET?.trim();
+  if (!secret) {
+    console.error("[MorningRead] worker disabled: CRON_SECRET is not configured");
+    return NextResponse.json({ ok: false, error: "worker_not_configured" }, { status: 503 });
+  }
+  if (!authorizedWorker(request, secret)) {
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  }
+
+  const startedAt = Date.now();
+  try {
+    const result = await sendMorningReads(createSupabaseAdminClient());
+    return NextResponse.json({ ok: true, ...result, durationMs: Date.now() - startedAt });
+  } catch (error) {
+    console.error("[MorningRead] worker failed", safeErrorDetails(error));
+    return NextResponse.json({ ok: false, error: "worker_failed" }, { status: 500 });
+  }
+}
+
+messagingRouter.post("/internal/reports/morning-read", (c) => processMorningReadRequest(c.req.raw));
+messagingRouter.get("/internal/reports/morning-read", (c) => processMorningReadRequest(c.req.raw));
+
+export { processMorningReadRequest };
 
 // ---------------------------------------------------------------------------
 // Push public key (public)
