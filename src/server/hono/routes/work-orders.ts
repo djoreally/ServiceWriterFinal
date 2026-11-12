@@ -58,6 +58,7 @@ import {
   type TechPaymentInvoiceLike,
   type TechPaymentPaymentLike,
 } from "@/application/queries/tech-app-payment.query";
+import { captureServerError } from "@/server/sentry";
 import { syncCanonicalInvoiceToStripe } from "@/server/payments/stripe-invoice-sync";
 import { dispatchPaymentLifecycle, LIFECYCLE_EVENT_KEYS } from "@/server/messaging/quote-payment-events";
 import { planVehicleFieldUpdate } from "@/application/commands/tech-app-vehicle.command";
@@ -2308,6 +2309,24 @@ workOrdersRouter.post("/v1/tech-app/payment/customer-email", async (c) => {
   return json({ data: state });
 });
 
+/**
+ * Sync-pull degradation reporter (2026-11-12): the pull's auxiliary
+ * reads (playbook enrichment, SYNC-1b child tables) must never be
+ * load-bearing — when one fails, the failure is captured here and
+ * the pull serves the remaining change sets without it. Core reads
+ * (the appointment census and its customer/vehicle/item joins) keep
+ * throwing: a pull that cannot see the jobs must fail loudly, not
+ * answer an empty list the device would trust.
+ */
+function captureSyncPullDegradation(error: unknown, workspaceId: string, source: string): void {
+  captureServerError(error, {
+    route: "/v1/tech-app/sync/pull",
+    method: "GET",
+    workspaceId,
+    code: `sync_pull_degraded:${source}`,
+  });
+}
+
 workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
   // Tech app sync pull (SYNC-1, 2026-11-11): the server half of the
   // Watermelon synchronize() protocol the external tech app already
@@ -2417,22 +2436,58 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
       ),
     ),
   );
-  const [playbooksRes, templatesRes] = await Promise.all([
+  // Fail-soft enrichment (2026-11-12, live 500 — Sentry
+  // SERVICE-WRITER-2): the full selects name the `components` column
+  // that migration 20261112030000 adds to both playbook tables.
+  // Production had not received that migration, PostgREST answered
+  // 42703 ("column service_playbooks.components does not exist"),
+  // and throwing it killed the entire pull — jobs included — for
+  // every caller whose jobs carry catalog items. Enrichment is
+  // decoration on the jobs change set, never a precondition: on
+  // error, capture it, retry with the pre-migration columns (steps
+  // only — SOP still enriches), and if that fails too, ship the
+  // jobs with no playbook data at all.
+  const readPlaybooks = (select: string) =>
     catalogIds.length > 0
       ? (supabase.from("service_playbooks") as any)
-          .select("id, service_catalog_id, steps, components")
+          .select(select)
           .eq("workspace_id", workspaceId)
           .eq("is_active", true)
           .in("service_catalog_id", catalogIds)
-      : Promise.resolve(empty),
+      : Promise.resolve(empty);
+  const readTemplates = (select: string) =>
     serviceNames.length > 0
       ? (supabase.from("service_playbook_templates") as any)
-          .select("name, steps, components")
+          .select(select)
           .eq("is_active", true)
           .in("name", serviceNames)
-      : Promise.resolve(empty),
+      : Promise.resolve(empty);
+  const settlePlaybookRead = async (
+    source: string,
+    first: { data: unknown; error: unknown },
+    retry: () => Promise<{ data: unknown; error: unknown }>,
+  ): Promise<{ data: unknown; error: null }> => {
+    if (!first.error) return first as { data: unknown; error: null };
+    captureSyncPullDegradation(first.error, workspaceId, source);
+    const second = await retry();
+    if (second.error) {
+      captureSyncPullDegradation(second.error, workspaceId, source);
+      return empty;
+    }
+    return second as { data: unknown; error: null };
+  };
+  const [playbooksFirst, templatesFirst] = await Promise.all([
+    readPlaybooks("id, service_catalog_id, steps, components"),
+    readTemplates("name, steps, components"),
   ]);
-  if (playbooksRes.error || templatesRes.error) throw playbooksRes.error || templatesRes.error;
+  const [playbooksRes, templatesRes] = await Promise.all([
+    settlePlaybookRead("service_playbooks", playbooksFirst, () =>
+      readPlaybooks("id, service_catalog_id, steps"),
+    ),
+    settlePlaybookRead("service_playbook_templates", templatesFirst, () =>
+      readTemplates("name, steps"),
+    ),
+  ]);
   const playbookByCatalogId = new Map<string, Record<string, any>>(
     ((playbooksRes.data ?? []) as Array<Record<string, any>>)
       .filter((row) => typeof row.service_catalog_id === "string")
@@ -2442,7 +2497,10 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
     ((templatesRes.data ?? []) as Array<Record<string, any>>).map((row) => [row.name as string, row]),
   );
 
-  const composed: ComposedSyncAppointment[] = rows.map((appt) => {
+  // Per-row guard (2026-11-12): one appointment whose stored shape
+  // breaks composition is captured and skipped — it must never 500
+  // the whole pull and strand every other job on the device.
+  const composeSyncAppointment = (appt: Record<string, any>): ComposedSyncAppointment => {
     const customer = appt.customer_id ? customersById.get(appt.customer_id as string) ?? null : null;
     const vehicle = appt.vehicle_id ? vehiclesById.get(appt.vehicle_id as string) ?? null : null;
     const metadata = (appt.metadata ?? {}) as Record<string, any>;
@@ -2506,7 +2564,15 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
       createdAt: appt.created_at as string,
       updatedAt: (appt.updated_at as string | null) ?? null,
     };
-  });
+  };
+  const composed: ComposedSyncAppointment[] = [];
+  for (const appt of rows) {
+    try {
+      composed.push(composeSyncAppointment(appt));
+    } catch (error) {
+      captureSyncPullDegradation(error, workspaceId, `compose:${appt.id as string}`);
+    }
+  }
 
   const jobChanges = bucketJobChanges(composed, lastPulledAt, extraDeletedIds);
 
@@ -2515,7 +2581,7 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
   // caller's window appointments + the moved-away delete ids).
   const deletedJobIds = new Set(jobChanges.deleted);
   const scopedAppointmentIds = Array.from(new Set([...appointmentIds, ...extraDeletedIds]));
-  const [inspectionsRes, recommendationsRes, photosRes, technicianRes] = await Promise.all([
+  let [inspectionsRes, recommendationsRes, photosRes, technicianRes] = await Promise.all([
     scopedAppointmentIds.length > 0
       ? (supabase.from("service_inspections") as any)
         .select("id, appointment_id, user_id, notes, status, created_at, updated_at")
@@ -2540,14 +2606,35 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
       .eq("workspace_id", workspaceId)
       .maybeSingle(),
   ]);
-  const childError = inspectionsRes.error || recommendationsRes.error || photosRes.error || technicianRes.error;
-  if (childError) throw childError;
+  // Fail-soft child reads (2026-11-12): a failure in any one child
+  // source empties only that table's change set — the jobs change
+  // set and the remaining tables still ship. Before this, any child
+  // error threw and 500'd the entire pull (including the technician
+  // lookup's maybeSingle answering PGRST116 for a caller whose
+  // workspace holds two technician rows). Each failure is captured
+  // to Sentry via captureSyncPullDegradation, never silent.
+  if (inspectionsRes.error) {
+    captureSyncPullDegradation(inspectionsRes.error, workspaceId, "service_inspections");
+    inspectionsRes = empty;
+  }
+  if (recommendationsRes.error) {
+    captureSyncPullDegradation(recommendationsRes.error, workspaceId, "service_recommendations");
+    recommendationsRes = empty;
+  }
+  if (photosRes.error) {
+    captureSyncPullDegradation(photosRes.error, workspaceId, "job_photos");
+    photosRes = empty;
+  }
+  if (technicianRes.error) {
+    captureSyncPullDegradation(technicianRes.error, workspaceId, "technicians");
+    technicianRes = { data: null, error: null };
+  }
 
   const inspectionRows = (inspectionsRes.data ?? []) as unknown as ServerInspectionRow[];
   const reportChanges = bucketInspectionReports(inspectionRows, lastPulledAt, deletedJobIds);
   const inspectionIds = inspectionRows.map((row) => row.id);
 
-  const [resultsRes, locationsRes, sopRes] = await Promise.all([
+  let [resultsRes, locationsRes, sopRes] = await Promise.all([
     inspectionIds.length > 0
       ? (supabase.from("inspection_results") as any)
         .select("id, inspection_id, item_name, item_category, status, notes, sort_order, created_at")
@@ -2572,8 +2659,20 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
           .order("step_order", { ascending: true })
       : Promise.resolve(empty),
   ]);
-  const stepError = resultsRes.error || locationsRes.error || sopRes.error;
-  if (stepError) throw stepError;
+  // Fail-soft, same rule as the child group above (2026-11-12):
+  // each of these reads empties only its own change set on error.
+  if (resultsRes.error) {
+    captureSyncPullDegradation(resultsRes.error, workspaceId, "inspection_results");
+    resultsRes = empty;
+  }
+  if (locationsRes.error) {
+    captureSyncPullDegradation(locationsRes.error, workspaceId, "location_history");
+    locationsRes = empty;
+  }
+  if (sopRes.error) {
+    captureSyncPullDegradation(sopRes.error, workspaceId, "job_execution_checklists");
+    sopRes = empty;
+  }
 
   const stepChanges = bucketInspectionSteps(
     (resultsRes.data ?? []) as unknown as ServerInspectionResultRow[],
