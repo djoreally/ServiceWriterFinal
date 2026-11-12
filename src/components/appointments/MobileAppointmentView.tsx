@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Appointment, BusinessHours } from "@/shared/types";
 import { format, isToday, isPast, isSameDay, isSameMonth, addDays, addMonths, subMonths, addWeeks, subWeeks, startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval } from 'date-fns';
 // ⚡ Native groupBy - avoids lodash dependency (not installed in prod)
@@ -136,8 +136,30 @@ export const MobileAppointmentView = ({
          // Both are in the past
          return dateB.getTime() - dateA.getTime();
      });
+     // Week picker: the day strip is the picker, so the picked day's
+     // group leads the list. Without this the sort above always leads
+     // with today/future days and buries a picked past day at the very
+     // bottom — the strip tap looked dead and the list read as
+     // "overwritten by today" (Nov 12 field report).
+     if (viewMode === 'week') {
+       const pickedKey = format(currentDate, "yyyy-MM-dd");
+       const pickedIndex = keys.indexOf(pickedKey);
+       if (pickedIndex > 0) {
+         keys.splice(pickedIndex, 1);
+         keys.unshift(pickedKey);
+       }
+     }
      return keys;
-  }, [groupedAppointments]);
+  }, [groupedAppointments, viewMode, currentDate]);
+
+  // When the picked day changes in week view, bring the list back to
+  // the top so the picked day's group (now first) is what you see.
+  const weekListRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (viewMode === 'week') {
+      weekListRef.current?.scrollTo({ top: 0 });
+    }
+  }, [currentDate, viewMode]);
 
   const renderAppointmentList = (emptyMessage = "No appointments found for this filter.") => {
     return (
@@ -222,7 +244,7 @@ export const MobileAppointmentView = ({
              );
            })}
          </div>
-         <div className="flex-1 overflow-y-auto">
+         <div className="flex-1 overflow-y-auto" ref={weekListRef}>
            {renderAppointmentList("No appointments this week.")}
          </div>
        </div>

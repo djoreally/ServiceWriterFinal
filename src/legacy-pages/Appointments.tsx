@@ -382,6 +382,14 @@ const AppointmentsPage = () => {
         toast.success(formData.guest_email?.trim() ? "Appointment created — confirmation email queued" : "Appointment created");
       }
 
+      // Follow the saved job: anchor the schedule on its (possibly
+      // new) date so the day strip and the list land on the day you
+      // just saved, instead of staying on the previously picked day
+      // until a full reload (Nov 12 field report).
+      if (formData.scheduled_date) {
+        setCurrentDate(new Date(`${formData.scheduled_date}T12:00:00`));
+      }
+
       setDialogOpen(false);
       setEditingAppointment(null);
       setIsPrefillNew(false);
