@@ -19,6 +19,7 @@ import { useBookingPricing, type FeeSettings } from "@/hooks/useBookingPricing";
 import { useBookingSlots } from "@/hooks/useBookingSlots";
 import { useBookingSubmit } from "@/hooks/useBookingSubmit";
 import { useBookingTracker } from "@/hooks/useBookingTracker";
+import { useBookingFunnelTelemetry } from "@/components/analytics/useBookingFunnelTelemetry";
 import { getAnonSessionId } from "@/lib/anonSession";
 import { startPresence, stopPresence, updatePage, trackEvent } from "@/lib/livePresence";
 import { verifyLocation } from "@/application/queries/booking-context.query";
@@ -602,6 +603,22 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
     scheduledDate: bs.selectedDate ? bs.selectedDate.toISOString().slice(0, 10) : null,
     scheduledTime: bs.selectedTime || null,
     succeeded: bs.step === 6,
+  });
+
+  // Built-in telemetry — the shop's own booking-funnel analytics
+  // (services viewed/selected, prices shown, drop-off, confirmation),
+  // recorded into Service Writer's own telemetry store under one
+  // visitor session. Fire-and-forget; never affects booking.
+  useBookingFunnelTelemetry({
+    ownerUserId: business?.user_id,
+    step: bs.step,
+    step5View,
+    services,
+    selectedServices: bs.selectedServices,
+    selectedDate: bs.selectedDate,
+    selectedTime: bs.selectedTime,
+    grandTotal: pricing.grandTotal,
+    payNowStatus: bs.payNow?.status,
   });
 
   // ── Category-driven vehicle selector policy ─────────────────────────────

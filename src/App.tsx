@@ -27,6 +27,11 @@ const AIAssistant = lazyRetry(() =>
 const PostHogIdentity = lazyRetry(() =>
   import("@/components/analytics/PostHogIdentity").then((m) => ({ default: m.PostHogIdentity }))
 );
+// Built-in telemetry tracker — same lazy treatment: it arms after first
+// paint and renders nothing for anyone.
+const UserActivityTracker = lazyRetry(() =>
+  import("@/components/analytics/UserActivityTracker").then((m) => ({ default: m.UserActivityTracker }))
+);
 import { RequireRole } from "./components/security/RequireRole";
 import { RouteRoleGuard } from "./components/security/RouteRoleGuard";
 
@@ -161,6 +166,9 @@ const App = () => (
                   <KeyboardShortcutsProvider>
                     <Suspense fallback={null}>
                       <PostHogIdentity />
+                    </Suspense>
+                    <Suspense fallback={null}>
+                      <UserActivityTracker />
                     </Suspense>
                     <OfflineStatusBanner />
                     <Toaster />

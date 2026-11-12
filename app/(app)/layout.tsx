@@ -76,6 +76,12 @@ const PostHogIdentity = lazyRetry(() =>
   import("@/components/analytics/PostHogIdentity").then((m) => ({ default: m.PostHogIdentity })),
 );
 
+// Built-in telemetry tracker — same lazy treatment: it arms after first
+// paint and renders nothing for anyone.
+const UserActivityTracker = lazyRetry(() =>
+  import("@/components/analytics/UserActivityTracker").then((m) => ({ default: m.UserActivityTracker })),
+);
+
 /**
  * App-shell side effects: the current offline tenant slug, plus the
  * deferred boot tasks (service-worker updates, offline bootstrap/outbox)
@@ -133,6 +139,9 @@ export default function MigratedAppLayout({ children }: { children: ReactNode })
                               <KeyboardShortcutsProvider>
                                 <Suspense fallback={null}>
                                   <PostHogIdentity />
+                                </Suspense>
+                                <Suspense fallback={null}>
+                                  <UserActivityTracker />
                                 </Suspense>
                                 <OfflineStatusBanner />
                                 <Toaster />
