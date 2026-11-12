@@ -9,6 +9,7 @@ module.exports = {
     "\\.(css|less|scss|sass)$": "<rootDir>/src/test/mocks/styleMock.js",
     "^@/server/(.*)$": "<rootDir>/src/server/$1",
     "^@/components/analytics/PostHogIdentity$": "<rootDir>/src/test/mocks/PostHogIdentity.tsx",
+    "^@/components/analytics/UserActivityTracker$": "<rootDir>/src/test/mocks/UserActivityTracker.tsx",
     "^@/config/features$": "<rootDir>/src/test/mocks/features.js",
     "^@/integrations/supabase/client$": "<rootDir>/src/test/mocks/supabaseClient.js",
     ".*/integrations/supabase/client$": "<rootDir>/src/test/mocks/supabaseClient.js",
