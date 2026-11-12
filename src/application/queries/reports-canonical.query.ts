@@ -8,6 +8,11 @@ export interface ReportsKpi {
   collected: number;
   collectedPrev: number;
   billed: number;
+  expensesTotal: number;
+  expensesPrev: number;
+  grossMargin: number;
+  marginRate: number;
+  jobLinkedCosts: number;
   outstanding: number;
   refunds: number;
   taxCollected: number;
@@ -29,7 +34,7 @@ export interface ReportsKpi {
   revenueByPaymentMethod: Array<{ method: string; revenue: number; count: number }>;
   topMakes: Array<{ make: string; count: number }>;
   topZips: Array<{ zip: string; jobs: number; revenue: number }>;
-  dailyRevenue: Array<{ date: string; collected: number; billed: number }>;
+  dailyRevenue: Array<{ date: string; collected: number; billed: number; costs: number }>;
   periodStart: string;
   periodEnd: string;
   periodLabel: string;
@@ -107,6 +112,15 @@ interface InvoiceLineRow {
   unit_price: number | string;
 }
 
+interface ExpenseRow {
+  id: string;
+  total_amount: number | string | null;
+  transaction_date: string;
+  category_id: string | null;
+  appointment_id: string | null;
+  status: string | null;
+}
+
 function object(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as JsonObject
@@ -180,6 +194,8 @@ export async function fetchReportsCanonical(
       customerRows: CustomerRow[];
       vehicleRows: VehicleRow[];
       invoiceLineRows: InvoiceLineRow[];
+      expenseRows: ExpenseRow[];
+      expensePrevRows: ExpenseRow[];
     }>("/v1/platform/reports/canonical-rows", {
       query: {
         selected_workspace_id: workspaceId,
@@ -225,6 +241,22 @@ export async function fetchReportsCanonical(
   const refunds = receipts.reduce((sum, row) => sum + row.refunded_cents / 100, 0);
   const taxCollected = receipts.reduce((sum, row) => sum + row.tax_amount / 100, 0);
   const ytdCollected = receiptsYtd.reduce((sum, row) => sum + settledNet(row), 0);
+  // THE JOIN (Reports Machine §1): costs come from the Financials expenses
+  // ledger — the same rows the Expenses UI writes. Rejected expenses never
+  // count as costs. Margin is stated on the collected basis, matching the
+  // headline "Net collected" card it stands next to.
+  const expenseRows = ((canonicalRows.expenseRows ?? []) as ExpenseRow[])
+    .filter((row) => row.status !== "rejected");
+  const expensePrevRows = ((canonicalRows.expensePrevRows ?? []) as ExpenseRow[])
+    .filter((row) => row.status !== "rejected");
+  const expensesTotal = expenseRows.reduce((sum, row) => sum + dollars(row.total_amount), 0);
+  const expensesPrev = expensePrevRows.reduce((sum, row) => sum + dollars(row.total_amount), 0);
+  const jobLinkedCosts = expenseRows
+    .filter((row) => row.appointment_id)
+    .reduce((sum, row) => sum + dollars(row.total_amount), 0);
+  const grossMargin = collected - expensesTotal;
+  const marginRate = collected > 0 ? (grossMargin / collected) * 100 : 0;
+
   const billed = invoices.reduce((sum, row) => sum + dollars(row.total), 0);
   const ytdBilled = invoicesYtd.reduce((sum, row) => sum + dollars(row.total), 0);
   const outstanding = openInvoices.reduce(
@@ -314,19 +346,26 @@ export async function fetchReportsCanonical(
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 8);
 
-  const dailyMap = new Map<string, { collected: number; billed: number }>();
+  const dailyMap = new Map<string, { collected: number; billed: number; costs: number }>();
   for (const receipt of receipts) {
     const key = dateKey(receipt.collected_at);
     if (!key) continue;
-    const current = dailyMap.get(key) ?? { collected: 0, billed: 0 };
+    const current = dailyMap.get(key) ?? { collected: 0, billed: 0, costs: 0 };
     current.collected += settledNet(receipt);
     dailyMap.set(key, current);
   }
   for (const invoice of invoices) {
     const key = dateKey(invoice.issued_at ?? invoice.created_at);
     if (!key) continue;
-    const current = dailyMap.get(key) ?? { collected: 0, billed: 0 };
+    const current = dailyMap.get(key) ?? { collected: 0, billed: 0, costs: 0 };
     current.billed += dollars(invoice.total);
+    dailyMap.set(key, current);
+  }
+  for (const expense of expenseRows) {
+    const key = dateKey(expense.transaction_date);
+    if (!key) continue;
+    const current = dailyMap.get(key) ?? { collected: 0, billed: 0, costs: 0 };
+    current.costs += dollars(expense.total_amount);
     dailyMap.set(key, current);
   }
   const dailyRevenue = Array.from(dailyMap.entries())
@@ -337,6 +376,11 @@ export async function fetchReportsCanonical(
     collected,
     collectedPrev,
     billed,
+    expensesTotal,
+    expensesPrev,
+    grossMargin,
+    marginRate,
+    jobLinkedCosts,
     outstanding,
     refunds,
     taxCollected,
