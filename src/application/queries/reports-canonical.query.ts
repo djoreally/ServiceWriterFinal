@@ -16,6 +16,7 @@ export interface ReportsKpi {
   arAging: Array<{ bucket: string; amount: number; count: number }>;
   expensesByCategory: Array<{ name: string; total: number }>;
   jobMargins: Array<{ customer: string; date: string; billed: number; consumed: number; kept: number }>;
+  worstJob: { customer: string; date: string; billed: number; consumed: number; kept: number; topCosts: Array<{ name: string; total: number }> } | null;
   jobMarginTotals: { billed: number; consumed: number; kept: number; jobs: number };
   outstanding: number;
   refunds: number;
@@ -328,6 +329,7 @@ export async function fetchReportsCanonical(
       billed: billedJob,
       consumed,
       kept: billedJob - consumed,
+      appointmentId: row.appointment_id ?? null,
     };
   });
   const jobMarginTotals = {
@@ -339,6 +341,30 @@ export async function fetchReportsCanonical(
   const jobMargins = [...jobMarginRows]
     .sort((a, b) => a.kept - b.kept)
     .slice(0, 100);
+
+  // Reports Machine §6 (Robert): the worst underwater job, named, with
+  // the why — its consumed dollars broken down by expense category, so
+  // the morning read can say what ate the job, not just that it sank.
+  const worstMarginRow = jobMarginRows.filter((row) => row.kept < 0).sort((a, b) => a.kept - b.kept)[0] ?? null;
+  let worstJob: ReportsKpi["worstJob"] = null;
+  if (worstMarginRow) {
+    const costByCategory = new Map<string, number>();
+    if (worstMarginRow.appointmentId) {
+      for (const expense of expenseRows) {
+        if (expense.appointment_id !== worstMarginRow.appointmentId) continue;
+        const name = (expense.category_id ? categoryNameById.get(expense.category_id) : null) || "Uncategorized";
+        costByCategory.set(name, (costByCategory.get(name) ?? 0) + dollars(expense.total_amount));
+      }
+    }
+    worstJob = {
+      customer: worstMarginRow.customer,
+      date: worstMarginRow.date,
+      billed: worstMarginRow.billed,
+      consumed: worstMarginRow.consumed,
+      kept: worstMarginRow.kept,
+      topCosts: [...costByCategory.entries()].map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total).slice(0, 3),
+    };
+  }
 
   const cancelled = appointments.filter((row) => row.status === "cancelled");
   const noShow = appointments.filter((row) => row.status === "no_show");
@@ -479,6 +505,7 @@ export async function fetchReportsCanonical(
     arAging,
     expensesByCategory,
     jobMargins,
+    worstJob,
     jobMarginTotals,
     outstanding,
     refunds,
