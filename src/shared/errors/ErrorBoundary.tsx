@@ -1,5 +1,7 @@
 import React, { Component, ErrorInfo, ReactNode } from "react";
 
+import { captureClientError } from "../../lib/sentry";
+
 interface Props {
   children: ReactNode;
 }
@@ -21,6 +23,11 @@ class ErrorBoundary extends Component<Props, State> {
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("Uncaught error:", error, errorInfo);
+    // Report to Sentry when a DSN is configured; a strict no-op
+    // otherwise (see src/lib/sentry.ts). Never throws.
+    captureClientError(error, {
+      componentStack: errorInfo.componentStack ?? undefined,
+    });
   }
 
   public render() {

@@ -2,11 +2,17 @@
 
 import React from "react";
 import App from "./App";
+import { initSentry } from "./lib/sentry";
 import { AuthProvider } from "@packages/auth";
 import ErrorBoundary from "./shared/errors/ErrorBoundary";
 import { ThemeProvider } from "./components/ThemeProvider";
 import { GDPRConsentBanner } from "./components/security/GDPRConsentBanner";
 import { supabase } from "./integrations/supabase/client";
+
+// Initialize client error reporting as early as the client entry
+// allows — before the shell first renders. Strict no-op when
+// VITE_SENTRY_DSN is unset (see src/lib/sentry.ts).
+initSentry();
 
 /**
  * Client boundary for the consolidated Next.js application.
