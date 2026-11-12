@@ -14,6 +14,7 @@ export interface ReportsKpi {
   marginRate: number;
   jobLinkedCosts: number;
   arAging: Array<{ bucket: string; amount: number; count: number }>;
+  expensesByCategory: Array<{ name: string; total: number }>;
   jobMargins: Array<{ customer: string; date: string; billed: number; consumed: number; kept: number }>;
   jobMarginTotals: { billed: number; consumed: number; kept: number; jobs: number };
   outstanding: number;
@@ -200,6 +201,7 @@ export async function fetchReportsCanonical(
       invoiceLineRows: InvoiceLineRow[];
       expenseRows: ExpenseRow[];
       expensePrevRows: ExpenseRow[];
+      expenseCategories: Array<{ id: string; name: string }>;
     }>("/v1/platform/reports/canonical-rows", {
       query: {
         selected_workspace_id: workspaceId,
@@ -260,6 +262,17 @@ export async function fetchReportsCanonical(
     .reduce((sum, row) => sum + dollars(row.total_amount), 0);
   const grossMargin = collected - expensesTotal;
   const marginRate = collected > 0 ? (grossMargin / collected) * 100 : 0;
+  // Reports Machine §5a (Daymond): channel cost starts with an honest
+  // ingredient — period spend per expense category NAME. Attribution puts
+  // a cost on a channel only when a category names that channel; spend
+  // that names no channel is never guessed into one.
+  const categoryNameById = new Map(((canonicalRows.expenseCategories ?? []) as Array<{ id: string; name: string }>).map((category) => [category.id, category.name]));
+  const expensesByCategoryMap = new Map<string, number>();
+  for (const row of expenseRows) {
+    const name = (row.category_id ? categoryNameById.get(row.category_id) : null) || "Uncategorized";
+    expensesByCategoryMap.set(name, (expensesByCategoryMap.get(name) ?? 0) + dollars(row.total_amount));
+  }
+  const expensesByCategory = [...expensesByCategoryMap.entries()].map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total);
 
   const billed = invoices.reduce((sum, row) => sum + dollars(row.total), 0);
   const ytdBilled = invoicesYtd.reduce((sum, row) => sum + dollars(row.total), 0);
@@ -464,6 +477,7 @@ export async function fetchReportsCanonical(
     marginRate,
     jobLinkedCosts,
     arAging,
+    expensesByCategory,
     jobMargins,
     jobMarginTotals,
     outstanding,

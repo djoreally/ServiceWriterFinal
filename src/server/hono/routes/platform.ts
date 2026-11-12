@@ -3315,6 +3315,14 @@ platformRouter.get("/v1/platform/reports/canonical-rows", async (c) => {
   for (const result of [invoicesRes, openInvoicesRes, invoicesYtdRes, serviceRecordsRes, appointmentsRes, customersRes, vehiclesRes, invoiceLinesRes, expenseRowsRes, expensePrevRowsRes]) {
     if (result.error) throw result.error;
   }
+  // Reports Machine §5a: category names for the expense rows above, so the
+  // client can put a cost on an attribution channel when a category names
+  // that channel. Names only — the semantics stay client-side.
+  const categoryIds = [...new Set([...(expenseRowsRes.data ?? []), ...(expensePrevRowsRes.data ?? [])].map((row: any) => row.category_id).filter(Boolean))];
+  const expenseCategoriesRes = categoryIds.length
+    ? await db.from("expense_categories").select("id,name").in("id", categoryIds)
+    : { data: [], error: null };
+  if (expenseCategoriesRes.error) throw expenseCategoriesRes.error;
   return json({
     invoiceRows: invoicesRes.data ?? [],
     openInvoiceRows: openInvoicesRes.data ?? [],
@@ -3326,6 +3334,7 @@ platformRouter.get("/v1/platform/reports/canonical-rows", async (c) => {
     invoiceLineRows: invoiceLinesRes.data ?? [],
     expenseRows: expenseRowsRes.data ?? [],
     expensePrevRows: expensePrevRowsRes.data ?? [],
+    expenseCategories: expenseCategoriesRes.data ?? [],
   });
 });
 

@@ -317,6 +317,52 @@ export default function Reports() {
 
   const attribution = useMemo(() => summarizeCohorts(rawRecords, (record) => record.origin_source || "direct"), [rawRecords]);
 
+  // Reports Machine §5a (Daymond): a channel earns a cost only when an
+  // expense category NAMES it ("Facebook Ads" names facebook). Spend that
+  // names no channel is never guessed into one — unmeasured shows as such.
+  const channelCosts = useMemo(() => {
+    const normalize = (value: string) => value.toLowerCase().replace(/_/g, " ").replace(/\s+/g, " ").trim();
+    const byChannel = new Map<string, number>();
+    for (const category of data?.expensesByCategory ?? []) {
+      const categoryName = normalize(category.name);
+      for (const row of attribution) {
+        const channel = normalize(row.label);
+        if (!channel || channel === "direct") continue;
+        if (categoryName === channel || categoryName.split(" ").includes(channel) || categoryName.includes(channel)) {
+          byChannel.set(row.label, (byChannel.get(row.label) ?? 0) + category.total);
+          break;
+        }
+      }
+    }
+    return byChannel;
+  }, [data, attribution]);
+
+  // Reports Machine §5b (Robert): the morning read — the machine reports
+  // to the owner. Exceptions already computed across the machine, ranked
+  // by the dollars at stake; count-only exceptions follow the money lines.
+  const morningRead = useMemo(() => {
+    if (!data) return [] as Array<{ label: string; detail: string; dollars: number | null; figure: string }>;
+    const money: Array<{ label: string; detail: string; dollars: number }> = [];
+    const aged = data.arAging.find((row) => row.bucket === "90+ days");
+    if (aged && aged.amount > 0) money.push({ label: "Receivables over 90 days old", detail: `${aged.count} open invoice${aged.count === 1 ? "" : "s"} — the shrug ends here`, dollars: aged.amount });
+    const underwater = data.jobMargins.filter((job) => job.kept < 0);
+    if (underwater.length) money.push({ label: "Jobs that kept less than they consumed", detail: `${underwater.length} completed job${underwater.length === 1 ? "" : "s"} under water this period`, dollars: Math.abs(underwater.reduce((sum, job) => sum + job.kept, 0)) });
+    if (customerAnalytics) {
+      const due = customerAnalytics.customers.filter((row) => (row.days_since_last_service ?? 0) >= 90);
+      const dueValue = due.reduce((sum, row) => sum + row.lifetime_value, 0);
+      if (due.length && dueValue > 0) money.push({ label: "Customers due for service, waiting", detail: `${due.length} customers past 90 days — reach them from the Customers tab`, dollars: dueValue });
+      const highRisk = customerAnalytics.customers.filter((row) => row.churn_risk === "high");
+      const riskValue = highRisk.reduce((sum, row) => sum + row.lifetime_value, 0);
+      if (highRisk.length && riskValue > 0) money.push({ label: "Lifetime value at high churn risk", detail: `${highRisk.length} customers flagged high risk`, dollars: riskValue });
+    }
+    money.sort((a, b) => b.dollars - a.dollars);
+    const lines: Array<{ label: string; detail: string; dollars: number | null; figure: string }> = money.map((line) => ({ ...line, figure: formatCurrency(line.dollars) }));
+    if (audit && audit.jobsMissingTimestamps.total > 0) lines.push({ label: "Completed jobs missing timestamps", detail: "Data Quality names every one of them", dollars: null, figure: String(audit.jobsMissingTimestamps.total) });
+    const unassignedCount = retailRecords.filter((record) => record.technician_name === "Unassigned").length;
+    if (unassignedCount > 0) lines.push({ label: "Bookings with no technician", detail: "Not dispatched yet", dollars: null, figure: String(unassignedCount) });
+    return lines;
+  }, [data, audit, customerAnalytics, retailRecords, formatCurrency]);
+
   const qualityGaps = useMemo(() => ([
     { label: "Bookings missing coordinates", count: retailRecords.filter((record) => record.latitude == null || record.longitude == null).length, detail: "Excluded from the service-area map until geocoded." },
     { label: "Bookings missing ZIP or city", count: retailRecords.filter((record) => record.postal_code === "Unknown" && record.city === "Unknown").length, detail: "No ZIP on the appointment, its address, or the customer record." },
@@ -344,6 +390,7 @@ export default function Reports() {
         <div className="overflow-x-auto pb-1"><TabsList className="h-auto min-w-max justify-start"><TabsTrigger value="overview">Overview</TabsTrigger><TabsTrigger value="revenue">Revenue</TabsTrigger><TabsTrigger value="bookings">Bookings & Funnel</TabsTrigger><TabsTrigger value="demand"><Clock3 className="mr-1 h-3.5 w-3.5" />Demand & Service Area</TabsTrigger><TabsTrigger value="customers">Customers</TabsTrigger><TabsTrigger value="ltv">Customer LTV</TabsTrigger><TabsTrigger value="operations">Operations</TabsTrigger><TabsTrigger value="services">Services & Vehicles</TabsTrigger><TabsTrigger value="marketing">Marketing & Google</TabsTrigger><TabsTrigger value="fleet">Fleet</TabsTrigger><TabsTrigger value="quality">Data Quality</TabsTrigger><TabsTrigger value="explore"><Search className="mr-1 h-3.5 w-3.5" />Explore Data</TabsTrigger></TabsList></div>
 
         <TabsContent value="overview" className="space-y-4">
+          {morningRead.length > 0 && <Card className="border-l-4 border-l-amber-500"><CardHeader className="pb-2"><CardTitle className="text-base">The morning read</CardTitle><p className="text-xs text-muted-foreground">Exceptions ranked by dollars — the machine reports to the owner.</p></CardHeader><CardContent className="space-y-2.5">{morningRead.map((line) => <div key={line.label} className="flex items-baseline justify-between gap-3 text-sm"><div><p className="font-medium">{line.label}</p><p className="text-xs text-muted-foreground">{line.detail}</p></div><span className={`shrink-0 font-semibold tabular-nums ${line.dollars != null ? "text-amber-600" : ""}`}>{line.figure}</span></div>)}</CardContent></Card>}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4"><StatCard label="Net collected" value={formatCurrency(data.collected)} detail="Payment date · after refunds" tone="success" trend={trendPercent(data.collected, data.collectedPrev)} /><StatCard label="Gross billed" value={formatCurrency(data.billed)} detail="Service date · completed work" /><StatCard label="Outstanding A/R" value={formatCurrency(data.outstanding)} detail="Unpaid and partial balances" tone={data.outstanding > 0 ? "warning" : "default"} /><StatCard label="Completed jobs" value={String(data.jobsCompleted)} detail={`${completionRate.toFixed(1)}% of scheduled jobs`} /></div>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4"><StatCard label="Expenses" value={formatCurrency(data.expensesTotal)} detail="Transaction date · from Financials" tone={data.expensesTotal > 0 ? "warning" : "default"} /><StatCard label="Gross margin" value={formatCurrency(data.grossMargin)} detail="Collected minus expenses" tone={data.grossMargin >= 0 ? "success" : "danger"} /><StatCard label="Margin rate" value={`${data.marginRate.toFixed(1)}%`} detail="Of net collected, after expenses" /><StatCard label="Job-linked costs" value={formatCurrency(data.jobLinkedCosts)} detail="Expenses recorded against a job" /></div>
           <div className="grid gap-4 lg:grid-cols-3"><Card className="lg:col-span-2"><CardHeader><CardTitle className="text-base">Daily billed vs. collected vs. costs</CardTitle><p className="text-xs text-muted-foreground">Billed uses service date. Collected uses payment date. Costs use transaction date.</p></CardHeader><CardContent>{data.dailyRevenue.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">No financial activity in this period.</p> : <div className="space-y-3">{data.dailyRevenue.slice(-14).map((day) => <div key={day.date} className="grid grid-cols-[84px_1fr_auto] items-center gap-3 text-xs"><span className="text-muted-foreground">{safeDayLabel(day.date, "MMM d")}</span><div className="space-y-1"><Progress value={percent(day.billed, Math.max(...data.dailyRevenue.map((item) => Math.max(item.billed, item.collected, item.costs)), 1))} className="h-2" /><Progress value={percent(day.collected, Math.max(...data.dailyRevenue.map((item) => Math.max(item.billed, item.collected, item.costs)), 1))} className="h-2 [&>div]:bg-emerald-500" /><Progress value={percent(day.costs, Math.max(...data.dailyRevenue.map((item) => Math.max(item.billed, item.collected, item.costs)), 1))} className="h-2 [&>div]:bg-rose-500" /></div><span className="w-36 text-right tabular-nums">{formatCurrency(day.billed)} / {formatCurrency(day.collected)}{day.costs > 0 ? ` / −${formatCurrency(day.costs)}` : ""}</span></div>)}</div>}</CardContent></Card><Card><CardHeader><CardTitle className="text-base">Attention needed</CardTitle></CardHeader><CardContent className="space-y-3 text-sm"><div className="flex justify-between"><span>Outstanding A/R</span><span className="font-semibold text-amber-600">{formatCurrency(data.outstanding)}</span></div><div className="flex justify-between"><span>Cancelled jobs</span><span className="font-semibold">{data.jobsCancelled}</span></div><div className="flex justify-between"><span>No-shows</span><span className="font-semibold">{data.appointmentsNoShow}</span></div><div className="flex justify-between"><span>Refunds</span><span className="font-semibold">{formatCurrency(data.refunds)}</span></div></CardContent></Card></div>
@@ -389,7 +436,7 @@ export default function Reports() {
         </TabsContent>
 
         <TabsContent value="marketing" className="space-y-4"><GoogleInsightsConnections />
-          <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Booking source attribution</CardTitle><p className="text-xs text-muted-foreground">Booked revenue by the source recorded on the appointment. No channel revenue is inferred from clicks.</p></CardHeader><CardContent className="p-0"><Table density="compact"><TableHeader><TableRow><TableHead>Source</TableHead><TableHead className="text-right">Bookings</TableHead><TableHead className="text-right">Billed</TableHead><TableHead className="text-right">Avg ticket</TableHead><TableHead className="w-28">Share</TableHead></TableRow></TableHeader><TableBody>{attribution.map((row) => <TableRow key={row.label}><TableCell className="font-medium capitalize">{row.label.replace(/_/g, " ")}</TableCell><TableCell className="text-right tabular-nums">{row.bookings}</TableCell><TableCell className="text-right tabular-nums">{formatCurrency(row.billed)}</TableCell><TableCell className="text-right tabular-nums">{formatCurrency(row.avgTicket)}</TableCell><TableCell><Progress value={percent(row.bookings, attribution[0]?.bookings || 0)} className="h-1.5" /></TableCell></TableRow>)}{attribution.length === 0 && <TableRow><TableCell colSpan={5} className="py-6 text-center text-sm text-muted-foreground">No bookings in this period, so there is no attribution to report.</TableCell></TableRow>}</TableBody></Table></CardContent></Card>
+          <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Booking source attribution</CardTitle><p className="text-xs text-muted-foreground">Booked revenue by the source recorded on the appointment. No channel revenue is inferred from clicks. Channel cost counts expenses whose category names the channel (a "Facebook Ads" category names Facebook) — spend that names no channel is never guessed into one, and shows as unmeasured.</p></CardHeader><CardContent className="p-0"><Table density="compact"><TableHeader><TableRow><TableHead>Source</TableHead><TableHead className="text-right">Bookings</TableHead><TableHead className="text-right">Billed</TableHead><TableHead className="text-right">Avg ticket</TableHead><TableHead className="text-right">Channel cost</TableHead><TableHead className="text-right">Cost per booking</TableHead><TableHead className="w-28">Share</TableHead></TableRow></TableHeader><TableBody>{attribution.map((row) => { const cost = channelCosts.get(row.label); return <TableRow key={row.label}><TableCell className="font-medium capitalize">{row.label.replace(/_/g, " ")}</TableCell><TableCell className="text-right tabular-nums">{row.bookings}</TableCell><TableCell className="text-right tabular-nums">{formatCurrency(row.billed)}</TableCell><TableCell className="text-right tabular-nums">{formatCurrency(row.avgTicket)}</TableCell><TableCell className="text-right tabular-nums">{cost != null ? formatCurrency(cost) : <span className="text-muted-foreground">unmeasured</span>}</TableCell><TableCell className="text-right tabular-nums">{cost != null && row.bookings > 0 ? formatCurrency(cost / row.bookings) : "—"}</TableCell><TableCell><Progress value={percent(row.bookings, attribution[0]?.bookings || 0)} className="h-1.5" /></TableCell></TableRow>; })}{attribution.length === 0 && <TableRow><TableCell colSpan={7} className="py-6 text-center text-sm text-muted-foreground">No bookings in this period, so there is no attribution to report.</TableCell></TableRow>}</TableBody></Table></CardContent></Card>
           {funnel && <Card><CardHeader className="pb-2"><CardTitle className="text-sm">Public booking sessions</CardTitle></CardHeader><CardContent className="grid gap-3 sm:grid-cols-3 text-sm"><div><p className="text-xs text-muted-foreground">Tracked sessions</p><p className="text-xl font-semibold">{funnel.sessions}</p></div><div><p className="text-xs text-muted-foreground">Recovered</p><p className="text-xl font-semibold text-emerald-600">{funnel.recovered}</p></div><div><p className="text-xs text-muted-foreground">Abandoned</p><p className="text-xl font-semibold text-amber-600">{funnel.abandoned}</p></div></CardContent></Card>}
         </TabsContent>
 
