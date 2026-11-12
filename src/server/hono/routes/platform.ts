@@ -3392,7 +3392,7 @@ platformRouter.get("/v1/platform/reports/customer-analytics-rows", async (c) => 
   const { supabase, workspaceId } = await requirePlatformWorkspace(c);
   const db = supabase as any;
   const [customerResult, serviceResult] = await Promise.all([
-    db.from("customers").select("id,first_name,last_name,company_name,email,created_at").eq("workspace_id", workspaceId),
+    db.from("customers").select("id,first_name,last_name,company_name,email,phone,created_at").eq("workspace_id", workspaceId),
     db.from("service_records").select("customer_id,total_amount,status,started_at,completed_at,created_at").eq("workspace_id", workspaceId),
   ]);
   if (customerResult.error) throw customerResult.error;

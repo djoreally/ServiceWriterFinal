@@ -2,7 +2,7 @@
 import { apiClient } from "@/lib/api-client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
-export interface CustomerAnalyticsRow { id: string; name: string; email: string | null; lifetime_value: number; total_services: number; average_order_value: number; days_since_last_service: number | null; churn_risk: string | null; customer_segment: string | null; last_service_date: string | null; first_service_date: string | null; }
+export interface CustomerAnalyticsRow { id: string; name: string; email: string | null; phone: string | null; lifetime_value: number; total_services: number; average_order_value: number; days_since_last_service: number | null; churn_risk: string | null; customer_segment: string | null; last_service_date: string | null; first_service_date: string | null; }
 export interface CustomerAnalytics { customers: CustomerAnalyticsRow[]; totalLifetimeValue: number; repeat: number; oneTime: number; dueForService: CustomerAnalyticsRow[]; churnRisk: CustomerAnalyticsRow[]; topByValue: CustomerAnalyticsRow[]; }
 
 const parseValidDate = (value: unknown): Date | null => {
@@ -39,6 +39,7 @@ export async function fetchCustomerAnalytics(_userId: string): Promise<CustomerA
       id: row.id,
       name: [row.first_name, row.last_name].filter(Boolean).join(" ") || row.company_name || "Customer",
       email: row.email,
+      phone: row.phone ?? null,
       lifetime_value: lifetime,
       total_services: count,
       average_order_value: count ? lifetime / count : 0,
