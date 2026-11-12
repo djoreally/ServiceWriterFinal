@@ -215,7 +215,7 @@ export function CustomerLifetimeValue() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">Customer Lifetime Value</h2>
-          <p className="text-muted-foreground">Track and analyze customer value over time</p>
+          <p className="text-muted-foreground">Track and analyze customer value over time — counts only customers with at least one paid invoice; the rest of the book is not in these numbers.</p>
         </div>
         <Button variant="outline" onClick={() => fetchData(true)} disabled={refreshing}>
           {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
@@ -274,7 +274,7 @@ export function CustomerLifetimeValue() {
                 <div>
                   <p className="text-sm text-muted-foreground">At Risk</p>
                   <p className="text-2xl font-bold">{metrics.atRiskCustomers}</p>
-                  <p className="text-xs text-muted-foreground">of {metrics.totalCustomers} customers</p>
+                  <p className="text-xs text-muted-foreground">of {metrics.totalCustomers} customers with paid history</p>
                 </div>
                 <div className="p-3 bg-red-100 rounded-full">
                   <AlertTriangle className="h-6 w-6 text-red-600" />
