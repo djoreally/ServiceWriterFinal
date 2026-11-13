@@ -197,13 +197,23 @@ export async function recordFleetInvoicePayment(params: {
   invoiceId: string;
   amount: number;
   note?: string;
+  /** Canonical manual-payment method set (see ManualPaymentDialog). */
+  paymentMethod?: "cash" | "check" | "external_card" | "other";
+  /** Waive the invoice's card processing fee as part of a settling payment. */
+  waiveFees?: boolean;
 }): Promise<{ status: string; amount_paid: number; balance_due: number }> {
   if (!Number.isFinite(params.amount) || params.amount <= 0) throw new Error("Payment amount must be greater than zero");
   const workspace_id = getSelectedWorkspaceId();
   if (!workspace_id) throw new Error("Select a workspace before recording a payment.");
   const { data } = await apiClient.post<{ data: { status: string; amount_paid: number; balance_due: number } | null }>(
     `/v1/invoices/${encodeURIComponent(params.invoiceId)}/fleet-payment`,
-    { workspace_id, amount: params.amount, note: params.note ?? null },
+    {
+      workspace_id,
+      amount: params.amount,
+      note: params.note ?? null,
+      payment_method: params.paymentMethod ?? null,
+      waive_fees: params.waiveFees ?? false,
+    },
   );
   if (!data) throw new Error("Payment reconciliation returned no result");
   return data;

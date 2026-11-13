@@ -858,6 +858,13 @@ const fleetPaymentBodySchema = z.object({
   workspace_id: z.string().uuid(),
   amount: z.number().positive(),
   note: z.string().trim().max(2000).nullable().optional(),
+  // Restored manual-payment fields: the method set is the one
+  // ManualPaymentDialog has carried since the frontend was preserved
+  // (cash / check / external_card / other), and waive_fees is the card
+  // processing fee waiver (see the record_fleet_invoice_payment
+  // migration 20261112031000 for the reconciliation semantics).
+  payment_method: z.enum(["cash", "check", "external_card", "other"]).optional(),
+  waive_fees: z.boolean().optional(),
 });
 
 documentsRouter.post("/v1/invoices/:id/fleet-payment", async (c) => {
@@ -869,7 +876,12 @@ documentsRouter.post("/v1/invoices/:id/fleet-payment", async (c) => {
     _invoice_id: invoiceId,
     _amount: body.amount,
     _idempotency_key: `manual:${invoiceId}:${crypto.randomUUID()}`,
-    _details: { source: "fleet_invoice_ui", note: body.note ?? null },
+    _details: {
+      source: "fleet_invoice_ui",
+      note: body.note ?? null,
+      payment_method: body.payment_method ?? null,
+      waive_fees: body.waive_fees ?? false,
+    },
   });
   if (error) throw new ApiError(502, error.message || "Payment reconciliation failed", "fleet_payment_failed");
 

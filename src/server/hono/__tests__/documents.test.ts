@@ -275,6 +275,62 @@ describe("documents router", () => {
     });
   });
 
+  describe("POST /v1/invoices/:id/fleet-payment", () => {
+    beforeEach(() => {
+      db["rpc:record_fleet_invoice_payment"] = {
+        data: [{ status: "paid", amount_paid: 120, balance_due: 0 }],
+        error: null,
+      };
+    });
+
+    const postPayment = (payload: Record<string, unknown>) =>
+      documentsRouter.request(`/v1/invoices/${INVOICE_ID}/fleet-payment`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ workspace_id: WS_ID, ...payload }),
+      });
+
+    it("forwards the payment method and card-fee waiver into the canonical payment rpc", async () => {
+      // Restored behavior (ManualPaymentDialog method set + the
+      // 2026-09-18 card-fee waiver): the recorded payment must carry
+      // the method and the waiver into record_fleet_invoice_payment's
+      // details, where the ledger write stamps them on the payment row.
+      const res = await postPayment({
+        amount: 120,
+        note: "Paid at the door",
+        payment_method: "check",
+        waive_fees: true,
+      });
+      expect(res.status).toBe(200);
+      const rpc = calls.rpc.find((r) => r.fn === "record_fleet_invoice_payment");
+      expect(rpc).toBeDefined();
+      const params = rpc!.params as { _amount: number; _details: Record<string, unknown> };
+      expect(params._amount).toBe(120);
+      expect(params._details).toMatchObject({
+        note: "Paid at the door",
+        payment_method: "check",
+        waive_fees: true,
+      });
+      const body = await res.json();
+      expect(body.data).toMatchObject({ status: "paid", amount_paid: 120, balance_due: 0 });
+    });
+
+    it("defaults to no waiver and no method when the caller omits them", async () => {
+      const res = await postPayment({ amount: 50 });
+      expect(res.status).toBe(200);
+      const rpc = calls.rpc.find((r) => r.fn === "record_fleet_invoice_payment");
+      const params = rpc!.params as { _details: Record<string, unknown> };
+      expect(params._details.payment_method).toBeNull();
+      expect(params._details.waive_fees).toBe(false);
+    });
+
+    it("rejects an unknown payment method", async () => {
+      const res = await postPayment({ amount: 50, payment_method: "venmo" });
+      expect(res.status).toBe(400);
+      expect(calls.rpc.some((r) => r.fn === "record_fleet_invoice_payment")).toBe(false);
+    });
+  });
+
   describe("route registration", () => {
     it("exposes the declined-services tracker", async () => {
       const res = await documentsRouter.request(
