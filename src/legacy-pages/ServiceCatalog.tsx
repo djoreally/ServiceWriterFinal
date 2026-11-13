@@ -50,6 +50,7 @@ import { toast } from "@/hooks/use-toast";
 import { Plus, Search, Pencil, Trash2, Clock, DollarSign, Wrench, ArrowUp, ArrowDown, GripVertical, Gauge, Settings2, CarFront, Sparkles, CircleGauge } from "lucide-react";
 import { getCategoryColor } from "@/lib/categoryColors";
 import { SmartUpsellsCard } from "@/components/catalog/SmartUpsellsCard";
+import { ServiceMenuCard } from "@/components/catalog/ServiceMenuCard";
 import { ServiceLibraryDialog } from "@/components/catalog/ServiceLibraryDialog";
 import { CatalogBenchmarkDialog } from "@/components/pricing/CatalogBenchmarkDialog";
 import { fetchCatalogBenchmarks, type CatalogBenchmark } from "@/application/queries/repair-pricing.query";
@@ -323,6 +324,9 @@ const ServiceCatalog = () => {
     <AppLayout title={`${terms.service} Catalog`}>
       {/* Smart Upsells Manager */}
       <SmartUpsellsCard onRefresh={fetchServices} />
+
+      {/* Service Menu Builder (off by default; presentation layer over this catalog) */}
+      <ServiceMenuCard onRefresh={fetchServices} />
 
       {(mainServices.some((service) => service.service_vertical === "detailing") ||
         mainServices.some((service) => service.service_vertical === "tires")) && (
