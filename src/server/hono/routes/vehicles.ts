@@ -25,7 +25,47 @@ import { ApiError, json, paginationSchema, requireWorkspaceMember } from "@/serv
 import { requireAuth, requireWorkspaceAuth } from "@/server/hono/middleware/auth";
 import type { Context } from "hono";
 import { getNextFleetWorkOrderStatus } from "@/domain/fleet/work-order-lifecycle";
+import {
+  decodePlateWithVehicleDatabases,
+  type PlateDecodeResult,
+} from "@/server/hono/lib/vehicle-databases";
+import {
+  fetchFluidSpecs,
+  fetchMaintenanceSchedule,
+  fetchOilLookup,
+  type MaintenanceInterval,
+  type VehicleDataResult,
+} from "@/server/hono/lib/vehicle-databases-data";
+import {
+  decodeVinWithNhtsa,
+  type DecodedVehicle,
+  type VinDecodeResult,
+} from "@/server/hono/lib/vin-decode";
+import { fetchWheelSizeFitment } from "@/server/hono/lib/wheel-size";
+import { resolveQldSpec } from "@/server/qld/spec-provider";
+import {
+  appliesToFromCatalog,
+  hasAnySpec,
+  mergeSpecs,
+  parseCapacityQuarts,
+  pickCatalogRow,
+  specsFromCatalogRow,
+  specsFromWorkspaceRow,
+  EMPTY_SPECS,
+  type DataCenterSpecs,
+} from "@/server/hono/lib/data-center";
 import { toDollars } from "@/lib/money";
+import {
+  MAX_ODOMETER_READING,
+  isDuplicateServiceRecord,
+  mileageFromUnknown,
+  normalizeOdometerUnit,
+  normalizeUsState,
+  normalizeVin,
+  serviceDateKey,
+  validateMileageValue,
+  validateVin,
+} from "@/server/hono/lib/creation-validation";
 
 export const vehiclesRouter = new Hono();
 
@@ -45,8 +85,8 @@ const vehicleSchema = z.object({
   plate_state: z.string().trim().max(20).nullable().optional(),
   plate_region: z.string().trim().max(20).nullable().optional(),
   color: z.string().trim().max(50).nullable().optional(),
-  mileage: z.number().int().min(0).nullable().optional(),
-  mileage_unit: z.enum(["mi", "km"]).default("mi"),
+  mileage: z.number().int().min(0).max(MAX_ODOMETER_READING, `Mileage cannot exceed ${MAX_ODOMETER_READING.toLocaleString("en-US")}`).nullable().optional(),
+  mileage_unit: z.string().trim().max(10).optional(),
   odometer_measure: z.string().trim().max(20).nullable().optional(),
   engine: z.string().trim().max(120).nullable().optional(),
   oil_type: z.string().trim().max(80).nullable().optional(),
@@ -54,6 +94,42 @@ const vehicleSchema = z.object({
   oil_filter: z.string().trim().max(100).nullable().optional(),
   notes: z.string().max(5000).nullable().optional(),
 });
+
+/**
+ * Creation-time validation + normalization for vehicle writes (Build Board
+ * Session 7 condition 4 — see src/server/hono/lib/creation-validation.ts).
+ * Returns the normalized fields to persist; throws ApiError(400) with a
+ * clear message on the first violated rule.
+ */
+function prepareVehicleFields(input: {
+  vin?: string | null;
+  mileage_unit?: string | null;
+  plate_region?: string | null;
+}): { vin?: string | null; mileage_unit?: string; plate_region?: string | null } {
+  const prepared: { vin?: string | null; mileage_unit?: string; plate_region?: string | null } = {};
+  if (input.vin !== undefined) {
+    if (input.vin === null || input.vin.trim() === "") {
+      prepared.vin = null;
+    } else {
+      const vinError = validateVin(input.vin);
+      if (vinError) throw new ApiError(400, vinError, "invalid_vin");
+      prepared.vin = normalizeVin(input.vin);
+    }
+  }
+  if (input.mileage_unit !== undefined && input.mileage_unit !== null && input.mileage_unit !== "") {
+    const unit = normalizeOdometerUnit(input.mileage_unit);
+    if (unit !== "MI" && unit !== "KM") {
+      throw new ApiError(400, "Mileage unit must be MI or KM.", "invalid_mileage_unit");
+    }
+    prepared.mileage_unit = unit;
+  }
+  if (input.plate_region !== undefined) {
+    prepared.plate_region = input.plate_region === null || input.plate_region.trim() === ""
+      ? null
+      : normalizeUsState(input.plate_region);
+  }
+  return prepared;
+}
 
 async function assertCustomerInWorkspace(
   supabase: Awaited<ReturnType<typeof requireWorkspaceMember>>["supabase"],
@@ -115,10 +191,17 @@ vehiclesRouter.post("/v1/vehicles", async (c) => {
   await assertCustomerInWorkspace(supabase, body.workspace_id, body.customer_id);
 
   const { engine, oil_type, oil_capacity, oil_filter, odometer_measure, plate_state, ...vehicleInput } = body;
+  const prepared = prepareVehicleFields({
+    vin: body.vin,
+    mileage_unit: body.mileage_unit,
+    plate_region: body.plate_region ?? plate_state,
+  });
   const { data: vehicle, error } = await supabase.from("vehicles").insert({
     ...vehicleInput,
-    plate_region: body.plate_region ?? plate_state ?? null,
-    metadata: odometer_measure ? { odometer_measure } : {},
+    vin: prepared.vin ?? null,
+    mileage_unit: prepared.mileage_unit ?? "MI",
+    plate_region: prepared.plate_region ?? null,
+    metadata: odometer_measure ? { odometer_measure: normalizeOdometerUnit(odometer_measure) } : {},
   } as never).select().single();
   if (error) throw error;
 
@@ -151,8 +234,8 @@ const vehicleUpdateSchema = z.object({
   plate_state: z.string().trim().max(20).nullable().optional(),
   plate_region: z.string().trim().max(20).nullable().optional(),
   color: z.string().trim().max(50).nullable().optional(),
-  mileage: z.number().int().min(0).nullable().optional(),
-  mileage_unit: z.enum(["mi", "km"]).optional(),
+  mileage: z.number().int().min(0).max(MAX_ODOMETER_READING, `Mileage cannot exceed ${MAX_ODOMETER_READING.toLocaleString("en-US")}`).nullable().optional(),
+  mileage_unit: z.string().trim().max(10).nullable().optional(),
   odometer_measure: z.string().trim().max(20).nullable().optional(),
   engine: z.string().trim().max(120).nullable().optional(),
   oil_type: z.string().trim().max(80).nullable().optional(),
@@ -202,6 +285,16 @@ vehiclesRouter.patch("/v1/vehicles/:id", async (c) => {
   if (Object.prototype.hasOwnProperty.call(body, "plate_state") && !Object.prototype.hasOwnProperty.call(body, "plate_region")) {
     patch.plate_region = plate_state ?? null;
   }
+  const prepared = prepareVehicleFields({
+    ...(Object.prototype.hasOwnProperty.call(body, "vin") ? { vin: body.vin ?? null } : {}),
+    ...(Object.prototype.hasOwnProperty.call(body, "mileage_unit") ? { mileage_unit: body.mileage_unit } : {}),
+    ...(Object.prototype.hasOwnProperty.call(body, "plate_region") || Object.prototype.hasOwnProperty.call(body, "plate_state")
+      ? { plate_region: body.plate_region ?? plate_state ?? null }
+      : {}),
+  });
+  if ("vin" in prepared) patch.vin = prepared.vin;
+  if (prepared.mileage_unit !== undefined) patch.mileage_unit = prepared.mileage_unit;
+  if ("plate_region" in prepared) patch.plate_region = prepared.plate_region;
   if (Object.prototype.hasOwnProperty.call(body, "odometer_measure")) {
     const { data: current, error: currentError } = await supabase
       .from("vehicles")
@@ -214,7 +307,7 @@ vehiclesRouter.patch("/v1/vehicles/:id", async (c) => {
     const metadata = current.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata)
       ? current.metadata as Record<string, unknown>
       : {};
-    patch.metadata = { ...metadata, odometer_measure: odometer_measure ?? null };
+    patch.metadata = { ...metadata, odometer_measure: odometer_measure ? normalizeOdometerUnit(odometer_measure) : null };
   }
 
   let vehicle: unknown;
@@ -424,12 +517,25 @@ vehiclesRouter.get("/v1/service-records", async (c) => {
 });
 
 vehiclesRouter.post("/v1/service-records", async (c) => {
-  const body = serviceRecordSchema.parse(await c.req.json());
+  const rawBody = await c.req.json();
+  // Keys the caller actually sent (the schema applies defaults for status /
+  // metadata, so the parsed body cannot distinguish sent from defaulted) —
+  // the reuse update below needs that distinction (SW-42).
+  const sentKeys = new Set(Object.keys(rawBody && typeof rawBody === "object" ? rawBody : {}));
+  const body = serviceRecordSchema.parse(rawBody);
   const { supabase, user } = await requireWorkspaceAuth(c, body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician"]);
   const refs = await resolveReferences(supabase, body);
   if ("error" in refs) return refs.error;
 
   const meta = body.metadata ?? {};
+  // Creation-time validation (Session 7 condition 4): a service record's
+  // odometer reading lives in metadata; bound it here so an implausible
+  // reading can never be saved, and store the unit normalized (MI/KM).
+  const mileageError = validateMileageValue(meta.mileage);
+  if (mileageError) return json({ error: { code: "invalid_mileage", message: mileageError } }, { status: 400 });
+  const normalizedMeta: Record<string, unknown> = typeof meta.odometer_measure === "string" && meta.odometer_measure.trim()
+    ? { ...meta, odometer_measure: normalizeOdometerUnit(meta.odometer_measure) }
+    : meta;
   const laborCost = numberFromMetadata(meta.labor_cost) ?? 0;
   const partsCost = numberFromMetadata(meta.parts_cost) ?? 0;
   const shopSupplies = numberFromMetadata(meta.shop_supplies) ?? 0;
@@ -443,17 +549,83 @@ vehiclesRouter.post("/v1/service-records", async (c) => {
   if (Math.abs(total - expectedTotal) > 0.01) return json({ error: { code: "financial_math_mismatch", message: "Service record total does not match subtotal, discount, and tax." } }, { status: 400 });
 
   const now = new Date().toISOString();
-  const payload = { ...body, customer_id: refs.customerId, vehicle_id: refs.vehicleId, subtotal, tax_rate: taxRate, tax_amount: taxAmount, discount_amount: discount, total_amount: total, completed_by: body.status === "completed" ? user.id : null, completed_at: body.status === "completed" ? body.completed_at ?? now : body.completed_at ?? null };
+  const payload = { ...body, metadata: normalizedMeta, customer_id: refs.customerId, vehicle_id: refs.vehicleId, subtotal, tax_rate: taxRate, tax_amount: taxAmount, discount_amount: discount, total_amount: total, completed_by: body.status === "completed" ? user.id : null, completed_at: body.status === "completed" ? body.completed_at ?? now : body.completed_at ?? null };
 
   if (body.appointment_id) {
     const { data: existing, error: existingError } = await supabase.from("service_records").select("id,metadata").eq("workspace_id", body.workspace_id).eq("appointment_id", body.appointment_id).neq("status", "voided").order("created_at", { ascending: true }).limit(1).maybeSingle();
     if (existingError) throw existingError;
     if (existing) {
-      const { data, error } = await (supabase.from("service_records") as any).update({ ...payload, metadata: mergeMetadata(existing.metadata, meta) }).eq("workspace_id", body.workspace_id).eq("id", existing.id).select().single();
+      // Partial-update guard (SW-42): this path RETURNs the existing record
+      // for a duplicate create; it must not rewrite it with values derived
+      // from a request that never mentioned them (financials recomputed to
+      // 0-based values, tax_rate null, completion fields from the defaulted
+      // status). Write only what this request actually provided — same rule
+      // as the Next twin of this route.
+      const updatePayload: Record<string, unknown> = { metadata: mergeMetadata(existing.metadata, normalizedMeta) };
+      for (const key of Object.keys(body)) {
+        if (key === "workspace_id" || key === "metadata" || !sentKeys.has(key)) continue;
+        updatePayload[key] = (body as Record<string, unknown>)[key];
+      }
+      if (refs.customerId !== null || sentKeys.has("customer_id")) updatePayload.customer_id = refs.customerId;
+      if (refs.vehicleId !== null || sentKeys.has("vehicle_id")) updatePayload.vehicle_id = refs.vehicleId;
+      // Each derived financial field is written only when its own inputs
+      // were sent (same rule as the Next twin of this route).
+      const subtotalSent = sentKeys.has("subtotal")
+        || ["labor_cost", "parts_cost", "shop_supplies"].every((key) => meta[key] !== undefined);
+      const taxSent = sentKeys.has("tax_amount") || meta.tax_amount !== undefined
+        || sentKeys.has("tax_rate") || meta.tax_rate !== undefined;
+      const totalSent = sentKeys.has("total_amount") || meta.total_cost !== undefined;
+      if (subtotalSent) updatePayload.subtotal = subtotal;
+      if (sentKeys.has("discount_amount") || meta.discount_amount !== undefined) updatePayload.discount_amount = discount;
+      if (sentKeys.has("tax_rate") || meta.tax_rate !== undefined) updatePayload.tax_rate = taxRate;
+      if (taxSent) updatePayload.tax_amount = taxAmount;
+      if (totalSent || (subtotalSent && taxSent)) updatePayload.total_amount = total;
+      if (sentKeys.has("status") || sentKeys.has("completed_at")) {
+        updatePayload.completed_by = body.status === "completed" ? user.id : null;
+        updatePayload.completed_at = body.status === "completed" ? body.completed_at ?? now : body.completed_at ?? null;
+      }
+      const { data, error } = await (supabase.from("service_records") as any).update(updatePayload).eq("workspace_id", body.workspace_id).eq("id", existing.id).select().single();
       if (error) throw error;
       return json({ data, reused: true });
     }
   }
+
+  // Duplicate detection (Session 7 condition 4): the legacy import landed
+  // the same service twice (same vehicle + date + mileage + invoice). Follow
+  // this route's existing idempotency convention — return the existing
+  // record with reused: true instead of inserting a second copy.
+  if (refs.vehicleId) {
+    const candidate = {
+      serviceDate: serviceDateKey(payload.completed_at ?? payload.started_at),
+      mileage: mileageFromUnknown(normalizedMeta.mileage),
+      invoiceNumber: typeof normalizedMeta.service_number === "string" ? normalizedMeta.service_number : null,
+    };
+    if (candidate.serviceDate && (candidate.mileage !== null || candidate.invoiceNumber)) {
+      const { data: prior, error: priorError } = await supabase
+        .from("service_records")
+        .select("id,metadata,completed_at,started_at,created_at")
+        .eq("workspace_id", body.workspace_id)
+        .eq("vehicle_id", refs.vehicleId)
+        .neq("status", "voided")
+        .order("created_at", { ascending: true })
+        .limit(50);
+      if (priorError) throw priorError;
+      const duplicate = (prior ?? []).find((row) => {
+        const rowMeta = (row.metadata && typeof row.metadata === "object" ? row.metadata : {}) as Record<string, unknown>;
+        return isDuplicateServiceRecord(candidate, {
+          serviceDate: serviceDateKey(row.completed_at ?? row.started_at ?? row.created_at),
+          mileage: mileageFromUnknown(rowMeta.mileage),
+          invoiceNumber: typeof rowMeta.service_number === "string" ? rowMeta.service_number : null,
+        });
+      });
+      if (duplicate) {
+        const { data: existingFull, error: existingFullError } = await supabase.from("service_records").select("*").eq("workspace_id", body.workspace_id).eq("id", duplicate.id).single();
+        if (existingFullError) throw existingFullError;
+        return json({ data: existingFull, reused: true });
+      }
+    }
+  }
+
   const { data, error } = await supabase.from("service_records").insert(payload).select().single();
   if (error) throw error;
   return json({ data }, { status: 201 });
@@ -515,6 +687,83 @@ async function validateTargetReferences(supabase: any, workspaceId: string, targ
   return null;
 }
 
+// Registered before /v1/service-records/:id on purpose: Hono resolves
+// same-router overlaps in registration order, so the :id handler would
+// otherwise capture "page" and fail UUID validation before this handler
+// runs. (The static Next route app/api/v1/service-records/page gets the
+// request past the legacy [id] route file; this ordering gets it past
+// the :id registration here.)
+vehiclesRouter.get("/v1/service-records/page", async (c) => {
+  const url = new URL(c.req.url);
+  const workspaceId = url.searchParams.get("selected_workspace_id");
+  if (!workspaceId) return json({ data: null });
+  const { supabase, user } = await requireAuth(c);
+  const db = supabase as any;
+
+  const [servicesRes, customersRes, vehiclesRes] = await Promise.all([
+    db.from("service_records")
+      .select("id,customer_id,vehicle_id,status,work_performed,customer_notes,internal_notes,metadata,started_at,completed_at,created_at,subtotal,total_amount,technician_id")
+      .eq("workspace_id", workspaceId)
+      .neq("status", "voided")
+      .order("completed_at", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false }),
+    db.from("customers")
+      .select("id,first_name,last_name")
+      .eq("workspace_id", workspaceId)
+      .neq("status", "archived")
+      .order("last_name"),
+    db.from("vehicles")
+      .select("id,customer_id,make,model,year")
+      .eq("workspace_id", workspaceId)
+      .neq("status", "archived")
+      .order("created_at", { ascending: false }),
+  ]);
+
+  if (servicesRes.error) throw servicesRes.error;
+  if (customersRes.error) throw customersRes.error;
+  if (vehiclesRes.error) throw vehiclesRes.error;
+
+  return json({
+    data: {
+      services: servicesRes.data ?? [],
+      customers: customersRes.data ?? [],
+      vehicles: vehiclesRes.data ?? [],
+      userId: user.id,
+    },
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Service records search for linking — GET /v1/service-records/search-for-linking
+//
+// The CRM ↔ Assets linkage searches service *records* (with customer names),
+// not the service catalog. Returns the raw bundle; the caller filters by
+// term client-side.
+//
+// Registered here, before /v1/service-records/:id, on purpose — the same
+// shadowing the /page handler above escaped. This route used to live on
+// workOrdersRouter, which app.ts mounts after this router, so the :id
+// handler captured "search-for-linking" and failed UUID validation before
+// the search could run. (The static Next route
+// app/api/v1/service-records/search-for-linking gets the request past the
+// legacy [id] route file; this ordering gets it past the :id registration
+// here.)
+// ---------------------------------------------------------------------------
+vehiclesRouter.get("/v1/service-records/search-for-linking", async (c) => {
+  const { supabase } = await requireAuth(c);
+  const params = new URL(c.req.url).searchParams;
+  const workspaceId = z.string().uuid().parse(params.get("workspace_id") ?? "");
+  const limit = Math.min(Math.max(Number(params.get("limit") ?? 25) || 25, 1), 200);
+  const { data, error } = await (supabase.from("service_records") as any)
+    .select("id,customer_id,work_performed,metadata,completed_at,created_at,customers(first_name,last_name,company_name)")
+    .eq("workspace_id", workspaceId)
+    .neq("status", "voided")
+    .order("completed_at", { ascending: false, nullsFirst: false })
+    .limit(Math.max(limit * 4, limit));
+  if (error) throw error;
+  return json({ data: data ?? [] });
+});
+
 vehiclesRouter.get("/v1/service-records/:id", async (c) => {
   const id = idSchema.parse(c.req.param("id"));
   const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
@@ -524,110 +773,19 @@ vehiclesRouter.get("/v1/service-records/:id", async (c) => {
   return json({ data });
 });
 
-// ---------------------------------------------------------------------------
-// Service record detail bundle — GET /v1/service-records/:id/detail-full
-//
-// Server-side translation of the legacy client composition in
-// `src/application/queries/service-detail.query.ts` (which fetched the
-// service row, customer, vehicle, line items, workspace settings/name,
-// appointment, vehicle specs, fallback customer, and first appointment item
-// in parallel via the browser Supabase client). The client now expects this
-// bundle from a single endpoint; without it the ServiceDetail page renders
-// empty.
-// ---------------------------------------------------------------------------
-vehiclesRouter.get("/v1/service-records/:id/detail-full", async (c) => {
-  const id = idSchema.parse(c.req.param("id"));
-  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
-  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
-  const db = supabase as any;
-
-  const { data: service, error: serviceError } = await supabase
-    .from("service_records")
-    .select("*")
-    .eq("workspace_id", workspaceId)
-    .eq("id", id)
-    .single();
-  if (serviceError) throw serviceError;
-
-  const [customerRes, vehicleRes, linesRes, settingsRes, workspaceRes, appointmentRes] = await Promise.all([
-    service.customer_id
-      ? db.from("customers").select("*").eq("workspace_id", workspaceId).eq("id", service.customer_id).maybeSingle()
-      : Promise.resolve({ data: null, error: null }),
-    service.vehicle_id
-      ? db.from("vehicles").select("*").eq("workspace_id", workspaceId).eq("id", service.vehicle_id).maybeSingle()
-      : Promise.resolve({ data: null, error: null }),
-    db.from("service_record_line_items")
-      .select("id,item_type,description,quantity,unit_price,total_price,labor_hours,labor_rate,metadata,created_at")
-      .eq("workspace_id", workspaceId)
-      .eq("service_record_id", id)
-      .order("sort_order"),
-    db.from("workspace_settings").select("email").eq("workspace_id", workspaceId).maybeSingle(),
-    db.from("workspaces").select("name").eq("id", workspaceId).maybeSingle(),
-    service.appointment_id
-      ? db.from("appointments").select("id,customer_id,vehicle_id,metadata,notes,starts_at").eq("workspace_id", workspaceId).eq("id", service.appointment_id).maybeSingle()
-      : Promise.resolve({ data: null, error: null }),
-  ]);
-  for (const res of [customerRes, vehicleRes, linesRes, settingsRes, workspaceRes, appointmentRes]) {
-    if (res.error) throw res.error;
-  }
-
-  const appointment = appointmentRes.data ?? null;
-  const customer = customerRes.data ?? null;
-
-  let vehicleSpecs = null;
-  if (service.vehicle_id) {
-    const { data: spec, error: specError } = await db.from("vehicle_service_specs")
-      .select("engine,oil_type,oil_capacity,oil_filter,metadata")
-      .eq("workspace_id", workspaceId)
-      .eq("vehicle_id", service.vehicle_id)
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (specError) throw specError;
-    vehicleSpecs = spec ?? null;
-  }
-
-  let fallbackCustomer = null;
-  if (!customer && appointment?.customer_id) {
-    const { data: fallback, error: fallbackError } = await db.from("customers").select("*")
-      .eq("workspace_id", workspaceId).eq("id", appointment.customer_id).maybeSingle();
-    if (fallbackError) throw fallbackError;
-    fallbackCustomer = fallback ?? null;
-  }
-
-  let firstAppointmentItem = null;
-  if (service.appointment_id) {
-    const { data: items, error: itemsError } = await db.from("appointment_items")
-      .select("service_catalog_id,description,quantity,unit_price,service_catalog(name,description,estimated_duration)")
-      .eq("workspace_id", workspaceId)
-      .eq("appointment_id", service.appointment_id)
-      .order("created_at")
-      .limit(1);
-    if (itemsError) throw itemsError;
-    firstAppointmentItem = items?.[0] ?? null;
-  }
-
-  return json({
-    data: {
-      service,
-      customer,
-      vehicle: vehicleRes.data ?? null,
-      line_items: linesRes.data ?? [],
-      workspace_email: settingsRes.data?.email ?? "",
-      workspace_name: workspaceRes.data?.name ?? "",
-      appointment,
-      fallback_customer: fallbackCustomer,
-      vehicle_specs: vehicleSpecs,
-      first_appointment_item: firstAppointmentItem,
-    },
-  });
-});
-
 vehiclesRouter.patch("/v1/service-records/:id", async (c) => {
   const id = idSchema.parse(c.req.param("id"));
   const body = updateSchema.parse(await c.req.json());
   const { supabase, user } = await requireWorkspaceAuth(c, body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician"]);
   const { workspace_id, ...updates } = body;
+
+  if (updates.metadata && "mileage" in updates.metadata) {
+    const mileageError = validateMileageValue(updates.metadata.mileage);
+    if (mileageError) return json({ error: { code: "invalid_mileage", message: mileageError } }, { status: 400 });
+  }
+  if (updates.metadata && typeof updates.metadata.odometer_measure === "string" && updates.metadata.odometer_measure.trim()) {
+    updates.metadata = { ...updates.metadata, odometer_measure: normalizeOdometerUnit(updates.metadata.odometer_measure) };
+  }
 
   const { data: current, error: currentError } = await supabase.from("service_records").select("id,customer_id,vehicle_id,work_order_id,quote_id,technician_id,subtotal,tax_amount,discount_amount,total_amount,status,metadata").eq("workspace_id", workspace_id).eq("id", id).single();
   if (currentError) throw currentError;
@@ -1096,6 +1254,25 @@ async function resolveWorkspaceIdForUser(
   return active[0]?.workspace_id ?? null;
 }
 
+/**
+ * Platform-admin gate (same idiom as platform.ts / messaging.ts,
+ * verified via user_roles). platform_settings is a global table whose
+ * RLS write arms are platform-admin-only after the Step 3 translation,
+ * so writes through this router must pass the same gate server-side.
+ */
+async function requirePlatformAdmin(c: Context) {
+  const { supabase, user } = await requireAuth(c);
+  const { data, error } = await supabase
+    .from("user_roles")
+    .select("role")
+    .eq("user_id", user.id)
+    .eq("role", "admin")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new ApiError(403, "Platform admin access required", "forbidden");
+  return { supabase, user };
+}
+
 function selectedWorkspaceHint(c: Context): string | undefined {
   const fromQuery = new URL(c.req.url).searchParams.get("selected_workspace_id");
   return fromQuery ?? undefined;
@@ -1181,6 +1358,8 @@ vehiclesRouter.get("/v1/carfax/settings", async (c) => {
       phone: settings?.phone || "",
       carfax_activated: Boolean(carfax.location_id),
       carfax_activation_date: typeof carfax.activation_date === "string" ? carfax.activation_date : null,
+      carfax_product_data_id: typeof carfax.product_data_id === "string" ? carfax.product_data_id : "",
+      carfax_comp_code: typeof carfax.comp_code === "string" ? carfax.comp_code : "",
     },
   });
 });
@@ -1206,12 +1385,24 @@ vehiclesRouter.put("/v1/carfax/settings", async (c) => {
     activation_date: body.carfax_location_id
       ? existingCarfax.activation_date || new Date().toISOString()
       : null,
+    // CARFAX-issued identifiers (product-data-id for Service History Check /
+    // QuickVIN, comp-code for the Authorization Tool). They arrive with the
+    // CARFAX agreement, so they are saved independently of the location
+    // fields and preserved when a save does not mention them.
+    product_data_id:
+      typeof body.carfax_product_data_id === "string"
+        ? body.carfax_product_data_id || null
+        : existingCarfax.product_data_id ?? null,
+    comp_code:
+      typeof body.carfax_comp_code === "string"
+        ? body.carfax_comp_code || null
+        : existingCarfax.comp_code ?? null,
   };
   const { error } = await client
     .from("workspace_settings")
     .update({
       city: body.city || null,
-      region: body.state || null,
+      region: typeof body.state === "string" && body.state.trim() ? normalizeUsState(body.state) : null,
       postal_code: body.postal_code || null,
       website_url: body.website_url || null,
       operational_settings: { ...operational, carfax: nextCarfax },
@@ -1231,7 +1422,7 @@ vehiclesRouter.get("/v1/carfax/export-services", async (c) => {
   const { data, error } = await client
     .from("service_records")
     .select(
-      "id,vehicle_id,work_performed,metadata,completed_at,created_at,vehicles(vin,make,model,year,license_plate,plate_region,mileage,mileage_unit),service_record_line_items(id,item_type,description,quantity,labor_hours)",
+      "id,vehicle_id,work_performed,metadata,completed_at,created_at,vehicles(vin,make,model,year,license_plate,plate_region,mileage,mileage_unit),service_record_line_items(id,item_type,description,quantity,labor_hours,sort_order,created_at)",
     )
     .eq("workspace_id", workspaceId)
     .eq("status", "completed")
@@ -1332,12 +1523,33 @@ vehiclesRouter.get("/v1/admin/carfax/settings", async (c) => {
 
 vehiclesRouter.put("/v1/admin/carfax/settings", async (c) => {
   const body = await c.req.json();
-  const { supabase } = await requireAuth(c);
-  const { error } = await (supabase as any)
+  // platform_settings is global; its write policies are platform-admin
+  // only, so the write is gated here as well (NEED-4, Step 3 spec).
+  const { supabase } = await requirePlatformAdmin(c);
+  const db = supabase as any;
+  // The settings row may not exist yet: an UPDATE alone would touch
+  // zero rows and still report success while persisting nothing
+  // (admin examination, 2026-11-10). Select-then-write: insert the row
+  // on first save, update it after. No unique constraint on key is
+  // assumed.
+  const { data: existing, error: readError } = await db
     .from("platform_settings")
-    .update({ value: body.config as never })
-    .eq("key", "carfax");
-  if (error) throw error;
+    .select("id")
+    .eq("key", "carfax")
+    .maybeSingle();
+  if (readError) throw readError;
+  if (existing?.id) {
+    const { error } = await db
+      .from("platform_settings")
+      .update({ value: body.config as never })
+      .eq("id", existing.id);
+    if (error) throw error;
+  } else {
+    const { error } = await db
+      .from("platform_settings")
+      .insert({ key: "carfax", value: body.config as never });
+    if (error) throw error;
+  }
   return json({ data: { ok: true } });
 });
 
@@ -1420,7 +1632,8 @@ vehiclesRouter.post("/v1/tire-pricing/public-inventory", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// VIN (dead provider edge functions keep their unavailable contract)
+// VIN (ocr/decode remain dead provider stubs; plate-lookup is LIVE —
+// it runs on Vehicle Databases behind VEHICLE_DATABASES_API_KEY)
 // ---------------------------------------------------------------------------
 
 vehiclesRouter.post("/v1/vin/ocr", async (c) => {
@@ -1433,14 +1646,432 @@ vehiclesRouter.post("/v1/vin/decode", async (c) => {
   return providerUnavailable("vin-decode");
 });
 
+const plateLookupSchema = z.object({
+  licensePlate: z.string().trim().min(1).max(20),
+  state: z.string().trim().min(2).max(2),
+});
+
 vehiclesRouter.post("/v1/vin/plate-lookup", async (c) => {
   await requireAuth(c);
-  return providerUnavailable("carfax-quickvin");
+  const body = await c.req.json().catch(() => null);
+  const parsed = plateLookupSchema.safeParse(body ?? {});
+  if (!parsed.success) {
+    throw new ApiError(400, "licensePlate and state are required", "invalid_request");
+  }
+  const apiKey = process.env.VEHICLE_DATABASES_API_KEY;
+  if (!apiKey) {
+    // House contract (the VehicleSpecs caller and the CARFAX query
+    // both read it this way): a missing key answers 200 with
+    // integrationUnavailable, so callers show "not configured"
+    // instead of treating it as a lookup failure.
+    return json({
+      data: { success: false, integrationUnavailable: true, error: "Plate lookup is not configured" },
+    });
+  }
+  const result = await decodePlateWithVehicleDatabases(
+    parsed.data.licensePlate.toUpperCase(),
+    parsed.data.state.toUpperCase(),
+    apiKey,
+  );
+  return json({ data: result });
+});
+
+// ---------------------------------------------------------------------------
+// Tech app — Data Center (GET /v1/tech-app/data-center/vehicle)
+//
+// One endpoint behind the tech app's Data tab: given exactly one of
+// vin | plate+state | vehicle_id, answer the vehicle and its service
+// specs. Sources, in trust order: the workspace's own
+// vehicle_service_specs, the vehicle_specifications reference table
+// (~14k rows), the bundled specs catalog (the same index
+// POST /v1/public-vehicle-catalog serves), Quick Lube Data by live
+// lookup (the platform's own spec source; 90-day server cache),
+// NHTSA vPIC for a bare VIN,
+// Vehicle Databases for plate -> VIN (PR #241's helper), Wheel-Size
+// for tire size + pressure — and, for fields still unknown and only
+// against a full VIN, Vehicle Databases' oil lookup, fluids, and
+// factory maintenance schedule (those calls spend account credits,
+// so they are the last resort). Never invent a spec: unknown stays null,
+// and a total miss answers 200 + success:false (the house fail-soft
+// contract), never a 500. appliesTo follows the workspace's active
+// service catalog — the platform is customized per industry, so a
+// tire shop's Data Center leads with tires, not oil.
+// ---------------------------------------------------------------------------
+
+interface DataCenterVehicle {
+  vin: string | null;
+  year: number | null;
+  make: string | null;
+  model: string | null;
+  engine: string | null;
+}
+
+vehiclesRouter.get("/v1/tech-app/data-center/vehicle", async (c) => {
+  const fail = (error: string) => c.json({ success: false, error }, 200);
+  // Auth stays OUTSIDE the fail-soft try: an unauthenticated call must
+  // answer 401 like every sibling route, not a 200 lookup failure —
+  // the app reads 200 + success:false as "specs unavailable", which
+  // would mask an expired session. Only the lookup itself fails soft.
+  const { supabase, user } = await requireAuth(c);
+  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id);
+  if (!workspaceId) return fail("No active workspace");
+  try {
+
+    const url = new URL(c.req.url);
+    const vinParam = url.searchParams.get("vin")?.trim().toUpperCase() || null;
+    const plateParam = url.searchParams.get("plate")?.trim().toUpperCase() || null;
+    const stateParam = url.searchParams.get("state")?.trim().toUpperCase() || null;
+    const vehicleIdParam = url.searchParams.get("vehicle_id")?.trim() || null;
+
+    const provided = [vinParam, plateParam, vehicleIdParam].filter(Boolean).length;
+    if (provided !== 1) return fail("Provide exactly one of vin, plate+state, or vehicle_id");
+    if (plateParam && (!stateParam || stateParam.length !== 2)) {
+      return fail("Plate lookup needs a 2-letter state");
+    }
+
+    const db = supabase as any;
+
+    // The workspace's selected services drive what applies (industry
+    // customization); read them alongside the vehicle resolution.
+    const catalogPromise = (async () => {
+      try {
+        const res = await db
+          .from("service_catalog")
+          .select("name,category")
+          .eq("workspace_id", workspaceId)
+          .eq("is_active", true);
+        return Array.isArray(res?.data) ? res.data : [];
+      } catch {
+        return [];
+      }
+    })();
+
+    let vehicle: DataCenterVehicle = { vin: null, year: null, make: null, model: null, engine: null };
+    let vehicleRowId: string | null = null;
+    let source: "workspace" | "catalog" | "decode" = "decode";
+
+    const loadVehicleRow = async (column: string, value: string) => {
+      const { data } = await db
+        .from("vehicles")
+        .select("id,vin,year,make,model")
+        .eq("workspace_id", workspaceId)
+        .eq(column, value)
+        .maybeSingle();
+      return data ?? null;
+    };
+
+    const adoptRow = (row: any) => {
+      vehicleRowId = row.id ?? null;
+      vehicle = {
+        vin: typeof row.vin === "string" && row.vin ? row.vin.toUpperCase() : vehicle.vin,
+        year: typeof row.year === "number" ? row.year : vehicle.year,
+        make: typeof row.make === "string" && row.make ? row.make : vehicle.make,
+        model: typeof row.model === "string" && row.model ? row.model : vehicle.model,
+        engine: vehicle.engine,
+      };
+    };
+
+    const adoptDecoded = (decoded: DecodedVehicle) => {
+      vehicle = {
+        vin: decoded.vin,
+        year: decoded.year,
+        make: decoded.make,
+        model: decoded.model,
+        engine: decoded.engine ?? vehicle.engine,
+      };
+    };
+
+    if (vehicleIdParam) {
+      const row = await loadVehicleRow("id", vehicleIdParam);
+      if (!row) return fail("Vehicle not found");
+      adoptRow(row);
+    } else {
+      let vin = vinParam;
+      if (plateParam && stateParam) {
+        const apiKey = process.env.VEHICLE_DATABASES_API_KEY;
+        if (!apiKey) return fail("Plate lookup is not configured");
+        const plate = await decodePlateWithVehicleDatabases(plateParam, stateParam, apiKey);
+        if (plate.success) {
+          vin = plate.vehicle.vin;
+          vehicle = {
+            vin,
+            year: plate.vehicle.year,
+            make: plate.vehicle.make || null,
+            model: plate.vehicle.model || null,
+            engine: null,
+          };
+        } else {
+          return fail((plate as Extract<PlateDecodeResult, { success: false }>).error);
+        }
+      }
+      if (vin) {
+        vehicle.vin = vin;
+        const row = await loadVehicleRow("vin", vin);
+        if (row) {
+          adoptRow(row);
+        } else {
+          const decoded = await decodeVinWithNhtsa(vin);
+          if (decoded.success) {
+            adoptDecoded(decoded.vehicle);
+          } else if (!vehicle.year || !vehicle.make || !vehicle.model) {
+            return fail((decoded as Extract<VinDecodeResult, { success: false }>).error);
+          }
+        }
+      }
+    }
+
+    // Specs: the workspace's own records first, the catalog fills gaps.
+    let specs: DataCenterSpecs = { ...EMPTY_SPECS };
+    if (vehicleRowId) {
+      const { data: specRow } = await db
+        .from("vehicle_service_specs")
+        .select("*")
+        .eq("workspace_id", workspaceId)
+        .eq("vehicle_id", vehicleRowId)
+        .maybeSingle();
+      if (specRow) {
+        specs = specsFromWorkspaceRow(specRow);
+        if (hasAnySpec(specs)) source = "workspace";
+        if (typeof specRow.engine === "string" && specRow.engine) vehicle.engine = specRow.engine;
+      }
+    }
+    // The vehicle_specifications reference table is the house layer
+    // under the workspace's own records: same year/make/model query +
+    // engine-displacement resolution the office spec lookup uses.
+    if (vehicle.year && vehicle.make && vehicle.model) {
+      try {
+        const { data: specRows } = await db
+          .from("vehicle_specifications")
+          .select("year,make,model,engine,oil_type,oil_capacity,oil_filter")
+          .eq("year", vehicle.year)
+          .ilike("make", vehicle.make)
+          .ilike("model", vehicle.model)
+          .limit(25);
+        const norm = (value: unknown) => String(value ?? "").trim().toLowerCase();
+        const rows = (Array.isArray(specRows) ? specRows : []).filter(
+          (row: any) =>
+            row.year === vehicle.year &&
+            norm(row.make) === norm(vehicle.make) &&
+            norm(row.model) === norm(vehicle.model),
+        );
+        const picked = pickCatalogRow(rows, vehicle.engine);
+        if (picked) {
+          const filled = mergeSpecs(specs, specsFromCatalogRow(picked));
+          if (hasAnySpec(filled) && source === "decode") source = "catalog";
+          specs = filled;
+          if (!vehicle.engine && picked.engine) vehicle.engine = picked.engine;
+        }
+      } catch {
+        // Reference table unreachable — the remaining layers still answer.
+      }
+    }
+    if (vehicle.year && vehicle.make && vehicle.model) {
+      const catalog = await getCatalog();
+      const rows = catalog.specsByYmm.get(ymmKey(vehicle.year, vehicle.make, vehicle.model)) ?? [];
+      const picked = pickCatalogRow(rows, vehicle.engine);
+      if (picked) {
+        const filled = mergeSpecs(specs, specsFromCatalogRow(picked));
+        if (hasAnySpec(filled) && source === "decode") source = "catalog";
+        specs = filled;
+        if (!vehicle.engine && picked.engine) vehicle.engine = picked.engine;
+      }
+    }
+
+    // Quick Lube Data — the platform's own spec source, by live
+    // lookup (90-day server cache behind it): fills the fields the
+    // house layers above left blank, ahead of the paid Vehicle
+    // Databases last resort. Runs dark when QLD_API_KEY is unset and
+    // fails soft like every layer here; mergeSpecs keeps it
+    // blanks-only, so it can never overwrite a settled value. When
+    // QLD needs an engine choice the caller has not got, it answers
+    // engine_required and this layer simply does not speak.
+    if (
+      vehicle.year &&
+      vehicle.make &&
+      vehicle.model &&
+      (specs.oilType === null ||
+        specs.oilCapacityQuarts === null ||
+        specs.oilFilter === null ||
+        specs.drainPlugTorqueFtLbs === null)
+    ) {
+      try {
+        const qld = await resolveQldSpec(db, {
+          year: vehicle.year,
+          make: vehicle.make,
+          model: vehicle.model,
+          engine: vehicle.engine,
+        });
+        if (qld.status === "ok") {
+          const filled = mergeSpecs(specs, {
+            ...EMPTY_SPECS,
+            oilType: qld.values.oilType ?? null,
+            oilCapacityQuarts: parseCapacityQuarts(qld.values.oilCapacity ?? null),
+            oilFilter: qld.values.oilFilter ?? null,
+            drainPlugTorqueFtLbs: qld.values.drainPlugTorqueFtLbs ?? null,
+          });
+          if (hasAnySpec(filled) && source === "decode") source = "catalog";
+          specs = filled;
+          if (!vehicle.engine && qld.values.engine) vehicle.engine = qld.values.engine;
+        }
+      } catch {
+        // QLD unreachable — the remaining layers still answer.
+      }
+    }
+
+    // Tires from Wheel-Size when the shop does tires (or has made no
+    // selection at all); only into fields still unknown.
+    const appliesTo = appliesToFromCatalog(await catalogPromise);
+    const wheelKey = process.env.WHEEL_SIZE_API_KEY;
+    if (
+      wheelKey &&
+      vehicle.year &&
+      vehicle.make &&
+      vehicle.model &&
+      (specs.tireSize === null || specs.tirePressurePsi === null) &&
+      (appliesTo.length === 0 || appliesTo.includes("tires"))
+    ) {
+      const fitment = await fetchWheelSizeFitment(
+        { year: vehicle.year, make: vehicle.make, model: vehicle.model },
+        wheelKey,
+      );
+      if (specs.tireSize === null) specs.tireSize = fitment.tireSize;
+      if (specs.tirePressurePsi === null) specs.tirePressurePsi = fitment.tirePressurePsi;
+    }
+
+    // Vehicle Databases depth — the last resort, and only against a
+    // full VIN: the calls spend account credits, so each one fires
+    // only when its fields are still unknown. Oil lookup and fluids
+    // fill spec gaps; the factory maintenance schedule rides along
+    // when the shop does oil, filters, or inspections (or has made
+    // no selection at all). All three run in parallel, fail soft,
+    // and are never retried inside a request.
+    let maintenance: MaintenanceInterval[] | null = null;
+    const vdKey = process.env.VEHICLE_DATABASES_API_KEY;
+    const vin17 = vehicle.vin && vehicle.vin.length === 17 ? vehicle.vin : null;
+    if (vdKey && vin17) {
+      const wantsMaintenance =
+        appliesTo.length === 0 ||
+        appliesTo.includes("oil") ||
+        appliesTo.includes("filters") ||
+        appliesTo.includes("inspection");
+      const needsOil =
+        specs.oilType === null ||
+        specs.oilCapacityQuarts === null ||
+        specs.oilFilter === null ||
+        specs.tireSize === null;
+      const [oil, fluids, schedule] = await Promise.all([
+        needsOil ? fetchOilLookup(vin17, vdKey) : Promise.resolve(null),
+        specs.coolantType === null ? fetchFluidSpecs(vin17, vdKey) : Promise.resolve(null),
+        wantsMaintenance ? fetchMaintenanceSchedule(vin17, vdKey) : Promise.resolve(null),
+      ]);
+      if (oil?.success) {
+        specs = mergeSpecs(
+          specs,
+          (oil as Extract<VehicleDataResult<DataCenterSpecs>, { success: true }>).value,
+        );
+      }
+      if (fluids?.success) {
+        specs = mergeSpecs(
+          specs,
+          (fluids as Extract<VehicleDataResult<DataCenterSpecs>, { success: true }>).value,
+        );
+      }
+      if (schedule?.success) {
+        maintenance = (
+          schedule as Extract<VehicleDataResult<MaintenanceInterval[]>, { success: true }>
+        ).value;
+      }
+    }
+
+    return c.json({
+      success: true,
+      vehicle,
+      specs: hasAnySpec(specs) ? specs : null,
+      source,
+      appliesTo,
+      maintenance,
+    });
+  } catch {
+    return fail("Data center lookup failed");
+  }
 });
 
 // ---------------------------------------------------------------------------
 // Mileage (workspace-scoped)
 // ---------------------------------------------------------------------------
+
+type MileageCandidateLocation = {
+  address_line1?: unknown;
+  address_line2?: unknown;
+  city?: unknown;
+  region?: unknown;
+  postal_code?: unknown;
+  latitude?: unknown;
+  longitude?: unknown;
+};
+
+function optionalMileageString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() !== "" ? value : null;
+}
+
+function optionalMileageNumber(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Resolve one appointments row into a mileage candidate, or null when the
+ * job has no usable coordinates anywhere.
+ *
+ * Production `appointments` has no location_address / location_lat /
+ * location_lng columns: the service address is a compatibility value the
+ * write paths carry in `metadata`, and the canonical location lives on
+ * the linked `locations` row. Selecting the phantom columns made
+ * PostgREST reject the query outright (42703), so mileage sync never
+ * returned a single candidate. Resolution mirrors the operational-jobs
+ * read model: the locations row wins for address and coordinates, and
+ * metadata is the fallback for both. A completed job whose coordinates
+ * exist in neither place is not a mileage candidate yet — the same
+ * contract the old NOT NULL filters expressed — so it is skipped
+ * instead of failing the whole sync.
+ */
+function resolveMileageCandidate(row: Record<string, unknown>): {
+  id: string;
+  starts_at: string;
+  location_address: string | null;
+  location_lat: number;
+  location_lng: number;
+  status: string;
+} | null {
+  const metadata =
+    row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+      ? (row.metadata as Record<string, unknown>)
+      : {};
+  const embedded = row.locations as MileageCandidateLocation | MileageCandidateLocation[] | null | undefined;
+  const location: MileageCandidateLocation | null = Array.isArray(embedded)
+    ? embedded[0] ?? null
+    : embedded ?? null;
+  const locationAddress = location
+    ? [location.address_line1, location.address_line2, location.city, location.region, location.postal_code]
+        .map((part) => optionalMileageString(part))
+        .filter(Boolean)
+        .join(", ") || null
+    : null;
+  const locationLat =
+    location?.latitude != null ? optionalMileageNumber(location.latitude) : optionalMileageNumber(metadata.location_lat);
+  const locationLng =
+    location?.longitude != null ? optionalMileageNumber(location.longitude) : optionalMileageNumber(metadata.location_lng);
+  if (locationLat == null || locationLng == null) return null;
+  return {
+    id: String(row.id),
+    starts_at: String(row.starts_at),
+    location_address: locationAddress ?? optionalMileageString(metadata.location_address),
+    location_lat: locationLat,
+    location_lng: locationLng,
+    status: String(row.status),
+  };
+}
 
 vehiclesRouter.get("/v1/mileage/candidates", async (c) => {
   const url = new URL(c.req.url);
@@ -1450,15 +2081,16 @@ vehiclesRouter.get("/v1/mileage/candidates", async (c) => {
   if (!workspaceId) throw new ApiError(403, "No active workspace.", "forbidden");
   const { data, error } = await (supabase as any)
     .from("appointments")
-    .select("id,starts_at,location_address,location_lat,location_lng,status")
+    .select("id,starts_at,status,metadata,locations(address_line1,address_line2,city,region,postal_code,latitude,longitude)")
     .eq("workspace_id", workspaceId)
     .eq("status", "completed")
-    .not("location_lat", "is", null)
-    .not("location_lng", "is", null)
     .order("starts_at", { ascending: false })
     .limit(500);
   if (error) throw error;
-  return json({ data: data ?? [] });
+  const candidates = ((data ?? []) as Array<Record<string, unknown>>)
+    .map((row) => resolveMileageCandidate(row))
+    .filter((candidate) => candidate !== null);
+  return json({ data: candidates });
 });
 
 vehiclesRouter.get("/v1/mileage/trips", async (c) => {
@@ -1485,7 +2117,7 @@ vehiclesRouter.get("/v1/mileage/bookkeeping-settings", async (c) => {
   if (!workspaceId) throw new ApiError(403, "No active workspace.", "forbidden");
   const { data, error } = await (supabase as any)
     .from("bookkeeping_settings")
-    .select("mileage_enabled,mileage_round_trip,mileage_rate_per_mile,minimum_cash_reserve")
+    .select("mileage_enabled,mileage_round_trip,mileage_rate_per_mile,minimum_cash_reserve,vendor_classification_rules")
     .eq("workspace_id", workspaceId)
     .maybeSingle();
   if (error) throw error;
@@ -1498,14 +2130,20 @@ vehiclesRouter.put("/v1/mileage/bookkeeping-settings", async (c) => {
   const { supabase, user } = await requireAuth(c);
   const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id, hint);
   if (!workspaceId) throw new ApiError(403, "No active workspace.", "forbidden");
-  const { error } = await (supabase as any).from("bookkeeping_settings").upsert({
+  const payload: Record<string, unknown> = {
     workspace_id: workspaceId,
     mileage_enabled: body.mileage_enabled,
     mileage_round_trip: body.mileage_round_trip,
     mileage_rate_per_mile: body.mileage_rate_per_mile,
     minimum_cash_reserve: body.minimum_cash_reserve,
     updated_at: new Date().toISOString(),
-  }, { onConflict: "workspace_id" });
+  };
+  // Standing vendor rules are only written when the caller sends them, so
+  // a mileage/reserve save can never wipe a workspace's configured rules.
+  if (Array.isArray(body.vendor_classification_rules)) {
+    payload.vendor_classification_rules = body.vendor_classification_rules;
+  }
+  const { error } = await (supabase as any).from("bookkeeping_settings").upsert(payload, { onConflict: "workspace_id" });
   if (error) throw error;
   return json({ data: { ok: true } });
 });
@@ -1661,22 +2299,31 @@ vehiclesRouter.post("/v1/vehicle-part-suggestions", async (c) => {
 
 vehiclesRouter.post("/v1/vehicle-part-assignments", async (c) => {
   const body = await c.req.json();
-  const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  const { supabase, user, workspaceId: scopedWorkspaceId } = await requireFleetScope(c, selectedWorkspaceHint(c));
   const kind = body.kind;
   const vehicleId = body.vehicle_id;
   if (kind !== "fleet" && kind !== "retail") throw new ApiError(400, "kind must be fleet or retail", "invalid_input");
   if (!vehicleId) throw new ApiError(400, "vehicle_id is required", "invalid_input");
   // Resolve the workspace owner that owns the vehicle row, so team members write valid rows.
+  // Step 9 translation: the parent vehicle row is also the tenancy anchor —
+  // its workspace_id stamps the assignment; the caller's resolved workspace
+  // is the fallback when the parent row's workspace_id is null.
   const ownerQuery =
     kind === "fleet"
-      ? (supabase as any).from("fleet_vehicles").select("user_id").eq("id", vehicleId).maybeSingle()
-      : (supabase as any).from("vehicles").select("user_id").eq("id", vehicleId).maybeSingle();
+      ? (supabase as any).from("fleet_vehicles").select("user_id, workspace_id").eq("id", vehicleId).maybeSingle()
+      : (supabase as any).from("vehicles").select("user_id, workspace_id").eq("id", vehicleId).maybeSingle();
   const { data: vehicle, error: vehicleError } = await ownerQuery;
   if (vehicleError) throw new Error(vehicleError.message);
   if (!vehicle?.user_id) throw new ApiError(404, "Vehicle not found", "not_found");
+  const workspaceId =
+    (vehicle.workspace_id as string | null) ??
+    scopedWorkspaceId ??
+    (await resolveWorkspaceIdForUser(supabase, user.id));
+  if (!workspaceId) throw new ApiError(403, "Select a workspace before assigning parts.", "forbidden");
   const input = body.input ?? {};
   const row = {
     user_id: vehicle.user_id,
+    workspace_id: workspaceId,
     vehicle_kind: kind,
     fleet_vehicle_id: kind === "fleet" ? vehicleId : null,
     vehicle_id: kind === "retail" ? vehicleId : null,
@@ -1707,21 +2354,28 @@ vehiclesRouter.patch("/v1/vehicle-part-assignments/:id", async (c) => {
   const body = await c.req.json();
   const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
   const input = body.input ?? body;
+  // Partial-update guard (SW-42): this PATCH used to rebuild every column
+  // from the request, so a caller that sent one field erased the rest
+  // (part_number -> "", brand/oem/unit/inventory/notes -> null, quantity ->
+  // 1, is_required -> true). Write only the fields the caller sent; a sent
+  // field keeps the historical coercion (empty -> null is an explicit
+  // clear). verified_by/at always restamp — they record this verification.
+  const patch: Record<string, unknown> = {
+    verified_by: user.id,
+    verified_at: new Date().toISOString(),
+  };
+  if (input.part_category !== undefined) patch.part_category = input.part_category;
+  if (input.part_number !== undefined) patch.part_number = String(input.part_number ?? "").trim();
+  if (input.brand !== undefined) patch.brand = input.brand?.trim() || null;
+  if (input.oem_number !== undefined) patch.oem_number = input.oem_number?.trim() || null;
+  if (input.quantity !== undefined) patch.quantity = input.quantity ?? 1;
+  if (input.unit !== undefined) patch.unit = input.unit || null;
+  if (input.inventory_item_id !== undefined) patch.inventory_item_id = input.inventory_item_id || null;
+  if (input.is_required !== undefined) patch.is_required = input.is_required ?? true;
+  if (input.notes !== undefined) patch.notes = input.notes?.trim() || null;
   const { error } = await (supabase as any)
     .from("vehicle_part_assignments")
-    .update({
-      part_category: input.part_category,
-      part_number: String(input.part_number ?? "").trim(),
-      brand: input.brand?.trim() || null,
-      oem_number: input.oem_number?.trim() || null,
-      quantity: input.quantity ?? 1,
-      unit: input.unit || null,
-      inventory_item_id: input.inventory_item_id || null,
-      is_required: input.is_required ?? true,
-      notes: input.notes?.trim() || null,
-      verified_by: user.id,
-      verified_at: new Date().toISOString(),
-    })
+    .update(patch)
     .eq("id", id);
   if (error) throw new Error(error.message);
   return json({ data: { ok: true } });
@@ -1789,11 +2443,14 @@ vehiclesRouter.get("/v1/inventory/stock-options", async (c) => {
 
 vehiclesRouter.get("/v1/vans/stock", async (c) => {
   const url = new URL(c.req.url);
-  const { supabase, user } = await requireFleetScope(c, url.searchParams.get("selected_workspace_id"));
+  const { supabase, user, workspaceId } = await requireFleetScope(c, url.searchParams.get("selected_workspace_id"));
+  // Dispatch S-D2 (Step 10): vans are workspace-tenanted; the user_id
+  // filter was the pre-recon creator stamp.
+  const vanWorkspaceId = workspaceId ?? (await resolveWorkspaceIdForUser(supabase, user.id));
   const { data: vans } = await (supabase as any)
     .from("vans")
     .select("id, name")
-    .eq("user_id", user.id)
+    .eq("workspace_id", vanWorkspaceId)
     .eq("is_active", true);
   const vanIds = (vans ?? []).map((v: { id: string }) => v.id);
   if (vanIds.length === 0) return json({ data: [] });
@@ -1884,12 +2541,16 @@ vehiclesRouter.get("/v1/vehicle-recommendations", async (c) => {
   const url = new URL(c.req.url);
   const vehicleId = url.searchParams.get("vehicle_id");
   if (!vehicleId) throw new ApiError(400, "vehicle_id is required", "invalid_input");
-  const { supabase, user } = await requireFleetScope(c, url.searchParams.get("selected_workspace_id"));
+  const { supabase, user, workspaceId: scopedWorkspaceId } = await requireFleetScope(c, url.searchParams.get("selected_workspace_id"));
+  // Step 9 translation: recommendations are workspace-keyed; with no hint
+  // the caller's first active membership stands in (the /generate idiom).
+  const workspaceId = scopedWorkspaceId ?? (await resolveWorkspaceIdForUser(supabase, user.id));
+  if (!workspaceId) return json({ data: [] });
   const { data, error } = await (supabase as any)
     .from("vehicle_recommendations")
     .select("*")
     .eq("vehicle_id", vehicleId)
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .eq("is_dismissed", false)
     .order("priority", { ascending: true });
   if (error) throw error;
@@ -1927,10 +2588,15 @@ vehiclesRouter.delete("/v1/vehicle-recommendations/:id", async (c) => {
 
 vehiclesRouter.post("/v1/vehicle-recommendations", async (c) => {
   const body = await c.req.json();
-  const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  const { supabase, user, workspaceId: scopedWorkspaceId } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  // Step 9 translation: workspace_id is stamped AFTER the body spread, so
+  // a client-supplied value can never smuggle a row into another workspace.
+  const workspaceId = scopedWorkspaceId ?? (await resolveWorkspaceIdForUser(supabase, user.id));
+  if (!workspaceId) throw new ApiError(403, "Select a workspace before adding recommendations.", "forbidden");
   const { error } = await (supabase as any).from("vehicle_recommendations").insert([{
     ...(body.rec ?? body),
     user_id: user.id,
+    workspace_id: workspaceId,
   }]);
   if (error) throw new Error("Failed to add recommendation");
   return json({ data: { ok: true } });
@@ -1938,15 +2604,27 @@ vehiclesRouter.post("/v1/vehicle-recommendations", async (c) => {
 
 vehiclesRouter.post("/v1/vehicle-recommendations/generate", async (c) => {
   const body = await c.req.json().catch(() => ({}));
-  const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  const { supabase, user, workspaceId: scopedWorkspaceId } = await requireFleetScope(c, selectedWorkspaceHint(c));
   const vehicleId = body.vehicle_id;
   const currentMileage = body.current_mileage ?? null;
   const intervals = body.intervals ?? [];
   if (!vehicleId) return json({ data: { count: 0 } });
   const client = supabase as any;
+  // Step 8 translation: services is workspace-keyed (no user_id column).
+  // Use the scope the fleet gate already resolved; with no hint, fall
+  // back to the caller's first active membership (resolveWorkspaceIdForUser's
+  // own behavior). No workspace at all -> empty history, and generation
+  // proceeds without it, exactly as an empty history behaves.
+  const servicesWorkspaceId = scopedWorkspaceId ?? (await resolveWorkspaceIdForUser(supabase, user.id));
   const [servicesRes, existingRes] = await Promise.all([
-    client.from("services").select("*").eq("vehicle_id", vehicleId).eq("user_id", user.id).order("service_date", { ascending: false }),
-    client.from("vehicle_recommendations").select("recommendation_type").eq("vehicle_id", vehicleId).eq("user_id", user.id).eq("is_dismissed", false),
+    servicesWorkspaceId
+      ? client.from("services").select("*").eq("vehicle_id", vehicleId).eq("workspace_id", servicesWorkspaceId).order("service_date", { ascending: false })
+      : Promise.resolve({ data: [], error: null }),
+    // Step 9 translation: the existing-recommendations check is keyed by
+    // the same resolved workspace as the services history read above.
+    servicesWorkspaceId
+      ? client.from("vehicle_recommendations").select("recommendation_type").eq("vehicle_id", vehicleId).eq("workspace_id", servicesWorkspaceId).eq("is_dismissed", false)
+      : Promise.resolve({ data: [], error: null }),
   ]);
   const services = servicesRes.data || [];
   const existingTypes = new Set((existingRes.data || []).map((r: { recommendation_type: string }) => r.recommendation_type));
@@ -1991,10 +2669,15 @@ vehiclesRouter.post("/v1/vehicle-recommendations/generate", async (c) => {
         last_service_mileage: null,
         last_service_date: lastService?.service_date || null,
         user_id: user.id,
+        workspace_id: servicesWorkspaceId,
       });
     }
   }
   if (newRecs.length > 0) {
+    // No resolved workspace -> nothing can be stamped; generation reports
+    // zero rather than writing tenant-less rows (mirrors the services
+    // leg's no-workspace treatment above).
+    if (!servicesWorkspaceId) return json({ data: { count: 0 } });
     const { error } = await client.from("vehicle_recommendations").insert(newRecs);
     if (error) throw new Error("Failed to generate recommendations");
   }
@@ -2038,10 +2721,15 @@ vehiclesRouter.post("/v1/vehicles/oil-reset-procedure", async (c) => {
 
 vehiclesRouter.get("/v1/vans/:id/detail", async (c) => {
   const vanId = c.req.param("id");
-  const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  const { supabase, user, workspaceId } = await requireFleetScope(c, selectedWorkspaceHint(c));
   const client = supabase as any;
+  // Step 4 RESCOPE (SRC-F): the technician list is workspace-scoped;
+  // without a hint the caller's first active workspace stands in.
+  const techWorkspaceId = workspaceId ?? (await resolveWorkspaceIdForUser(supabase, user.id));
+  let techQuery = client.from("technicians").select("id, name").eq("user_id", user.id).eq("is_active", true);
+  if (techWorkspaceId) techQuery = techQuery.eq("workspace_id", techWorkspaceId);
   const [vanRes, terrRes, invRes, apptsRes, techRes, whRes] = await Promise.all([
-    client.from("vans").select("*").eq("id", vanId).eq("user_id", user.id).single(),
+    client.from("vans").select("*").eq("id", vanId).eq("workspace_id", techWorkspaceId).single(),
     client.from("van_territories").select("*").eq("van_id", vanId).order("zip_code"),
     client.from("van_inventory").select("*, inventory_items(name, sku, quantity)").eq("van_id", vanId),
     client.from("appointments")
@@ -2049,7 +2737,7 @@ vehiclesRouter.get("/v1/vans/:id/detail", async (c) => {
       .eq("assigned_van_id", vanId)
       .order("scheduled_date", { ascending: false })
       .limit(50),
-    client.from("technicians").select("id, name").eq("user_id", user.id).eq("is_active", true).order("name"),
+    techQuery.order("name"),
     client.from("inventory_items").select("id, name, sku, quantity").eq("user_id", user.id).order("name"),
   ]);
   for (const res of [vanRes, terrRes, invRes, apptsRes, techRes, whRes]) {
@@ -2071,7 +2759,11 @@ vehiclesRouter.patch("/v1/vans/:id", async (c) => {
   const vanId = c.req.param("id");
   const body = await c.req.json();
   const { supabase } = await requireFleetScope(c, selectedWorkspaceHint(c));
-  const { error } = await (supabase as any).from("vans").update(body.payload ?? body).eq("id", vanId);
+  // Dispatch S-D2 (Step 10): the passthrough update must never move a
+  // van between workspaces or rewrite its creator / identity.
+  const rawPatch = (body.payload ?? body) as Record<string, unknown>;
+  const { id: _id, user_id: _userId, workspace_id: _workspaceId, ...patch } = rawPatch ?? {};
+  const { error } = await (supabase as any).from("vans").update(patch).eq("id", vanId);
   if (error) throw new Error(error.message);
   return json({ data: { ok: true } });
 });
@@ -2555,28 +3247,45 @@ vehiclesRouter.patch("/v1/fleet/contracts/:id", async (c) => {
     updated_by: user.id,
     change_summary: payload.change_summary || "Contract rules updated",
   };
-  const nextRules = { ...payload.rule_engine, version_meta: revisionMeta };
+  // Partial-update guard (SW-42): merge the incoming rule_engine over the
+  // stored pricing_rules instead of replacing the blob. pricing_rules can
+  // carry keys the editing form does not model; a wholesale replace dropped
+  // them on every save. The payload's own sections still win key-by-key at
+  // the top level, and version_meta is always the new revision.
+  const nextRules = { ...currentRules, ...payload.rule_engine, version_meta: revisionMeta };
   let history: Array<Record<string, unknown>> = [];
+  let notesHoldFreeText = false;
   try {
     const parsed = existing?.notes ? JSON.parse(existing.notes) : {};
     history = Array.isArray(parsed?.version_history) ? parsed.version_history : [];
+    // notes is (ab)used as the version-history store, but a value that is
+    // not that JSON shape is user free text — never overwrite it (below).
+    notesHoldFreeText = Boolean(existing?.notes) && !Array.isArray(parsed?.version_history);
   } catch {
     history = [];
+    notesHoldFreeText = Boolean(existing?.notes);
+  }
+  const contractPatch: Record<string, unknown> = {
+    fleet_client_id: payload.fleet_client_id,
+    name: payload.name,
+    sla_hours: payload.rule_engine.sla_hours,
+    approval_threshold: payload.rule_engine.approval.threshold_amount || null,
+    invoice_frequency: payload.rule_engine.billing.invoice_frequency,
+    start_date: payload.start_date,
+    end_date: payload.end_date,
+    is_active: payload.is_active,
+    pricing_rules: nextRules,
+  };
+  // Only write the version-history JSON into notes when notes is empty or
+  // already holds that shape; free-text notes are the user's data and are
+  // left untouched (the revision still lands in pricing_rules.version_meta
+  // and the audit log).
+  if (!notesHoldFreeText) {
+    contractPatch.notes = JSON.stringify({ version_history: [...history, revisionMeta] });
   }
   const { error } = await client
     .from("fleet_contracts")
-    .update({
-      fleet_client_id: payload.fleet_client_id,
-      name: payload.name,
-      sla_hours: payload.rule_engine.sla_hours,
-      approval_threshold: payload.rule_engine.approval.threshold_amount || null,
-      invoice_frequency: payload.rule_engine.billing.invoice_frequency,
-      start_date: payload.start_date,
-      end_date: payload.end_date,
-      is_active: payload.is_active,
-      pricing_rules: nextRules,
-      notes: JSON.stringify({ version_history: [...history, revisionMeta] }),
-    })
+    .update(contractPatch)
     .eq("id", contractId)
     .eq("user_id", user.id);
   if (error) throw new Error(error.message);
@@ -3213,9 +3922,14 @@ vehiclesRouter.post("/v1/vans", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const payload = body.payload ?? body;
   if (!payload.name) throw new ApiError(400, "Van name is required.", "invalid_input");
-  const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  const { supabase, user, workspaceId } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  // Dispatch S-D2 (Step 10): stamp the van with the caller's resolved
+  // workspace (vans.workspace_id is NOT NULL; user_id stays as the
+  // legacy creator stamp).
+  const vanWorkspaceId = workspaceId ?? (await resolveWorkspaceIdForUser(supabase, user.id));
   const { error } = await (supabase as any).from("vans").insert([
     {
+      workspace_id: vanWorkspaceId,
       user_id: user.id,
       name: payload.name,
       vin: payload.vin || null,
@@ -3238,6 +3952,17 @@ vehiclesRouter.post("/v1/fleet/vehicles", async (c) => {
     validateFleetVehicle(payload),
     "Cannot create vehicle",
   );
+  // Hard creation-time checks (Session 7 condition 4): the fleet validator
+  // only warns on a malformed VIN; a placeholder VIN or an implausible
+  // odometer reading must never be saved at all.
+  if (payload.vin !== undefined && payload.vin !== null && String(payload.vin).trim() !== "") {
+    const vinError = validateVin(String(payload.vin));
+    if (vinError) throw new ApiError(400, vinError, "invalid_vin");
+  }
+  for (const mileageField of ["mileage", "last_service_mileage", "next_service_mileage"] as const) {
+    const mileageError = validateMileageValue(payload[mileageField]);
+    if (mileageError) throw new ApiError(400, mileageError, "invalid_mileage");
+  }
   const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
   const { data, error } = await (supabase as any).from("fleet_vehicles").insert([
     {
@@ -3920,8 +4645,13 @@ vehiclesRouter.post("/v1/fleet/work-orders/generate-from-schedules", async (c) =
 
 vehiclesRouter.get("/v1/fleet/work-orders/:id/dispatch-score", async (c) => {
   const workOrderId = c.req.param("id");
-  const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  const { supabase, user, workspaceId } = await requireFleetScope(c, selectedWorkspaceHint(c));
   const db = supabase as any;
+  // Step 4 RESCOPE (SRC-F): the candidate list was filtered by
+  // is_active alone — it is now scoped to the caller's workspace.
+  const techWorkspaceId = workspaceId ?? (await resolveWorkspaceIdForUser(supabase, user.id));
+  let techQuery = db.from("technicians").select("id,name").eq("is_active", true);
+  if (techWorkspaceId) techQuery = techQuery.eq("workspace_id", techWorkspaceId);
 
   const [{ data: order }, { data: technicians }, { data: activeAssignments }] = await Promise.all([
     db
@@ -3930,7 +4660,7 @@ vehiclesRouter.get("/v1/fleet/work-orders/:id/dispatch-score", async (c) => {
       .eq("id", workOrderId)
       .eq("user_id", user.id)
       .maybeSingle(),
-    db.from("technicians").select("id,name").eq("is_active", true),
+    techQuery,
     db
       .from("fleet_work_orders")
       .select("assigned_technician_id,fleet_client_id,status")
@@ -5027,6 +5757,11 @@ vehiclesRouter.patch("/v1/fleet/work-orders/:id/notes", async (c) => {
   const status = await getFleetWorkOrderStatusForUser(db, workOrderId, user.id);
   assertFleetWorkOrderEditableForAction(status, "restricted");
 
+  // Partial-update guard (SW-42): an omitted notes field is not a clear.
+  // Only an explicitly sent value (including null) writes the column.
+  if (!("notes" in body)) {
+    return json({ data: null, error: { code: "invalid_input", message: "notes is required" } }, { status: 400 });
+  }
   const { error } = await db
     .from("fleet_work_orders")
     .update({ notes: body.notes ?? null })
@@ -5393,7 +6128,7 @@ vehiclesRouter.post("/v1/fleet/import/clients", async (c) => {
     phone: cli.phone || null,
     address: cli.address || null,
     city: cli.city || null,
-    state: cli.state || null,
+    state: typeof cli.state === "string" && cli.state.trim() ? normalizeUsState(cli.state) : cli.state || null,
     postal_code: cli.postal_code || null,
     payment_terms: cli.payment_terms || "net_30",
     notes: cli.notes || null,
@@ -5412,24 +6147,44 @@ vehiclesRouter.post("/v1/fleet/import/vehicles", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const vehicles = body.vehicles ?? [];
   const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
-  const rows = vehicles.map((v: Record<string, unknown>) => ({
-    user_id: user.id,
-    fleet_client_id: v.fleet_client_id,
-    year: v.year ?? null,
-    make: v.make || null,
-    model: v.model || null,
-    vin: v.vin || null,
-    license_plate: v.license_plate || null,
-    unit_number: v.unit_number || null,
-    color: v.color || null,
-    engine: v.engine || null,
-    fuel_type: v.fuel_type || null,
-    mileage: v.mileage ?? null,
-    status: v.status || "active",
-    notes: v.notes || null,
-  }));
+  // Creation-time validation (Session 7 condition 4): an imported row with a
+  // placeholder/malformed VIN or an implausible odometer reading is skipped
+  // and reported per-row instead of being saved; valid rows are normalized.
+  const validationErrors: string[] = [];
+  const rows: Array<Record<string, unknown>> = [];
+  (vehicles as Array<Record<string, unknown>>).forEach((v, index) => {
+    const rowLabel = `Row ${index + 1}`;
+    if (v.vin !== undefined && v.vin !== null && String(v.vin).trim() !== "") {
+      const vinError = validateVin(String(v.vin));
+      if (vinError) {
+        validationErrors.push(`${rowLabel}: ${vinError}`);
+        return;
+      }
+    }
+    const mileageError = validateMileageValue(v.mileage);
+    if (mileageError) {
+      validationErrors.push(`${rowLabel}: ${mileageError}`);
+      return;
+    }
+    rows.push({
+      user_id: user.id,
+      fleet_client_id: v.fleet_client_id,
+      year: v.year ?? null,
+      make: v.make || null,
+      model: v.model || null,
+      vin: v.vin ? normalizeVin(String(v.vin)) : null,
+      license_plate: v.license_plate || null,
+      unit_number: v.unit_number || null,
+      color: v.color || null,
+      engine: v.engine || null,
+      fuel_type: v.fuel_type || null,
+      mileage: v.mileage ?? null,
+      status: v.status || "active",
+      notes: v.notes || null,
+    });
+  });
   const result = await batchInsertFleetRows(supabase as any, "fleet_vehicles", rows);
-  return json({ data: result });
+  return json({ data: { ...result, errors: [...validationErrors, ...result.errors] } });
 });
 
 vehiclesRouter.get("/v1/fleet/clients/map", async (c) => {
@@ -6115,22 +6870,26 @@ function mapCoordinates(value: unknown): { lat: number; lng: number } | null {
 }
 
 vehiclesRouter.get("/v1/fleet/map-data", async (c) => {
-  const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  const { supabase, user, workspaceId } = await requireFleetScope(c, selectedWorkspaceHint(c));
   const db = supabase as any;
   const today = new Date().toISOString().slice(0, 10);
+  // Step 4 RESCOPE (SRC-F): workspace-scope the technician leg.
+  const techWorkspaceId = workspaceId ?? (await resolveWorkspaceIdForUser(supabase, user.id));
+  let techQuery = db
+    .from("technicians")
+    .select("id, name, status, current_location, avatar_url")
+    .eq("user_id", user.id)
+    .eq("is_active", true);
+  if (techWorkspaceId) techQuery = techQuery.eq("workspace_id", techWorkspaceId);
 
   const [vansRes, territoriesRes, techsRes, jobsRes] = await Promise.all([
     db
       .from("vans")
       .select("id, name, status, color, make, model, year, license_plate, assigned_technician_id")
-      .eq("user_id", user.id)
+      .eq("workspace_id", techWorkspaceId)
       .eq("is_active", true),
     db.from("van_territories").select("van_id, zip_code, is_primary"),
-    db
-      .from("technicians")
-      .select("id, name, status, current_location, avatar_url")
-      .eq("user_id", user.id)
-      .eq("is_active", true),
+    techQuery,
     db
       .from("appointments")
       .select("id, assigned_van_id")
@@ -6431,46 +7190,6 @@ vehiclesRouter.get("/v1/fleet/reports", async (c) => {
         overdueVehicles: overdue,
       },
       topVehicles: [],
-    },
-  });
-});
-
-vehiclesRouter.get("/v1/service-records/page", async (c) => {
-  const url = new URL(c.req.url);
-  const workspaceId = url.searchParams.get("selected_workspace_id");
-  if (!workspaceId) return json({ data: null });
-  const { supabase, user } = await requireAuth(c);
-  const db = supabase as any;
-
-  const [servicesRes, customersRes, vehiclesRes] = await Promise.all([
-    db.from("service_records")
-      .select("id,customer_id,vehicle_id,status,work_performed,customer_notes,internal_notes,metadata,started_at,completed_at,created_at,subtotal,total_amount,technician_id")
-      .eq("workspace_id", workspaceId)
-      .neq("status", "voided")
-      .order("completed_at", { ascending: false, nullsFirst: false })
-      .order("created_at", { ascending: false }),
-    db.from("customers")
-      .select("id,first_name,last_name")
-      .eq("workspace_id", workspaceId)
-      .neq("status", "archived")
-      .order("last_name"),
-    db.from("vehicles")
-      .select("id,customer_id,make,model,year")
-      .eq("workspace_id", workspaceId)
-      .neq("status", "archived")
-      .order("created_at", { ascending: false }),
-  ]);
-
-  if (servicesRes.error) throw servicesRes.error;
-  if (customersRes.error) throw customersRes.error;
-  if (vehiclesRes.error) throw vehiclesRes.error;
-
-  return json({
-    data: {
-      services: servicesRes.data ?? [],
-      customers: customersRes.data ?? [],
-      vehicles: vehiclesRes.data ?? [],
-      userId: user.id,
     },
   });
 });
@@ -7129,14 +7848,18 @@ vehiclesRouter.get("/v1/fleet/scheduler-window", async (c) => {
 });
 
 vehiclesRouter.get("/v1/fleet/vans-overview", async (c) => {
-  const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  const { supabase, user, workspaceId } = await requireFleetScope(c, selectedWorkspaceHint(c));
   const db = supabase as any;
+  // Step 4 RESCOPE (SRC-F): workspace-scope the technician leg.
+  const techWorkspaceId = workspaceId ?? (await resolveWorkspaceIdForUser(supabase, user.id));
+  let techQuery = db.from("technicians").select("id, name").eq("user_id", user.id).eq("is_active", true);
+  if (techWorkspaceId) techQuery = techQuery.eq("workspace_id", techWorkspaceId);
 
   const [vansRes, territoriesRes, inventoryRes, techRes] = await Promise.all([
-    db.from("vans").select("*").eq("user_id", user.id).order("name"),
+    db.from("vans").select("*").eq("workspace_id", techWorkspaceId).order("name"),
     db.from("van_territories").select("van_id"),
     db.from("van_inventory").select("van_id"),
-    db.from("technicians").select("id, name").eq("user_id", user.id).eq("is_active", true).order("name"),
+    techQuery.order("name"),
   ]);
 
   const technicians = (techRes.data as Array<{ id: string; name: string }> | null) ?? [];
@@ -7598,12 +8321,16 @@ vehiclesRouter.get("/v1/fleet/work-orders/:id/detail", async (c) => {
 });
 
 vehiclesRouter.get("/v1/fleet/assignable-technicians", async (c) => {
-  const { supabase } = await requireFleetScope(c, selectedWorkspaceHint(c));
-  const { data, error } = await (supabase as any)
+  const { supabase, user, workspaceId } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  // Step 4 RESCOPE (SRC-F): the handler held the fleet scope but the
+  // query carried no tenancy filter at all — add the workspace scope.
+  const techWorkspaceId = workspaceId ?? (await resolveWorkspaceIdForUser(supabase, user.id));
+  let query = (supabase as any)
     .from("technicians")
     .select("id,name")
-    .eq("is_active", true)
-    .order("name");
+    .eq("is_active", true);
+  if (techWorkspaceId) query = query.eq("workspace_id", techWorkspaceId);
+  const { data, error } = await query.order("name");
   if (error) throw error;
   return json({ data: data ?? [] });
 });
@@ -7662,15 +8389,19 @@ vehiclesRouter.get("/v1/fleet/work-orders", async (c) => {
 });
 
 vehiclesRouter.get("/v1/fleet/work-order-create-technicians", async (c) => {
-  const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  const { supabase, user, workspaceId } = await requireFleetScope(c, selectedWorkspaceHint(c));
   const db = supabase as any;
   const { data: ownerId } = await db.rpc("current_workspace_owner_user_id");
-  const { data, error } = await db
+  // Step 4 RESCOPE (SRC-F): add the workspace scope alongside the
+  // owner key (the owner's roster, in the caller's workspace).
+  const techWorkspaceId = workspaceId ?? (await resolveWorkspaceIdForUser(supabase, user.id));
+  let query = db
     .from("technicians")
     .select("id, name")
     .eq("user_id", String(ownerId || user.id))
-    .eq("is_active", true)
-    .order("name");
+    .eq("is_active", true);
+  if (techWorkspaceId) query = query.eq("workspace_id", techWorkspaceId);
+  const { data, error } = await query.order("name");
   if (error) throw error;
   return json({ data: data ?? [] });
 });

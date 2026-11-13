@@ -32,7 +32,10 @@ export async function requestAppointmentProviderSync(
       {
         appointment_id: params.appointmentId,
         payment_record_id: params.paymentRecordId ?? null,
-        provider: params.provider ?? null,
+        // Omit the provider hint entirely when unset: the workspace's
+        // configured provider governs the sync server-side, and an
+        // explicit null used to fail the route's enum validation.
+        ...(params.provider ? { provider: params.provider } : {}),
         sync_mode: params.syncMode,
         external_payment_id: params.externalPaymentId ?? null,
         external_order_id: params.externalOrderId ?? null,

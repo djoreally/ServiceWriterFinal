@@ -8,6 +8,16 @@ export interface ReportsKpi {
   collected: number;
   collectedPrev: number;
   billed: number;
+  expensesTotal: number;
+  expensesPrev: number;
+  grossMargin: number;
+  marginRate: number;
+  jobLinkedCosts: number;
+  arAging: Array<{ bucket: string; amount: number; count: number }>;
+  expensesByCategory: Array<{ name: string; total: number }>;
+  jobMargins: Array<{ customer: string; date: string; billed: number; consumed: number; kept: number }>;
+  worstJob: { customer: string; date: string; billed: number; consumed: number; kept: number; topCosts: Array<{ name: string; total: number }> } | null;
+  jobMarginTotals: { billed: number; consumed: number; kept: number; jobs: number };
   outstanding: number;
   refunds: number;
   taxCollected: number;
@@ -29,7 +39,7 @@ export interface ReportsKpi {
   revenueByPaymentMethod: Array<{ method: string; revenue: number; count: number }>;
   topMakes: Array<{ make: string; count: number }>;
   topZips: Array<{ zip: string; jobs: number; revenue: number }>;
-  dailyRevenue: Array<{ date: string; collected: number; billed: number }>;
+  dailyRevenue: Array<{ date: string; collected: number; billed: number; costs: number }>;
   periodStart: string;
   periodEnd: string;
   periodLabel: string;
@@ -59,6 +69,7 @@ interface InvoiceRow {
 
 interface ServiceRecordRow {
   id: string;
+  appointment_id?: string | null;
   customer_id: string | null;
   vehicle_id: string | null;
   status: string;
@@ -105,6 +116,15 @@ interface InvoiceLineRow {
   description: string;
   quantity: number | string;
   unit_price: number | string;
+}
+
+interface ExpenseRow {
+  id: string;
+  total_amount: number | string | null;
+  transaction_date: string;
+  category_id: string | null;
+  appointment_id: string | null;
+  status: string | null;
 }
 
 function object(value: unknown): JsonObject {
@@ -180,6 +200,9 @@ export async function fetchReportsCanonical(
       customerRows: CustomerRow[];
       vehicleRows: VehicleRow[];
       invoiceLineRows: InvoiceLineRow[];
+      expenseRows: ExpenseRow[];
+      expensePrevRows: ExpenseRow[];
+      expenseCategories: Array<{ id: string; name: string }>;
     }>("/v1/platform/reports/canonical-rows", {
       query: {
         selected_workspace_id: workspaceId,
@@ -225,6 +248,33 @@ export async function fetchReportsCanonical(
   const refunds = receipts.reduce((sum, row) => sum + row.refunded_cents / 100, 0);
   const taxCollected = receipts.reduce((sum, row) => sum + row.tax_amount / 100, 0);
   const ytdCollected = receiptsYtd.reduce((sum, row) => sum + settledNet(row), 0);
+  // THE JOIN (Reports Machine §1): costs come from the Financials expenses
+  // ledger — the same rows the Expenses UI writes. Rejected expenses never
+  // count as costs. Margin is stated on the collected basis, matching the
+  // headline "Net collected" card it stands next to.
+  const expenseRows = ((canonicalRows.expenseRows ?? []) as ExpenseRow[])
+    .filter((row) => row.status !== "rejected");
+  const expensePrevRows = ((canonicalRows.expensePrevRows ?? []) as ExpenseRow[])
+    .filter((row) => row.status !== "rejected");
+  const expensesTotal = expenseRows.reduce((sum, row) => sum + dollars(row.total_amount), 0);
+  const expensesPrev = expensePrevRows.reduce((sum, row) => sum + dollars(row.total_amount), 0);
+  const jobLinkedCosts = expenseRows
+    .filter((row) => row.appointment_id)
+    .reduce((sum, row) => sum + dollars(row.total_amount), 0);
+  const grossMargin = collected - expensesTotal;
+  const marginRate = collected > 0 ? (grossMargin / collected) * 100 : 0;
+  // Reports Machine §5a (Daymond): channel cost starts with an honest
+  // ingredient — period spend per expense category NAME. Attribution puts
+  // a cost on a channel only when a category names that channel; spend
+  // that names no channel is never guessed into one.
+  const categoryNameById = new Map(((canonicalRows.expenseCategories ?? []) as Array<{ id: string; name: string }>).map((category) => [category.id, category.name]));
+  const expensesByCategoryMap = new Map<string, number>();
+  for (const row of expenseRows) {
+    const name = (row.category_id ? categoryNameById.get(row.category_id) : null) || "Uncategorized";
+    expensesByCategoryMap.set(name, (expensesByCategoryMap.get(name) ?? 0) + dollars(row.total_amount));
+  }
+  const expensesByCategory = [...expensesByCategoryMap.entries()].map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total);
+
   const billed = invoices.reduce((sum, row) => sum + dollars(row.total), 0);
   const ytdBilled = invoicesYtd.reduce((sum, row) => sum + dollars(row.total), 0);
   const outstanding = openInvoices.reduce(
@@ -232,14 +282,117 @@ export async function fetchReportsCanonical(
     0,
   );
 
+  // Reports Machine §3a (Kevin): receivables get their age. Same owed
+  // definition as the platform card (open status AND balance over $0.01),
+  // aged from the invoice's issued date.
+  const arBucketDefs = [
+    { bucket: "0–30 days", test: (days: number) => days <= 30 },
+    { bucket: "31–60 days", test: (days: number) => days > 30 && days <= 60 },
+    { bucket: "61–90 days", test: (days: number) => days > 60 && days <= 90 },
+    { bucket: "90+ days", test: (days: number) => days > 90 },
+  ];
+  const arAging = arBucketDefs.map((def) => ({ bucket: def.bucket, amount: 0, count: 0 }));
+  const nowMs = Date.now();
+  for (const row of openInvoices) {
+    const balance = Math.max(dollars(row.total) - dollars(row.amount_paid), 0);
+    if (balance <= 0.01) continue;
+    const issuedMs = new Date(row.issued_at ?? row.created_at).getTime();
+    const ageDays = Number.isFinite(issuedMs) ? Math.max(Math.floor((nowMs - issuedMs) / 86_400_000), 0) : 0;
+    const idx = arBucketDefs.findIndex((def) => def.test(ageDays));
+    arAging[idx === -1 ? 0 : idx].amount += balance;
+    arAging[idx === -1 ? 0 : idx].count += 1;
+  }
+
   const completed = serviceRecords;
+
+  // Reports Machine §3b (Kevin): margin per job, one row — what the job
+  // billed (service record total), what the job consumed (expenses recorded
+  // against its appointment, from the §1 join), what the job kept.
+  const costsByAppointment = new Map<string, number>();
+  for (const expense of expenseRows) {
+    if (!expense.appointment_id) continue;
+    costsByAppointment.set(
+      expense.appointment_id,
+      (costsByAppointment.get(expense.appointment_id) ?? 0) + dollars(expense.total_amount),
+    );
+  }
+  const customerNameById = new Map(customers.map((row) => [
+    row.id,
+    row.company_name || `${row.first_name ?? ""} ${row.last_name ?? ""}`.trim() || row.email || "Unknown customer",
+  ]));
+  const jobMarginRows = completed.map((row) => {
+    const billedJob = dollars(row.total_amount);
+    const consumed = row.appointment_id ? costsByAppointment.get(row.appointment_id) ?? 0 : 0;
+    return {
+      customer: row.customer_id ? customerNameById.get(row.customer_id) ?? "Unknown customer" : "Unknown customer",
+      date: dateKey(row.completed_at),
+      billed: billedJob,
+      consumed,
+      kept: billedJob - consumed,
+      appointmentId: row.appointment_id ?? null,
+    };
+  });
+  const jobMarginTotals = {
+    billed: jobMarginRows.reduce((sum, row) => sum + row.billed, 0),
+    consumed: jobMarginRows.reduce((sum, row) => sum + row.consumed, 0),
+    kept: jobMarginRows.reduce((sum, row) => sum + row.kept, 0),
+    jobs: jobMarginRows.length,
+  };
+  const jobMargins = [...jobMarginRows]
+    .sort((a, b) => a.kept - b.kept)
+    .slice(0, 100);
+
+  // Reports Machine §6 (Robert): the worst underwater job, named, with
+  // the why — its consumed dollars broken down by expense category, so
+  // the morning read can say what ate the job, not just that it sank.
+  const worstMarginRow = jobMarginRows.filter((row) => row.kept < 0).sort((a, b) => a.kept - b.kept)[0] ?? null;
+  let worstJob: ReportsKpi["worstJob"] = null;
+  if (worstMarginRow) {
+    const costByCategory = new Map<string, number>();
+    if (worstMarginRow.appointmentId) {
+      for (const expense of expenseRows) {
+        if (expense.appointment_id !== worstMarginRow.appointmentId) continue;
+        const name = (expense.category_id ? categoryNameById.get(expense.category_id) : null) || "Uncategorized";
+        costByCategory.set(name, (costByCategory.get(name) ?? 0) + dollars(expense.total_amount));
+      }
+    }
+    worstJob = {
+      customer: worstMarginRow.customer,
+      date: worstMarginRow.date,
+      billed: worstMarginRow.billed,
+      consumed: worstMarginRow.consumed,
+      kept: worstMarginRow.kept,
+      topCosts: [...costByCategory.entries()].map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total).slice(0, 3),
+    };
+  }
+
   const cancelled = appointments.filter((row) => row.status === "cancelled");
   const noShow = appointments.filter((row) => row.status === "no_show");
+  // Reports Machine §2 (timestamps law): the canonical start/complete RPCs
+  // stamp the APPOINTMENT metadata (actual_start_time / actual_end_time);
+  // service_records.started_at is legacy and usually null. Resolve the pair
+  // from every truthful source before calling a job stamp-less.
+  const appointmentById = new Map(appointments.map((row) => [row.id, row]));
+  const stampText = (value: unknown): string | null =>
+    typeof value === "string" && value ? value : null;
+  const resolveStart = (row: ServiceRecordRow): string | null => {
+    if (row.started_at) return row.started_at;
+    const appt = row.appointment_id ? appointmentById.get(row.appointment_id) : undefined;
+    return stampText(object(appt?.metadata).actual_start_time)
+      ?? stampText(object(object(row.metadata).appointment_metadata).actual_start_time);
+  };
+  const resolveEnd = (row: ServiceRecordRow): string | null => {
+    if (row.completed_at) return row.completed_at;
+    const appt = row.appointment_id ? appointmentById.get(row.appointment_id) : undefined;
+    return stampText(object(appt?.metadata).actual_end_time);
+  };
   const durations = completed
     .map((row) => {
-      if (!row.started_at || !row.completed_at) return 0;
-      const start = new Date(row.started_at).getTime();
-      const end = new Date(row.completed_at).getTime();
+      const startRaw = resolveStart(row);
+      const endRaw = resolveEnd(row);
+      if (!startRaw || !endRaw) return 0;
+      const start = new Date(startRaw).getTime();
+      const end = new Date(endRaw).getTime();
       return Number.isFinite(start) && Number.isFinite(end) && end >= start
         ? Math.round((end - start) / 60_000)
         : 0;
@@ -314,19 +467,26 @@ export async function fetchReportsCanonical(
     .sort((a, b) => b.revenue - a.revenue)
     .slice(0, 8);
 
-  const dailyMap = new Map<string, { collected: number; billed: number }>();
+  const dailyMap = new Map<string, { collected: number; billed: number; costs: number }>();
   for (const receipt of receipts) {
     const key = dateKey(receipt.collected_at);
     if (!key) continue;
-    const current = dailyMap.get(key) ?? { collected: 0, billed: 0 };
+    const current = dailyMap.get(key) ?? { collected: 0, billed: 0, costs: 0 };
     current.collected += settledNet(receipt);
     dailyMap.set(key, current);
   }
   for (const invoice of invoices) {
     const key = dateKey(invoice.issued_at ?? invoice.created_at);
     if (!key) continue;
-    const current = dailyMap.get(key) ?? { collected: 0, billed: 0 };
+    const current = dailyMap.get(key) ?? { collected: 0, billed: 0, costs: 0 };
     current.billed += dollars(invoice.total);
+    dailyMap.set(key, current);
+  }
+  for (const expense of expenseRows) {
+    const key = dateKey(expense.transaction_date);
+    if (!key) continue;
+    const current = dailyMap.get(key) ?? { collected: 0, billed: 0, costs: 0 };
+    current.costs += dollars(expense.total_amount);
     dailyMap.set(key, current);
   }
   const dailyRevenue = Array.from(dailyMap.entries())
@@ -337,6 +497,16 @@ export async function fetchReportsCanonical(
     collected,
     collectedPrev,
     billed,
+    expensesTotal,
+    expensesPrev,
+    grossMargin,
+    marginRate,
+    jobLinkedCosts,
+    arAging,
+    expensesByCategory,
+    jobMargins,
+    worstJob,
+    jobMarginTotals,
     outstanding,
     refunds,
     taxCollected,
@@ -371,6 +541,7 @@ export interface ServiceWriterAuditResult {
   actualBugs: Array<{ label: string; count: number; detail: string }>;
   standardIssues: Array<{ label: string; count: number; detail: string }>;
   productionCleanup: Array<{ label: string; count: number; detail: string; action: string }>;
+  jobsMissingTimestamps: { total: number; jobs: Array<{ label: string; date: string; missing: string }> };
 }
 
 function placeholder(value: unknown): boolean {
@@ -447,6 +618,46 @@ export async function fetchServiceWriterAudit(): Promise<ServiceWriterAuditResul
     ...invoices.map((row) => row.created_at),
   ].filter((value) => value && value > "2100-01-01").length;
 
+  // Reports Machine §2: Data Quality NAMES the jobs missing timestamps —
+  // a count alone cannot be acted on. A job is stamp-less only when no
+  // truthful source carries the stamp: the record columns, the appointment's
+  // canonical actual_start_time / actual_end_time metadata, or the
+  // appointment snapshot frozen into the record at completion.
+  const auditAppointmentById = new Map(appointments.map((row) => [row.id, row]));
+  const auditCustomerName = (id: string | null): string => {
+    const customer = id ? customers.find((row) => row.id === id) : undefined;
+    if (!customer) return "Unknown customer";
+    return customer.company_name
+      || `${customer.first_name ?? ""} ${customer.last_name ?? ""}`.trim()
+      || customer.email
+      || "Unknown customer";
+  };
+  const stampTextAudit = (value: unknown): string | null =>
+    typeof value === "string" && value ? value : null;
+  const jobsMissingTimestampsAll = completedServices
+    .map((row) => {
+      const appt = row.appointment_id ? auditAppointmentById.get(row.appointment_id) : undefined;
+      const apptMeta = object(appt?.metadata);
+      const snapshotMeta = object(object(row.metadata).appointment_metadata);
+      const start = row.started_at
+        ?? stampTextAudit(apptMeta.actual_start_time)
+        ?? stampTextAudit(snapshotMeta.actual_start_time);
+      const end = row.completed_at
+        ?? stampTextAudit(apptMeta.actual_end_time);
+      if (start && end) return null;
+      return {
+        label: auditCustomerName(row.customer_id),
+        date: (appt?.starts_at ?? row.completed_at ?? "").slice(0, 10),
+        missing: !start && !end ? "start and end stamps" : !start ? "start stamp" : "end stamp",
+      };
+    })
+    .filter((row): row is { label: string; date: string; missing: string } => row !== null)
+    .sort((a, b) => b.date.localeCompare(a.date));
+  const jobsMissingTimestamps = {
+    total: jobsMissingTimestampsAll.length,
+    jobs: jobsMissingTimestampsAll.slice(0, 50),
+  };
+
   return {
     placeholderBadDefaults: [
       { label: "Fake/default customer fields", count: fakeCustomers.length, detail: "Customer identity/contact fields contain placeholder or demo values." },
@@ -476,5 +687,6 @@ export async function fetchServiceWriterAudit(): Promise<ServiceWriterAuditResul
       { label: "Invoices not linked to line items", count: invoicesWithoutLines, detail: "Invoice has no durable line-item evidence.", action: "Reconcile invoice lines to completed work." },
       { label: "Broken appointment references", count: brokenAppointmentLinks, detail: "Appointment links do not resolve inside the workspace.", action: "Repair customer and vehicle references." },
     ],
+    jobsMissingTimestamps,
   };
 }

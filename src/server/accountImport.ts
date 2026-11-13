@@ -2,6 +2,13 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { ApiError } from "@/server/api";
+import {
+  normalizeUsState,
+  normalizeVin,
+  serviceDateKey,
+  validateMileageValue,
+  validateVin,
+} from "@/server/hono/lib/creation-validation";
 
 const uuid = z.string().uuid();
 const rowSchema = z.record(z.string(), z.unknown());
@@ -105,7 +112,19 @@ async function importServiceCatalog(ctx: ImportContext, row: Record<string, unkn
 async function importVehicle(ctx: ImportContext, row: Record<string, unknown>) {
   const customer = ctx.mappings.get(sourceId("customers", { id: row.customer_id }));
   if (!customer) throw new ApiError(422, "Vehicle references a customer that was not imported", "orphan_customer");
-  return insertMapped(ctx, "vehicles", row, "vehicles", { customer_id: customer.targetId, status: mapVehicleStatus(text(row, "status")), vin: nullable(text(row, "vin")), year: number(row, "year", 0) || null, make: nullable(text(row, "make")), model: nullable(text(row, "model")), trim: nullable(text(row, "trim")), license_plate: nullable(text(row, "license_plate")), plate_region: nullable(text(row, "plate_region")), color: nullable(text(row, "color")), mileage: number(row, "mileage", 0) || null, mileage_unit: "mi", notes: nullable(text(row, "notes")), created_at: safeDate(row.created_at, now()), updated_at: safeDate(row.updated_at, now()) }, { table: "vehicles", column: "vin", value: text(row, "vin") || null });
+  // Creation-time validation (Session 7 condition 4): the legacy import is
+  // how a placeholder VIN and a 934,000-mile reading reached production.
+  // Rows that fail are recorded as failed with the reason, never saved.
+  const rawVin = text(row, "vin");
+  if (rawVin) {
+    const vinError = validateVin(rawVin);
+    if (vinError) throw new ApiError(422, vinError, "invalid_vin");
+  }
+  const mileageError = validateMileageValue(number(row, "mileage", 0) || null);
+  if (mileageError) throw new ApiError(422, mileageError, "invalid_mileage");
+  const vin = rawVin ? normalizeVin(rawVin) : null;
+  const plateRegion = text(row, "plate_region");
+  return insertMapped(ctx, "vehicles", row, "vehicles", { customer_id: customer.targetId, status: mapVehicleStatus(text(row, "status")), vin, year: number(row, "year", 0) || null, make: nullable(text(row, "make")), model: nullable(text(row, "model")), trim: nullable(text(row, "trim")), license_plate: nullable(text(row, "license_plate")), plate_region: plateRegion ? normalizeUsState(plateRegion) : null, color: nullable(text(row, "color")), mileage: number(row, "mileage", 0) || null, mileage_unit: "MI", notes: nullable(text(row, "notes")), created_at: safeDate(row.created_at, now()), updated_at: safeDate(row.updated_at, now()) }, { table: "vehicles", column: "vin", value: vin });
 }
 
 export async function createImportBatch(args: { supabase: SupabaseClient; user: User; workspaceId: string; fileName: string; input: unknown }) {
@@ -147,7 +166,37 @@ async function importServiceRecord(ctx: ImportContext, row: Record<string, unkno
   if (!customer) throw new ApiError(422, "Service references a customer that was not imported", "orphan_customer");
   const vehicle = row.vehicle_id ? ctx.mappings.get(sourceId("vehicles", { id: row.vehicle_id })) : null;
   const appointment = row.appointment_id ? ctx.mappings.get(sourceId("appointments", { id: row.appointment_id })) : null;
-  return insertMapped(ctx, "services", row, "service_records", { appointment_id: appointment?.targetId ?? null, work_order_id: null, technician_id: null, completed_by: ctx.user.id, status: text(row, "status") || "completed", complaint: nullable(text(row, "description")), diagnosis: null, work_performed: nullable(text(row, "description") || text(row, "service_type")), oil_quarts_used: null, customer_notes: nullable(text(row, "notes")), internal_notes: null, metadata: { source: "lovable_account_export", source_id: String(row.id ?? ""), customer_id: customer.targetId, vehicle_id: vehicle?.targetId ?? null }, started_at: safeDate(row.service_date || row.created_at, now()), completed_at: safeDate(row.service_date || row.updated_at, now()), created_at: safeDate(row.created_at, now()), updated_at: safeDate(row.updated_at, now()), quote_id: null, subtotal: number(row, "total_cost", 0), tax_rate: null, tax_amount: null, discount_amount: 0, total_amount: number(row, "total_cost", 0), currency_code: "USD" });
+  const completedAt = safeDate(row.service_date || row.updated_at, now());
+  const workPerformed = nullable(text(row, "description") || text(row, "service_type"));
+  const totalAmount = number(row, "total_cost", 0);
+  // Duplicate detection (Session 7 condition 4): re-importing an export (or
+  // an export whose rows repeat a service under a second source id) used to
+  // land the same service twice — the Carfax pull found the pairs. The
+  // importer's identity for a service is vehicle + service date + work +
+  // total; a row that already exists is matched to it, never re-inserted.
+  if (vehicle?.targetId) {
+    const dateKey = serviceDateKey(completedAt);
+    if (dateKey) {
+      const { data: prior, error: priorError } = await ctx.supabase
+        .from("service_records")
+        .select("id,work_performed,total_amount,completed_at,started_at")
+        .eq("workspace_id", ctx.workspaceId)
+        .eq("vehicle_id", vehicle.targetId)
+        .neq("status", "voided")
+        .gte("completed_at", `${dateKey}T00:00:00.000Z`)
+        .lt("completed_at", `${dateKey}T23:59:59.999Z`)
+        .limit(50);
+      if (priorError) throw priorError;
+      const duplicate = (prior ?? []).find(
+        (existing) => existing.work_performed === workPerformed && Number(existing.total_amount) === totalAmount,
+      );
+      if (duplicate) {
+        await record(ctx, "services", row, { action: "matched", targetTable: "service_records", targetId: duplicate.id });
+        return duplicate.id;
+      }
+    }
+  }
+  return insertMapped(ctx, "services", row, "service_records", { appointment_id: appointment?.targetId ?? null, work_order_id: null, technician_id: null, completed_by: ctx.user.id, status: text(row, "status") || "completed", complaint: nullable(text(row, "description")), diagnosis: null, work_performed: workPerformed, oil_quarts_used: null, customer_notes: nullable(text(row, "notes")), internal_notes: null, metadata: { source: "lovable_account_export", source_id: String(row.id ?? ""), customer_id: customer.targetId, vehicle_id: vehicle?.targetId ?? null }, started_at: safeDate(row.service_date || row.created_at, now()), completed_at: completedAt, created_at: safeDate(row.created_at, now()), updated_at: safeDate(row.updated_at, now()), quote_id: null, subtotal: totalAmount, tax_rate: null, tax_amount: null, discount_amount: 0, total_amount: totalAmount, currency_code: "USD" });
 }
 
 async function importInvoice(ctx: ImportContext, row: Record<string, unknown>) {

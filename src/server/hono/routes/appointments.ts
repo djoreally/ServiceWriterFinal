@@ -43,6 +43,11 @@ import { isQuoteLocked } from "@/lib/price-lock";
 import { appointmentStatusView, invoiceStatusView, normalizeAppointmentStatus, paymentStatusView, resolveDispatchStatus, withAppointmentStatusView } from "@/lib/status-vocabulary";
 import { withAppointmentTitleFields } from "@/lib/appointment-title";
 import { resolvePrimaryServiceNames, resolveWorkspaceTimezone } from "@/server/appointments/title-resolution";
+import {
+  composeAppointmentJobMoney,
+  composeAppointmentPaymentState,
+  resolveAppointmentPaymentRows,
+} from "@/server/appointments/appointment-money";
 import { buildBookingConfiguration } from "@/server/appointments/spec-resolution";
 import { logMutation } from "@/server/audit";
 import { z } from "zod";
@@ -63,15 +68,45 @@ appointmentsRouter.get("/v1/appointments", async (c: Context) => {
   if (!workspaceId) throw new Error("workspace_id is required");
   const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const { limit, offset } = paginationSchema.parse(Object.fromEntries(url.searchParams));
-  const { data, error } = await supabase.from("appointments").select("*,customers(id,first_name,last_name,email,phone),vehicles(id,customer_id,year,make,model,vin,license_plate,plate_region,color,mileage,notes),locations(id,name)").eq("workspace_id", workspaceId).order("starts_at").range(offset, offset + limit - 1);
+  // Optional starts_at window (Fix 3) — mirrors the legacy shadow route
+  // (app/api/v1/appointments/route.ts), which production actually serves;
+  // keep the two handlers in step. Absent params = historical behavior.
+  const from = url.searchParams.get("from");
+  const to = url.searchParams.get("to");
+  let listQuery = supabase.from("appointments").select("*,customers(id,first_name,last_name,email,phone),vehicles(id,customer_id,year,make,model,vin,license_plate,plate_region,color,mileage,notes),locations(id,name)").eq("workspace_id", workspaceId);
+  if (from) listQuery = listQuery.gte("starts_at", from);
+  if (to) listQuery = listQuery.lt("starts_at", to);
+  const { data, error } = await listQuery.order("starts_at").range(offset, offset + limit - 1);
   if (error) throw error;
   const rows = data ?? [];
+  // P3: rows also carry the composed job money from the shared
+  // appointment-money helper — the same composition the Home cockpit
+  // ships — so list cards state job_due from the invoice facts instead
+  // of falling back to the locked quote verbatim (a paid job listed as
+  // due in full). A composition failure must not take the list down:
+  // the rows ship without money and JobRow falls back as before.
+  let jobMoney = new Map<string, { total: number; due: number }>();
+  try {
+    jobMoney = await composeAppointmentJobMoney(
+      supabase as any,
+      workspaceId,
+      rows as Array<Record<string, any>>,
+    );
+  } catch (err) {
+    console.error("appointments list: job money composition failed", err);
+  }
   // B2/T-1: every job response carries the server-composed title fields.
   const [timezone, primaryServiceNames] = await Promise.all([
     resolveWorkspaceTimezone(supabase, workspaceId),
     resolvePrimaryServiceNames(supabase, workspaceId, rows.map((row) => row.id)),
   ]);
-  return json({ data: rows.map((row) => withAppointmentTitleFields(withAppointmentStatusView(row), { timezone, primaryServiceName: primaryServiceNames.get(row.id) })), pagination: { limit, offset } });
+  return json({ data: rows.map((row) => {
+    const money = jobMoney.get(row.id);
+    return {
+      ...withAppointmentTitleFields(withAppointmentStatusView(row), { timezone, primaryServiceName: primaryServiceNames.get(row.id) }),
+      ...(money ? { job_total: money.total, job_due: money.due } : {}),
+    };
+  }), pagination: { limit, offset } });
 });
 
 appointmentsRouter.post("/v1/appointments", async (c: Context) => {
@@ -79,7 +114,7 @@ appointmentsRouter.post("/v1/appointments", async (c: Context) => {
   const { supabase, user } = await requireWorkspaceAuth(c, body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher"]);
   // One booking path: validation + availability checks + insert all live in
   // bookAppointmentCore. Auth (membership + role list) stays on the route.
-  const result = await bookAppointmentCore(supabase, body, { createdBy: user.id });
+  const result = await bookAppointmentCore(supabase, body, { createdBy: user.id, requestUrl: c.req.url });
   if ("error" in result) return result.error;
   const created = result.data as { id?: unknown; workspace_id?: unknown } | null;
   logMutation({
@@ -98,7 +133,17 @@ appointmentsRouter.post("/v1/appointments", async (c: Context) => {
   if (typeof createdId === "string" && createdId) {
     await syncAppointmentToGoogleCalendar({ supabase, userId: user.id, appointmentId: createdId });
   }
-  return json({ data: result.data }, { status: 201 });
+  // Auto-dispatch ran inside the booking core; its verdict rides along so
+  // the staff UI can report the assignment truthfully. Absent when the
+  // create carried an explicit assignee or auto-dispatch itself failed
+  // (fail-soft: the booking succeeded either way).
+  return json(
+    {
+      data: result.data,
+      ...(result.autoDispatch ? { auto_dispatch: result.autoDispatch } : {}),
+    },
+    { status: 201 },
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -221,12 +266,22 @@ appointmentsRouter.get("/v1/appointments/scheduling-settings", async (c: Context
 // GET /v1/appointments/service-lines — canonical appointment_items rows
 // projected to the legacy client shape (appointment_id, vehicle_id, price, quantity).
 appointmentsRouter.get("/v1/appointments/service-lines", async (c: Context) => {
-  const { supabase, workspaceId } = await requireCallerWorkspace(c, selectedWorkspaceHint(new URL(c.req.url)));
+  const url = new URL(c.req.url);
+  const { supabase, workspaceId } = await requireCallerWorkspace(c, selectedWorkspaceHint(url));
   const db = supabase as any;
-  const { data, error } = await db
+  // Optional scoping (Fix 3): the Appointments page asks for the lines of
+  // the appointments in its window instead of every line in the workspace.
+  // A plain column filter — no JSON-path matching. Absent = all lines.
+  const idsParam = url.searchParams.get("appointment_ids");
+  const appointmentIds = idsParam
+    ? idsParam.split(",").map((id) => id.trim()).filter(Boolean).slice(0, 500)
+    : [];
+  let linesQuery = db
     .from("appointment_items")
     .select("appointment_id,quantity,unit_price,metadata")
     .eq("workspace_id", workspaceId);
+  if (appointmentIds.length > 0) linesQuery = linesQuery.in("appointment_id", appointmentIds);
+  const { data, error } = await linesQuery;
   if (error) throw error;
   const rows = ((data ?? []) as Array<{
     appointment_id: string;
@@ -445,6 +500,8 @@ appointmentsRouter.delete("/v1/appointments/:id", async (c: Context) => {
     .eq("id", id)
     .eq("workspace_id", workspaceId)
     .maybeSingle();
+  // Same rule as the legacy route: completed jobs are permanent record.
+  if (before?.status === "completed") throw new ApiError(409, "A completed appointment can't be cancelled or deleted. Completed jobs are part of the permanent job record.", "appointment_completed");
   const { data, error } = await supabase.from("appointments").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("id", id).eq("workspace_id", workspaceId).select("id,workspace_id,customer_id,starts_at,ends_at,status,confirmation_code,notes,metadata,updated_at,customers(id,first_name,last_name,email),vehicles(id,year,make,model)").single();
   if (error) throw error;
   logMutation({
@@ -535,7 +592,7 @@ appointmentsRouter.post("/v1/appointments/:id/complete", async (c: Context) => {
     const [{ data: appointment }, { data: workspace }, { data: serviceRecord }] = await Promise.all([
       db.from("appointments").select("id,workspace_id,customer_id,starts_at,ends_at,status,notes,metadata,updated_at,customers(id,first_name,last_name,email),vehicles(id,year,make,model)").eq("workspace_id", workspace_id).eq("id", id).single(),
       db.from("workspaces").select("name,timezone").eq("id", workspace_id).single(),
-      serviceRecordId ? db.from("service_records").select("id,work_performed,mileage_at_service,status").eq("workspace_id", workspace_id).eq("id", serviceRecordId).maybeSingle() : Promise.resolve({ data: null }),
+      serviceRecordId ? db.from("service_records").select("id,work_performed,status,metadata").eq("workspace_id", workspace_id).eq("id", serviceRecordId).maybeSingle() : Promise.resolve({ data: null }),
     ]);
     if (appointment) {
       const queued = await dispatchAppointmentLifecycle({ eventKey: LIFECYCLE_EVENT_KEYS.serviceCompleted, eventId: `${id}:completed:${serviceRecordId}`, appointment, workspaceName: workspace?.name ?? "Service Writer", workspaceTimezone: workspace?.timezone ?? "UTC", actionUrl });
@@ -547,7 +604,8 @@ appointmentsRouter.post("/v1/appointments/:id/complete", async (c: Context) => {
         const customerName = [customer?.first_name, customer?.last_name].filter(Boolean).join(" ") || "Customer";
         const vehicleDescription = [vehicle?.year, vehicle?.make, vehicle?.model].filter(Boolean).join(" ") || "Vehicle on file";
         const confirmationCode = String((appointment.metadata as any)?.confirmation_code || id.replace(/-/g, "").slice(0, 8).toUpperCase());
-        const baseVariables = { "business.name": workspace?.name ?? "Service Writer", "business.timezone": workspace?.timezone ?? "UTC", "customer.first_name": customerName.split(/\s+/)[0], "customer.full_name": customerName, "appointment.confirmation_code": confirmationCode, "vehicle.description": vehicleDescription, "service.work_performed": serviceRecord?.work_performed || "Completed service", "service.mileage": serviceRecord?.mileage_at_service != null ? String(serviceRecord.mileage_at_service) : "Recorded on service record", "email.primary_action_url": withAppointmentContext(actionUrl, id) };
+        const serviceMileage = object(serviceRecord?.metadata).mileage;
+        const baseVariables = { "business.name": workspace?.name ?? "Service Writer", "business.timezone": workspace?.timezone ?? "UTC", "customer.first_name": customerName.split(/\s+/)[0], "customer.full_name": customerName, "appointment.confirmation_code": confirmationCode, "vehicle.description": vehicleDescription, "service.work_performed": serviceRecord?.work_performed || "Completed service", "service.mileage": serviceMileage != null ? String(serviceMileage) : "Recorded on service record", "email.primary_action_url": withAppointmentContext(actionUrl, id) };
         const summary = await dispatchLifecycleEvent({ templateKey: LIFECYCLE_EVENT_KEYS.serviceCompletionSummary, eventId: `${id}:completion-summary:${serviceRecordId}`, entityType: "service_record", entityId: serviceRecordId || id, workspaceId: workspace_id, customerId: appointment.customer_id, recipientEmail, recipientRole: "customer", variables: baseVariables, metadata: { appointmentId: id, serviceRecordId, invoiceId, paymentId } });
         completionSummary = { status: summary.status };
         const supportUrl = new URL("/support", c.req.url).toString();
@@ -1386,6 +1444,13 @@ async function geocodeAddressServer(address: string): Promise<{ lat: number; lng
 }
 
 // POST /v1/appointments/geocode-backfill — geocode appointments missing coordinates.
+// Production `appointments` has no location_address / location_lat /
+// location_lng / deleted_at columns: the service address is carried in
+// `metadata` (or composed from the linked `locations` row), and geocoded
+// coordinates are written back into `metadata`, where the canonical read
+// models (operational jobs, mileage candidates) look for them. The old
+// query selected and updated the phantom columns, so PostgREST rejected
+// it (42703) and no appointment ever gained coordinates.
 appointmentsRouter.post("/v1/appointments/geocode-backfill", async (c: Context) => {
   const { batch_size } = z.object({ batch_size: z.number().int().min(1).max(100).optional() }).parse(await c.req.json().catch(() => ({})));
   const batchSize = batch_size ?? 25;
@@ -1399,25 +1464,49 @@ appointmentsRouter.post("/v1/appointments/geocode-backfill", async (c: Context) 
   const workspaceIds = ((memberships ?? []) as Array<{ workspace_id: string }>).map((m) => m.workspace_id);
   if (!workspaceIds.length) throw new ApiError(400, "No active workspace", "no_workspace");
   const db = supabase as any;
-  const { data, error, count } = await db
+  const { data, error } = await db
     .from("appointments")
-    .select("id, location_address", { count: "exact" })
+    .select("id, metadata, locations(address_line1,address_line2,city,region,postal_code,latitude,longitude)")
     .in("workspace_id", workspaceIds)
-    .is("location_lat", null)
-    .not("location_address", "is", null)
-    .is("deleted_at", null)
-    .limit(batchSize);
+    .order("starts_at", { ascending: false })
+    .limit(500);
   if (error) throw error;
-  const rows = (data ?? []) as Array<{ id: string; location_address: string }>;
+  type BackfillRow = {
+    id: string;
+    address: string;
+    metadata: Record<string, unknown>;
+  };
+  const pending: BackfillRow[] = [];
+  for (const raw of (data ?? []) as Array<Record<string, unknown>>) {
+    const metadata = object(raw.metadata);
+    const location = one(raw.locations) as Record<string, unknown> | null;
+    const locationAddress = location
+      ? [location.address_line1, location.address_line2, location.city, location.region, location.postal_code]
+          .filter((part) => typeof part === "string" && part.trim() !== "")
+          .join(", ") || null
+      : null;
+    const address =
+      locationAddress ??
+      (typeof metadata.location_address === "string" && metadata.location_address.trim() !== ""
+        ? metadata.location_address
+        : null);
+    if (!address) continue;
+    const hasCoordinates =
+      (location?.latitude != null && location?.longitude != null) ||
+      (metadata.location_lat != null && metadata.location_lng != null);
+    if (hasCoordinates) continue;
+    pending.push({ id: String(raw.id), address, metadata });
+  }
+  const rows = pending.slice(0, batchSize);
   let geocoded = 0;
   let failed = 0;
   for (const row of rows) {
     try {
-      const result = await geocodeAddressServer(String(row.location_address));
+      const result = await geocodeAddressServer(row.address);
       if (!result) { failed += 1; continue; }
       const { error: updateError } = await db
         .from("appointments")
-        .update({ location_lat: result.lat, location_lng: result.lng })
+        .update({ metadata: { ...row.metadata, location_lat: result.lat, location_lng: result.lng } })
         .eq("id", row.id);
       if (updateError) throw updateError;
       geocoded += 1;
@@ -1429,7 +1518,7 @@ appointmentsRouter.post("/v1/appointments/geocode-backfill", async (c: Context) 
     scanned: rows.length,
     geocoded,
     failed,
-    remaining: Math.max(0, (count ?? rows.length) - geocoded),
+    remaining: Math.max(0, pending.length - geocoded),
   });
 });
 
@@ -1682,9 +1771,32 @@ appointmentsRouter.post("/v1/appointments/booking-contexts", async (c: Context) 
   const { business_user_id, location_context, session_id } = bookingContextInsertSchema.parse(await c.req.json());
   const { supabase } = await optionalAuthClient(c);
   const db = supabase as any;
+  // Step 4 translation: booking_contexts is workspace-tenanted and the
+  // public flow's only tenancy handle is business_user_id (the business
+  // owner's user id). Resolve the owner's home workspace server-side
+  // through the admin client — the guest/anon client cannot read
+  // workspace_members under RLS. A multi-workspace owner resolves to
+  // their first owner workspace deterministically (ordered); NEED-S4-8
+  // keeps the booking-profile disambiguation question open.
+  const admin = createSupabaseAdminClient();
+  const { data: ownerMembership, error: ownerError } = await (admin as any)
+    .from("workspace_members")
+    .select("workspace_id")
+    .eq("user_id", business_user_id)
+    .eq("role", "owner")
+    .eq("is_active", true)
+    .order("workspace_id", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (ownerError) return json({ data: null, error: serializeDataError(ownerError) });
+  const workspaceId = (ownerMembership as { workspace_id?: string } | null)?.workspace_id;
+  if (!workspaceId) {
+    return json({ data: null, error: { message: "Business workspace could not be resolved", code: "workspace_unresolved" } });
+  }
   const { data, error } = await db
     .from("booking_contexts")
     .insert({
+      workspace_id: workspaceId,
       business_user_id,
       location_context: location_context ?? null,
       session_id: session_id ?? null,
@@ -1794,8 +1906,29 @@ appointmentsRouter.post("/v1/appointments/booking-progress", async (c: Context) 
     last_attempted_at: new Date().toISOString(),
   };
 
+  // Partial-update guard (SW-42): the shared payload is correct for the
+  // INSERT, but on the update branch its `?? null` / `?? {}` coercions wiped
+  // the visitor's previously captured progress fields whenever a later
+  // progress ping omitted them. The update writes only what this ping
+  // actually carries; identity fields are written only when this ping
+  // supplied that identity dimension.
+  const updatePayload: Record<string, unknown> = {
+    user_id: body.business_user_id,
+    last_step: body.last_step,
+    status: "pending",
+    last_attempted_at: payload.last_attempted_at,
+  };
+  if (email) updatePayload.guest_email = email;
+  if (sessionId) updatePayload.session_id = sessionId;
+  if (body.guest_name !== undefined) updatePayload.guest_name = body.guest_name ?? null;
+  if (body.guest_phone !== undefined) updatePayload.guest_phone = body.guest_phone ?? null;
+  if (body.service_catalog_id !== undefined) updatePayload.service_catalog_id = body.service_catalog_id ?? null;
+  if (body.scheduled_date !== undefined) updatePayload.scheduled_date = body.scheduled_date ?? null;
+  if (body.scheduled_time !== undefined) updatePayload.scheduled_time = body.scheduled_time ?? null;
+  if (body.metadata !== undefined) updatePayload.metadata = body.metadata ?? {};
+
   const { data, error } = existingId
-    ? await db.from("abandoned_bookings").update(payload).eq("id", existingId).select("id").single()
+    ? await db.from("abandoned_bookings").update(updatePayload).eq("id", existingId).select("id").single()
     : await db.from("abandoned_bookings").insert(payload).select("id").single();
   if (error) return json({ data: null, error: serializeDataError(error) });
 
@@ -2597,7 +2730,7 @@ appointmentsRouter.get("/v1/inspections/:id/report", async (c: Context) => {
   const db = supabase as any;
   const { data: inspection } = await db.from("service_inspections").select("*").eq("id", id).single();
   if (!inspection) throw new ApiError(404, "Inspection not found.", "not_found");
-  const row = inspection as { vehicle_id?: string | null; user_id?: string | null };
+  const row = inspection as { vehicle_id?: string | null; workspace_id?: string | null };
   const { data: results } = await db
     .from("inspection_results")
     .select("*")
@@ -2613,11 +2746,11 @@ appointmentsRouter.get("/v1/inspections/:id/report", async (c: Context) => {
       .single();
     vehicle = veh ?? null;
   }
-  if (row.user_id) {
+  if (row.workspace_id) {
     const { data: biz } = await (supabase as any)
       .from("business_profiles")
       .select("business_name, phone, email, logo_url, service_address")
-      .eq("user_id", row.user_id)
+      .eq("workspace_id", row.workspace_id)
       .single();
     business = biz ?? null;
   }
@@ -2735,22 +2868,34 @@ appointmentsRouter.get("/v1/appointments/service-catalog-item", async (c: Contex
   return json({ data: data ?? null });
 });
 
-// GET /v1/appointments/:id/payments — payments bound to an appointment via metadata.
+// GET /v1/appointments/:id/payments — the appointment's payment rows
+// plus its composed payment state (P3). Rows resolve through BOTH
+// bindings — the invoice chain (payments.invoice_id → an invoice linked
+// to the appointment) and the metadata shortcut
+// (payments.metadata.appointment_id) — deduped by id, newest first.
+// `payment_state` carries the invoice facts every summary reads; the
+// old metadata-only resolution hid invoice-bound rows (e.g. manual
+// closeouts) and reported paid jobs as unpaid.
 appointmentsRouter.get("/v1/appointments/:id/payments", async (c: Context) => {
   const id = z.string().uuid().parse(c.req.param("id"));
   const url = new URL(c.req.url);
   const status = url.searchParams.get("status");
   const { supabase, workspaceId } = await requireCallerWorkspace(c, selectedWorkspaceHint(url));
-  let query = (supabase as any)
-    .from("payments")
-    .select("id,amount,status,provider,provider_payment_id,created_at,updated_at,metadata")
+  const db = supabase as any;
+  const { data: appointment, error: appointmentError } = await db
+    .from("appointments")
+    .select("id,metadata")
     .eq("workspace_id", workspaceId)
-    .contains("metadata", { appointment_id: id })
-    .order("created_at", { ascending: false });
-  if (status) query = query.eq("status", status);
-  const { data, error } = await query;
-  if (error) throw error;
-  return json({ data: data ?? [] });
+    .eq("id", id)
+    .maybeSingle();
+  if (appointmentError) throw appointmentError;
+  const [paymentState, rows] = await Promise.all([
+    appointment
+      ? composeAppointmentPaymentState(db, workspaceId, appointment)
+      : Promise.resolve(null),
+    resolveAppointmentPaymentRows(db, workspaceId, id, appointment?.metadata, status),
+  ]);
+  return json({ data: rows, payment_state: paymentState });
 });
 
 // GET /v1/appointments/:id/services — appointment service lines + catalog fallback.
@@ -2989,7 +3134,7 @@ appointmentsRouter.get("/v1/appointments/quick-service-form-data", async (c: Con
   const db = supabase as any;
   const [{ data: services, error: servicesError }, { data: profile, error: profileError }] = await Promise.all([
     db.from("service_catalog").select("id,name,description,labor_price,estimated_minutes,category,is_active,metadata").eq("workspace_id", workspaceId).eq("is_active", true).order("name"),
-    db.from("business_profiles").select("business_name").eq("user_id", user.id).maybeSingle(),
+    db.from("business_profiles").select("business_name").eq("workspace_id", workspaceId).maybeSingle(),
   ]);
   if (servicesError) throw servicesError;
   if (profileError) throw profileError;
@@ -3034,16 +3179,7 @@ appointmentsRouter.get("/v1/dispatch/operational-jobs", async (c: Context) => {
   const startIso = new Date(`${fromDate}T00:00:00`).toISOString();
   const endIso = new Date(`${toDate}T23:59:59.999`).toISOString();
   const db = supabase as any;
-  // Fleet work orders share the dispatch board: tech status transitions
-  // (en route → arrived → in progress → complete) write fleet_work_orders
-  // directly, so the board must read that table for the round trip to close.
-  // Workspace-scoped; RLS on fleet_work_orders is owner-only, so non-owner
-  // staff see only rows they own until the policy is widened.
-  //
-  // Technician names resolve through workspace_members on the techs' linked
-  // auth identities (no dependency on a technicians.workspace_id column,
-  // which is not in the generated schema).
-  const [appointmentsRes, workOrdersRes, membersRes, fleetRes] = await Promise.all([
+  const [appointmentsRes, workOrdersRes, membersRes] = await Promise.all([
     db.from("appointments")
       .select("id,status,starts_at,ends_at,assigned_user_id,updated_at,dispatch_status,metadata,confirmation_code,customers(first_name,last_name,company_name,phone,address_line1,address_line2,city,region,postal_code),vehicles(year,make,model),locations(address_line1,address_line2,city,region,postal_code,latitude,longitude)")
       .eq("workspace_id", workspaceId)
@@ -3061,23 +3197,9 @@ appointmentsRouter.get("/v1/dispatch/operational-jobs", async (c: Context) => {
       .select("user_id,profiles!workspace_members_user_id_fkey(display_name)")
       .eq("workspace_id", workspaceId)
       .eq("is_active", true),
-    db.from("fleet_work_orders")
-      .select("id,order_number,status,priority,scheduled_date,scheduled_time,assigned_technician_id,assigned_van_id,technician_notes,description,service_type,total,updated_at,fleet_clients(company_name),fleet_vehicles(year,make,model),fleet_locations(name,address)")
-      .eq("workspace_id", workspaceId)
-      .not("status", "in", '("completed","cancelled","invoiced")')
-      .or(`and(scheduled_date.gte.${fromDate},scheduled_date.lte.${toDate}),scheduled_date.is.null`)
-      .order("scheduled_date", { ascending: true, nullsFirst: false }),
   ]);
-  const error = appointmentsRes.error ?? workOrdersRes.error ?? membersRes.error ?? fleetRes.error;
+  const error = appointmentsRes.error ?? workOrdersRes.error ?? membersRes.error;
   if (error) throw error;
-
-  // Technician display names for fleet assignments: techs linked to this
-  // workspace through their auth identity.
-  const memberUserIds = (membersRes.data ?? []).map((m: { user_id: string }) => m.user_id).filter(Boolean);
-  const { data: fleetTechs, error: fleetTechsError } = memberUserIds.length > 0
-    ? await db.from("technicians").select("id,name,auth_user_id").in("auth_user_id", memberUserIds).neq("is_active", false)
-    : { data: [], error: null };
-  if (fleetTechsError) throw fleetTechsError;
 
   // B2/T-1: server-composed title fields on the board's appointment rows.
   const [timezone, primaryServiceNames] = await Promise.all([
@@ -3089,8 +3211,6 @@ appointmentsRouter.get("/v1/dispatch/operational-jobs", async (c: Context) => {
       appointments: (appointmentsRes.data ?? []).map((row: Record<string, unknown>) => withAppointmentTitleFields(withAppointmentStatusView(row), { timezone, primaryServiceName: primaryServiceNames.get(row.id as string) })),
       work_orders: workOrdersRes.data ?? [],
       members: membersRes.data ?? [],
-      fleet_work_orders: fleetRes.data ?? [],
-      technicians: fleetTechs ?? [],
     },
   });
 });
@@ -3134,14 +3254,19 @@ appointmentsRouter.get("/v1/dispatch/dispatchable-appointments", async (c: Conte
 });
 
 // GET /v1/dispatch/settings — dispatch settings for the caller's business profile.
+// The profile is workspace-keyed after the Step 3 translation; the user_id
+// query param stays as the caller-identity check, and the workspace is
+// resolved server-side from the auth token.
 appointmentsRouter.get("/v1/dispatch/settings", async (c: Context) => {
   const { supabase, user } = await requireAuth(c);
   const userId = new URL(c.req.url).searchParams.get("user_id") ?? "";
   if (userId !== user.id) throw new ApiError(403, "user_id must match the caller.", "forbidden");
+  const workspaceId = await resolveCallerWorkspaceId(supabase, user.id);
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
   const { data, error } = await (supabase as any)
     .from("business_profiles")
-    .select("user_id,auto_dispatch_enabled,dispatch_weight_distance,dispatch_weight_load,dispatch_weight_performance,dispatch_weight_fairness,dispatch_weight_route,dispatch_fleet_performance_threshold,default_technician_id")
-    .eq("user_id", userId)
+    .select("auto_dispatch_enabled,dispatch_weight_distance,dispatch_weight_load,dispatch_weight_performance,dispatch_weight_fairness,dispatch_weight_route,dispatch_fleet_performance_threshold")
+    .eq("workspace_id", workspaceId)
     .maybeSingle();
   if (error) throw error;
   return json({ data: data ?? null });
@@ -3165,9 +3290,11 @@ appointmentsRouter.patch("/v1/dispatch/settings", async (c: Context) => {
   const { supabase, user } = await requireAuth(c);
   if (user_id !== user.id) throw new ApiError(403, "user_id must match the caller.", "forbidden");
   const db = supabase as any;
+  const workspaceId = await resolveCallerWorkspaceId(supabase, user.id);
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
   // Upsert: a missing business_profiles row must not turn the save into a
   // silent zero-write. The helper throws when the write cannot be verified.
-  await upsertBusinessProfile(db, user_id, values);
+  await upsertBusinessProfile(db, workspaceId, values);
   return json({ data: { ok: true } });
 });
 
@@ -3246,6 +3373,13 @@ appointmentsRouter.get("/v1/dispatch/mobile-dispatch-state", async (c: Context) 
 });
 
 // GET /v1/dispatch/mobile-state — member + presence + today's clock entries + open jobs.
+// Production `appointments` has no priority / location_address / location_lat /
+// location_lng columns (live-schema census 2026-11-10): the old jobs select
+// named all four, so PostgREST rejected it (42703) and the whole mobile-state
+// payload failed. `priority` has no live source and is dropped. The flat
+// location_* fields the mobile client reads are composed server-side from the
+// linked `locations` row first, falling back to `metadata` — the canonical
+// read model documented on the geocode-backfill handler in this file.
 appointmentsRouter.get("/v1/dispatch/mobile-state", async (c: Context) => {
   const { supabase, user, workspaceId } = await requireCallerWorkspace(c, selectedWorkspaceHint(new URL(c.req.url)));
   const userId = new URL(c.req.url).searchParams.get("user_id") ?? "";
@@ -3256,7 +3390,7 @@ appointmentsRouter.get("/v1/dispatch/mobile-state", async (c: Context) => {
     db.from("workspace_members").select("user_id,role,is_active").eq("workspace_id", workspaceId).eq("user_id", userId).eq("is_active", true).maybeSingle(),
     db.from("technician_presence").select("*").eq("workspace_id", workspaceId).eq("user_id", userId).maybeSingle(),
     db.from("technician_clock_entries").select("*").eq("workspace_id", workspaceId).eq("user_id", userId).gte("clock_in", `${today}T00:00:00`).order("clock_in", { ascending: false }).limit(10),
-    db.from("appointments").select("id,starts_at,ends_at,status,assigned_user_id,vehicle_id,customer_id,priority,dispatch_status,metadata,location_address,location_lat,location_lng,confirmation_code,customers(id,first_name,last_name,phone,email),vehicles(id,year,make,model,license_plate)").eq("workspace_id", workspaceId).eq("assigned_user_id", userId).not("status", "in", '("completed","cancelled","no_show")').order("starts_at", { ascending: true }).limit(50),
+    db.from("appointments").select("id,starts_at,ends_at,status,assigned_user_id,vehicle_id,customer_id,location_id,dispatch_status,metadata,confirmation_code,customers(id,first_name,last_name,phone,email),vehicles(id,year,make,model,license_plate),locations(address_line1,address_line2,city,region,postal_code,latitude,longitude)").eq("workspace_id", workspaceId).eq("assigned_user_id", userId).not("status", "in", '("completed","cancelled","no_show")').order("starts_at", { ascending: true }).limit(50),
   ]);
   if (memberError) throw memberError;
   if (presenceError) throw presenceError;
@@ -3267,8 +3401,32 @@ appointmentsRouter.get("/v1/dispatch/mobile-state", async (c: Context) => {
     resolveWorkspaceTimezone(db, workspaceId),
     resolvePrimaryServiceNames(db, workspaceId, (jobs ?? []).map((row: Record<string, unknown>) => row.id as string)),
   ]);
-  return json({ data: { member: member ?? null, presence: presence ?? null, clockEntries: clockEntries ?? [], jobs: (jobs ?? []).map((row: Record<string, unknown>) => withAppointmentTitleFields(withAppointmentStatusView(row), { timezone, primaryServiceName: primaryServiceNames.get(row.id as string) })) } });
+  return json({ data: { member: member ?? null, presence: presence ?? null, clockEntries: clockEntries ?? [], jobs: (jobs ?? []).map((row: Record<string, unknown>) => withAppointmentTitleFields(withAppointmentStatusView(withMobileJobLocation(row)), { timezone, primaryServiceName: primaryServiceNames.get(row.id as string) })) } });
 });
+
+// Flatten the linked locations row (falling back to metadata) into the
+// location_address / location_lat / location_lng fields the mobile client
+// reads on mobile-state job rows. See the handler comment above.
+function withMobileJobLocation(row: Record<string, unknown>): Record<string, unknown> {
+  const { locations, ...rest } = row;
+  const location = one(locations) as Record<string, unknown> | null;
+  const metadata = object(row.metadata);
+  const locationAddress = location
+    ? [location.address_line1, location.address_line2, location.city, location.region, location.postal_code]
+        .filter((part) => typeof part === "string" && part.trim() !== "")
+        .join(", ") || null
+    : null;
+  return {
+    ...rest,
+    location_address:
+      locationAddress ??
+      (typeof metadata.location_address === "string" && metadata.location_address.trim() !== ""
+        ? metadata.location_address
+        : null),
+    location_lat: location?.latitude ?? metadata.location_lat ?? null,
+    location_lng: location?.longitude ?? metadata.location_lng ?? null,
+  };
+}
 
 // POST /v1/dispatch/technician-location — update live location + presence via RPC.
 appointmentsRouter.post("/v1/dispatch/technician-location", async (c: Context) => {
@@ -3390,6 +3548,9 @@ appointmentsRouter.post("/v1/dispatch-runs", async (c: Context) => {
     .insert({
       workspace_id: workspaceId,
       technician_id,
+      // Step 4: the list read filters .eq("user_id", ...) — stamp it
+      // alongside created_by so the shipped filter is honest.
+      user_id,
       van_id: van_id ?? null,
       run_date,
       status: "draft",
@@ -3415,6 +3576,7 @@ appointmentsRouter.post("/v1/dispatch-runs/:id/stops", async (c: Context) => {
   const { data, error } = await (supabase as any)
     .from("route_stops")
     .insert({
+      workspace_id: workspaceId,
       dispatch_run_id: id,
       work_order_id,
       sequence_order,

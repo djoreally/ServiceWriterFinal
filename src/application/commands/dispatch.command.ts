@@ -38,16 +38,15 @@ export async function assignDispatchJob(input: DispatchAssignmentInput): Promise
   }
 }
 
-/** Public bookings remain unassigned until a dispatcher/staff member assigns them. */
-export async function autoDispatchPublicBooking(_input: {
-  businessUserId: string;
-  appointmentId: string;
-  zipCode?: string | null;
-  notes?: string | null;
-}): Promise<{ assigned: boolean; technician_id?: string | null; reason?: string }> {
-  return { assigned: false, technician_id: null, reason: "manual_dispatch_required" };
-}
-
+/**
+ * Public bookings are auto-dispatched server-side at the creation
+ * boundary (Auto-Dispatch v1 — see src/server/appointments/auto-dispatch.ts)
+ * when the workspace flag is on and exactly one eligible technician
+ * exists; otherwise they remain unassigned until a dispatcher/staff
+ * member assigns them. There is deliberately no client-side dispatch
+ * command: the former stub that claimed this surface always answered
+ * "manual_dispatch_required" and has been retired.
+ */
 export async function assignTechnician(appointmentId: string, technicianId: string, notes?: string | null): Promise<void> {
   return assignDispatchJob({ jobSource: "appointment", jobId: appointmentId, technicianId, notes });
 }

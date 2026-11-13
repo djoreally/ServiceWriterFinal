@@ -142,11 +142,25 @@ export async function completeAppointmentWithServiceRecord(
     if (options?.filterParts?.length) metadata.filter_parts = formatFilterPartsForDisplay(options.filterParts);
 
     if (options?.additionalNotes || options?.oilQuartsUsed != null || Object.keys(metadata).length) {
+      // Partial-update guard (SW-42): the server PATCH replaces the metadata
+      // column with what it is sent. This enrichment builds metadata only
+      // from the options it was passed, so sending it bare erased every
+      // pre-existing metadata key on the freshly created record
+      // (service_number and friends). Merge over the stored metadata first.
+      let mergedMetadata: Record<string, unknown> | undefined;
+      if (Object.keys(metadata).length) {
+        const current = await nextApi.serviceRecords.get(workspace_id, serviceId);
+        const currentRow = current.data as { metadata?: unknown } | null;
+        const storedMetadata = currentRow?.metadata && typeof currentRow.metadata === "object" && !Array.isArray(currentRow.metadata)
+          ? currentRow.metadata as Record<string, unknown>
+          : {};
+        mergedMetadata = { ...storedMetadata, ...metadata };
+      }
       await nextApi.serviceRecords.update(serviceId, {
         workspace_id,
         ...(options?.additionalNotes ? { internal_notes: options.additionalNotes } : {}),
         ...(options?.oilQuartsUsed != null ? { oil_quarts_used: options.oilQuartsUsed } : {}),
-        ...(Object.keys(metadata).length ? { metadata } : {}),
+        ...(mergedMetadata ? { metadata: mergedMetadata } : {}),
       });
     }
     return { success: true, serviceId };

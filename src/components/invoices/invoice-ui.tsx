@@ -20,6 +20,20 @@ export function invoiceBalance(row: InvoiceMoneyRow): number {
   return Math.max(Number(row.total) - Number(row.amount_paid || 0), 0);
 }
 
+const OWED_STATUSES = new Set(["sent", "partial", "past_due"]);
+
+/**
+ * THE one owed definition (Fix 2 — the same rule the dashboard composes
+ * server-side): an invoice is owed when it has been sent and still carries
+ * a balance. In the client status vocabulary: sent / partial / past_due
+ * with balance > $0.01. Drafts are not owed — nothing has been asked of
+ * the customer yet — and paid/void are settled. Every surface that counts
+ * what is owed (Invoices page, Financials Overview) uses this helper.
+ */
+export function isOwedInvoice(row: InvoiceMoneyRow): boolean {
+  return OWED_STATUSES.has(row.status) && invoiceBalance(row) > 0.01;
+}
+
 /** True when the invoice is past due and still has a balance. */
 export function isInvoiceOverdue(row: InvoiceMoneyRow): boolean {
   if (!row.due_date || SETTLED_STATUSES.has(row.status)) return false;

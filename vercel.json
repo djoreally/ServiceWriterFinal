@@ -15,6 +15,14 @@
     {
       "path": "/api/internal/crm/newsletter/weekly",
       "schedule": "0 15 * * *"
+    },
+    {
+      "path": "/api/internal/reports/morning-read",
+      "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/internal/carfax/daily",
+      "schedule": "30 6 * * *"
     }
   ],
   "git": {

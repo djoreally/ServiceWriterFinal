@@ -10,6 +10,8 @@ import {
   signUpCustomer,
   createCustomerAccount,
   resetPassword,
+  updateCustomerPassword,
+  signOutCustomer,
 } from "@/application/commands/customer-auth.command";
 import { beginAuthInteraction } from "@/lib/authInteractionLock";
 
@@ -116,7 +118,57 @@ export default function CustomerAuth({ providerId, providerName, onSuccess, retu
   const [resetEmail, setResetEmail] = useState("");
   const [resetSent, setResetSent] = useState(false);
 
+  // Password-recovery landing state. Reset emails point back to this page
+  // with ?reset=true; when Supabase establishes the recovery session it
+  // emits PASSWORD_RECOVERY, and only then may a new password be set.
+  const wantsRecovery = searchParams.get("reset") === "true";
+  const [recoveryMode, setRecoveryMode] = useState(false);
+  const [recoveryChecked, setRecoveryChecked] = useState(!wantsRecovery);
+  const [recoveryDismissed, setRecoveryDismissed] = useState(false);
+  const recoveryInvalid =
+    wantsRecovery && recoveryChecked && !recoveryMode && !recoveryDismissed;
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+
   useEffect(() => {
+    // Recovery landing: the reset email returns here with ?reset=true and a
+    // recovery session. Show the set-new-password form instead of running
+    // the normal already-signed-in redirect to the dashboard.
+    if (wantsRecovery) {
+      let active = true;
+      const { data: { subscription } } = onAuthStateChange(
+        (event, session) => {
+          if (!active) return;
+          if (event === "PASSWORD_RECOVERY" && session?.user) {
+            setRecoveryMode(true);
+            setRecoveryChecked(true);
+            setCheckingAuth(false);
+          }
+        }
+      );
+
+      void getAuthUser()
+        .then((user) => {
+          if (!active) return;
+          if (user) {
+            // The recovery session was already established from the link.
+            setRecoveryMode(true);
+          }
+          setRecoveryChecked(true);
+          setCheckingAuth(false);
+        })
+        .catch(() => {
+          if (!active) return;
+          setRecoveryChecked(true);
+          setCheckingAuth(false);
+        });
+
+      return () => {
+        active = false;
+        subscription.unsubscribe();
+      };
+    }
+
     // Check if already logged in as customer
     const checkAuth = async () => {
       const user = await getAuthUser();
@@ -150,9 +202,46 @@ export default function CustomerAuth({ providerId, providerName, onSuccess, retu
     );
     
     checkAuth();
-    
+
     return () => subscription.unsubscribe();
-  }, [navigate, onSuccess, returnTo]);
+  }, [navigate, onSuccess, returnTo, wantsRecovery]);
+
+  const handleSetNewPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    try {
+      passwordSchema.parse(newPassword);
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        toast.error(err.issues[0].message);
+        return;
+      }
+    }
+    if (newPassword !== confirmNewPassword) {
+      toast.error("Passwords do not match.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { error } = await updateCustomerPassword(newPassword);
+      if (error) throw error;
+
+      // End the one-time recovery session; the customer proves the new
+      // password at the normal sign-in form.
+      await signOutCustomer();
+      toast.success("Password updated. Sign in with your new password.");
+      setRecoveryMode(false);
+      setNewPassword("");
+      setConfirmNewPassword("");
+      setActiveTab("login");
+    } catch (error: unknown) {
+      const err = error as Error;
+      toast.error(err.message || "Unable to update your password.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -264,6 +353,21 @@ export default function CustomerAuth({ providerId, providerName, onSuccess, retu
 
       if (error) throw error;
 
+      // Supabase answers an already-registered email with an obfuscated
+      // success: a user object whose identities list is empty, and no new
+      // account (or password) is created. Say so plainly instead of telling
+      // the customer to check an inbox that will never confirm anything.
+      if (
+        data.user &&
+        Array.isArray(data.user.identities) &&
+        data.user.identities.length === 0
+      ) {
+        toast.error("This email is already registered. Please login instead.");
+        setActiveTab("login");
+        setLoginEmail(signupEmail);
+        return;
+      }
+
       if (data.user) {
         // Create customer account, link to provider if provided
         await createCustomerAccount(
@@ -314,8 +418,85 @@ export default function CustomerAuth({ providerId, providerName, onSuccess, retu
 
       <div className="w-full max-w-sm relative z-10">
 
+        {/* ── SET NEW PASSWORD (recovery landing) ── */}
+        {recoveryMode && (
+          <div className="bg-card rounded-3xl shadow-xl p-8 space-y-6">
+            <div className="h-32 mx-auto w-48">
+              <ResetIllustration />
+            </div>
+
+            <div className="text-center">
+              <h1 className="text-2xl font-bold text-slate-800">Set a New Password</h1>
+              <p className="text-sm text-slate-400 mt-1">
+                Choose a new password for your account
+              </p>
+            </div>
+
+            <form onSubmit={handleSetNewPassword} className="space-y-4">
+              <IconInput
+                id="recovery-new-password"
+                icon={Lock}
+                type="password"
+                placeholder="New password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                required
+                disabled={loading}
+              />
+              <IconInput
+                id="recovery-confirm-password"
+                icon={Lock}
+                type="password"
+                placeholder="Confirm new password"
+                value={confirmNewPassword}
+                onChange={(e) => setConfirmNewPassword(e.target.value)}
+                required
+                disabled={loading}
+              />
+              <Button
+                type="submit"
+                disabled={loading}
+                className="w-full h-11 rounded-xl font-semibold"
+              >
+                {loading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                Update Password
+              </Button>
+            </form>
+          </div>
+        )}
+
+        {/* ── RECOVERY LINK INVALID / EXPIRED ── */}
+        {recoveryInvalid && (
+          <div className="bg-card rounded-3xl shadow-xl p-8 space-y-6">
+            <div className="h-32 mx-auto w-48">
+              <ResetIllustration />
+            </div>
+
+            <div className="text-center">
+              <h1 className="text-2xl font-bold text-slate-800">Reset Link Expired</h1>
+              <p className="text-sm text-slate-600 mt-1">
+                This password reset link is invalid, expired, or has already been used.
+              </p>
+            </div>
+
+            <Button
+              className="w-full h-11 rounded-xl font-semibold"
+              onClick={() => { setRecoveryDismissed(true); setActiveTab("reset"); }}
+            >
+              Send a New Reset Link
+            </Button>
+            <button
+              type="button"
+              className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700 mx-auto"
+              onClick={() => { setRecoveryDismissed(true); setActiveTab("login"); }}
+            >
+              <ArrowLeft className="h-3 w-3" /> Back to Sign In
+            </button>
+          </div>
+        )}
+
         {/* ── RESET PASSWORD ── */}
-        {activeTab === "reset" && (
+        {activeTab === "reset" && !recoveryMode && !recoveryInvalid && (
           <div className="bg-white rounded-3xl shadow-xl p-8 space-y-6">
             <div className="h-32 mx-auto w-48">
               <ResetIllustration />
@@ -376,7 +557,7 @@ export default function CustomerAuth({ providerId, providerName, onSuccess, retu
         )}
 
         {/* ── LOGIN ── */}
-        {activeTab === "login" && (
+        {activeTab === "login" && !recoveryMode && !recoveryInvalid && (
           <div className="bg-white rounded-3xl shadow-xl p-8 space-y-6">
             <div className="h-32 mx-auto w-48">
               <LoginIllustration />
@@ -445,7 +626,7 @@ export default function CustomerAuth({ providerId, providerName, onSuccess, retu
         )}
 
         {/* ── REGISTER ── */}
-        {activeTab === "signup" && (
+        {activeTab === "signup" && !recoveryMode && !recoveryInvalid && (
           <div className="bg-white rounded-3xl shadow-xl p-8 space-y-6">
             <div className="h-32 mx-auto w-48">
               <RegisterIllustration />

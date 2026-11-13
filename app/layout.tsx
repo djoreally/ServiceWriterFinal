@@ -7,6 +7,7 @@ import "@fontsource-variable/plus-jakarta-sans";
 import "@fontsource-variable/jetbrains-mono";
 import "../src/index.css";
 import ClientOnlyShell from "../src/ClientOnlyShell";
+import ShellErrorBoundary from "../src/components/routing/ShellErrorBoundary";
 
 export const metadata: Metadata = {
   title: "Service Writer - Auto Shop Management Software",
@@ -36,8 +37,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="en" suppressHydrationWarning>
       <body>
         <div id="root">
-          <ClientOnlyShell />
-          {children}
+          <ShellErrorBoundary>
+            <ClientOnlyShell />
+            {children}
+          </ShellErrorBoundary>
         </div>
       </body>
     </html>

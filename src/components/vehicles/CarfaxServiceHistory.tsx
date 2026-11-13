@@ -146,13 +146,12 @@ export function CarfaxServiceHistory({ vin, vehicleName }: CarfaxServiceHistoryP
             <div className="flex items-start gap-3">
               <Info className="h-5 w-5 text-yellow-600 mt-0.5" />
               <div>
-                <p className="font-medium text-yellow-600">CARFAX API Not Configured</p>
+                <p className="font-medium text-yellow-600">CARFAX Service History Not Enabled</p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  To enable CARFAX service history lookups, add your CARFAX API credentials 
-                  in Settings → CARFAX Integration.
-                </p>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Required secrets: CARFAX_API_KEY, CARFAX_ACCOUNT_ID
+                  Service History Check activates with the product-data-id CARFAX issues
+                  during onboarding. Once CARFAX provides it, it is stored in
+                  Settings → CARFAX Integration and lookups run through CARFAX's
+                  servicesocket endpoint.
                 </p>
               </div>
             </div>

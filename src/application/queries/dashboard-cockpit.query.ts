@@ -311,7 +311,11 @@ export async function fetchDashboardCockpit(): Promise<CockpitData | null> {
     collectedYesterday: sumNetCollectedDollars(inRange(yesterdayStart, yesterdayEnd)),
     collectedWeek: sumNetCollectedDollars(inRange(weekStart)),
     collectedMonth: sumNetCollectedDollars(inRange(monthStart)),
-    collectedYTD: sumNetCollectedDollars(receipts),
+    // YTD is a bucket like the others, not a raw sum of the fetch: a
+    // receipt's collected_at is its job's date, which can precede the
+    // fetch window (a back-dated closeout paid this year for last year's
+    // job belongs to last year everywhere, YTD included).
+    collectedYTD: sumNetCollectedDollars(inRange(yearStart)),
     collectedPrevMonthMTD: sumNetCollectedDollars(inRange(prevMonthStart, prevMonthMtdEnd)),
     bookedToday: Number(day?.bookedToday ?? 0),
     jobsToday: Number(day?.jobsToday ?? todayJobs.length),

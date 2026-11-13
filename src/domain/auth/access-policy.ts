@@ -16,9 +16,14 @@ export type AccessRole = TeamRole | "customer";
 const ADMIN: AccessRole[] = ["admin", "owner"];
 const OFFICE: AccessRole[] = ["admin", "owner", "manager", "service_advisor", "receptionist", "viewer"];
 const BOARD: AccessRole[] = ["admin", "owner", "manager", "service_advisor", "receptionist", "dispatcher", "viewer"];
+// Staff sets without the viewer role (owner directive, Nov 7, 2026):
+// viewers keep the book — dashboard, appointments, customers, vehicles,
+// invoices, payments — not the operations boards and tool surfaces below.
+const BOARD_STAFF: AccessRole[] = ["admin", "owner", "manager", "service_advisor", "receptionist", "dispatcher"];
+const OFFICE_STAFF: AccessRole[] = ["admin", "owner", "manager", "service_advisor", "receptionist"];
 const SCHEDULING: AccessRole[] = [...BOARD, "fleet_manager"];
-const FLEET: AccessRole[] = ["admin", "owner", "manager", "dispatcher", "fleet_manager", "viewer"];
-const CRM: AccessRole[] = ["admin", "owner", "manager", "dispatcher", "fleet_manager", "service_advisor", "receptionist", "viewer"];
+const FLEET: AccessRole[] = ["admin", "owner", "manager", "dispatcher", "fleet_manager"];
+const CRM: AccessRole[] = ["admin", "owner", "manager", "dispatcher", "fleet_manager", "service_advisor", "receptionist"];
 const TECH: AccessRole[] = ["technician"];
 const CUSTOMER: AccessRole[] = ["customer"];
 const EVERYONE: AccessRole[] = ["admin", "owner", "manager", "dispatcher", "fleet_manager", "technician", "service_advisor", "receptionist", "viewer"];
@@ -41,7 +46,7 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
   { match: "/tutorials", roles: EVERYONE },
   { match: "/whats-new", roles: EVERYONE },
   { match: "/support", roles: EVERYONE },
-  { match: "/field-companion", roles: EVERYONE },
+  { match: "/field-companion", roles: [...OFFICE_STAFF, "dispatcher", "fleet_manager", "technician"] },
   { match: "/customer", roles: CUSTOMER },
   { match: "/customer/dashboard", roles: CUSTOMER },
   { match: "/customer/appointments", roles: CUSTOMER },
@@ -66,9 +71,14 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
   { match: "/settings/import", roles: ADMIN },
 
   // --- owner / admin only ----------------------------------------------
+  // Built-in telemetry console: owners/admins only. Tracked users
+  // (viewers included) never see it — there is no self-activity view.
+  { match: "/analytics", roles: ADMIN },
   { match: "/settings", roles: ADMIN },
   { match: "/invitations", roles: ADMIN },
   { match: "/receptionist", roles: ADMIN },
+  // Key management is owner/admin server-side (agent-api.ts ADMIN_ROLES).
+  { match: "/agent-integrations", roles: ADMIN },
   { match: "/vehicle-specs", roles: ADMIN },
   { match: "/admin", roles: ADMIN },
   { match: "/marketplace", roles: ADMIN },
@@ -76,7 +86,6 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
 
   // --- finance ----------------------------------------------------------
   { match: "/financials", roles: ADMIN },
-  { match: "/expenses", roles: ADMIN },
   { match: "/reports", roles: ADMIN },
   { match: "/operations", roles: ADMIN },
   { match: "/tax-compliance", roles: ADMIN },
@@ -85,13 +94,15 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
   { match: "/pricing-tool", roles: OFFICE },
 
   // --- dispatch board ---------------------------------------------------
-  { match: "/dispatch", roles: BOARD },
-  { match: "/dispatch-engine", roles: BOARD },
-  { match: "/command-center", roles: BOARD },
+  { match: "/dispatch", roles: BOARD_STAFF },
+  { match: "/dispatch-engine", roles: BOARD_STAFF },
+  { match: "/command-center", roles: BOARD_STAFF },
   { match: "/appointments", roles: SCHEDULING },
-  { match: "/website-bookings", roles: SCHEDULING },
+  // Owner-only per the owner's directive (Nov 6, 2026): the Website Bookings
+  // queue exposes customer names/phones/addresses and push controls.
+  { match: "/website-bookings", roles: ["owner"] },
   { match: "/messages", roles: BOARD },
-  { match: "/weather-guard", roles: BOARD },
+  { match: "/weather-guard", roles: BOARD_STAFF },
 
   // --- operations -------------------------------------------------------
   { match: "/customers", roles: BOARD },
@@ -107,18 +118,8 @@ export const ROUTE_ACCESS: RouteAccessRule[] = [
   { match: "/dashboard", roles: OFFICE },
   { match: "/inventory", roles: OFFICE },
   { match: "/subscriptions", roles: OFFICE },
-  { match: "/team-os", roles: OFFICE },
-  { match: "/technician-os", roles: OFFICE },
-
-  // --- Fleet OS ---------------------------------------------------------
-  { match: "/fleet-os/scheduler", roles: FLEET },
-  { match: "/fleet-os/command-center", roles: FLEET },
-  { match: "/fleet-os/checkin", roles: FLEET },
-  { match: "/fleet-os/tracking", roles: FLEET },
-  { match: "/fleet-os/work-orders", roles: FLEET },
-  { match: "/fleet-os/vehicles", roles: FLEET },
-  { match: "/fleet-os/help", roles: FLEET },
-  { match: "/fleet-os", roles: [...OFFICE, "fleet_manager"] },
+  { match: "/team-os", roles: OFFICE_STAFF },
+  { match: "/technician-os", roles: OFFICE_STAFF },
 ];
 
 const matches = (pathname: string, match: string) =>

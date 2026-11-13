@@ -1,3 +1,4 @@
+import { formatPhoneDisplay } from "@/lib/phone";
 import { errorMessage } from "@/lib/error-message";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sendReviewRequest } from "@/application/commands/review-request.command";
@@ -344,15 +345,15 @@ export const AppointmentDetail = ({
 
   const handleDelete = async () => {
     if (!appointment || !allowDelete) {
-      toast.error("You do not have permission to delete this appointment");
+      toast.error("You do not have permission to cancel this appointment");
       return;
     }
     const { error: deleteError } = await deleteAppointmentQuery(appointment.id);
     if (deleteError) {
-      toast.error("Failed to delete appointment");
+      toast.error("Failed to cancel appointment");
       return;
     }
-    toast.success("Appointment deleted");
+    toast.success("Appointment cancelled");
     navigate("/appointments");
   };
 
@@ -530,6 +531,15 @@ export const AppointmentDetail = ({
   const summaryTotal = summaryInvoice ? summaryInvoice.total : totalDue;
   const summaryPaid = summaryInvoice ? summaryInvoice.amount_paid : succeededPaymentTotal;
   const summaryBalance = Math.max(0, roundMoney(summaryTotal - summaryPaid));
+  // P3: the prepaid state follows the SAME invoice precedence as the
+  // summary composition — when an invoice exists, its facts decide
+  // (any amount recorded against it, or a paid status); the succeeded-
+  // payments feed is only the no-invoice fallback. Before this, the
+  // chip and the tab prop read the feed alone and could call a
+  // paid-in-full job "not prepaid".
+  const effectiveIsPrepaid = summaryInvoice
+    ? summaryInvoice.amount_paid > 0 || summaryInvoice.status === "paid"
+    : isPrepaid;
   const isEditable = appointment.status !== "completed" && appointment.status !== "cancelled";
   const canReactivate = appointment.status === "cancelled" || appointment.status === "no_show";
 
@@ -561,13 +571,21 @@ export const AppointmentDetail = ({
                 </h2>
                 <AppointmentStatusChip appointment={appointment} />
                 {appointment.confirmation_code && (
-                  <span className="font-mono text-sm uppercase tracking-wide text-muted-foreground">
+                  <span className="inline-flex items-center rounded-md border border-border bg-muted/40 px-2 py-0.5 font-mono text-xs uppercase tracking-wide text-muted-foreground">
                     Confirmation {appointment.confirmation_code}
                   </span>
                 )}
               </div>
-              <p className="mt-2 font-display text-sm font-semibold text-muted-foreground">
-                {formatDate(appointment.scheduled_date)} at {formatTimeLabel(appointment.scheduled_time, "h:mm a")} · {appointment.duration_minutes} min
+              <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+                <span className="inline-flex items-center gap-1.5">
+                  <Calendar className="h-4 w-4" aria-hidden />
+                  {formatDate(appointment.scheduled_date)} at {formatTimeLabel(appointment.scheduled_time, "h:mm a")}
+                </span>
+                <span aria-hidden="true">·</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <Clock className="h-4 w-4" aria-hidden />
+                  {appointment.duration_minutes} min
+                </span>
               </p>
             </div>
           </div>
@@ -612,7 +630,7 @@ export const AppointmentDetail = ({
               <Card className="mt-4 rounded-2xl shadow-card">
                 <CardContent className="p-0">
                   {/* Customer block */}
-                  <div className="space-y-4 p-6">
+                  <div className="p-6">
                     <div className="flex items-start justify-between gap-4">
                       <div className="min-w-0">
                         <Eyebrow>{terms.customer}</Eyebrow>
@@ -629,30 +647,31 @@ export const AppointmentDetail = ({
                       )}
                     </div>
 
+                    <div className="mt-3 divide-y divide-border/60 border-t border-border/60">
                     {customerPhone && (
                       <ClickablePhone
                         phone={customerPhone}
-                        className="flex min-h-[56px] w-full items-center gap-3 rounded-lg border px-4 font-mono text-[15px] text-foreground no-underline hover:bg-muted/40 hover:text-foreground hover:no-underline"
+                        className="flex min-h-[52px] w-full items-center gap-3 rounded-md px-2 py-2 -mx-2 text-[15px] text-foreground no-underline hover:bg-muted/40 hover:text-foreground hover:no-underline"
                         iconClassName="h-5 w-5 text-primary"
                       >
                         <span className="sr-only">Call </span>
-                        {customerPhone}
+                        {formatPhoneDisplay(customerPhone)}
                       </ClickablePhone>
                     )}
 
                     {displayEmail ? (
                       <ClickableEmail
                         email={displayEmail}
-                        className="flex min-h-[56px] w-full items-center gap-3 rounded-lg border px-4 text-[15px] text-foreground no-underline hover:bg-muted/40 hover:text-foreground hover:no-underline"
+                        className="flex min-h-[52px] w-full items-center gap-3 rounded-md px-2 py-2 -mx-2 text-[15px] text-foreground no-underline hover:bg-muted/40 hover:text-foreground hover:no-underline"
                         iconClassName="h-5 w-5 text-primary"
                       >
-                        <span className="min-w-0 flex-1 break-all font-mono text-[14px]">
+                        <span className="min-w-0 flex-1 break-all text-[15px]">
                           <span className="sr-only">Email </span>
                           {displayEmail}
                         </span>
                       </ClickableEmail>
                     ) : (
-                      <div className="flex min-h-[56px] w-full items-center gap-3 rounded-lg border border-dashed px-4 text-[15px] text-muted-foreground">
+                      <div className="flex min-h-[52px] w-full items-center gap-3 rounded-md px-2 py-2 -mx-2 text-[15px] text-muted-foreground">
                         <Mail className="h-5 w-5 shrink-0" aria-hidden />
                         No email on file
                       </div>
@@ -661,14 +680,14 @@ export const AppointmentDetail = ({
                     {address ? (
                       <button
                         onClick={openDirections}
-                        className="flex min-h-[56px] w-full items-center gap-3 rounded-lg border px-4 text-left transition-colors hover:bg-muted/40"
+                        className="flex min-h-[52px] w-full items-center gap-3 rounded-md px-2 py-2 -mx-2 text-left transition-colors hover:bg-muted/40"
                       >
                         <MapPin className="h-5 w-5 shrink-0 text-primary" aria-hidden />
-                        <span className="min-w-0 flex-1 break-words font-mono text-[14px]">{address}</span>
+                        <span className="min-w-0 flex-1 break-words text-[15px]">{address}</span>
                         <Navigation className="h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
                       </button>
                     ) : (
-                      <div className="rounded-lg border border-dashed px-4 py-4">
+                      <div className="rounded-md px-2 py-3 -mx-2">
                         <p className="text-sm text-muted-foreground">
                           No address on file for this job.{" "}
                           <button className="underline underline-offset-2" onClick={() => setEditDialogOpen(true)}>
@@ -678,6 +697,7 @@ export const AppointmentDetail = ({
                         </p>
                       </div>
                     )}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -707,7 +727,7 @@ export const AppointmentDetail = ({
                     estimatedCost={appointment.estimated_cost}
                     taxAmount={appointment.tax_amount}
                     serviceCatalogId={appointment.service_catalog_id}
-                    isPrepaid={isPrepaid}
+                    isPrepaid={effectiveIsPrepaid}
                     onTotalChange={(subtotal) => setServicesTotal(subtotal)}
                   />
                 </TabsContent>
@@ -717,11 +737,19 @@ export const AppointmentDetail = ({
                     appointmentId={appointment.id}
                     customerEmail={customerEmail}
                     customerName={customerName}
-                    isPrepaid={isPrepaid}
+                    isPrepaid={effectiveIsPrepaid}
                     estimatedTotal={totalDue}
                     taxAmount={taxAmount}
                     subtotal={estimatedCost + wasteOilFee + shopFee + surcharge}
+                    // Workspace tax_rate is a PERCENT (6 = 6%) — the tab's
+                    // amount helper relies on that contract.
                     taxRate={feeSettings?.tax_rate || undefined}
+                    // Locked quote: the tab collects exactly the recorded
+                    // balance due (invoice total − paid, else total −
+                    // collected) and never recomputes tax on the quote —
+                    // the same contract CompleteAppointmentDialog uses.
+                    priceLocked={priceLocked}
+                    lockedAmountDue={priceLocked ? summaryBalance : null}
                   />
                 </TabsContent>
 
@@ -761,7 +789,7 @@ export const AppointmentDetail = ({
               <CardHeader>
                 <div className="flex items-center justify-between gap-3">
                   <CardTitle className="font-display text-lg font-bold leading-snug">Financial summary</CardTitle>
-                  {isPrepaid && (
+                  {effectiveIsPrepaid && (
                     <span className={cn("inline-flex shrink-0 items-center rounded-full border px-2.5 py-1 text-xs font-semibold", statusToneClasses("success").chip)}>
                       Prepaid
                     </span>
@@ -920,25 +948,25 @@ export const AppointmentDetail = ({
                   </>
                 )}
 
-                {allowDelete && (
+                {allowDelete && appointment.status !== "completed" && (
                   <>
                     <Separator className="my-2" />
                     <AlertDialog>
                       <AlertDialogTrigger asChild>
                         <Button className="min-h-[56px] w-full text-base" variant="ghost">
                           <Trash2 className="mr-2 h-5 w-5 text-destructive" />
-                          <span className="text-destructive">Delete appointment</span>
+                          <span className="text-destructive">Cancel appointment</span>
                         </Button>
                       </AlertDialogTrigger>
                       <AlertDialogContent>
                         <AlertDialogHeader>
-                          <AlertDialogTitle>Delete appointment?</AlertDialogTitle>
-                          <AlertDialogDescription>This will permanently delete the appointment. This action cannot be undone.</AlertDialogDescription>
+                          <AlertDialogTitle>Cancel appointment?</AlertDialogTitle>
+                          <AlertDialogDescription>This cancels the appointment. The customer is notified by email, the calendar event is removed, and the appointment stays on record as Cancelled. It is not permanently deleted.</AlertDialogDescription>
                         </AlertDialogHeader>
                         <AlertDialogFooter>
                           <AlertDialogCancel className="min-h-[56px]">Cancel</AlertDialogCancel>
                           <AlertDialogAction onClick={handleDelete} className="min-h-[56px] bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                            Delete
+                            Cancel appointment
                           </AlertDialogAction>
                         </AlertDialogFooter>
                       </AlertDialogContent>

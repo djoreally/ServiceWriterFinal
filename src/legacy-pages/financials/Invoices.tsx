@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
-import { Plus, FileText, Search, AlertCircle, TriangleAlert } from "lucide-react";
+import { Plus, FileText, Search, AlertCircle, TriangleAlert, Eye } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { useAuth } from "@packages/auth";
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
@@ -17,6 +18,7 @@ import { InvoiceDetailDialog } from "@/components/invoices/InvoiceDetailDialog";
 import {
   invoiceBalance,
   isInvoiceOverdue,
+  isOwedInvoice,
   overdueDays,
   InvoiceStatusPill,
   OverduePill,
@@ -34,7 +36,9 @@ const FILTER_LABELS: Record<StatusFilter, string> = {
   paid: "Paid",
 };
 
-const SETTLED = new Set(["paid", "void"]);
+// THE one owed definition lives with the shared invoice money helpers
+// (isOwedInvoice in @/components/invoices/invoice-ui) — this page, the
+// dashboard, and Financials Overview all count owed the same way.
 
 function billToName(r: InvoiceListRow): string {
   return r.bill_to_type === "fleet"
@@ -56,6 +60,9 @@ export function InvoicesTab() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const debouncedSearch = useDebounce(searchQuery, 250);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkViewId = searchParams.get("view");
+  const consumedDeepLinkRef = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -77,6 +84,26 @@ export function InvoicesTab() {
     void Promise.resolve().then(() => load());
   }, [load]);
 
+  // Item #9 Step 3 (CHAIR-1): /invoices/<id> deep links land here as
+  // ?view=<id>. Once the list has loaded, open the existing detail dialog
+  // when the id resolves to a loaded invoice; an unknown id simply lands
+  // on the plain list — no error toast. The param is consumed exactly once
+  // and cleared via replace either way, so refresh/back never re-trigger
+  // the open and the dialog's own close stays closed.
+  useEffect(() => {
+    if (!deepLinkViewId || loading) return;
+    if (consumedDeepLinkRef.current === deepLinkViewId) return;
+    consumedDeepLinkRef.current = deepLinkViewId;
+    if (rows.some((r) => r.id === deepLinkViewId)) {
+      // Deferred like the load/paging effects above: the open lands a
+      // microtask after the param clear, never synchronously in the effect.
+      void Promise.resolve().then(() => setViewId(deepLinkViewId));
+    }
+    const next = new URLSearchParams(searchParams);
+    next.delete("view");
+    setSearchParams(next, { replace: true });
+  }, [deepLinkViewId, loading, rows, searchParams, setSearchParams]);
+
   const stats = useMemo(() => {
     let outstandingAmount = 0;
     let outstandingCount = 0;
@@ -87,7 +114,7 @@ export function InvoicesTab() {
     for (const r of rows) {
       collectedAmount += Number(r.amount_paid) || 0;
       const balance = invoiceBalance(r);
-      const owed = !SETTLED.has(r.status) && balance > 0.01;
+      const owed = isOwedInvoice(r);
       if (owed) {
         outstandingAmount += balance;
         outstandingCount += 1;
@@ -105,8 +132,7 @@ export function InvoicesTab() {
   const filteredRows = useMemo(() => {
     const q = debouncedSearch.trim().toLowerCase();
     return rows.filter((r) => {
-      const balance = invoiceBalance(r);
-      const owed = !SETTLED.has(r.status) && balance > 0.01;
+      const owed = isOwedInvoice(r);
       if (statusFilter === "outstanding" && !owed) return false;
       if (statusFilter === "overdue" && !isInvoiceOverdue(r)) return false;
       if (statusFilter === "paid" && r.status !== "paid") return false;
@@ -148,7 +174,7 @@ export function InvoicesTab() {
       render: (r) => {
         const balance = invoiceBalance(r);
         const overdue = isInvoiceOverdue(r);
-        const owed = !SETTLED.has(r.status) && balance > 0.01;
+        const owed = isOwedInvoice(r);
         return (
           <span className={cn(
             "font-mono tabular-nums whitespace-nowrap",
@@ -162,7 +188,7 @@ export function InvoicesTab() {
       // One slot for the amount: top right, tabular figures. No label needed.
       cardAmount: (r) => {
         const balance = invoiceBalance(r);
-        const owed = !SETTLED.has(r.status) && balance > 0.01;
+        const owed = isOwedInvoice(r);
         return owed ? formatCurrency(balance) : "Paid";
       },
     },
@@ -395,6 +421,21 @@ export function InvoicesTab() {
                 rows={pagedRows}
                 rowKey={(r) => r.id}
                 onViewRecord={(r) => setViewId(r.id)}
+                // Desktop door into InvoiceDetailDialog: ResponsiveTable only
+                // consumes onViewRecord in its mobile-card branch — on desktop
+                // the row affordance is rowActions (hover/focus reveal).
+                rowActions={(r) => (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setViewId(r.id)}
+                    aria-label={`View invoice ${r.invoice_number}`}
+                    title="View invoice"
+                  >
+                    <Eye className="h-4 w-4" />
+                  </Button>
+                )}
                 emptyState={
                   <p className="py-8 text-center text-sm text-muted-foreground">
                     No invoices match.

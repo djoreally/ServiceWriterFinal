@@ -1,5 +1,11 @@
 import { apiClient, ApiClientError } from "@/lib/api-client";
 import type { AccountingClassification, ImportedBankRow } from "@/features/accounting/accounting-engine";
+import {
+  applyVendorClassificationRules,
+  resolveVendorClassificationRules,
+  type VendorClassificationRule,
+} from "@/features/accounting/vendor-rules";
+import { fetchBookkeepingSettings } from "@/application/queries/mileage.query";
 
 export type StoredBankTransaction = {
   id: string;
@@ -9,6 +15,7 @@ export type StoredBankTransaction = {
   direction: "inflow" | "outflow";
   classification: AccountingClassification;
   confidence: number | null;
+  draw_side: "owner" | "partner" | null;
   review_status: "pending" | "approved" | "rejected";
   notes: string | null;
   created_at: string;
@@ -49,12 +56,34 @@ export async function createFinancialImport(params: {
   }
 }
 
+/**
+ * The standing vendor classification rules in force for the active
+ * workspace: its own configured list from bookkeeping settings, or the
+ * product defaults when it has never configured any. Fails soft to the
+ * defaults — a settings hiccup must never take the books down with it.
+ */
+export async function fetchActiveVendorClassificationRules(): Promise<VendorClassificationRule[]> {
+  try {
+    const settings = await fetchBookkeepingSettings();
+    return resolveVendorClassificationRules(settings.vendor_classification_rules);
+  } catch {
+    return resolveVendorClassificationRules(null);
+  }
+}
+
 export async function fetchBankTransactions(limit = 1000): Promise<StoredBankTransaction[]> {
   try {
     const { data } = await apiClient.get<{ data: StoredBankTransaction[] }>("/v1/billing/bank-transactions", {
       query: { limit: String(limit) },
     });
-    return data ?? [];
+    // Standing vendor rules are applied HERE, in the one shared read, so
+    // every surface that reads bank transactions — Accounting, Overview,
+    // Expenses — sees the same effective classification for every row
+    // and their totals can never drift apart. Stored rows are not
+    // rewritten; the stored classification remains the system of record
+    // underneath the rules.
+    const rules = await fetchActiveVendorClassificationRules();
+    return applyVendorClassificationRules(data ?? [], (row) => row.description_raw, rules);
   } catch (error) {
     throw toError(error, "Failed to fetch bank transactions.");
   }

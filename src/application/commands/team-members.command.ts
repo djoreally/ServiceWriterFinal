@@ -10,7 +10,10 @@ type TechnicianUpdate = Database["public"]["Tables"]["technicians"]["Update"];
 
 export async function addTechnician(
   userId: string,
-  data: Omit<TechnicianInsert, "user_id">,
+  // Step 4: the profile bag never carries tenancy keys — the route's
+  // user_id field keys the row and create_team_os_technician_v1 stamps
+  // workspace_id from the caller's membership server-side.
+  data: Omit<TechnicianInsert, "user_id" | "workspace_id">,
 ) {
   try {
     const response = await apiClient.post<{ data: unknown }>("/v1/tech-os/technicians", {

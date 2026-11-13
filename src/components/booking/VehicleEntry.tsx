@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { fetchVehiclePhoto } from "@/application/queries/booking-vehicle.query";
 import { decodeVinNumber } from "@/application/commands/vin.command";
+import { lookupVin } from "@/application/queries/vin-lookup.query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -18,7 +19,9 @@ import type { BookingRequirement, VehicleSelectorKind } from "@/lib/service-cate
 import { TireInventorySelector } from "@/components/booking/TireInventorySelector";
 import { TireQuantitySelector } from "@/components/booking/TireQuantitySelector";
 import { uploadBookingAssessmentPhoto } from "@/application/commands/booking-assessment.command";
+import { VinRecallNotice } from "@/components/booking/VinRecallNotice";
 import { resolveDetailingRule, type DetailingPricingRule } from "@/lib/detailing-pricing";
+import { vehicleHasRequiredIdentification, VIN_FORMAT_PATTERN } from "@/lib/booking-requirements";
 import { getInitialTireQuantities, getRequestedTireQuantity, reconcileTireQuantitiesForFitment } from "@/lib/tire-quantity";
 
 export interface VehicleData {
@@ -28,6 +31,8 @@ export interface VehicleData {
   model: string;
   engine?: string;
   licensePlate: string;
+  /** State/province the plate was issued in — the plate decoder needs it. */
+  plateState?: string;
   vin: string;
   mileage: string;
   // Vehicle specs from database
@@ -98,6 +103,14 @@ const generateYears = () => {
   return years;
 };
 
+// US state codes for the plate decoder (the provider's US lookup is
+// keyed by plate + issuing state).
+const PLATE_STATES = [
+  "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD",
+  "MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC",
+  "SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC",
+];
+
 const createEmptyVehicle = (): VehicleData => ({
   id: crypto.randomUUID(),
   year: "",
@@ -105,6 +118,7 @@ const createEmptyVehicle = (): VehicleData => ({
   model: "",
   engine: "",
   licensePlate: "",
+  plateState: "",
   vin: "",
   mileage: "",
   oilType: "",
@@ -137,6 +151,7 @@ export function VehicleEntry({
   const [activeVehicleId, setActiveVehicleId] = useState(vehicles[0]?.id || "");
   const [entryMode, setEntryMode] = useState<"manual" | "vin">("manual");
   const [vinLoading, setVinLoading] = useState(false);
+  const [plateLoading, setPlateLoading] = useState(false);
   const [fallbackMode, setFallbackMode] = useState<FallbackMode>("none");
   
   // Track processed AI results to prevent duplicate toasts
@@ -147,6 +162,15 @@ export function VehicleEntry({
 
   const activeVehicle = vehicles.find(v => v.id === activeVehicleId) || vehicles[0];
   const activeDetailingRule = activeVehicle ? resolveDetailingRule(detailingRules, activeVehicle) : null;
+
+  // Owner identification rule (standard flow): VIN or license plate identifies
+  // the vehicle; with neither, the engine is required on the manual path.
+  const identifiedByVinOrPlate = Boolean(activeVehicle) && (
+    VIN_FORMAT_PATTERN.test((activeVehicle?.vin || "").trim().toUpperCase()) ||
+    (activeVehicle?.licensePlate || "").trim().length > 0
+  );
+  const engineStillNeeded = !identifiedByVinOrPlate;
+  const showIdentificationNotice = !isTireFlow && Boolean(activeVehicle?.year && activeVehicle?.make && activeVehicle?.model) && !(activeVehicle && vehicleHasRequiredIdentification(activeVehicle));
 
   // Use vehicle specs from database for dropdowns (makes, models, engines)
   // Note: years come from generateYears() to show full range 1990-2026
@@ -391,6 +415,39 @@ export function VehicleEntry({
         transmissionFluid: spec.transmission_fluid || "",
       });
     }
+  };
+
+  const handlePlateLookup = async () => {
+    const plate = (activeVehicle?.licensePlate || "").trim();
+    const state = (activeVehicle?.plateState || "").trim();
+    if (!plate) {
+      toast.error("Please enter a license plate first");
+      return;
+    }
+    if (!state) {
+      toast.error("Please select the plate's state");
+      return;
+    }
+
+    setPlateLoading(true);
+    try {
+      // Plate → vehicle via the server plate decoder (Vehicle
+      // Databases). The fill mirrors the VIN lookup: year/make/model
+      // land on the vehicle, and the specs hook cross-fills the oil
+      // data from them exactly as it does for a decoded VIN.
+      const decoded = await lookupVin(plate, state);
+      updateVehicle(activeVehicle.id, {
+        vin: decoded.vin || activeVehicle.vin,
+        year: decoded.year ? String(decoded.year) : activeVehicle.year,
+        make: decoded.make || activeVehicle.make,
+        model: decoded.model || activeVehicle.model,
+        ...(decoded.engine ? { engine: decoded.engine } : {}),
+      });
+      toast.success("Vehicle information found!");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Plate lookup failed. Please enter manually.");
+    }
+    setPlateLoading(false);
   };
 
   const handleVinLookup = async () => {
@@ -647,7 +704,7 @@ export function VehicleEntry({
 
                 {engines.length > 1 && (
                   <div>
-                    <Label>Engine</Label>
+                    <Label>Engine{engineStillNeeded ? " *" : ""}</Label>
                     <Select 
                       value={activeVehicle?.engine || ""} 
                       onValueChange={handleEngineChange}
@@ -793,7 +850,7 @@ export function VehicleEntry({
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label>Engine (Optional)</Label>
+                    <Label>{engineStillNeeded ? "Engine *" : "Engine (Optional)"}</Label>
                     <Input
                       value={activeVehicle?.engine || ""}
                       onChange={(e) => updateVehicle(activeVehicle.id, { engine: e.target.value })}
@@ -935,18 +992,59 @@ export function VehicleEntry({
               </div>
             </div>
 
+            <div className="flex items-end gap-2">
+              <div className="w-28">
+                <Label>Plate State</Label>
+                <Select
+                  value={activeVehicle?.plateState || ""}
+                  onValueChange={(value) => updateVehicle(activeVehicle.id, { plateState: value })}
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="State" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PLATE_STATES.map((code) => (
+                      <SelectItem key={code} value={code}>{code}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handlePlateLookup}
+                disabled={plateLoading || !(activeVehicle?.licensePlate || "").trim() || !activeVehicle?.plateState}
+                className="gap-2"
+              >
+                {plateLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                Look up by plate
+              </Button>
+            </div>
+
             {entryMode === "manual" && (
               <div>
-                <Label>VIN (Optional)</Label>
+                <Label>VIN</Label>
                 <Input
                   value={activeVehicle?.vin || ""}
                   onChange={(e) => updateVehicle(activeVehicle.id, { vin: e.target.value.toUpperCase() })}
-                  placeholder="Optional - 17 characters"
+                  placeholder="17 characters"
                   maxLength={17}
                   className="mt-1 font-mono"
                 />
               </div>
             )}
+
+            {showIdentificationNotice && (
+              <p className="text-sm text-destructive">
+                This vehicle still needs one of these: its VIN, its license plate, or its engine selected above.
+              </p>
+            )}
+
+            {/* SW-68: free NHTSA recall notice — appears once a valid
+                VIN settles (typed, decoded, or filled by plate lookup);
+                renders nothing on any failure or when no recalls are
+                on file, and never blocks the booking. */}
+            <VinRecallNotice vin={activeVehicle?.vin || ""} />
           </div>
 
           {/* Actions */}

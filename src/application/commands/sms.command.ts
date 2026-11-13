@@ -11,7 +11,8 @@ import { apiClient } from "@/lib/api-client";
 export interface SendSmsParams {
   to: string;
   text: string;
-  appointmentId: string;
+  /** Optional: outreach (e.g. Reports due-for-service) has no appointment. */
+  appointmentId?: string | null;
   messageClass?: "transactional" | "marketing";
   messageType?: string;
   customerId?: string | null;

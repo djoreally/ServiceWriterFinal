@@ -19,6 +19,7 @@ import { useBookingPricing, type FeeSettings } from "@/hooks/useBookingPricing";
 import { useBookingSlots } from "@/hooks/useBookingSlots";
 import { useBookingSubmit } from "@/hooks/useBookingSubmit";
 import { useBookingTracker } from "@/hooks/useBookingTracker";
+import { useBookingFunnelTelemetry } from "@/components/analytics/useBookingFunnelTelemetry";
 import { getAnonSessionId } from "@/lib/anonSession";
 import { startPresence, stopPresence, updatePage, trackEvent } from "@/lib/livePresence";
 import { verifyLocation } from "@/application/queries/booking-context.query";
@@ -36,7 +37,7 @@ import {
   type PublicSubscriptionPlan,
 } from "@/application/queries/public-booking.query";
 import type { BookingRequirement } from "@/lib/service-category-policy";
-import { mergeBookingRequirements, vehicleMeetsBookingRequirements } from "@/lib/booking-requirements";
+import { mergeBookingRequirements, vehicleHasRequiredIdentification, vehicleMeetsBookingRequirements } from "@/lib/booking-requirements";
 import type { DetailingPricingRule } from "@/lib/detailing-pricing";
 import { fetchPublicDetailingPricingRules } from "@/application/queries/detailing-pricing.query";
 import { Button } from "@/components/ui/button";
@@ -62,7 +63,9 @@ import { applyProviderVerticalDefault } from "@/lib/service-category-policy";
 import { LocationStep } from "@/components/booking/steps/LocationStep";
 import { VehicleStep } from "@/components/booking/steps/VehicleStep";
 import { ServiceSelectionStep, type ServiceCatalogItem } from "@/components/booking/steps/ServiceSelectionStep";
+import { usePublicServiceMenu } from "@/hooks/usePublicServiceMenu";
 import { ConfirmationStep } from "@/components/booking/steps/ConfirmationStep";
+import { BookingCardPayment } from "@/components/booking/BookingCardPayment";
 import { DateTimeStep } from "@/components/booking/steps/DateTimeStep";
 import { ContactPaymentStep } from "@/components/booking/steps/ContactPaymentStep";
 import { CheckoutOptionsStep } from "@/components/booking/steps/CheckoutOptionsStep";
@@ -435,6 +438,8 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
 
   const needsTireFitment = bookingRequirements.includes("tire_fitment");
   const needsOilFitment = bookingRequirements.includes("oil_fitment") && categoryPolicy.showsFluidSpecs;
+  /** Tire-only bookings identify the vehicle by fitment and have no engine field. */
+  const isTireOnlyFlow = needsTireFitment && !needsOilFitment;
 
   /** Ids of selected services whose category requires a detailing assessment. */
   const detailingServiceIds = useMemo(() => services
@@ -600,6 +605,29 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
     scheduledTime: bs.selectedTime || null,
     succeeded: bs.step === 6,
   });
+
+  // Built-in telemetry — the shop's own booking-funnel analytics
+  // (services viewed/selected, prices shown, drop-off, confirmation),
+  // recorded into Service Writer's own telemetry store under one
+  // visitor session. Fire-and-forget; never affects booking.
+  useBookingFunnelTelemetry({
+    ownerUserId: business?.user_id,
+    step: bs.step,
+    step5View,
+    services,
+    selectedServices: bs.selectedServices,
+    selectedDate: bs.selectedDate,
+    selectedTime: bs.selectedTime,
+    grandTotal: pricing.grandTotal,
+    payNowStatus: bs.payNow?.status,
+  });
+
+  // ── Service Menu (Step 3) ─────────────────────────────────────────────
+  // Resolved public menu for this shop's booking slug (null when the shop
+  // has not enabled one or the load fails). Passed into the service
+  // selection step, which renders it above the catalog and wires its
+  // entries into the step's normal per-vehicle selection pathway.
+  const serviceMenu = usePublicServiceMenu(slug);
 
   // ── Category-driven vehicle selector policy ─────────────────────────────
   // Tire categories use the wheel/tire configurator and never show fluid specs.
@@ -1018,7 +1046,14 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
         return !!bs.customerAddress.trim() && !!bs.city.trim() && !!bs.state.trim() && !!bs.zipCode.trim();
       case 2: {
         const enteredVehicles = bs.vehicles.filter((vehicle) => vehicle.year || vehicle.make || vehicle.model);
-        return enteredVehicles.length > 0 && enteredVehicles.every((vehicle) => vehicleMeetsBookingRequirements(vehicle, ["basic_vehicle"]));
+        if (enteredVehicles.length === 0) return false;
+        if (!enteredVehicles.every((vehicle) => vehicleMeetsBookingRequirements(vehicle, ["basic_vehicle"]))) return false;
+        // Owner rule: every vehicle must be identifiable — its VIN or its
+        // license plate (one or the other, never both). With neither, the
+        // manual year/make/model path also requires the engine. The tire-only
+        // flow has no engine field and identifies by fitment, so it is exempt.
+        if (!isTireOnlyFlow && !enteredVehicles.every((vehicle) => vehicleHasRequiredIdentification(vehicle))) return false;
+        return true;
       }
       case 3: {
         const enteredVehicles = bs.vehicles.filter((vehicle) => vehicle.year && vehicle.make && vehicle.model);
@@ -1047,8 +1082,17 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
     switch (bs.step) {
       case 1:
         return "Enter your full address to check the service area.";
-      case 2:
+      case 2: {
+        const enteredVehicles = bs.vehicles.filter((vehicle) => vehicle.year || vehicle.make || vehicle.model);
+        if (enteredVehicles.length === 0) return "Add at least one vehicle to continue.";
+        if (!enteredVehicles.every((vehicle) => vehicleMeetsBookingRequirements(vehicle, ["basic_vehicle"]))) {
+          return "Select year, make and model for each vehicle to continue.";
+        }
+        if (!isTireOnlyFlow && !enteredVehicles.every((vehicle) => vehicleHasRequiredIdentification(vehicle))) {
+          return "Add the VIN or license plate for each vehicle — or select its engine — to continue.";
+        }
         return "Add at least one vehicle to continue.";
+      }
       case 3:
         return "Choose a service to continue.";
       case 4:
@@ -1315,7 +1359,9 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
 
         {/* Step 3: Assign services independently to each vehicle */}
         {bs.step === 3 && (
+          <>
           <ServiceSelectionStep
+            serviceMenu={serviceMenu}
             services={services}
             packages={packages}
             subscriptionPlans={subscriptionPlans}
@@ -1336,6 +1382,7 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
             serviceDisplayMode={business?.service_display_mode || "full_list"}
             detailingRules={detailingRules}
           />
+          </>
         )}
 
         {/* Step 4: Date & Time */}
@@ -1514,9 +1561,12 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
           />
         )}
 
-        {/* Step 6: Confirmation — pay-later bookings land here (pay-now goes
-            to /booking-success). Fire the Meta Purchase conversion with the
-            appointment total so offline-payment bookings are tracked too. */}
+        {/* Step 6: Confirmation — pay-later bookings land here directly;
+            Stripe pay-now bookings land here too, but render the in-page
+            card payment first (BookingCardPayment) until the payment
+            settles server-side or the guest opts to pay at service.
+            Fire the Meta Purchase conversion with the appointment total
+            so offline-payment bookings are tracked too. */}
         {bs.step === 6 && (
           <>
             {business?.user_id && (
@@ -1526,6 +1576,21 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
                 value={pricing.getGrandTotal()}
               />
             )}
+            {bs.payNow?.status === "awaiting_payment" && business?.payment_provider === "stripe" && slug ? (
+              <BookingCardPayment
+                slug={slug}
+                appointmentId={bs.payNow.appointmentId}
+                email={bs.payNow.email}
+                formatCurrency={pricing.formatCurrency}
+                onSettled={() => {
+                  dispatch({ type: "SET_PAYNOW_STATUS", status: "settled" });
+                  toast.success("Payment received — thank you!");
+                }}
+                onContinueWithoutOnlinePayment={() =>
+                  dispatch({ type: "SET_PAYNOW_STATUS", status: "skipped" })
+                }
+              />
+            ) : (
             <ConfirmationStep
               businessName={business?.business_name || "Auto Shop"}
               guestEmail={bs.guestEmail}
@@ -1542,6 +1607,7 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
               getGrandTotal={pricing.getGrandTotal}
               confirmationEmailStatus={bs.confirmationEmailStatus}
             />
+            )}
           </>
         )}
 

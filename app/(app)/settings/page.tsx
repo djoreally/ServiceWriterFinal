@@ -57,6 +57,7 @@ const SETTINGS_TAB_ALIASES: Readonly<Record<string, string>> = {
   "google-calendar": "integrations",
   inspection: "integrations",
   inspections: "integrations",
+  carfax: "integrations",
   "link-health": "integrations",
 
   advanced: "advanced",

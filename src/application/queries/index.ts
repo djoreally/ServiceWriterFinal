@@ -149,6 +149,9 @@ export {
 
 export {
   fetchAppointmentsPageData,
+  fetchAppointmentsWindowData,
+  fetchAppointmentDirectories,
+  mapWindowAppointments,
   type AppointmentWithSource,
   type AppointmentsPageData,
   type AppointmentsPageErrors,
@@ -331,7 +334,14 @@ export {
 
 export {
   fetchAppointmentPayments,
+  fetchAppointmentPaymentsWithState,
+  isManualAdjustmentRow,
+  isProviderSyncArtifact,
+  sumPendingPaymentsCents,
+  sumSucceededPaymentsCents,
   type AppointmentPaymentRow,
+  type AppointmentPaymentState,
+  type AppointmentPaymentsResult,
 } from './appointment-payments.query';
 
 export {

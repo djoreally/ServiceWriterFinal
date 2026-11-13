@@ -3,8 +3,8 @@
  */
 
 import { apiClient } from "@/lib/api-client";
-import { format, subMonths, parseISO } from "date-fns";
 import { getCurrentAuthUser } from "@/lib/auth/current-user";
+import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";
 
 // Realtime subscriptions stay on the browser client (HTTP-only apiClient cannot
 // subscribe); re-exported here so existing imports keep working.
@@ -34,7 +34,11 @@ export interface TestimonialRow {
 
 export async function fetchTestimonials(): Promise<TestimonialRow[]> {
   await requireUser();
-  const { data } = await apiClient.get<{ data: TestimonialRow[] }>("/v1/crm/marketing/testimonials");
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) throw new Error("Select a workspace before viewing testimonials.");
+  const { data } = await apiClient.get<{ data: TestimonialRow[] }>("/v1/crm/marketing/testimonials", {
+    query: { workspace_id: workspaceId },
+  });
   return data ?? [];
 }
 
@@ -72,8 +76,11 @@ export async function fetchReviewDashboardData(): Promise<{
   requests: ReviewRequestRow[];
 }> {
   await requireUser();
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) throw new Error("Select a workspace before viewing the review dashboard.");
   const { data } = await apiClient.get<{ data: { analytics: ReviewAnalyticsData | null; requests: ReviewRequestRow[] } }>(
     "/v1/crm/marketing/review-dashboard",
+    { query: { workspace_id: workspaceId } },
   );
   return data;
 }
@@ -95,7 +102,11 @@ export interface MarketingAnalyticsResult {
 
 export async function fetchMarketingAnalytics(): Promise<MarketingAnalyticsResult> {
   await requireUser();
-  const { data } = await apiClient.get<{ data: MarketingAnalyticsResult }>("/v1/crm/marketing/analytics");
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) throw new Error("Select a workspace before viewing marketing analytics.");
+  const { data } = await apiClient.get<{ data: MarketingAnalyticsResult }>("/v1/crm/marketing/analytics", {
+    query: { workspace_id: workspaceId },
+  });
   return data;
 }
 
@@ -130,43 +141,17 @@ export interface LTVDataResult {
   monthlyRevenue: MonthlyRevenuePoint[];
 }
 
-interface LTVRawPayment { created_at: string; amount: number | null; status: string; appointment_id: string | null; }
-interface LTVRawService { service_date: string; total_cost: number | null; }
-
 export async function fetchLTVData(): Promise<LTVDataResult> {
   await requireUser();
-  const { data } = await apiClient.get<{ data: { customers: LTVCustomer[]; payments: LTVRawPayment[]; services: LTVRawService[] } }>(
-    "/v1/crm/marketing/ltv",
-  );
-
-  const customers = data.customers ?? [];
-
-  // Build monthly revenue map
-  const monthlyMap = new Map<string, { revenue: number; services: number }>();
-
-  (data.payments ?? []).forEach((p) => {
-    const month = format(parseISO(p.created_at), "MMM yyyy");
-    const existing = monthlyMap.get(month) || { revenue: 0, services: 0 };
-    monthlyMap.set(month, {
-      revenue: existing.revenue + (p.amount || 0) / 100,
-      services: existing.services + 1,
-    });
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) throw new Error("Select a workspace before viewing customer lifetime value.");
+  // The endpoint computes LTV server-side from the canonical ledger (paid
+  // invoices + service records, workspace-scoped); this adapter only carries
+  // the selected workspace and passes the derived shape through.
+  const { data } = await apiClient.get<{ data: LTVDataResult }>("/v1/crm/marketing/ltv", {
+    query: { workspace_id: workspaceId },
   });
-
-  (data.services ?? []).forEach((s) => {
-    const month = format(parseISO(s.service_date), "MMM yyyy");
-    const existing = monthlyMap.get(month) || { revenue: 0, services: 0 };
-    monthlyMap.set(month, {
-      revenue: existing.revenue,
-      services: existing.services + 1,
-    });
-  });
-
-  const monthlyRevenue = Array.from(monthlyMap.entries()).map(
-    ([month, point]) => ({ month, ...point })
-  );
-
-  return { customers, monthlyRevenue };
+  return { customers: data.customers ?? [], monthlyRevenue: data.monthlyRevenue ?? [] };
 }
 
 // ── Additional marketing UI queries (segmentation, abandoned bookings, retention analytics, live visitors) ──
@@ -234,9 +219,11 @@ export interface RetentionSignalRow {
   customer_id: string | null;
 }
 
-export async function fetchRetentionSignalsSince(userId: string, sinceISO: string) {
+export async function fetchRetentionSignalsSince(_userId: string, sinceISO: string) {
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) throw new Error("Select a workspace before viewing retention signals.");
   const { data } = await apiClient.get<{ data: RetentionSignalRow[] }>("/v1/crm/marketing/retention-signals-since", {
-    query: { since: sinceISO },
+    query: { since: sinceISO, workspace_id: workspaceId },
   });
   return (data ?? []) as RetentionSignalRow[];
 }
@@ -249,9 +236,11 @@ export interface ServiceReminderRow {
   customer_id: string | null;
 }
 
-export async function fetchServiceRemindersSince(userId: string, sinceISO: string) {
+export async function fetchServiceRemindersSince(_userId: string, sinceISO: string) {
+  const workspaceId = getSelectedWorkspaceId();
+  if (!workspaceId) throw new Error("Select a workspace before viewing service reminders.");
   const { data } = await apiClient.get<{ data: ServiceReminderRow[] }>("/v1/crm/marketing/service-reminders-since", {
-    query: { since: sinceISO },
+    query: { since: sinceISO, workspace_id: workspaceId },
   });
   return (data ?? []) as ServiceReminderRow[];
 }

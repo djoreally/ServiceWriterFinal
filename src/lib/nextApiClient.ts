@@ -90,6 +90,37 @@ export const nextApi = {
         `/v1/public-booking/${encodeURIComponent(slug)}/confirmation`,
         { method: "POST", body: JSON.stringify(payload) },
       ),
+    createPaymentIntent: (slug: string, payload: { appointment_id: string; email: string }) =>
+      request<{
+        data: {
+          payment_id: string;
+          client_secret: string;
+          amount: number;
+          currency: string;
+          mode: "connect" | "direct";
+          stripe_account_id: string | null;
+          publishable_key: string | null;
+          reused: boolean;
+        };
+      }>(
+        `/v1/public-booking/${encodeURIComponent(slug)}/payment-intent`,
+        { method: "POST", body: JSON.stringify(payload) },
+      ),
+    confirmPaymentIntent: (slug: string, payload: { appointment_id: string; email: string; payment_intent_id: string }) =>
+      request<{
+        data: {
+          success: boolean;
+          settled: boolean;
+          already_recorded?: boolean;
+          status?: string;
+          payment_id: string;
+          amount_paid?: number;
+          invoice_status?: string;
+        };
+      }>(
+        `/v1/public-booking/${encodeURIComponent(slug)}/payment-intent/confirm`,
+        { method: "POST", body: JSON.stringify(payload) },
+      ),
   },
   workspaces: async (): Promise<WorkspaceMembership[]> => {
     const response = await request<{ data: unknown[] }>("/v1/workspaces");
@@ -173,17 +204,23 @@ export const nextApi = {
     updateStatus: (quoteId: string, payload: { workspace_id: string; status: "approved" | "declined"; expected_updated_at?: string | null }) => request<{ data: unknown }>(`/v1/quotes/${encodeURIComponent(quoteId)}/status`, { method: "POST", body: JSON.stringify(payload) }),
   },
   appointments: {
-    list: async (workspaceId: string) => {
+    list: async (workspaceId: string, window?: { from: string; to: string }) => {
       // The appointments API is paginated. Loading only its default first page
       // returned the 25 oldest records, which made newly-created public
       // bookings disappear from both the appointment list and calendar.
+      // The optional window (Fix 3) asks the API for one date range — the
+      // Appointments page passes the window its view shows, so the paging
+      // loop below normally completes in a single page.
       const pageSize = 100;
       const data: unknown[] = [];
       let offset = 0;
+      const windowQuery = window
+        ? `&from=${encodeURIComponent(window.from)}&to=${encodeURIComponent(window.to)}`
+        : "";
 
       for (;;) {
         const response = await request<{ data: unknown[] }>(
-          `/v1/appointments?workspace_id=${encodeURIComponent(workspaceId)}&limit=${pageSize}&offset=${offset}`,
+          `/v1/appointments?workspace_id=${encodeURIComponent(workspaceId)}&limit=${pageSize}&offset=${offset}${windowQuery}`,
         );
         data.push(...response.data);
         if (response.data.length < pageSize) break;

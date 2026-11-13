@@ -25,6 +25,7 @@ import {
   GraduationCap,
   Building2,
   Bot,
+  MousePointerClick,
 } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
 const AdminCarfaxSettings = lazy(() => import("@/components/admin/AdminCarfaxSettings").then((module) => ({ default: module.AdminCarfaxSettings })));
@@ -32,6 +33,7 @@ const AdminPlatformStats = lazy(() => import("@/components/admin/AdminPlatformSt
 const AdminUserManagement = lazy(() => import("@/components/admin/AdminUserManagement").then((module) => ({ default: module.AdminUserManagement })));
 const AdminSystemHealth = lazy(() => import("@/components/admin/AdminSystemHealth").then((module) => ({ default: module.AdminSystemHealth })));
 const AdminAuditLogs = lazy(() => import("@/components/admin/AdminAuditLogs").then((module) => ({ default: module.AdminAuditLogs })));
+const AdminUserActivity = lazy(() => import("@/components/admin/AdminUserActivity").then((module) => ({ default: module.AdminUserActivity })));
 const AdminDatabaseExplorer = lazy(() => import("@/components/admin/AdminDatabaseExplorer").then((module) => ({ default: module.AdminDatabaseExplorer })));
 const WebhookHealthDashboard = lazy(() => import("@/components/admin/WebhookHealthDashboard").then((module) => ({ default: module.WebhookHealthDashboard })));
 const AdminPlatformPlans = lazy(() => import("@/components/admin/AdminPlatformPlans").then((module) => ({ default: module.AdminPlatformPlans })));
@@ -149,6 +151,10 @@ const AdminDashboard = () => {
               <FileText className="h-4 w-4" />
               Audit Logs
             </TabsTrigger>
+            <TabsTrigger value="user-activity" className="gap-2">
+              <MousePointerClick className="h-4 w-4" />
+              User Activity
+            </TabsTrigger>
             <TabsTrigger value="database" className="gap-2">
               <Database className="h-4 w-4" />
               Database
@@ -219,6 +225,10 @@ const AdminDashboard = () => {
 
           <TabsContent value="audit" className="mt-0 min-w-0 space-y-6">
             <AdminAuditLogs />
+          </TabsContent>
+
+          <TabsContent value="user-activity" className="mt-0 min-w-0 space-y-6">
+            <AdminUserActivity />
           </TabsContent>
 
           <TabsContent value="database" className="mt-0 min-w-0 space-y-6">

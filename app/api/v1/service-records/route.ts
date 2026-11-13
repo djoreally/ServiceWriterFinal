@@ -95,7 +95,13 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const body = serviceRecordSchema.parse(await request.json());
+    const rawBody = await request.json();
+    // Keys the caller actually sent. The zod schema applies defaults
+    // (status, metadata), so the parsed body alone cannot distinguish
+    // "caller sent it" from "default filled it in" — the reuse update below
+    // needs that distinction (SW-42).
+    const sentKeys = new Set(Object.keys(rawBody && typeof rawBody === "object" ? rawBody : {}));
+    const body = serviceRecordSchema.parse(rawBody);
     const { supabase, user } = await requireWorkspaceMember(body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician"], request);
     const refs = await resolveReferences(supabase, body);
     if ("error" in refs) return refs.error;
@@ -120,7 +126,43 @@ export async function POST(request: Request) {
       const { data: existing, error: existingError } = await supabase.from("service_records").select("id,metadata").eq("workspace_id", body.workspace_id).eq("appointment_id", body.appointment_id).neq("status", "voided").order("created_at", { ascending: true }).limit(1).maybeSingle();
       if (existingError) throw existingError;
       if (existing) {
-        const { data, error } = await (supabase.from("service_records") as any).update({ ...payload, metadata: mergeMetadata(existing.metadata, meta) }).eq("workspace_id", body.workspace_id).eq("id", existing.id).select().single();
+        // Partial-update guard (SW-42): this path exists to RETURN the
+        // existing record for a duplicate create, not to rewrite it. The
+        // full create payload always carries server-derived values —
+        // financials recomputed from this request (0 when the request omits
+        // them), tax_rate null, unresolved refs null, completion fields from
+        // the defaulted status — so updating with it erased stored data the
+        // caller never mentioned. Write only what this request actually
+        // provided: sent body keys, refs that resolved (or were explicitly
+        // sent), derived financials whose inputs were sent, and completion
+        // fields when status/completed_at was sent.
+        const updatePayload: Record<string, unknown> = { metadata: mergeMetadata(existing.metadata, meta) };
+        for (const key of Object.keys(body)) {
+          if (key === "workspace_id" || key === "metadata" || !sentKeys.has(key)) continue;
+          updatePayload[key] = (body as Record<string, unknown>)[key];
+        }
+        if (refs.customerId !== null || sentKeys.has("customer_id")) updatePayload.customer_id = refs.customerId;
+        if (refs.vehicleId !== null || sentKeys.has("vehicle_id")) updatePayload.vehicle_id = refs.vehicleId;
+        // Each derived financial field is written only when its own inputs
+        // were sent: subtotal needs the subtotal or the full cost picture;
+        // tax_amount needs a tax input; total needs a total input or the
+        // complete subtotal+tax picture. Anything less would fabricate a
+        // value (usually 0) over the stored one.
+        const subtotalSent = sentKeys.has("subtotal")
+          || ["labor_cost", "parts_cost", "shop_supplies"].every((key) => meta[key] !== undefined);
+        const taxSent = sentKeys.has("tax_amount") || meta.tax_amount !== undefined
+          || sentKeys.has("tax_rate") || meta.tax_rate !== undefined;
+        const totalSent = sentKeys.has("total_amount") || meta.total_cost !== undefined;
+        if (subtotalSent) updatePayload.subtotal = subtotal;
+        if (sentKeys.has("discount_amount") || meta.discount_amount !== undefined) updatePayload.discount_amount = discount;
+        if (sentKeys.has("tax_rate") || meta.tax_rate !== undefined) updatePayload.tax_rate = taxRate;
+        if (taxSent) updatePayload.tax_amount = taxAmount;
+        if (totalSent || (subtotalSent && taxSent)) updatePayload.total_amount = total;
+        if (sentKeys.has("status") || sentKeys.has("completed_at")) {
+          updatePayload.completed_by = body.status === "completed" ? user.id : null;
+          updatePayload.completed_at = body.status === "completed" ? body.completed_at ?? now : body.completed_at ?? null;
+        }
+        const { data, error } = await (supabase.from("service_records") as any).update(updatePayload).eq("workspace_id", body.workspace_id).eq("id", existing.id).select().single();
         if (error) throw error;
         return json({ data, reused: true });
       }

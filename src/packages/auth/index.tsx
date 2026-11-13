@@ -1,5 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  SESSION_LIFE_LIMITS,
+  SessionLifeGuard,
+  isAuthRoute,
+  type SessionLifeExpiryReason,
+} from "./session-life";
 
 export type AppRole = "admin" | "moderator" | "user";
 export type Action = "create" | "read" | "update" | "delete" | "manage";
@@ -55,12 +61,112 @@ export function AuthProvider({
   const [session, setSession] = useState<FrontendSession | null>(initialSession);
   const [loading, setLoading] = useState(Boolean(authStateSource?.getSession && !initialSession));
 
+  // --- Session life guard -------------------------------------------------
+  // Enforces the inactivity timeout and absolute session-age cap from
+  // session-life.ts. The guard owns both clocks; this provider only feeds it
+  // session identity, real user activity, and the sign-out/redirect action.
+  const guardRef = useRef<SessionLifeGuard | null>(null);
+  const expiringRef = useRef(false);
+
+  const expireSession = useCallback(async (_reason: SessionLifeExpiryReason) => {
+    if (expiringRef.current) return;
+    expiringRef.current = true;
+    try {
+      if (authStateSource?.signOut) await authStateSource.signOut();
+    } catch {
+      // Even if the network sign-out fails, the local session ends here.
+    }
+    // Wipe any record a racing auth event may have begun while the sign-out
+    // was in flight; the session is over either way.
+    guardRef.current?.endSession();
+    setSession(null);
+    if (typeof window !== "undefined" && !isAuthRoute(window.location.pathname)) {
+      const returnTo = encodeURIComponent(`${window.location.pathname}${window.location.search}`);
+      try {
+        window.location.assign(`/login?returnTo=${returnTo}`);
+      } catch {
+        // Non-browser/test environments cannot navigate; the cleared session
+        // still routes through the normal route guards.
+      }
+    }
+  }, [authStateSource]);
+  const expireSessionRef = useRef(expireSession);
+  useEffect(() => {
+    expireSessionRef.current = expireSession;
+  }, [expireSession]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const guard = new SessionLifeGuard({
+      onExpire: (reason) => { void expireSessionRef.current(reason); },
+    });
+    guardRef.current = guard;
+
+    const onActivity = () => guard.recordActivity();
+    const activityEvents: Array<keyof WindowEventMap> = [
+      "pointerdown",
+      "keydown",
+      "touchstart",
+      "scroll",
+    ];
+    for (const eventName of activityEvents) {
+      window.addEventListener(eventName, onActivity, { passive: true });
+    }
+    // History navigation counts as activity even without a preceding pointer
+    // or key event (e.g. browser back/forward).
+    window.addEventListener("popstate", onActivity);
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") guard.check();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    const interval = window.setInterval(() => guard.check(), SESSION_LIFE_LIMITS.checkIntervalMs);
+
+    return () => {
+      for (const eventName of activityEvents) {
+        window.removeEventListener(eventName, onActivity);
+      }
+      window.removeEventListener("popstate", onActivity);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.clearInterval(interval);
+      if (guardRef.current === guard) guardRef.current = null;
+    };
+  }, []);
+
+  // Feed session identity to the guard. Keyed on the user id only, so a
+  // TOKEN_REFRESHED (new access token, same user) never re-begins the
+  // session and never moves either clock.
+  const sessionUserId = session?.user?.id;
+  useEffect(() => {
+    const guard = guardRef.current;
+    if (!guard) return;
+    if (sessionUserId) {
+      expiringRef.current = false;
+      guard.beginSession(sessionUserId);
+      // A persisted record may already be past a limit (the tab was closed
+      // for days while the refresh token lived on): trip it now, not at the
+      // first interval tick.
+      guard.check();
+    } else {
+      guard.endSession();
+    }
+  }, [sessionUserId]);
+
   useEffect(() => {
     let active = true;
     let receivedAuthEvent = false;
-    const result = authStateSource?.onAuthStateChange?.((_event, nextSession) => {
+    const result = authStateSource?.onAuthStateChange?.((event, nextSession) => {
       receivedAuthEvent = true;
       if (!active) return;
+      if (event === "TOKEN_REFRESHED" && guardRef.current?.handleSilentRefresh()) {
+        // A silent refresh is not activity and must not extend the session.
+        // This one arrived after a limit had already passed, so the guard
+        // tripped: expireSession is ending the session, and the refreshed
+        // session must not be applied on top of it.
+        setLoading(false);
+        return;
+      }
       setSession(nextSession);
       setLoading(false);
     });
@@ -85,6 +191,7 @@ export function AuthProvider({
     user: session?.user ?? null,
     loading,
     signOut: async () => {
+      guardRef.current?.endSession();
       if (authStateSource?.signOut) await authStateSource.signOut();
       setSession(null);
     },
@@ -240,6 +347,16 @@ export function withPermission<T, Args extends unknown[]>(check: () => { allowed
     return operation(...args);
   };
 }
+
+export {
+  SESSION_LIFE_LIMITS,
+  SESSION_LIFE_STORAGE_KEY,
+  SessionLifeGuard,
+  evaluateSessionLife,
+  type SessionLifeExpiryReason,
+  type SessionLifeLimits,
+  type SessionLifeRecord,
+} from "./session-life";
 
 export type AuthState = { session: FrontendSession | null; user: FrontendUser | null; loading: boolean };
 export type Permission = { resource: string; action: Action };

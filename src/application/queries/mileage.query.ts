@@ -1,5 +1,9 @@
 import { apiClient } from "@/lib/api-client";
 import { fetchBusinessSettings, resolveCurrentWorkspace } from "@/application/queries/settings.query";
+import {
+  normalizeVendorClassificationRules,
+  type VendorClassificationRule,
+} from "@/features/accounting/vendor-rules";
 
 export type MileageCandidate = {
   id: string;
@@ -30,6 +34,12 @@ export type BookkeepingSettings = {
   mileage_round_trip: boolean;
   mileage_rate_per_mile: number;
   minimum_cash_reserve: number;
+  /**
+   * Standing vendor classification rules configured for this workspace.
+   * null = not configured (product defaults apply at read); an array —
+   * including an empty one — is the workspace's own configured list.
+   */
+  vendor_classification_rules?: VendorClassificationRule[] | null;
 };
 
 const DEFAULTS: BookkeepingSettings = {
@@ -94,6 +104,7 @@ export async function fetchBookkeepingSettings(): Promise<BookkeepingSettings> {
     mileage_round_trip: data.mileage_round_trip !== false,
     mileage_rate_per_mile: Number(data.mileage_rate_per_mile ?? 0),
     minimum_cash_reserve: Number(data.minimum_cash_reserve ?? 0),
+    vendor_classification_rules: normalizeVendorClassificationRules(data.vendor_classification_rules),
   };
 }
 

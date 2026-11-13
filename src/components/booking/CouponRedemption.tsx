@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { validateCouponCode } from "@/application/queries";
+import { parseLinkedOfferCode } from "./offerLink";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -42,41 +43,78 @@ export const CouponRedemption = ({
     return Math.min(coupon.discount_value, subtotal);
   };
 
+  const applyCouponCode = useCallback(
+    async (code: string, fromLink: boolean): Promise<boolean> => {
+      setValidating(true);
+      setError(null);
+
+      try {
+        const validatedCoupon = await validateCouponCode(
+          businessUserId,
+          code,
+          subtotal,
+          formatCurrency,
+        );
+
+        const applied: AppliedCoupon = {
+          id: validatedCoupon.id,
+          code: validatedCoupon.code,
+          discount_type: validatedCoupon.discount_type,
+          discount_value: validatedCoupon.discount_value,
+          description: validatedCoupon.description,
+        };
+
+        onCouponApplied(applied);
+        toast.success(
+          fromLink
+            ? `Offer "${validatedCoupon.code}" from your link applied!`
+            : `Coupon "${validatedCoupon.code}" applied!`,
+        );
+        setCouponCode("");
+        return true;
+      } catch (err) {
+        // A link-carried code that fails validation stays silent: it is
+        // prefilled into the box below, and tapping Apply shows the real
+        // error. A manual apply reports its error immediately.
+        if (fromLink) {
+          setCouponCode(code);
+        } else {
+          const message = err instanceof Error ? err.message : "Failed to validate coupon. Please try again.";
+          setError(message);
+        }
+        return false;
+      } finally {
+        setValidating(false);
+      }
+    },
+    [businessUserId, subtotal, formatCurrency, onCouponApplied],
+  );
+
   const handleApplyCoupon = async () => {
     if (!couponCode.trim()) {
       setError("Please enter a coupon code");
       return;
     }
-
-    setValidating(true);
-    setError(null);
-
-    try {
-      const validatedCoupon = await validateCouponCode(
-        businessUserId,
-        couponCode,
-        subtotal,
-        formatCurrency,
-      );
-
-      const applied: AppliedCoupon = {
-        id: validatedCoupon.id,
-        code: validatedCoupon.code,
-        discount_type: validatedCoupon.discount_type,
-        discount_value: validatedCoupon.discount_value,
-        description: validatedCoupon.description,
-      };
-
-      onCouponApplied(applied);
-      toast.success(`Coupon "${validatedCoupon.code}" applied!`);
-      setCouponCode("");
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to validate coupon. Please try again.";
-      setError(message);
-    } finally {
-      setValidating(false);
-    }
+    await applyCouponCode(couponCode, false);
   };
+
+  // Offer links: a customer arriving from an offer link (?offer=CODE, the
+  // same param the MOMS website's /book page reads) should not have to
+  // retype the code. Recognize it, run it through the same validation door
+  // as the manual box, and apply it. Fail soft — no param, no change; a
+  // bad code changes nothing the customer can see.
+  const linkAttemptedRef = useRef(false);
+  useEffect(() => {
+    if (linkAttemptedRef.current || appliedCoupon || !businessUserId) return;
+    const linkedCode = parseLinkedOfferCode(window.location.search);
+    if (!linkedCode) return;
+    linkAttemptedRef.current = true;
+    // Deferred a tick so no state is set during the effect's own pass.
+    const timer = setTimeout(() => {
+      void applyCouponCode(linkedCode, true);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [appliedCoupon, businessUserId, applyCouponCode]);
 
   const handleRemoveCoupon = () => {
     onCouponApplied(null);

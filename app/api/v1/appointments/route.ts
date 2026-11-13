@@ -1,4 +1,5 @@
 import { json, errorResponse, paginationSchema, requireWorkspaceMember } from "@/server/api";
+import { composeAppointmentJobMoney } from "@/server/appointments/appointment-money";
 import { conflictWindow, validateLocalAvailability } from "@/server/scheduling/appointment-availability";
 import { syncAppointmentToGoogleCalendar } from "@/server/google-calendar/sync";
 import { manualLockedQuote, seedManualQuoteItem } from "@/server/appointments/book-appointment";
@@ -156,14 +157,53 @@ export async function GET(request: Request) {
     if (!workspaceId) throw new Error("workspace_id is required");
     const { supabase } = await requireWorkspaceMember(workspaceId, undefined, request);
     const { limit, offset } = paginationSchema.parse(Object.fromEntries(url.searchParams));
-    const { data, error } = await supabase
+    // Optional starts_at window (Fix 3): the Appointments page asks for
+    // the window its view shows instead of paging the entire history.
+    // Absent params keep the historical behavior exactly.
+    const from = url.searchParams.get("from");
+    const to = url.searchParams.get("to");
+    let query = supabase
       .from("appointments")
       .select("*,customers(id,first_name,last_name,email,phone),vehicles(id,customer_id,year,make,model,vin,license_plate,plate_region,color,mileage,notes),locations(id,name)")
-      .eq("workspace_id", workspaceId)
+      .eq("workspace_id", workspaceId);
+    if (from) query = query.gte("starts_at", from);
+    if (to) query = query.lt("starts_at", to);
+    const { data, error } = await query
       .order("starts_at")
       .range(offset, offset + limit - 1);
     if (error) throw error;
-    return json({ data: data ?? [], pagination: { limit, offset } });
+    const rows = data ?? [];
+    // NOTE (2026-11-06): this route.ts SHADOWS the Hono router's
+    // GET /v1/appointments (src/server/hono/routes/appointments.ts) —
+    // Next.js gives specific route files precedence over the
+    // app/api/[[...route]] catch-all, so THIS handler is the one
+    // production serves. The job-money composition below mirrors the
+    // Hono handler: list rows carry job_total/job_due composed from
+    // the invoice facts, so a paid job does not list as due in full
+    // via the client's locked-quote fallback. Keep the two handlers
+    // in step until the migration removes this file. A composition
+    // failure must not take the list down: rows ship without money
+    // and the client falls back as before.
+    let jobMoney = new Map<string, { total: number; due: number }>();
+    try {
+      jobMoney = await composeAppointmentJobMoney(
+        supabase as any,
+        workspaceId,
+        rows as Array<Record<string, any>>,
+      );
+    } catch (err) {
+      console.error("appointments list: job money composition failed", err);
+    }
+    return json({
+      data: rows.map((row) => {
+        const money = jobMoney.get(row.id);
+        return {
+          ...row,
+          ...(money ? { job_total: money.total, job_due: money.due } : {}),
+        };
+      }),
+      pagination: { limit, offset },
+    });
   } catch (error) {
     return errorResponse(error);
   }

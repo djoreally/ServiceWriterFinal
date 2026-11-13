@@ -329,6 +329,20 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
       ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher"],
       request,
     );
+    // A completed appointment is part of the permanent job record — it can
+    // never be cancelled/deleted through this endpoint (owner rule, Nov 7, 2026).
+    const { data: current } = await supabase
+      .from("appointments")
+      .select("status")
+      .eq("id", id)
+      .eq("workspace_id", workspaceId)
+      .maybeSingle();
+    if (current?.status === "completed") {
+      return json(
+        { error: { code: "appointment_completed", message: "A completed appointment can't be cancelled or deleted. Completed jobs are part of the permanent job record." } },
+        { status: 409 },
+      );
+    }
     const { data, error } = await supabase
       .from("appointments")
       .update({ status: "cancelled", updated_at: new Date().toISOString() })

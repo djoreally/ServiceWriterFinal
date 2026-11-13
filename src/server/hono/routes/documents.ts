@@ -25,6 +25,10 @@ import { dispatchInvoiceTransition } from "@/server/messaging/invoice-events";
 import { LIFECYCLE_EVENT_KEYS as INVOICE_LIFECYCLE_EVENT_KEYS } from "@/server/messaging/lifecycle-events";
 import { sendLifecycleEmail } from "@/server/messaging/lifecycle-sender";
 import { dispatchQuoteLifecycle, LIFECYCLE_EVENT_KEYS as QUOTE_LIFECYCLE_EVENT_KEYS } from "@/server/messaging/quote-payment-events";
+import {
+  isIntakeParseFailure,
+  runIntakeDocumentParse,
+} from "@/server/expenses/receipt-parse.service";
 
 export const documentsRouter = new Hono();
 
@@ -858,6 +862,13 @@ const fleetPaymentBodySchema = z.object({
   workspace_id: z.string().uuid(),
   amount: z.number().positive(),
   note: z.string().trim().max(2000).nullable().optional(),
+  // Restored manual-payment fields: the method set is the one
+  // ManualPaymentDialog has carried since the frontend was preserved
+  // (cash / check / external_card / other), and waive_fees is the card
+  // processing fee waiver (see the record_fleet_invoice_payment
+  // migration 20261112031000 for the reconciliation semantics).
+  payment_method: z.enum(["cash", "check", "external_card", "other"]).optional(),
+  waive_fees: z.boolean().optional(),
 });
 
 documentsRouter.post("/v1/invoices/:id/fleet-payment", async (c) => {
@@ -869,7 +880,12 @@ documentsRouter.post("/v1/invoices/:id/fleet-payment", async (c) => {
     _invoice_id: invoiceId,
     _amount: body.amount,
     _idempotency_key: `manual:${invoiceId}:${crypto.randomUUID()}`,
-    _details: { source: "fleet_invoice_ui", note: body.note ?? null },
+    _details: {
+      source: "fleet_invoice_ui",
+      note: body.note ?? null,
+      payment_method: body.payment_method ?? null,
+      waive_fees: body.waive_fees ?? false,
+    },
   });
   if (error) throw new ApiError(502, error.message || "Payment reconciliation failed", "fleet_payment_failed");
 
@@ -900,6 +916,7 @@ documentsRouter.post("/v1/invoices/:id/lifecycle-events", async (c) => {
 
   const { error } = await (supabase as any).from("invoice_lifecycle_events").insert({
     invoice_id: invoiceId,
+    workspace_id: body.workspace_id,
     user_id: user.id,
     event_type: body.event_type,
     idempotency_key: body.idempotency_key ?? null,
@@ -1461,6 +1478,7 @@ documentsRouter.post("/v1/declined-services/:id/follow-up", async (c) => {
   if (error) throw error;
 
   const { error: queueError } = await (supabase as any).from("email_queue").insert({
+    workspace_id: body.workspace_id,
     user_id: user.id,
     customer_id: body.customer_id,
     email_type: "declined_service_followup",
@@ -1579,18 +1597,34 @@ documentsRouter.post("/v1/document-intake/:id/parse", async (c) => {
 
   const { data: doc, error: docError } = await (supabase as any)
     .from("document_intake")
-    .select("id")
+    .select("*")
     .eq("id", id)
     .eq("user_id", user.id)
     .maybeSingle();
   if (docError) throw docError;
   if (!doc) throw new ApiError(404, "Document not found.", "not_found");
 
-  const { data, error } = await supabase.functions.invoke("expense-document-parse", {
-    body: { documentId: id },
+  // The reader runs in-process (src/server/expenses/receipt-parse.service.ts).
+  // It replaced the `expense-document-parse` edge function this route
+  // used to invoke: that function was never deployed (nothing in the
+  // deploy path ships Supabase functions), so every parse failed.
+  // The service records parse_failed + reason on the row itself; the
+  // 422 surfaces the same reason to the inbox toast.
+  const outcome = await runIntakeDocumentParse({ supabase }, doc);
+  if (isIntakeParseFailure(outcome)) {
+    throw new ApiError(422, outcome.reason, "parse_failed");
+  }
+  return json({
+    data: {
+      success: true,
+      confidence: outcome.confidence,
+      vin: outcome.vin,
+      vinValid: outcome.vinValid,
+      fleetVehicleId: outcome.fleetVehicleId,
+      extracted: outcome.extraction,
+      method: outcome.method,
+    },
   });
-  if (error) throw error;
-  return json({ data });
 });
 
 const intakePatchSchema = z.object({

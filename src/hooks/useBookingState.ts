@@ -95,6 +95,17 @@ export interface BookingState {
   submissionCount: number;
   confirmationEmailStatus: "pending" | "queued" | "failed";
 
+  // Pay-now (Stripe Elements): set when a booking was created with the
+  // pay_now choice and the card payment phase still has to run. Step 6
+  // renders the payment form while status is "awaiting_payment" and the
+  // confirmation only once the payment settles (server-verified) or the
+  // guest chooses to pay at time of service instead ("skipped").
+  payNow: {
+    appointmentId: string;
+    email: string;
+    status: "awaiting_payment" | "settled" | "skipped";
+  } | null;
+
   // Checkout error
   checkoutError: { type: CheckoutErrorType; message?: string } | null;
 
@@ -156,6 +167,8 @@ export type BookingAction =
   | { type: "SET_SUBMITTING"; submitting: boolean }
   | { type: "RECORD_SUBMISSION" }
   | { type: "SET_CONFIRMATION_EMAIL_STATUS"; status: BookingState["confirmationEmailStatus"] }
+  | { type: "SET_PAYNOW_PENDING"; appointmentId: string; email: string }
+  | { type: "SET_PAYNOW_STATUS"; status: "settled" | "skipped" }
   // Checkout error
   | { type: "SET_CHECKOUT_ERROR"; error: BookingState["checkoutError"] }
   // Auth dialog
@@ -286,6 +299,15 @@ function bookingReducer(state: BookingState, action: BookingAction): BookingStat
       return { ...state, submitting: action.submitting };
     case "SET_CONFIRMATION_EMAIL_STATUS":
       return { ...state, confirmationEmailStatus: action.status };
+    case "SET_PAYNOW_PENDING":
+      return {
+        ...state,
+        payNow: { appointmentId: action.appointmentId, email: action.email, status: "awaiting_payment" },
+      };
+    case "SET_PAYNOW_STATUS":
+      return state.payNow
+        ? { ...state, payNow: { ...state.payNow, status: action.status } }
+        : state;
     case "RECORD_SUBMISSION":
       return {
         ...state,
@@ -400,6 +422,7 @@ function createInitialState(savedData: SavedBookingData | null, initialStep: num
     lastSubmissionTime: 0,
     submissionCount: 0,
     confirmationEmailStatus: "pending",
+    payNow: null,
     checkoutError: null,
     emailVerified: false,
     showAuthDialog: false,

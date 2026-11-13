@@ -4,13 +4,19 @@
 import { apiClient } from "@/lib/api-client";
 import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
-export async function fetchRetentionSignals(userId: string) {
-  const { data } = await apiClient.get<{ data: any[] }>("/v1/crm/retention/signals");
+export async function fetchRetentionSignals(_userId: string) {
+  const workspaceId = await loyaltyWorkspaceId();
+  const { data } = await apiClient.get<{ data: any[] }>("/v1/crm/retention/signals", {
+    query: { workspace_id: workspaceId },
+  });
   return data;
 }
 
-export async function fetchRetentionVehicleProfiles(userId: string) {
-  const { data } = await apiClient.get<{ data: any[] }>("/v1/crm/retention/vehicle-profiles");
+export async function fetchRetentionVehicleProfiles(_userId: string) {
+  const workspaceId = await loyaltyWorkspaceId();
+  const { data } = await apiClient.get<{ data: any[] }>("/v1/crm/retention/vehicle-profiles", {
+    query: { workspace_id: workspaceId },
+  });
   return data;
 }
 

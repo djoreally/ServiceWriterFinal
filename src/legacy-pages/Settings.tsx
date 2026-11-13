@@ -48,6 +48,7 @@ import { TeamMembersSettings } from "@/components/settings/TeamMembersSettings";
 import { AutoDispatchSettings } from "@/components/settings/AutoDispatchSettings";
 import { WeatherGuardSettings } from "@/components/settings/WeatherGuardSettings";
 import { CalendarIntegration } from "@/components/settings/CalendarIntegration";
+import { CarfaxSettings } from "@/components/settings/CarfaxSettings";
 import { LinkHealthSection } from "@/components/settings/LinkHealthSection";
 import { VoiceAgentSettings } from "@/components/settings/VoiceAgentSettings";
 import { TrackingSettings } from "@/components/settings/TrackingSettings";
@@ -184,12 +185,13 @@ const SETTINGS_TABS: ReadonlyArray<SettingsTabDef> = [
   {
     id: "integrations",
     label: "Integrations",
-    description: "Calendar, inspections, link health",
+    description: "Calendar, inspections, CARFAX, link health",
     icon: Plug,
     sections: [
       { id: "calendar", label: "Google Calendar", description: "Two-way calendar sync", keywords: ["calendar", "google", "sync"] },
       { id: "inspection-templates", label: "Inspection templates", description: "Reusable checklists", keywords: ["inspection", "templates", "checklists"] },
       { id: "agent-integrations", label: "Agent integrations", description: "ChatGPT, Claude, Cursor", keywords: ["mcp", "chatgpt", "claude", "cursor", "ai", "assistant"] },
+      { id: "carfax", label: "CARFAX", description: "Service history data feed and exports", keywords: ["carfax", "service history", "data feed", "export", "vehicle history", "location id"] },
       { id: "link-health", label: "Link health", description: "Broken-link monitoring", keywords: ["links", "health", "broken", "monitoring"] },
     ],
   },
@@ -1751,6 +1753,10 @@ const Settings = () => {
                     </Button>
                   </CardContent>
                 </Card>
+              </SectionAnchor>
+
+              <SectionAnchor id="carfax" label="CARFAX">
+                <CarfaxSettings />
               </SectionAnchor>
 
               <SectionAnchor id="link-health" label="Link health">

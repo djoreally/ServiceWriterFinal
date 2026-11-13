@@ -6,10 +6,13 @@
  *
  *   1. learned  — `vehicle_service_specs`: what this shop has settled for
  *      THIS vehicle (the working spec, T-3). At-job actuals live here.
- *   2. catalog  — `vehicle_specifications`: the reference spec for the
- *      vehicle's year/make/model (engine-disambiguated, consensus-checked
- *      — see resolveCatalogOilValues). The seed when the shop has not
- *      settled a value yet.
+ *   2. catalog  — the reference spec for the vehicle's year/make/model:
+ *      the Quick Lube Data live lookup first (the platform's spec
+ *      source, composed over the legacy `vehicle_specifications`
+ *      table's engine-disambiguated, consensus-checked resolution —
+ *      see resolveCatalogOilValues — which fills only the fields QLD
+ *      leaves blank). The seed when the shop has not settled a value
+ *      yet.
  *   3. snapshot — the immutable `appointments.metadata` booking
  *      configuration. Provenance only: it surfaces when neither the
  *      learned record nor the catalog can speak for a field, and it is

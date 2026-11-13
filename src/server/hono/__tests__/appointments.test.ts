@@ -2,7 +2,7 @@
  * Grey-box tests for the appointments Hono router.
  * Drives the router over HTTP with Supabase + messaging pipelines mocked.
  */
-import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import { describe, it, expect, jest, beforeEach, afterEach } from "@jest/globals";
 import { installWebGlobals as mockInstallWebGlobals } from "../test-support/webGlobals";
 import { makeServerApiMock as mockMakeServerApiMock } from "../test-support/serverApiMock";
 import {
@@ -1039,6 +1039,205 @@ describe("appointments router", () => {
         `/v1/inspections/items?template_id=${LINKED_TEMPLATE_ID}`,
       );
       expect(res.status).toBe(200);
+    });
+  });
+
+  describe("P3 payment-state canonical read", () => {
+    // Cristina / INV-106 shape: the invoice is PAID in full; its real
+    // charge binds only through payments.invoice_id (no appointment_id in
+    // metadata), while the provider-sync working row carries the metadata
+    // key. The old payments route keyed exclusively on the metadata
+    // shortcut, so every surface reading it reported the paid job unpaid.
+    const PAID_APPT_ID = "94ead8b9-afc8-4061-85dc-469fb777f25f";
+    const PAID_INV_ID = "bb0e8400-e29b-41d4-a716-4466554400bb";
+    const MANUAL_PAY_ID = "cc0e8400-e29b-41d4-a716-4466554400cc";
+    const SYNC_PAY_ID = "dd0e8400-e29b-41d4-a716-4466554400dd";
+
+    const paidAppointmentRow = {
+      id: PAID_APPT_ID,
+      workspace_id: WS_ID,
+      source: "moms_website",
+      status: "completed",
+      starts_at: "2026-11-05T20:00:00Z",
+      ends_at: "2026-11-05T20:45:00Z",
+      metadata: {
+        pricing_state: "website_quote_locked",
+        estimated_cost: 133.83,
+        client_estimated_cost: 133.83,
+      },
+    };
+    const inv106Row = {
+      id: PAID_INV_ID,
+      workspace_id: WS_ID,
+      invoice_number: 106,
+      total: 133.83,
+      amount_paid: 133.83,
+      status: "paid",
+      created_at: "2026-11-05T16:00:00Z",
+      metadata: { appointment_id: PAID_APPT_ID },
+    };
+    const manualCloseoutRow = {
+      id: MANUAL_PAY_ID,
+      workspace_id: WS_ID,
+      invoice_id: PAID_INV_ID,
+      amount: 133.83,
+      status: "succeeded",
+      provider: "stripe",
+      provider_payment_id: "ch_3UYY1nADolYVlmkJ1cRz3W1H",
+      created_at: "2026-11-05T21:17:00Z",
+      updated_at: "2026-11-05T21:17:00Z",
+      metadata: { source: "manual_closeout", note: "Paid via Stripe payment link (manual reconcile)" },
+    };
+    const providerSyncRow = {
+      id: SYNC_PAY_ID,
+      workspace_id: WS_ID,
+      invoice_id: PAID_INV_ID,
+      amount: 133.83,
+      status: "pending",
+      provider: null,
+      provider_payment_id: null,
+      created_at: "2026-11-05T21:38:16Z",
+      updated_at: "2026-11-05T23:30:13Z",
+      metadata: {
+        source: "provider_sync",
+        appointment_id: PAID_APPT_ID,
+        payment_type: "pay_at_service",
+        stripe_sync_status: "synced",
+        stripe_invoice_id: "in_1UYa6fAeZsMzvbynylVUnkbl",
+      },
+    };
+
+    function seedPaidJob() {
+      db.workspace_members = { data: [{ workspace_id: WS_ID }], error: null };
+      db["appointments:single"] = { data: paidAppointmentRow, error: null };
+      db.appointments = { data: [paidAppointmentRow], error: null };
+      db.invoices = { data: [inv106Row], error: null };
+      db.payments = { data: [manualCloseoutRow, providerSyncRow], error: null };
+      db.appointment_items = { data: [], error: null };
+    }
+
+    describe("GET /v1/appointments/:id/payments", () => {
+      it("returns both payment rows (invoice-bound + metadata-bound), deduped, with the composed payment_state", async () => {
+        seedPaidJob();
+        const res = await appointmentsRouter.request(
+          `/v1/appointments/${PAID_APPT_ID}/payments?selected_workspace_id=${WS_ID}`,
+        );
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        const ids = (body.data as Array<{ id: string }>).map((row) => row.id).sort();
+        expect(ids).toEqual([MANUAL_PAY_ID, SYNC_PAY_ID].sort());
+        expect(body.payment_state).toMatchObject({
+          invoice_id: PAID_INV_ID,
+          invoice_status: "paid",
+          total: 133.83,
+          amount_paid: 133.83,
+          balance: 0,
+        });
+      });
+
+      it("keeps the status filter working across the widened resolution", async () => {
+        seedPaidJob();
+        const res = await appointmentsRouter.request(
+          `/v1/appointments/${PAID_APPT_ID}/payments?selected_workspace_id=${WS_ID}&status=succeeded`,
+        );
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect((body.data as Array<{ id: string }>).map((row) => row.id)).toEqual([MANUAL_PAY_ID]);
+      });
+    });
+
+    describe("GET /v1/appointments (list composition)", () => {
+      it("attaches the composed job_total/job_due — a paid job carries job_due 0", async () => {
+        seedPaidJob();
+        const res = await appointmentsRouter.request(
+          `/v1/appointments?workspace_id=${WS_ID}&limit=10&offset=0`,
+        );
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body.data).toHaveLength(1);
+        expect(body.data[0].job_total).toBe(133.83);
+        expect(body.data[0].job_due).toBe(0);
+      });
+    });
+
+    describe("POST /v1/appointments/geocode-backfill", () => {
+      const originalFetch = global.fetch;
+      const originalToken = process.env.NEXT_PUBLIC_MAPBOX_PUBLIC_TOKEN;
+
+      beforeEach(() => {
+        process.env.NEXT_PUBLIC_MAPBOX_PUBLIC_TOKEN = `pk.${"x".repeat(30)}`;
+        global.fetch = (async () => ({
+          ok: true,
+          statusText: "OK",
+          json: async () => ({ features: [{ center: [-75.1125, 40.0369] }] }),
+        })) as unknown as typeof fetch;
+        db.workspace_members = {
+          data: [{ workspace_id: WS_ID }],
+          error: null,
+        };
+      });
+
+      afterEach(() => {
+        global.fetch = originalFetch;
+        if (originalToken === undefined) delete process.env.NEXT_PUBLIC_MAPBOX_PUBLIC_TOKEN;
+        else process.env.NEXT_PUBLIC_MAPBOX_PUBLIC_TOKEN = originalToken;
+      });
+
+      it("geocodes from metadata/locations and writes coordinates into metadata only (no phantom columns)", async () => {
+        // Real production shape: no location_address / location_lat /
+        // location_lng / deleted_at columns on appointments.
+        db.appointments = {
+          data: [
+            {
+              // Address in metadata, no coordinates anywhere: backfilled.
+              id: APPT_ID,
+              metadata: { location_address: "6815 Lawnton St, Philadelphia, PA 19128", title: "Oil change" },
+              locations: null,
+            },
+            {
+              // Coordinates already on the locations row: skipped.
+              id: "990e8400-e29b-41d4-a716-446655440002",
+              metadata: {},
+              locations: {
+                address_line1: "428 Railroad Ave",
+                address_line2: null,
+                city: "Ambler",
+                region: "PA",
+                postal_code: "19002",
+                latitude: 40.1604,
+                longitude: -75.2337,
+              },
+            },
+            {
+              // No address anywhere: skipped, not an error.
+              id: "990e8400-e29b-41d4-a716-446655440003",
+              metadata: {},
+              locations: null,
+            },
+          ],
+          error: null,
+        };
+        const res = await appointmentsRouter.request("/v1/appointments/geocode-backfill", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        expect(res.status).toBe(200);
+        const body = await res.json();
+        expect(body).toEqual({ scanned: 1, geocoded: 1, failed: 0, remaining: 0 });
+        const appointmentUpdates = calls.updates.filter((u) => u.table === "appointments");
+        expect(appointmentUpdates).toHaveLength(1);
+        // The write touches ONLY the metadata column — the coordinates
+        // land in metadata.location_lat/location_lng, where the
+        // canonical readers look — and the existing metadata survives.
+        expect(Object.keys(appointmentUpdates[0].patch as Record<string, unknown>)).toEqual(["metadata"]);
+        expect((appointmentUpdates[0].patch as { metadata: Record<string, unknown> }).metadata).toEqual({
+          location_address: "6815 Lawnton St, Philadelphia, PA 19128",
+          title: "Oil change",
+          location_lat: 40.0369,
+          location_lng: -75.1125,
+        });
+      });
     });
   });
 });

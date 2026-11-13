@@ -188,6 +188,99 @@ describe("vehicles router", () => {
     });
   });
 
+  describe("GET /v1/mileage/candidates", () => {
+    const APPT_ID = "aa0e8400-e29b-41d4-a716-446655440001";
+
+    function seedWorkspace() {
+      db.workspace_members = {
+        data: [
+          {
+            workspace_id: WS_ID,
+            role: "owner",
+            is_active: true,
+            workspaces: { id: WS_ID, name: "MOMS", slug: "moms", kind: "shop", timezone: "UTC", currency_code: "USD", is_active: true },
+          },
+        ],
+        error: null,
+      };
+    }
+
+    it("resolves address and coordinates from the real appointments shape (locations row + metadata, no phantom columns)", async () => {
+      seedWorkspace();
+      // Production appointments rows carry NO location_address /
+      // location_lat / location_lng columns: the address lives in
+      // metadata and on the linked locations row.
+      db.appointments = {
+        data: [
+          {
+            // Locations row wins for both address and coordinates.
+            id: APPT_ID,
+            starts_at: "2026-11-08T15:00:00.000Z",
+            status: "completed",
+            metadata: { location_address: "999 Metadata Way", location_lat: 1, location_lng: 2 },
+            locations: {
+              address_line1: "428 Railroad Ave",
+              address_line2: null,
+              city: "Ambler",
+              region: "PA",
+              postal_code: "19002",
+              latitude: "40.1604",
+              longitude: "-75.2337",
+            },
+          },
+          {
+            // No locations row: metadata carries address + coordinates.
+            id: "aa0e8400-e29b-41d4-a716-446655440002",
+            starts_at: "2026-11-07T15:00:00.000Z",
+            status: "completed",
+            metadata: { location_address: "6815 Lawnton St, Philadelphia, PA 19128", location_lat: 40.0369, location_lng: -75.1125 },
+            locations: null,
+          },
+          {
+            // Address but no coordinates anywhere: not a candidate.
+            id: "aa0e8400-e29b-41d4-a716-446655440003",
+            starts_at: "2026-11-06T15:00:00.000Z",
+            status: "completed",
+            metadata: { location_address: "12 Nowhere Rd" },
+            locations: { address_line1: "12 Nowhere Rd", address_line2: null, city: null, region: null, postal_code: null, latitude: null, longitude: null },
+          },
+          {
+            // Nothing usable at all: not a candidate, and no error.
+            id: "aa0e8400-e29b-41d4-a716-446655440004",
+            starts_at: "2026-11-05T15:00:00.000Z",
+            status: "completed",
+            metadata: {},
+            locations: null,
+          },
+        ],
+        error: null,
+      };
+      const res = await vehiclesRouter.request(
+        `/v1/mileage/candidates?selected_workspace_id=${WS_ID}`,
+      );
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.data).toEqual([
+        {
+          id: APPT_ID,
+          starts_at: "2026-11-08T15:00:00.000Z",
+          location_address: "428 Railroad Ave, Ambler, PA, 19002",
+          location_lat: 40.1604,
+          location_lng: -75.2337,
+          status: "completed",
+        },
+        {
+          id: "aa0e8400-e29b-41d4-a716-446655440002",
+          starts_at: "2026-11-07T15:00:00.000Z",
+          location_address: "6815 Lawnton St, Philadelphia, PA 19128",
+          location_lat: 40.0369,
+          location_lng: -75.1125,
+          status: "completed",
+        },
+      ]);
+    });
+  });
+
   describe("route registration", () => {
     it("exposes the CARFAX settings endpoints", async () => {
       const res = await vehiclesRouter.request(

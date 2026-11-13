@@ -191,6 +191,94 @@ describe("appointments/route (collection)", () => {
       expect(body.data[0].id).toBe(APPOINTMENT_ID);
       expect(body.pagination).toEqual({ limit: 25, offset: 0 });
     });
+
+    it("applies the optional from/to window to the appointments query (Fix 3)", async () => {
+      const supabase = makeSupabaseClient({ appointments: { data: [], error: null } });
+      const buildersByTable = new Map<string, Array<Record<string, jest.Mock>>>();
+      const origFrom = supabase.from as unknown as jest.Mock;
+      supabase.from = jest.fn((table: string) => {
+        const builder = origFrom(table) as Record<string, jest.Mock>;
+        const list = buildersByTable.get(table) ?? [];
+        list.push(builder);
+        buildersByTable.set(table, list);
+        return builder;
+      }) as unknown as MockSupabaseClient["from"];
+      stubWorkspaceMember(api, supabase);
+      const { status } = await readJson(
+        await appointmentsGet(makeRequest(
+          `/api/v1/appointments?workspace_id=${WS_ID}&from=2026-11-08T05:00:00.000Z&to=2026-11-09T05:00:00.000Z`,
+        )),
+      );
+      expect(status).toBe(200);
+      const listBuilder = buildersByTable.get("appointments")?.[0];
+      expect(listBuilder?.gte.mock.calls).toContainEqual(["starts_at", "2026-11-08T05:00:00.000Z"]);
+      expect(listBuilder?.lt.mock.calls).toContainEqual(["starts_at", "2026-11-09T05:00:00.000Z"]);
+    });
+
+    it("keeps the historical unwindowed query when from/to are absent (Fix 3)", async () => {
+      const supabase = makeSupabaseClient({ appointments: { data: [], error: null } });
+      const buildersByTable = new Map<string, Array<Record<string, jest.Mock>>>();
+      const origFrom = supabase.from as unknown as jest.Mock;
+      supabase.from = jest.fn((table: string) => {
+        const builder = origFrom(table) as Record<string, jest.Mock>;
+        const list = buildersByTable.get(table) ?? [];
+        list.push(builder);
+        buildersByTable.set(table, list);
+        return builder;
+      }) as unknown as MockSupabaseClient["from"];
+      stubWorkspaceMember(api, supabase);
+      const { status } = await readJson(
+        await appointmentsGet(makeRequest(`/api/v1/appointments?workspace_id=${WS_ID}`)),
+      );
+      expect(status).toBe(200);
+      const listBuilder = buildersByTable.get("appointments")?.[0];
+      const gteArgs = (listBuilder?.gte.mock.calls ?? []).map((call) => call[0]);
+      expect(gteArgs).not.toContain("starts_at");
+    });
+
+    it("attaches the composed job_total/job_due — a paid job carries job_due 0", async () => {
+      // Regression lock for the 2026-11-06 shadow-route bug: this route.ts
+      // is the handler production serves for GET /v1/appointments (Next.js
+      // precedence over the Hono catch-all). The Hono twin had the money
+      // composition while this handler shipped rows without it, so paid
+      // jobs listed as due in full via the client's locked-quote fallback.
+      const paidAppointment = {
+        id: APPOINTMENT_ID,
+        workspace_id: WS_ID,
+        source: "moms_website",
+        status: "completed",
+        starts_at: "2026-11-05T20:00:00Z",
+        ends_at: "2026-11-05T20:45:00Z",
+        metadata: {
+          pricing_state: "website_quote_locked",
+          estimated_cost: 133.83,
+          client_estimated_cost: 133.83,
+        },
+      };
+      const paidInvoice = {
+        id: "bb0e8400-e29b-41d4-a716-4466554400bb",
+        workspace_id: WS_ID,
+        invoice_number: 106,
+        total: 133.83,
+        amount_paid: 133.83,
+        status: "paid",
+        created_at: "2026-11-05T16:00:00Z",
+        metadata: { appointment_id: APPOINTMENT_ID },
+      };
+      const supabase = makeSupabaseClient({
+        appointments: { data: [paidAppointment], error: null },
+        invoices: { data: [paidInvoice], error: null },
+        appointment_items: { data: [], error: null },
+      });
+      stubWorkspaceMember(api, supabase);
+      const { status, body } = await readJson(
+        await appointmentsGet(makeRequest(`/api/v1/appointments?workspace_id=${WS_ID}`)),
+      );
+      expect(status).toBe(200);
+      expect(body.data).toHaveLength(1);
+      expect(body.data[0].job_total).toBe(133.83);
+      expect(body.data[0].job_due).toBe(0);
+    });
   });
 
   describe("POST", () => {
@@ -461,6 +549,26 @@ describe("appointments/[id]/route", () => {
         ),
       );
       expect(status).toBe(400);
+    });
+
+    it("refuses to cancel a completed appointment (409, no lifecycle event)", async () => {
+      const supabase = makeSupabaseClient({
+        appointments: {
+          data: { id: APPOINTMENT_ID, workspace_id: WS_ID, status: "completed" },
+          error: null,
+        },
+        workspaces: { data: { name: "Shop", timezone: "UTC" }, error: null },
+      });
+      stubWorkspaceMember(api, supabase);
+      const { status, body } = await readJson(
+        await appointmentDelete(
+          makeRequest(`/api/v1/appointments/${APPOINTMENT_ID}?workspace_id=${WS_ID}`, { method: "DELETE" }),
+          contextWithParams({ id: APPOINTMENT_ID }),
+        ),
+      );
+      expect(status).toBe(409);
+      expect(body.error.code).toBe("appointment_completed");
+      expect(dispatchAppointmentLifecycle).not.toHaveBeenCalled();
     });
 
     it("soft-cancels the appointment and dispatches appointmentCancelled", async () => {
@@ -857,6 +965,29 @@ describe("POST /v1/appointments/:id/start (Hono appointments router)", () => {
     expect(status).toBe(409);
     expect(body.error.code).toBe("invalid_transition");
     expect(body.error.message).toBe("This appointment can no longer be started.");
+    expect(body.error.message).not.toMatch(/unexpected error/i);
+  });
+
+  it("preserves PGRST202 when the canonical start RPC is missing (no masked 500)", async () => {
+    // Regression for the production Start Job break: when the RPC is
+    // absent from the schema cache, the response must carry the
+    // PGRST202 code so the client's RPC-unavailable detector can engage
+    // its designed PATCH fallback — a masked internal_error left the
+    // button dead with only "An unexpected error occurred."
+    const supabase = startSupabase({ appointments: { data: startable(), error: null } });
+    stubStartAuth(supabase);
+    (supabase.rpc as jest.Mock).mockResolvedValue({
+      data: null,
+      error: {
+        code: "PGRST202",
+        message: "Could not find the function public.start_appointment_job_v1(p_workspace_id, p_appointment_id, p_idempotency_key) in the schema cache",
+      },
+    });
+    const { status, body } = await postStart({ selected_workspace_id: WS_ID });
+    expect(status).toBe(503);
+    expect(body.error.code).toBe("PGRST202");
+    expect(body.error.message).toMatch(/start_appointment_job_v1/);
+    expect(body.error.code).not.toBe("internal_error");
     expect(body.error.message).not.toMatch(/unexpected error/i);
   });
 

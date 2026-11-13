@@ -863,7 +863,8 @@ crmRouter.post("/v1/crm/follow-up/rules/seed-defaults", async (c) => {
 });
 
 crmRouter.post("/v1/crm/follow-up/rules", async (c) => {
-  const body = followUpRuleSchema.parse(await c.req.json());
+  const rawBody = await c.req.json();
+  const body = followUpRuleSchema.parse(rawBody);
   if (!body.name?.trim() || !body.trigger_type || !body.action_type) {
     throw new ApiError(400, "Follow-up rule is missing required fields", "invalid_rule");
   }
@@ -888,6 +889,13 @@ crmRouter.post("/v1/crm/follow-up/rules", async (c) => {
     updated_at: new Date().toISOString(),
   };
   if (is_edit && id) {
+    // Partial-update guard (SW-42): the schema's .default(0) injects
+    // trigger_days into every parse output, so an edit that omitted it
+    // reset the stored value to 0. On edit, an unsent trigger_days is not
+    // written; the insert path below keeps the default.
+    if (!rawBody || typeof rawBody !== "object" || !("trigger_days" in rawBody)) {
+      delete (payload as Record<string, unknown>).trigger_days;
+    }
     const { error } = await db.from("follow_up_rules").update(payload).eq("workspace_id", workspace_id).eq("id", id);
     if (error) throw error;
     return json({ data: { id } });
@@ -925,11 +933,12 @@ crmRouter.delete("/v1/crm/follow-up/rules/:id", async (c) => {
 const retentionSignalIdsSchema = z.object({ signal_ids: z.array(z.string().uuid()).min(1).max(500) });
 
 crmRouter.get("/v1/crm/retention/signals", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const { data, error } = await supabase
     .from("retention_signals")
     .select("*")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .order("detected_at", { ascending: false })
     .limit(50);
   if (error) throw error;
@@ -937,11 +946,12 @@ crmRouter.get("/v1/crm/retention/signals", async (c) => {
 });
 
 crmRouter.get("/v1/crm/retention/vehicle-profiles", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const { data, error } = await supabase
     .from("retention_vehicle_profiles")
     .select("*")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .order("days_overdue", { ascending: false })
     .limit(50);
   if (error) throw error;
@@ -1026,10 +1036,10 @@ crmRouter.delete("/v1/crm/retention/automation-rules/:id", async (c) => {
 });
 
 crmRouter.post("/v1/crm/retention/signals/snooze", async (c) => {
-  const { signal_ids, days } = retentionSignalIdsSchema
-    .extend({ days: z.number().int().min(1).max(365).default(30) })
+  const { signal_ids, days, workspace_id } = retentionSignalIdsSchema
+    .extend({ days: z.number().int().min(1).max(365).default(30), workspace_id: z.string().uuid() })
     .parse(await c.req.json());
-  const { supabase } = await requireAuth(c);
+  const { supabase } = await requireWorkspaceAuth(c, workspace_id, [...loyaltyWriteRoles]);
   const db = supabase as any;
   const snoozeUntil = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
   for (const signalId of signal_ids) {
@@ -1037,6 +1047,7 @@ crmRouter.post("/v1/crm/retention/signals/snooze", async (c) => {
       .from("retention_signals")
       .select("payload_jsonb")
       .eq("id", signalId)
+      .eq("workspace_id", workspace_id)
       .single();
     if (readErr) throw readErr;
     const merged = {
@@ -1044,32 +1055,38 @@ crmRouter.post("/v1/crm/retention/signals/snooze", async (c) => {
       snooze_until: snoozeUntil,
       snoozed_at: new Date().toISOString(),
     };
-    const { error } = await db.from("retention_signals").update({ status: "suppressed", payload_jsonb: merged }).eq("id", signalId);
+    const { error } = await db.from("retention_signals").update({ status: "suppressed", payload_jsonb: merged }).eq("id", signalId).eq("workspace_id", workspace_id);
     if (error) throw error;
   }
   return json({ data: { snoozed: signal_ids.length, snooze_until: snoozeUntil } });
 });
 
 crmRouter.post("/v1/crm/retention/signals/dismiss", async (c) => {
-  const { signal_ids } = retentionSignalIdsSchema.parse(await c.req.json());
-  const { supabase } = await requireAuth(c);
-  const { error } = await (supabase as any).from("retention_signals").update({ status: "suppressed" }).in("id", signal_ids);
+  const { signal_ids, workspace_id } = retentionSignalIdsSchema
+    .extend({ workspace_id: z.string().uuid() })
+    .parse(await c.req.json());
+  const { supabase } = await requireWorkspaceAuth(c, workspace_id, [...loyaltyWriteRoles]);
+  const { error } = await (supabase as any).from("retention_signals").update({ status: "suppressed" }).in("id", signal_ids).eq("workspace_id", workspace_id);
   if (error) throw error;
   return json({ data: { dismissed: signal_ids.length } });
 });
 
 crmRouter.post("/v1/crm/retention/signals/resolve", async (c) => {
-  const { signal_ids } = retentionSignalIdsSchema.parse(await c.req.json());
-  const { supabase } = await requireAuth(c);
+  const { signal_ids, workspace_id } = retentionSignalIdsSchema
+    .extend({ workspace_id: z.string().uuid() })
+    .parse(await c.req.json());
+  const { supabase } = await requireWorkspaceAuth(c, workspace_id, [...loyaltyWriteRoles]);
   const { error } = await (supabase as any)
     .from("retention_signals")
     .update({ status: "resolved", resolved_at: new Date().toISOString() })
-    .in("id", signal_ids);
+    .in("id", signal_ids)
+    .eq("workspace_id", workspace_id);
   if (error) throw error;
   return json({ data: { resolved: signal_ids.length } });
 });
 
 const retentionActionSchema = z.object({
+  workspace_id: z.string().uuid(),
   signal_ids: z.array(z.string().uuid()).min(1).max(500),
   action_type: z.enum(["send_winback_sms", "send_winback_email", "issue_reward", "send_reminder", "schedule_call", "send_recovery_offer", "award_points"]),
   config: z.record(z.string(), z.unknown()).default({}),
@@ -1077,12 +1094,13 @@ const retentionActionSchema = z.object({
 
 crmRouter.post("/v1/crm/retention/actions/enqueue", async (c) => {
   const body = retentionActionSchema.parse(await c.req.json());
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, user } = await requireWorkspaceAuth(c, body.workspace_id, [...loyaltyWriteRoles]);
   const db = supabase as any;
   const { data: signals, error: fetchErr } = await db
     .from("retention_signals")
     .select("id, signal_type, customer_id, vehicle_id")
-    .in("id", body.signal_ids);
+    .in("id", body.signal_ids)
+    .eq("workspace_id", body.workspace_id);
   if (fetchErr) throw fetchErr;
   const jobs = (signals || []).map((s: any) => ({
     user_id: user.id,
@@ -1098,7 +1116,7 @@ crmRouter.post("/v1/crm/retention/actions/enqueue", async (c) => {
   }));
   const { error: insertErr } = await db.from("job_queue").insert(jobs);
   if (insertErr) throw insertErr;
-  const { error: updateErr } = await db.from("retention_signals").update({ status: "active" }).in("id", body.signal_ids);
+  const { error: updateErr } = await db.from("retention_signals").update({ status: "active" }).in("id", body.signal_ids).eq("workspace_id", body.workspace_id);
   if (updateErr) throw updateErr;
   return json({ data: { enqueued: jobs.length } }, { status: 201 });
 });
@@ -1148,15 +1166,16 @@ const RETENTION_TYPE_WEIGHT: Record<string, number> = {
 };
 
 crmRouter.get("/v1/crm/retention/impact/metrics", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const db = supabase as any;
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
   const [signalsRes, profilesRes, loyaltyRes, prevSignalsRes] = await Promise.all([
-    db.from("retention_signals").select("id, signal_type, customer_id, score, detected_at, status").eq("user_id", user.id).in("status", [...RETENTION_ACTIVE_STATUSES]).gte("detected_at", thirtyDaysAgo),
-    db.from("retention_vehicle_profiles").select("vehicle_id, days_overdue").eq("user_id", user.id).gt("days_overdue", 0),
-    db.from("loyalty_accounts").select("id", { count: "exact", head: true }).eq("user_id", user.id).eq("status", "active"),
-    db.from("retention_signals").select("id", { count: "exact", head: true }).eq("user_id", user.id).gte("detected_at", sixtyDaysAgo).lt("detected_at", thirtyDaysAgo),
+    db.from("retention_signals").select("id, signal_type, customer_id, score, detected_at, status").eq("workspace_id", workspaceId).in("status", [...RETENTION_ACTIVE_STATUSES]).gte("detected_at", thirtyDaysAgo),
+    db.from("retention_vehicle_profiles").select("vehicle_id, days_overdue").eq("workspace_id", workspaceId).gt("days_overdue", 0),
+    db.from("loyalty_accounts").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId).eq("status", "active"),
+    db.from("retention_signals").select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId).gte("detected_at", sixtyDaysAgo).lt("detected_at", thirtyDaysAgo),
   ]);
   if (signalsRes.error) throw signalsRes.error;
   if (profilesRes.error) throw profilesRes.error;
@@ -1186,12 +1205,13 @@ crmRouter.get("/v1/crm/retention/impact/metrics", async (c) => {
 });
 
 crmRouter.get("/v1/crm/retention/impact/action-queue", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const db = supabase as any;
   const { data: signals, error } = await db
     .from("retention_signals")
     .select("id, signal_type, status, score, detected_at, customer_id, vehicle_id")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .in("status", [...RETENTION_ACTIVE_STATUSES])
     .order("detected_at", { ascending: false })
     .limit(500);
@@ -1240,14 +1260,17 @@ crmRouter.get("/v1/crm/retention/impact/action-queue", async (c) => {
 });
 
 crmRouter.get("/v1/crm/retention/signals/by-ids", async (c) => {
-  const ids = (new URL(c.req.url).searchParams.get("ids") || "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 50);
-  const { supabase } = await requireAuth(c);
+  const params = new URL(c.req.url).searchParams;
+  const ids = (params.get("ids") || "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 50);
+  const workspaceId = z.string().uuid().parse(params.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const db = supabase as any;
   if (!ids.length) return json({ data: [] });
   const { data, error } = await db
     .from("retention_signals")
     .select("id, signal_type, status, score, detected_at, customer_id, vehicle_id, payload_jsonb")
     .in("id", ids)
+    .eq("workspace_id", workspaceId)
     .order("score", { ascending: false, nullsFirst: false })
     .limit(50);
   if (error) throw error;
@@ -1267,12 +1290,13 @@ crmRouter.get("/v1/crm/retention/signals/by-ids", async (c) => {
 
 crmRouter.get("/v1/crm/retention/signal-log", async (c) => {
   const params = new URL(c.req.url).searchParams;
-  const { supabase, user } = await requireAuth(c);
+  const workspaceId = z.string().uuid().parse(params.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const db = supabase as any;
   let q = db
     .from("retention_signals")
     .select("id, signal_type, status, score, detected_at, customer_id, vehicle_id, payload_jsonb")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .order("detected_at", { ascending: false })
     .limit(Math.min(Number(params.get("limit") || 200), 5000));
   const type = params.get("type");
@@ -1298,13 +1322,16 @@ const retentionEventSchema = z.object({
 });
 
 crmRouter.post("/v1/crm/retention/events", async (c) => {
-  const rows = z.array(retentionEventSchema).min(1).max(500).parse(await c.req.json());
-  const { supabase, user } = await requireAuth(c);
+  const { workspace_id, events } = z.object({
+    workspace_id: z.string().uuid(),
+    events: z.array(retentionEventSchema).min(1).max(500),
+  }).parse(await c.req.json());
+  const { supabase, user } = await requireWorkspaceAuth(c, workspace_id, [...loyaltyWriteRoles]);
   const { error } = await (supabase as any)
     .from("retention_events")
-    .insert(rows.map((row) => ({ ...row, user_id: user.id })));
+    .insert(events.map((row) => ({ ...row, workspace_id, user_id: user.id })));
   if (error) throw error;
-  return json({ data: { inserted: rows.length } }, { status: 201 });
+  return json({ data: { inserted: events.length } }, { status: 201 });
 });
 
 crmRouter.patch("/v1/crm/retention/email-queue/:id/retry", async (c) => {
@@ -1771,11 +1798,12 @@ crmRouter.get("/v1/crm/coupons/validate", async (c) => {
 // /v1/crm/marketing/* — marketing reads (user-scoped via session)
 // ---------------------------------------------------------------------------
 crmRouter.get("/v1/crm/marketing/email-campaigns", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const { data, error } = await supabase
     .from("email_marketing_campaigns")
     .select("*")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false });
   if (error) throw error;
   return json({ data: data ?? [] });
@@ -1795,6 +1823,7 @@ crmRouter.get("/v1/crm/marketing/email-campaigns/customer-count", async (c) => {
 });
 
 const emailCampaignCreateSchema = z.object({
+  workspace_id: z.string().uuid(),
   name: z.string().trim().min(1).max(200),
   subject: z.string().trim().min(1).max(500),
   content: z.string().min(1),
@@ -1805,10 +1834,11 @@ const emailCampaignCreateSchema = z.object({
 
 crmRouter.post("/v1/crm/marketing/email-campaigns", async (c) => {
   const payload = emailCampaignCreateSchema.parse(await c.req.json());
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, user } = await requireWorkspaceAuth(c, payload.workspace_id, [...loyaltyWriteRoles]);
   const { data, error } = await (supabase as any)
     .from("email_marketing_campaigns")
     .insert({
+      workspace_id: payload.workspace_id,
       user_id: user.id,
       name: payload.name,
       subject: payload.subject,
@@ -1826,8 +1856,9 @@ crmRouter.post("/v1/crm/marketing/email-campaigns", async (c) => {
 
 crmRouter.delete("/v1/crm/marketing/email-campaigns/:id", async (c) => {
   const id = z.string().uuid().parse(c.req.param("id"));
-  const { supabase, user } = await requireAuth(c);
-  const { error } = await (supabase as any).from("email_marketing_campaigns").delete().eq("id", id).eq("user_id", user.id);
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId, [...loyaltyWriteRoles]);
+  const { error } = await (supabase as any).from("email_marketing_campaigns").delete().eq("id", id).eq("workspace_id", workspaceId);
   if (error) throw error;
   return json({ data: { id } });
 });
@@ -1963,7 +1994,7 @@ crmRouter.post("/v1/crm/marketing/email-campaigns/:id/send", async (c) => {
     .from("email_marketing_campaigns")
     .select("*")
     .eq("id", id)
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspace_id)
     .single();
   if (campaignError || !campaign) throw campaignError ?? new ApiError(404, "Campaign not found", "not_found");
 
@@ -1973,10 +2004,11 @@ crmRouter.post("/v1/crm/marketing/email-campaigns/:id/send", async (c) => {
   const { data: profile } = await supabase
     .from("business_profiles")
     .select("business_name, email, booking_slug")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspace_id)
     .maybeSingle();
 
   const emailQueue = recipients.map((customer) => ({
+    workspace_id,
     user_id: user.id,
     customer_id: customer.id,
     campaign_id: campaign.id,
@@ -2004,7 +2036,8 @@ crmRouter.post("/v1/crm/marketing/email-campaigns/:id/send", async (c) => {
   const { error: updateError } = await db
     .from("email_marketing_campaigns")
     .update({ status: "sent", sent_at: new Date().toISOString(), recipient_count: recipients.length })
-    .eq("id", campaign.id);
+    .eq("id", campaign.id)
+    .eq("workspace_id", workspace_id);
   if (updateError) throw updateError;
   return json({ data: { sent: recipients.length } });
 });
@@ -2012,19 +2045,20 @@ crmRouter.post("/v1/crm/marketing/email-campaigns/:id/send", async (c) => {
 crmRouter.post("/v1/crm/marketing/email-campaigns/:id/test", async (c) => {
   const id = z.string().uuid().parse(c.req.param("id"));
   const { to } = z.object({ to: z.string().email().max(320) }).parse(await c.req.json());
-  const { supabase, user } = await requireAuth(c);
+  const { workspace_id: workspaceId } = z.object({ workspace_id: z.string().uuid() }).parse({ workspace_id: new URL(c.req.url).searchParams.get("workspace_id") });
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId, [...loyaltyWriteRoles]);
   const db = supabase as any;
   const { data: campaign, error: campaignError } = await db
     .from("email_marketing_campaigns")
     .select("*")
     .eq("id", id)
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .single();
   if (campaignError || !campaign) throw campaignError ?? new ApiError(404, "Campaign not found", "not_found");
   const { data: profile } = await supabase
     .from("business_profiles")
     .select("business_name, email, booking_slug")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .maybeSingle();
   // Thin server-side proxy for the existing send-email edge function; the
   // messaging worker owns the sending mechanism itself.
@@ -2048,41 +2082,45 @@ crmRouter.post("/v1/crm/marketing/email-campaigns/:id/test", async (c) => {
 
 // Marketing reads: testimonials, business slug, review dashboard, analytics, LTV.
 crmRouter.get("/v1/crm/marketing/testimonials", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const { data, error } = await supabase
     .from("testimonials")
     .select("*")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false });
   if (error) throw error;
   return json({ data: data ?? [] });
 });
 
 crmRouter.get("/v1/crm/marketing/business-slug", async (c) => {
-  const { supabase, user } = await requireAuth(c);
-  const { data } = await supabase.from("business_profiles").select("booking_slug").eq("user_id", user.id).maybeSingle();
+  const { supabase } = await requireAuth(c);
+  const workspaceId = await resolveSettingsWorkspaceId(c);
+  const { data } = await supabase.from("business_profiles").select("booking_slug").eq("workspace_id", workspaceId).maybeSingle();
   return json({ data: { booking_slug: data?.booking_slug ?? null } });
 });
 
 crmRouter.get("/v1/crm/marketing/review-dashboard", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const db = supabase as any;
   const [analyticsRes, requestsRes] = await Promise.all([
     db.rpc("get_review_analytics", { p_days: 30 }),
-    supabase.from("review_requests").select("*, services:service_id (service_type, description)").eq("user_id", user.id).order("created_at", { ascending: false }).limit(50),
+    supabase.from("review_requests").select("*, services:service_id (service_type, description)").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).limit(50),
   ]);
   if (requestsRes.error) throw requestsRes.error;
   return json({ data: { analytics: analyticsRes.data?.[0] ?? null, requests: requestsRes.data ?? [] } });
 });
 
 crmRouter.get("/v1/crm/marketing/analytics", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
+  const { supabase, user } = await requireWorkspaceAuth(c, workspaceId);
   const db = supabase as any;
   const [emailQueueRes, reviewRes, testimonialRes, campaignRes, subscriberRes] = await Promise.all([
-    db.from("email_queue").select("email_type, status").eq("user_id", user.id),
-    db.from("review_requests").select("status, clicked_at").eq("user_id", user.id),
-    db.from("testimonials").select("status").eq("user_id", user.id),
-    db.from("email_marketing_campaigns").select("id").eq("user_id", user.id),
+    db.from("email_queue").select("email_type, status").eq("workspace_id", workspaceId),
+    db.from("review_requests").select("status, clicked_at").eq("workspace_id", workspaceId),
+    db.from("testimonials").select("status").eq("workspace_id", workspaceId),
+    db.from("email_marketing_campaigns").select("id").eq("workspace_id", workspaceId),
     db.from("customers").select("*", { count: "exact", head: true }).eq("user_id", user.id).not("email", "is", null),
   ]);
   if (emailQueueRes.error) throw emailQueueRes.error;
@@ -2115,43 +2153,170 @@ crmRouter.get("/v1/crm/marketing/analytics", async (c) => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// GET /v1/crm/marketing/ltv
+//
+// Lifetime value is computed from the canonical ledger, never from stored
+// rollup columns: the customers table carries no lifetime_value /
+// total_services / customer_segment columns, and there is no "services"
+// table — the legacy handler read both (user_id-scoped), which is why this
+// endpoint 500'd. Definitions, one source each:
+//   money      = invoices.amount_paid actually received (void excluded)
+//   job count  = paid invoices per customer (the average-order denominator)
+//   recency    = invoice dates + service_records completion dates
+// Segments and churn risk are derived from recency/value with the plain
+// rules below; they are presentation labels, not stored facts.
+// ---------------------------------------------------------------------------
+const LTV_MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const LTV_DAY_MS = 86_400_000;
+
+function ltvSegment(daysSince: number | null, lifetimeValue: number, paidCount: number): string {
+  if (daysSince === null) return "New";
+  if (daysSince > 365) return "Dormant";
+  if (daysSince > 180) return "At Risk";
+  if (lifetimeValue >= 750 && paidCount >= 3) return "VIP";
+  if (paidCount >= 3) return "Regular";
+  if (paidCount === 1 && daysSince <= 90) return "New";
+  return "Occasional";
+}
+
+function ltvChurnRisk(daysSince: number | null): string {
+  if (daysSince === null) return "low";
+  if (daysSince > 180) return "high";
+  if (daysSince > 90) return "medium";
+  return "low";
+}
+
 crmRouter.get("/v1/crm/marketing/ltv", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const url = new URL(c.req.url);
+  const workspaceId = url.searchParams.get("workspace_id");
+  if (!workspaceId) {
+    return json({ error: { code: "missing_workspace", message: "workspace_id is required" } }, { status: 400 });
+  }
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const db = supabase as any;
-  const twelveMonthsAgo = new Date();
-  twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
-  const twelveMonthsAgoDate = twelveMonthsAgo.toISOString().slice(0, 10);
-  const [customerRes, paymentRes, serviceRes] = await Promise.all([
-    db.from("customers").select("*").eq("user_id", user.id).not("lifetime_value", "is", null).order("lifetime_value", { ascending: false }),
-    db.from("payments").select("created_at, amount, status, appointment_id").eq("user_id", user.id).eq("status", "succeeded").gte("created_at", `${twelveMonthsAgoDate}T00:00:00`).order("created_at"),
-    db.from("services").select("service_date, total_cost").eq("user_id", user.id).eq("status", "completed").gte("service_date", twelveMonthsAgoDate).order("service_date"),
+  const [customerRes, invoiceRes, serviceRes] = await Promise.all([
+    db.from("customers")
+      .select("id, first_name, last_name, company_name, email, phone")
+      .eq("workspace_id", workspaceId)
+      .neq("status", "archived"),
+    db.from("invoices")
+      .select("customer_id, amount_paid, issued_at, created_at")
+      .eq("workspace_id", workspaceId)
+      .neq("status", "void")
+      .gt("amount_paid", 0),
+    db.from("service_records")
+      .select("customer_id, completed_at, created_at")
+      .eq("workspace_id", workspaceId)
+      .neq("status", "voided"),
   ]);
   if (customerRes.error) throw customerRes.error;
-  if (paymentRes.error) throw paymentRes.error;
+  if (invoiceRes.error) throw invoiceRes.error;
   if (serviceRes.error) throw serviceRes.error;
-  return json({
-    data: {
-      customers: customerRes.data ?? [],
-      payments: paymentRes.data ?? [],
-      services: serviceRes.data ?? [],
-    },
-  });
+
+  const money = (value: unknown) => Math.round((Number(value) || 0) * 100) / 100;
+  const dateMs = (value: unknown) => {
+    const parsed = typeof value === "string" ? Date.parse(value) : NaN;
+    return Number.isNaN(parsed) ? null : parsed;
+  };
+
+  type LtvAccumulator = { paidTotal: number; paidCount: number; dates: number[] };
+  const byCustomer = new Map<string, LtvAccumulator>();
+  const accFor = (customerId: string): LtvAccumulator => {
+    let acc = byCustomer.get(customerId);
+    if (!acc) {
+      acc = { paidTotal: 0, paidCount: 0, dates: [] };
+      byCustomer.set(customerId, acc);
+    }
+    return acc;
+  };
+
+  const monthly = new Map<string, { month: string; revenue: number; services: number }>();
+  for (const invoice of (invoiceRes.data ?? []) as Array<Record<string, unknown>>) {
+    if (typeof invoice.customer_id !== "string") continue;
+    const acc = accFor(invoice.customer_id);
+    const amount = Number(invoice.amount_paid) || 0;
+    acc.paidTotal += amount;
+    acc.paidCount += 1;
+    const at = dateMs(invoice.issued_at ?? invoice.created_at);
+    if (at !== null) {
+      acc.dates.push(at);
+      const d = new Date(at);
+      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+      const point = monthly.get(key) ?? {
+        month: `${LTV_MONTH_NAMES[d.getUTCMonth()]} ${d.getUTCFullYear()}`,
+        revenue: 0,
+        services: 0,
+      };
+      point.revenue += amount;
+      point.services += 1;
+      monthly.set(key, point);
+    }
+  }
+  for (const record of (serviceRes.data ?? []) as Array<Record<string, unknown>>) {
+    if (typeof record.customer_id !== "string") continue;
+    const at = dateMs(record.completed_at ?? record.created_at);
+    if (at !== null) accFor(record.customer_id).dates.push(at);
+  }
+
+  const now = Date.now();
+  const customers = ((customerRes.data ?? []) as Array<Record<string, unknown>>)
+    .map((customer) => {
+      const acc = byCustomer.get(customer.id as string);
+      if (!acc || acc.paidCount === 0) return null;
+      const lifetimeValue = money(acc.paidTotal);
+      const sortedDates = [...acc.dates].sort((a, b) => a - b);
+      const firstMs = sortedDates[0] ?? null;
+      const lastMs = sortedDates[sortedDates.length - 1] ?? null;
+      const daysSince = lastMs === null ? null : Math.max(0, Math.floor((now - lastMs) / LTV_DAY_MS));
+      const firstName = typeof customer.first_name === "string" ? customer.first_name : null;
+      const lastName = typeof customer.last_name === "string" ? customer.last_name : null;
+      const companyName = typeof customer.company_name === "string" ? customer.company_name : null;
+      return {
+        id: customer.id as string,
+        name: [firstName, lastName].filter(Boolean).join(" ").trim() || companyName || "Customer",
+        first_name: firstName,
+        last_name: lastName,
+        email: typeof customer.email === "string" ? customer.email : null,
+        phone: typeof customer.phone === "string" ? customer.phone : null,
+        lifetime_value: lifetimeValue,
+        total_services: acc.paidCount,
+        average_order_value: money(lifetimeValue / acc.paidCount),
+        first_service_date: firstMs === null ? null : new Date(firstMs).toISOString().slice(0, 10),
+        last_service_date: lastMs === null ? null : new Date(lastMs).toISOString().slice(0, 10),
+        days_since_last_service: daysSince,
+        visit_frequency_days:
+          acc.paidCount > 1 && firstMs !== null && lastMs !== null && lastMs > firstMs
+            ? Math.round((lastMs - firstMs) / LTV_DAY_MS / (acc.paidCount - 1))
+            : null,
+        customer_segment: ltvSegment(daysSince, lifetimeValue, acc.paidCount),
+        churn_risk: ltvChurnRisk(daysSince),
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => row !== null)
+    .sort((a, b) => b.lifetime_value - a.lifetime_value);
+
+  const monthlyRevenue = [...monthly.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([, point]) => ({ month: point.month, revenue: money(point.revenue), services: point.services }));
+
+  return json({ data: { customers, monthlyRevenue } });
 });
 
 crmRouter.patch("/v1/crm/marketing/testimonials/:id", async (c) => {
   const id = z.string().uuid().parse(c.req.param("id"));
-  const { status } = z.object({ status: z.enum(["approved", "rejected"]) }).parse(await c.req.json());
-  const { supabase, user } = await requireAuth(c);
-  const { error } = await (supabase as any).from("testimonials").update({ status }).eq("id", id).eq("user_id", user.id);
+  const { status, workspace_id } = z.object({ status: z.enum(["approved", "rejected"]), workspace_id: z.string().uuid() }).parse(await c.req.json());
+  const { supabase } = await requireWorkspaceAuth(c, workspace_id, [...loyaltyWriteRoles]);
+  const { error } = await (supabase as any).from("testimonials").update({ status }).eq("id", id).eq("workspace_id", workspace_id);
   if (error) throw error;
   return json({ data: { id, status } });
 });
 
 crmRouter.patch("/v1/crm/marketing/testimonials/:id/featured", async (c) => {
   const id = z.string().uuid().parse(c.req.param("id"));
-  const { featured } = z.object({ featured: z.boolean() }).parse(await c.req.json());
-  const { supabase, user } = await requireAuth(c);
-  const { error } = await (supabase as any).from("testimonials").update({ featured }).eq("id", id).eq("user_id", user.id);
+  const { featured, workspace_id } = z.object({ featured: z.boolean(), workspace_id: z.string().uuid() }).parse(await c.req.json());
+  const { supabase } = await requireWorkspaceAuth(c, workspace_id, [...loyaltyWriteRoles]);
+  const { error } = await (supabase as any).from("testimonials").update({ featured }).eq("id", id).eq("workspace_id", workspace_id);
   if (error) throw error;
   return json({ data: { id, featured } });
 });
@@ -2225,12 +2390,14 @@ crmRouter.get("/v1/crm/marketing/legacy-segments/:name/customer-ids", async (c) 
 });
 
 crmRouter.get("/v1/crm/marketing/retention-signals-since", async (c) => {
-  const since = z.string().datetime().parse(new URL(c.req.url).searchParams.get("since"));
-  const { supabase, user } = await requireAuth(c);
+  const params = new URL(c.req.url).searchParams;
+  const since = z.string().datetime().parse(params.get("since"));
+  const workspaceId = z.string().uuid().parse(params.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const { data, error } = await supabase
     .from("retention_signals")
     .select("detected_at, signal_type, customer_id")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .gte("detected_at", since)
     .order("detected_at", { ascending: true })
     .limit(5000);
@@ -2239,12 +2406,14 @@ crmRouter.get("/v1/crm/marketing/retention-signals-since", async (c) => {
 });
 
 crmRouter.get("/v1/crm/marketing/service-reminders-since", async (c) => {
-  const since = z.string().datetime().parse(new URL(c.req.url).searchParams.get("since"));
-  const { supabase, user } = await requireAuth(c);
+  const params = new URL(c.req.url).searchParams;
+  const since = z.string().datetime().parse(params.get("since"));
+  const workspaceId = z.string().uuid().parse(params.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const { data, error } = await supabase
     .from("service_reminders")
     .select("created_at, reminder_date, service_type, status, customer_id")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .gte("created_at", since)
     .order("created_at", { ascending: true })
     .limit(5000);
@@ -2252,7 +2421,7 @@ crmRouter.get("/v1/crm/marketing/service-reminders-since", async (c) => {
   return json({ data: data ?? [] });
 });
 
-// Marketing settings (business_profiles, keyed by session user).
+// Marketing settings (business_profiles, keyed by the caller's workspace).
 const marketingSettingsSchema = z.object({
   google_review_url: z.string().trim().max(2000).nullable().optional(),
   yelp_review_url: z.string().trim().max(2000).nullable().optional(),
@@ -2262,11 +2431,12 @@ const marketingSettingsSchema = z.object({
 });
 
 crmRouter.get("/v1/crm/marketing/settings", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase } = await requireAuth(c);
+  const workspaceId = await resolveSettingsWorkspaceId(c);
   const { data, error } = await supabase
     .from("business_profiles")
     .select("google_review_url, yelp_review_url, review_request_delay_hours, appointment_reminder_hours, service_reminder_months")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .maybeSingle();
   if (error) throw error;
   if (!data) return json({ data: null });
@@ -2283,17 +2453,23 @@ crmRouter.get("/v1/crm/marketing/settings", async (c) => {
 
 crmRouter.patch("/v1/crm/marketing/settings", async (c) => {
   const body = marketingSettingsSchema.parse(await c.req.json());
-  const { supabase, user } = await requireAuth(c);
+  const { supabase } = await requireAuth(c);
+  const workspaceId = await resolveSettingsWorkspaceId(c);
+  // Partial-update guard (SW-42): the two review URLs are optional in the
+  // schema; writing `|| null` unconditionally erased a stored URL whenever
+  // the caller omitted it. The numeric fields are schema-required and
+  // always written. A sent URL keeps the old coercion (empty -> null).
+  const patch: Record<string, unknown> = {
+    review_request_delay_hours: body.review_request_delay_hours,
+    appointment_reminder_hours: body.appointment_reminder_hours,
+    service_reminder_months: body.service_reminder_months,
+  };
+  if (body.google_review_url !== undefined) patch.google_review_url = body.google_review_url || null;
+  if (body.yelp_review_url !== undefined) patch.yelp_review_url = body.yelp_review_url || null;
   const { error } = await supabase
     .from("business_profiles")
-    .update({
-      google_review_url: body.google_review_url || null,
-      yelp_review_url: body.yelp_review_url || null,
-      review_request_delay_hours: body.review_request_delay_hours,
-      appointment_reminder_hours: body.appointment_reminder_hours,
-      service_reminder_months: body.service_reminder_months,
-    })
-    .eq("user_id", user.id);
+    .update(patch)
+    .eq("workspace_id", workspaceId);
   if (error) throw error;
   return json({ data: { updated: true } });
 });
@@ -2487,11 +2663,12 @@ crmRouter.put("/v1/crm/maintenance-reminders/settings", async (c) => {
 // /v1/crm/receptionist/* — AI receptionist profile + provisioning proxies
 // ---------------------------------------------------------------------------
 crmRouter.get("/v1/crm/receptionist/profile", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase } = await requireAuth(c);
+  const workspaceId = await resolveSettingsWorkspaceId(c);
   const { data, error } = await supabase
     .from("business_profiles")
-    .select("user_id, business_name, elevenlabs_agent_id, receptionist_phone_number, receptionist_phone_number_id, receptionist_voice_id, receptionist_system_prompt, receptionist_first_message, receptionist_status, receptionist_provisioned_at")
-    .eq("user_id", user.id)
+    .select("business_name, elevenlabs_agent_id, receptionist_phone_number, receptionist_phone_number_id, receptionist_voice_id, receptionist_system_prompt, receptionist_first_message, receptionist_status, receptionist_provisioned_at")
+    .eq("workspace_id", workspaceId)
     .maybeSingle();
   if (error) throw error;
   return json({ data: data ?? null });
@@ -2719,13 +2896,56 @@ crmRouter.get("/v1/crm/testimonials/profile", async (c) => {
 crmRouter.post("/v1/crm/testimonials/submit", async (c) => {
   const body = z.object({
     user_id: z.string().uuid(),
+    slug: z.string().trim().min(1).max(200),
     customer_name: z.string().trim().min(1).max(200),
     customer_email: z.string().email().max(320).nullable(),
     content: z.string().trim().min(1).max(10000),
     rating: z.number().int().min(1).max(5),
   }).parse(await c.req.json());
   const admin = createSupabaseAdminClient();
-  const { error } = await (admin as any).from("testimonials").insert({ ...body, status: "pending" });
+  // NEED-1: testimonials.workspace_id is NOT NULL, but the public page
+  // identifies the shop only by its booking slug + the owner's user_id
+  // (get_public_booking_profile_v2 returns no workspace_id). The workspace
+  // is resolved here, server-side: workspace_settings.booking_slug maps
+  // to exactly one workspace — the same join the profile RPC uses,
+  // including its is_active / booking_enabled conditions and the
+  // case-insensitive slug match. A client-supplied workspace_id is never
+  // read: the schema above does not declare one, and the insert stamps
+  // only the resolved id. The resolved workspace's owner must also be
+  // the body's user_id (the profile RPC returns created_by for this very
+  // slug, so a mismatch is a forged or stale submission).
+  const { data: settingsRows, error: settingsError } = await (admin as any)
+    .from("workspace_settings")
+    .select("workspace_id, booking_enabled, workspaces!inner(created_by, is_active)")
+    .ilike("booking_slug", body.slug)
+    .limit(1);
+  if (settingsError) throw settingsError;
+  const settings = (settingsRows ?? [])[0] as
+    | {
+        workspace_id: string;
+        booking_enabled: boolean;
+        workspaces: { created_by: string; is_active: boolean };
+      }
+    | undefined;
+  const workspace = settings?.workspaces;
+  if (
+    !settings ||
+    settings.booking_enabled !== true ||
+    !workspace ||
+    workspace.is_active !== true ||
+    workspace.created_by !== body.user_id
+  ) {
+    throw new ApiError(404, "Business not found for this booking link", "business_not_found");
+  }
+  const { error } = await (admin as any).from("testimonials").insert({
+    user_id: body.user_id,
+    workspace_id: settings.workspace_id,
+    customer_name: body.customer_name,
+    customer_email: body.customer_email,
+    content: body.content,
+    rating: body.rating,
+    status: "pending",
+  });
   if (error) throw error;
   return json({ data: { submitted: true } }, { status: 201 });
 });
@@ -2880,7 +3100,9 @@ crmRouter.get("/v1/crm/customer-portal/accounts/:id", async (c) => {
 crmRouter.get("/v1/crm/customer-portal/bookings", async (c) => {
   const params = new URL(c.req.url).searchParams;
   const accountId = params.get("account_id") ? z.string().uuid().parse(params.get("account_id")) : null;
-  const email = z.string().email().max(320).parse(params.get("email"));
+  // Parsed (and validated) for contract compatibility — the consumer always
+  // sends it; the RPC read below keys on the JWT identity instead.
+  z.string().email().max(320).parse(params.get("email"));
   const { supabase, user } = await requireAuth(c);
   const db = supabase as any;
   // Verify the account belongs to the caller before exposing its bookings.
@@ -2893,14 +3115,45 @@ crmRouter.get("/v1/crm/customer-portal/bookings", async (c) => {
     if (accountError) throw accountError;
     if (!account || account.user_id !== user.id) throw new ApiError(403, "You can only view your own bookings", "forbidden");
   }
-  const { data, error } = await db
-    .from("appointments")
-    .select("id, title, scheduled_date, scheduled_time, duration_minutes, status, estimated_cost, guest_name, management_token, service_catalog:service_catalog(name), user_id")
-    .or(accountId ? `customer_account_id.eq.${accountId},guest_email.ilike.${email.replace(/,/g, "\\,")}` : `guest_email.ilike.${email.replace(/,/g, "\\,")}`)
-    .order("scheduled_date", { ascending: false })
-    .order("scheduled_time", { ascending: false });
-  if (error) throw error;
-  return json({ data: data ?? [] });
+  // The bookings read delegates to get_customer_portal_appointments_v1 — the
+  // canonical portal read the sibling /customer-portal/appointments handler
+  // serves. The old direct query named eight columns production appointments
+  // does not have (title, scheduled_date, scheduled_time, duration_minutes,
+  // estimated_cost, guest_name, management_token, user_id), filtered on two
+  // more (customer_account_id, guest_email), ordered on scheduled_date/time,
+  // and embedded service_catalog with no FK path from appointments — every
+  // call 42703'd (live census 2026-11-10). The RPC resolves the caller's own
+  // appointments from the JWT identity, so the account_id/email params now
+  // only gate access (verified above / parsed for contract compatibility);
+  // rows are projected to the consumer's CustomerBookingRow shape
+  // (src/application/queries/customer-booking.query.ts), most recent first,
+  // matching this handler's original ordering intent.
+  const { data, error } = await db.rpc("get_customer_portal_appointments_v1");
+  if (error) {
+    console.error("[customer-portal/bookings] rpc error", error);
+    throw new Error("Appointments are temporarily unavailable.");
+  }
+  type Row = {
+    id: string; title: string | null; scheduled_date: string; scheduled_time: string; duration_minutes: number | null;
+    status: string; estimated_cost: number | null; guest_name: string | null; management_token: string | null;
+    service_catalog_name: string | null;
+  };
+  const rows = ((data ?? []) as Row[]).map((r) => ({
+    id: r.id,
+    title: r.title ?? "",
+    scheduled_date: r.scheduled_date,
+    scheduled_time: r.scheduled_time,
+    duration_minutes: r.duration_minutes ?? 0,
+    status: r.status,
+    estimated_cost: r.estimated_cost,
+    guest_name: r.guest_name,
+    management_token: r.management_token,
+    service_catalog: r.service_catalog_name ? { name: r.service_catalog_name } : null,
+  }));
+  rows.sort((a, b) =>
+    b.scheduled_date.localeCompare(a.scheduled_date) || b.scheduled_time.localeCompare(a.scheduled_time),
+  );
+  return json({ data: rows });
 });
 
 crmRouter.post("/v1/crm/customer-portal/appointments/cancel-by-token", async (c) => {
@@ -2959,14 +3212,13 @@ crmRouter.get("/v1/crm/customer-portal/appointments", async (c) => {
 
 crmRouter.get("/v1/crm/retention/automation-executions", async (c) => {
   const params = new URL(c.req.url).searchParams;
-  const userId = z.string().uuid().parse(params.get("user_id"));
+  const workspaceId = z.string().uuid().parse(params.get("workspace_id"));
   const limit = Math.max(1, Math.min(500, Number(params.get("limit") ?? 50) || 50));
-  const { supabase, user } = await requireAuth(c);
-  if (user.id !== userId) throw new ApiError(403, "You can only view your own execution log", "forbidden");
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const { data, error } = await (supabase as any)
     .from("retention_action_executions")
     .select("id, rule_id, customer_id, action_type, status, executed_at, result_jsonb, automation_rules(name), customers(name)")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .order("executed_at", { ascending: false, nullsFirst: false })
     .limit(limit);
   if (error) throw error;

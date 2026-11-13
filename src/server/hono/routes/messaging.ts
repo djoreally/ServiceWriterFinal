@@ -72,6 +72,7 @@ import { z } from "zod";
 import type { Context } from "hono";
 import { ApiError, json, requireWorkspaceMember } from "@/server/api";
 import { upsertBusinessProfile } from "@/server/business-profiles";
+import { sendMorningReads } from "@/server/reports/morning-read";
 import { requireAuth } from "@/server/hono/middleware/auth";
 import { createSupabaseAdminClient, createSupabaseRequestClient } from "@/lib/supabase";
 import { EnginemailerEmailAdapter } from "@/server/messaging/enginemailer";
@@ -929,6 +930,37 @@ messagingRouter.get("/internal/lifecycle/outbox", (c) => processLifecycleOutboxR
 export { processPushOutboxRequest, processLifecycleOutboxRequest };
 
 // ---------------------------------------------------------------------------
+// Morning read worker (Reports Machine §6): daily cron — the machine
+// reports to the owner. Emails each workspace's business email its
+// exception list ranked by dollars; quiet workspaces get no email.
+// ---------------------------------------------------------------------------
+
+async function processMorningReadRequest(request: Request) {
+  const secret = process.env.CRON_SECRET?.trim();
+  if (!secret) {
+    console.error("[MorningRead] worker disabled: CRON_SECRET is not configured");
+    return NextResponse.json({ ok: false, error: "worker_not_configured" }, { status: 503 });
+  }
+  if (!authorizedWorker(request, secret)) {
+    return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
+  }
+
+  const startedAt = Date.now();
+  try {
+    const result = await sendMorningReads(createSupabaseAdminClient());
+    return NextResponse.json({ ok: true, ...result, durationMs: Date.now() - startedAt });
+  } catch (error) {
+    console.error("[MorningRead] worker failed", safeErrorDetails(error));
+    return NextResponse.json({ ok: false, error: "worker_failed" }, { status: 500 });
+  }
+}
+
+messagingRouter.post("/internal/reports/morning-read", (c) => processMorningReadRequest(c.req.raw));
+messagingRouter.get("/internal/reports/morning-read", (c) => processMorningReadRequest(c.req.raw));
+
+export { processMorningReadRequest };
+
+// ---------------------------------------------------------------------------
 // Push public key (public)
 // ---------------------------------------------------------------------------
 
@@ -1122,12 +1154,12 @@ const EMAIL_LOG_COLUMNS =
   "id, recipient_email, recipient_name, email_type, subject, status, provider, error_message, created_at, source, queue_id, review_request_id, campaign_id, provider_message_id, last_event, last_event_at";
 
 messagingRouter.get("/v1/email-testing/data", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, user, workspaceId } = await resolveWorkspaceOrThrow(c, undefined);
   const [profileResp, emailSettingsResp, queueResp, logsResp] = await Promise.all([
-    supabase.from("business_profiles").select("business_name, email").eq("user_id", user.id).maybeSingle(),
+    supabase.from("business_profiles").select("business_name, email").eq("workspace_id", workspaceId).maybeSingle(),
     supabase.from("email_settings").select("id, use_custom_smtp, smtp_host, verified").eq("user_id", user.id).maybeSingle(),
-    supabase.from("email_queue").select(EMAIL_QUEUE_COLUMNS).eq("user_id", user.id).order("created_at", { ascending: false }).limit(20),
-    supabase.from("email_logs").select(EMAIL_LOG_COLUMNS).eq("user_id", user.id).order("created_at", { ascending: false }).limit(50),
+    supabase.from("email_queue").select(EMAIL_QUEUE_COLUMNS).eq("workspace_id", workspaceId).order("created_at", { ascending: false }).limit(20),
+    supabase.from("email_logs").select(EMAIL_LOG_COLUMNS).eq("workspace_id", workspaceId).order("created_at", { ascending: false }).limit(50),
   ]);
   const firstError = [profileResp, emailSettingsResp, queueResp, logsResp].find((r) => r.error)?.error;
   if (firstError) throw firstError;
@@ -1141,11 +1173,11 @@ messagingRouter.get("/v1/email-testing/data", async (c) => {
 });
 
 messagingRouter.get("/v1/email-testing/queue", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, workspaceId } = await resolveWorkspaceOrThrow(c, undefined);
   const { data, error } = await supabase
     .from("email_queue")
     .select(EMAIL_QUEUE_COLUMNS)
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false })
     .limit(20);
   if (error) throw error;
@@ -1153,11 +1185,11 @@ messagingRouter.get("/v1/email-testing/queue", async (c) => {
 });
 
 messagingRouter.get("/v1/email-testing/logs", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, workspaceId } = await resolveWorkspaceOrThrow(c, undefined);
   const { data, error } = await supabase
     .from("email_logs")
     .select(EMAIL_LOG_COLUMNS)
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false })
     .limit(50);
   if (error) throw error;
@@ -1554,7 +1586,7 @@ messagingRouter.get("/v1/sms/messages", async (c) => {
   const { data, error } = await supabase
     .from("sms_logs")
     .select("id, direction, recipient_hash, status, correlation_id, message_body, created_at, error_message")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false });
   if (error) throw error;
   return json({ data: data ?? [], workspaceId });
@@ -1567,13 +1599,18 @@ messagingRouter.get("/v1/sms/eligible-recipients", async (c) => {
     Object.fromEntries(new URL(c.req.url).searchParams),
   );
   const { supabase, workspaceId } = await resolveWorkspaceOrThrow(c, selected_workspace_id);
+  // Production appointments has no scheduled_date / scheduled_time columns
+  // and customers has no `name` column (live census 2026-11-10) — the old
+  // select and order 42703'd on every call. The schedule is starts_at; the
+  // customer name is composed client-side from first/last/company parts
+  // (src/application/queries/sms.query.ts).
   const { data, error } = await supabase
     .from("appointments")
-    .select("id, status, scheduled_date, scheduled_time, customer:customers(name, phone)")
+    .select("id, status, starts_at, customer:customers(first_name, last_name, company_name, phone)")
     .eq("workspace_id", workspaceId)
     .in("status", ELIGIBLE_APPOINTMENT_STATUSES)
     .not("customer.phone", "is", null)
-    .order("scheduled_date", { ascending: true });
+    .order("starts_at", { ascending: true });
   if (error) throw error;
   return json({ data: data ?? [] });
 });
@@ -1592,12 +1629,13 @@ messagingRouter.get("/v1/sms/timeline", async (c) => {
     .parse(Object.fromEntries(new URL(c.req.url).searchParams));
   // Workspace membership is verified; row access is enforced by RLS on the
   // scoped client, mirroring the original direct-from-browser queries.
-  const { supabase } = await resolveWorkspaceOrThrow(c, params.selected_workspace_id);
+  const { supabase, workspaceId } = await resolveWorkspaceOrThrow(c, params.selected_workspace_id);
 
   const { data, error } = await supabase
     .from("sms_logs")
     .select(SMS_TIMELINE_COLUMNS)
     .eq("appointment_id", params.appointment_id)
+    .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false });
   if (error) throw error;
   if (data && data.length > 0) return json({ data });
@@ -1609,6 +1647,7 @@ messagingRouter.get("/v1/sms/timeline", async (c) => {
     .from("sms_logs")
     .select(SMS_TIMELINE_COLUMNS)
     .eq("to_number_last4", last4)
+    .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false })
     .limit(25);
   if (params.scheduled_date) {
@@ -1675,11 +1714,16 @@ messagingRouter.get("/v1/sms-credits/balance", async (c) => {
   const { data, error } = await supabase.rpc("sms_credit_balance_v1", { p_user_id: user.id });
   if (error) throw error;
 
-  const { data: businessProfile } = await supabase
-    .from("business_profiles")
-    .select("sms_low_balance_threshold, sms_transactional_enabled, sms_marketing_enabled")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  // business_profiles is workspace-keyed after the Step 3 translation;
+  // the workspace is resolved server-side from the auth token.
+  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id);
+  const { data: businessProfile } = workspaceId
+    ? await supabase
+        .from("business_profiles")
+        .select("sms_low_balance_threshold, sms_transactional_enabled, sms_marketing_enabled")
+        .eq("workspace_id", workspaceId)
+        .maybeSingle()
+    : { data: null };
 
   return json({
     data: {
@@ -1730,10 +1774,12 @@ messagingRouter.put("/v1/sms-credits/threshold", async (c) => {
   const { threshold } = z.object({ threshold: z.number().finite() }).parse(await c.req.json());
   const { supabase, user } = await requireAuth(c);
   const clamped = Math.max(0, Math.round(threshold));
+  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id);
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
   const { error } = await supabase
     .from("business_profiles")
     .update({ sms_low_balance_threshold: clamped })
-    .eq("user_id", user.id);
+    .eq("workspace_id", workspaceId);
   if (error) throw error;
   return json({ ok: true });
 });
@@ -1747,7 +1793,9 @@ messagingRouter.put("/v1/sms-credits/channel-toggles", async (c) => {
   if (body.transactional !== undefined) update.sms_transactional_enabled = body.transactional;
   if (body.marketing !== undefined) update.sms_marketing_enabled = body.marketing;
   if (Object.keys(update).length > 0) {
-    const { error } = await supabase.from("business_profiles").update(update).eq("user_id", user.id);
+    const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id);
+    if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
+    const { error } = await supabase.from("business_profiles").update(update).eq("workspace_id", workspaceId);
     if (error) throw error;
   }
   return json({ ok: true });
@@ -1796,10 +1844,12 @@ messagingRouter.put("/v1/sms-preferences", async (c) => {
 
 messagingRouter.get("/v1/voice-agent/settings", async (c) => {
   const { supabase, user } = await requireAuth(c);
+  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id);
+  if (!workspaceId) return json({ data: { agentId: null } });
   const { data, error } = await supabase
     .from("business_profiles")
     .select("elevenlabs_agent_id")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .maybeSingle();
   if (error) throw error;
   return json({ data: { agentId: data?.elevenlabs_agent_id ?? null } });
@@ -1809,9 +1859,11 @@ messagingRouter.put("/v1/voice-agent/settings", async (c) => {
   const body = z.object({ enabled: z.boolean(), agentId: z.string().max(200) }).parse(await c.req.json());
   const { supabase, user } = await requireAuth(c);
   const nextValue = body.enabled ? body.agentId || null : null;
+  const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id);
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
   // Upsert: a missing business_profiles row must not turn the save into a
   // silent zero-write. The helper throws when the write cannot be verified.
-  await upsertBusinessProfile(supabase as any, user.id, { elevenlabs_agent_id: nextValue });
+  await upsertBusinessProfile(supabase as any, workspaceId, { elevenlabs_agent_id: nextValue });
   return json({ ok: true });
 });
 
@@ -1910,20 +1962,20 @@ messagingRouter.get("/v1/admin/messaging-health", async (c) => {
       admin.from("sms_opt_outs").select("id", { count: "exact", head: true }),
       admin
         .from("business_profiles")
-        .select("user_id", { count: "exact", head: true })
+        .select("workspace_id", { count: "exact", head: true })
         .eq("sms_enabled", true),
       admin
         .from("business_profiles")
-        .select("user_id", { count: "exact", head: true })
+        .select("workspace_id", { count: "exact", head: true })
         .eq("marketing_email_enabled", true),
       admin
         .from("business_profiles")
-        .select("user_id", { count: "exact", head: true })
+        .select("workspace_id", { count: "exact", head: true })
         .eq("sms_overage_enabled", false)
         .lt("sms_segments_remaining", 10),
       admin
         .from("business_profiles")
-        .select("user_id", { count: "exact", head: true })
+        .select("workspace_id", { count: "exact", head: true })
         .not("sms_a2p_status", "in", '("approved","verified","active")'),
     ]);
 

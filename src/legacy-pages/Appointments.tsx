@@ -1,11 +1,12 @@
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
 import { useRealtimeWorkflow } from "@/hooks/useRealtimeWorkflow";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { MobileAppointmentView } from "@/components/appointments/MobileAppointmentView";
 import { CompleteAppointmentDialog } from "@/components/appointments/CompleteAppointmentDialog";
+import { AppointmentTray } from "@/components/appointments/AppointmentTray";
 import { WorkflowStatusIndicator } from "@/components/workflow/WorkflowStatusIndicator";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,9 @@ import type { AppointmentFormState, CustomerFormData, VehicleFormData } from "@/
 import { AppointmentForm } from "@/components/appointments/AppointmentForm";
 // ENTERPRISE: Booking confirmation emails are now server-side via DB triggers → email_queue → transactional-email-worker
 import {
-  fetchAppointmentsPageData,
+  fetchAppointmentsWindowData,
+  fetchAppointmentDirectories,
+  mapWindowAppointments,
   type AppointmentWithSource,
 } from "@/application/queries";
 import {
@@ -46,7 +49,7 @@ const AppointmentsPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [userId, setUserId] = useState<string | undefined>();
-  const [viewMode, setViewMode] = useState<"today" | "week" | "month">("today");
+  const [viewMode, setViewMode] = useState<"today" | "week" | "month" | "board">("today");
 
   // Real-time workflow updates
   const { isConnected } = useRealtimeWorkflow({
@@ -85,8 +88,26 @@ const AppointmentsPage = () => {
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  // Section 4: the side tray — a job click opens the tray over the page
+  // instead of navigating away. The tray reads the LIVE row from the list
+  // (falling back to the clicked snapshot) so actions taken in the tray
+  // reflect immediately when the list refetches.
+  const [traySelection, setTraySelection] = useState<Appointment | null>(null);
+  const trayAppointment = traySelection
+    ? appointments.find((a) => a.id === traySelection.id) ?? traySelection
+    : null;
   const [editingAppointment, setEditingAppointment] = useState<AppointmentDraft | null>(null);
   const [currentDate, setCurrentDate] = useState(new Date());
+  // The fetch window follows the view (Fix 3): fetchData reads the
+  // current view through this ref so its identity stays stable, and a
+  // separate effect refetches when the view or the anchor date changes.
+  const viewRef = useRef({ viewMode, currentDate });
+  useEffect(() => {
+    viewRef.current = { viewMode, currentDate };
+  }, [viewMode, currentDate]);
+  // Incremented per fetchData run; a stale run's directory phase must
+  // not overwrite a newer run's rows (Fix 3 two-phase load).
+  const loadSeqRef = useRef(0);
   const [pendingOutboxCount, setPendingOutboxCount] = useState(0);
   const [deadLetterCount, setDeadLetterCount] = useState(0);
   const [syncingOutbox, setSyncingOutbox] = useState(false);
@@ -123,14 +144,19 @@ const AppointmentsPage = () => {
       setVehiclesError(null);
       setCatalogError(null);
 
-      const data = await fetchAppointmentsPageData();
+      const loadSeq = ++loadSeqRef.current;
+      const data = await fetchAppointmentsWindowData({
+        viewMode: viewRef.current.viewMode,
+        anchor: viewRef.current.currentDate,
+      });
+      if (loadSeq !== loadSeqRef.current) return;
 
       // Store userId for realtime filtering
       setUserId(data.userId);
 
+      // Phase 1 (Fix 3): the window paints from the rows' joined
+      // relations — the full directories are not on the critical path.
       setAppointments(data.appointments);
-      setCustomers(data.customers);
-      setVehicles(data.vehicles);
       setServiceCatalog(data.serviceCatalog);
       setScheduleResources(data.scheduleVans.map((van) => ({ id: van.id, name: van.name })));
       setBusinessHours(data.businessHours);
@@ -138,10 +164,29 @@ const AppointmentsPage = () => {
       setProviderEmail(data.providerEmail);
 
       setAppointmentsLoading(false);
-      setCustomersLoading(false);
-      setVehiclesLoading(false);
       setCatalogLoading(false);
       setLoading(false);
+
+      // Phase 2: the directories land, the rows re-map with the full
+      // records, and the form's pickers fill in. A stale load (a newer
+      // fetch started meanwhile) never applies its directories.
+      const directories = await fetchAppointmentDirectories().catch(() => null);
+      if (!directories || loadSeq !== loadSeqRef.current) {
+        setCustomersLoading(false);
+        setVehiclesLoading(false);
+        return;
+      }
+      setCustomers(directories.customers);
+      setVehicles(directories.vehicles);
+      setAppointments(mapWindowAppointments(
+        data.rawRows,
+        data.serviceLines,
+        directories.customers,
+        directories.vehicles,
+        data.timezone,
+      ));
+      setCustomersLoading(false);
+      setVehiclesLoading(false);
 
       // After data loads, open prefill dialog with full customer + vehicle info
       if (prefillStateRef) {
@@ -151,8 +196,8 @@ const AppointmentsPage = () => {
           setDialogOpen(true);
           return;
         }
-        const allCustomers = data.customers ?? [];
-        const allVehicles = data.vehicles ?? [];
+        const allCustomers = directories.customers ?? [];
+        const allVehicles = directories.vehicles ?? [];
       const customer = prefillStateRef.prefillCustomerId
         ? allCustomers.find(c => c.id === prefillStateRef.prefillCustomerId)
         : undefined;
@@ -213,8 +258,20 @@ const AppointmentsPage = () => {
     fetchData();
   }, [fetchData]);
 
+  // Refetch when the view or the anchor date changes — the window moved,
+  // so the loaded rows no longer cover what the view shows (Fix 3). The
+  // mount load above covers the first render.
+  const viewChangeSeenRef = useRef(false);
+  useEffect(() => {
+    if (!viewChangeSeenRef.current) {
+      viewChangeSeenRef.current = true;
+      return;
+    }
+    void fetchData();
+  }, [viewMode, currentDate, fetchData]);
+
   const handleSelectAppointment = (appointment: Appointment) => {
-    navigate(`/appointments/${appointment.id}`);
+    setTraySelection(appointment);
   };
 
   const handleAddAppointment = (date?: Date) => {
@@ -304,24 +361,33 @@ const AppointmentsPage = () => {
           const autoDispatchResult = await tryAutoDispatchAppointment(
             result.appointmentId,
             formData,
+            result.autoDispatch,
           );
 
-          if (autoDispatchResult.autoDispatchEnabled) {
-            if (autoDispatchResult.topRecommendationName) {
-              toast.success(
-                `⚡ Auto-assigned to ${autoDispatchResult.topRecommendationName}`,
-              );
-            } else {
-              toast.info(
-                "⚡ Auto-dispatch: no eligible technician found — assign manually",
-              );
-            }
+          if (autoDispatchResult.assigned) {
+            toast.success(
+              autoDispatchResult.topRecommendationName
+                ? `⚡ Auto-assigned to ${autoDispatchResult.topRecommendationName}`
+                : "⚡ Auto-assigned",
+            );
+          } else if (autoDispatchResult.autoDispatchEnabled) {
+            toast.info(
+              "⚡ Auto-dispatch: no eligible technician found — assign manually",
+            );
           }
         } catch {
           // Auto-dispatch failure is non-fatal
         }
 
         toast.success(formData.guest_email?.trim() ? "Appointment created — confirmation email queued" : "Appointment created");
+      }
+
+      // Follow the saved job: anchor the schedule on its (possibly
+      // new) date so the day strip and the list land on the day you
+      // just saved, instead of staying on the previously picked day
+      // until a full reload (Nov 12 field report).
+      if (formData.scheduled_date) {
+        setCurrentDate(new Date(`${formData.scheduled_date}T12:00:00`));
       }
 
       setDialogOpen(false);
@@ -574,6 +640,12 @@ const AppointmentsPage = () => {
         onOpenChange={setCompleteDialogOpen}
         appointment={appointmentToComplete}
         onSuccess={handleCompleteSuccess}
+      />
+      <AppointmentTray
+        appointment={trayAppointment}
+        onOpenChange={(open) => { if (!open) setTraySelection(null); }}
+        onOpenFullRecord={(a) => { setTraySelection(null); navigate(`/appointments/${a.id}`); }}
+        onChanged={() => { void fetchData(); }}
       />
     </AppLayout>
   );

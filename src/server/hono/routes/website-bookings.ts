@@ -1,5 +1,5 @@
 /**
- * Website Bookings queue router — staff-only surface for selectively pushing
+ * Website Bookings queue router — owner-only surface for selectively pushing
  * MOMS-website bookings into Service Writer (spec:
  * website-bookings-selective-push-spec.md).
  *
@@ -11,8 +11,9 @@
  *   (server-to-server only, shared push secret — the prepaid auto-push
  *   added 2026-10-29; every staff route above is unchanged)
  *
- * Everything here is behind requireWorkspaceAuth with the same role list as
- * POST /v1/appointments. Creation happens only inside
+ * Everything here is behind requireWorkspaceAuth restricted to the workspace
+ * owner only (owner's directive, Nov 6, 2026) — the queue exposes customer
+ * names, phones and addresses plus push controls. Creation happens only inside
  * public_booking_book_appointment_staff_v1 (the staff variant of the
  * canonical v3 create) — see src/server/website-bookings/service.ts.
  * The public booking routes are untouched by this router.
@@ -35,7 +36,7 @@ import {
 
 export const websiteBookingsRouter = new Hono();
 
-const PUSH_ROLES = ["owner", "admin", "manager", "service_advisor", "receptionist", "dispatcher"] as const;
+const PUSH_ROLES = ["owner"] as const;
 
 function backendErrorResponse(error: unknown) {
   if (error instanceof WebsiteBackendError) {

@@ -15,9 +15,16 @@
  *   actually runs for every route.
  * - Global `OPTIONS *` returns 204 with the same CORS headers the original
  *   `json()` helper sets, so preflight behavior is unchanged.
+ * - CORS is origin-aware (see `corsHeaders` in `@/server/api`): a
+ *   middleware reflects the request `Origin` onto every response when —
+ *   and only when — it is allowlisted (the technician app's origin is the
+ *   reason this exists), and strips CORS headers for non-allowlisted
+ *   origins so no route helper can leak them.
  */
 import { Hono } from "hono";
 import { corsHeaders, errorResponse, toError } from "@/server/api";
+import { initSentry } from "@/server/sentry";
+import { agentApiRouter } from "./routes/agent-api";
 import { appointmentsRouter } from "./routes/appointments";
 import { billingRouter } from "./routes/billing";
 import { catalogRouter } from "./routes/catalog";
@@ -25,16 +32,43 @@ import { crmRouter } from "./routes/crm";
 import { documentsRouter } from "./routes/documents";
 import { messagingRouter } from "./routes/messaging";
 import { platformRouter } from "./routes/platform";
+import { telemetryRouter } from "./routes/telemetry";
 import { publicBookingRouter } from "./routes/public-booking";
+import { serviceMenuRouter } from "./routes/service-menu";
 import { vehiclesRouter } from "./routes/vehicles";
 import { websiteBookingsRouter } from "./routes/website-bookings";
 import { workOrdersRouter } from "./routes/work-orders";
 
 export function createHonoApp(): Hono {
+  // Server boot: initialize Sentry once (no-op when SENTRY_DSN is unset).
+  initSentry();
+
   const app = new Hono().basePath("/api");
 
+  // Deliberate-error probe for the Sentry wiring proof. Registered ONLY
+  // when SENTRY_TEST=1 is set in the environment — it cannot fire in
+  // production by accident, and the route does not exist otherwise.
+  if (process.env.SENTRY_TEST === "1") {
+    app.get("/v1/__sentry-test", () => {
+      throw new Error("Sentry wiring test error (deliberate)");
+    });
+  }
+
   // Preserve the exact error contract of the original route handlers.
-  app.onError((error) => errorResponse(error));
+  // The request context (route, method, workspace id when the request
+  // carried one) rides along so 5xx captures in errorResponse are useful;
+  // it never changes the response shape.
+  app.onError((error, c) =>
+    errorResponse(
+      error,
+      {
+        route: c.req.path,
+        method: c.req.method,
+        workspaceId: c.req.query("workspace_id"),
+      },
+      c.req.header("origin"),
+    ),
+  );
 
   // Hono only routes `instanceof Error` throws to onError. PostgREST errors
   // are plain objects, so without this a route's `if (error) throw error`
@@ -48,8 +82,29 @@ export function createHonoApp(): Hono {
     }
   });
 
-  // CORS preflight: mirror the headers the original `json()` helper sets.
-  app.options("*", () => new Response(null, { status: 204, headers: corsHeaders() }));
+  // CORS: reflect the request Origin onto the response when it is
+  // allowlisted, and guarantee a non-allowlisted origin receives no
+  // Access-Control-Allow-Origin even if a route helper emitted one.
+  // Requests without an Origin header (same-origin browser calls,
+  // non-browser clients) pass through untouched. Thrown errors bypass
+  // this middleware on the way to onError, which applies the same
+  // allowlist via errorResponse's origin parameter.
+  app.use(async (c, next) => {
+    await next();
+    const origin = c.req.header("origin");
+    if (!origin) return;
+    const reflected = corsHeaders(origin);
+    if (reflected.get("Access-Control-Allow-Origin")) {
+      reflected.forEach((value, key) => c.res.headers.set(key, value));
+    } else {
+      c.res.headers.delete("Access-Control-Allow-Origin");
+      c.res.headers.delete("Access-Control-Allow-Credentials");
+    }
+  });
+
+  // CORS preflight: mirror the headers the original `json()` helper sets,
+  // reflected for allowlisted origins only.
+  app.options("*", (c) => new Response(null, { status: 204, headers: corsHeaders(c.req.header("origin")) }));
 
   // ---------------------------------------------------------------------------
   // Domain routers. Each router registers paths relative to `/api` (the
@@ -57,13 +112,16 @@ export function createHonoApp(): Hono {
   // `/v1/appointments/:id` on the router serves `/api/v1/appointments/:id`.
   // ---------------------------------------------------------------------------
   app.route("/", publicBookingRouter);
+  app.route("/", agentApiRouter);
   app.route("/", appointmentsRouter);
   app.route("/", billingRouter);
   app.route("/", catalogRouter);
+  app.route("/", serviceMenuRouter);
   app.route("/", crmRouter);
   app.route("/", documentsRouter);
   app.route("/", messagingRouter);
   app.route("/", platformRouter);
+  app.route("/", telemetryRouter);
   app.route("/", vehiclesRouter);
   app.route("/", websiteBookingsRouter);
   app.route("/", workOrdersRouter);

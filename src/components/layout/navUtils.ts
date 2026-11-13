@@ -11,9 +11,7 @@ const getPathBase = (path: string) => path.split("?")[0];
 
 export const navItemMatchesPath = (item: NavItem, pathname: string): boolean => {
   const itemPath = getPathBase(item.path);
-  const itemMatches = itemPath === "/fleet-os"
-    ? pathname === "/fleet-os" || pathname.startsWith("/fleet-os/")
-    : pathname === itemPath || pathname.startsWith(itemPath + "/");
+  const itemMatches = pathname === itemPath || pathname.startsWith(itemPath + "/");
 
   return itemMatches || (item.children?.some((child) => navItemMatchesPath(child, pathname)) ?? false);
 };

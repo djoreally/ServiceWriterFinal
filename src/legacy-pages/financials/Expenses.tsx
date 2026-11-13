@@ -1,14 +1,27 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Camera, Receipt, Clock, TrendingUp, FileEdit, Filter, Download, Inbox, ChevronLeft, ChevronRight, Repeat, Target } from "lucide-react";
+import { Camera, Receipt, Clock, TrendingUp, FileEdit, Filter, Download, Inbox, ChevronLeft, ChevronRight, Repeat, Target, Landmark } from "lucide-react";
 import { RecurringExpensesTab } from "@/components/expenses/RecurringExpensesTab";
 import { BudgetForecastTab } from "@/components/expenses/BudgetForecastTab";
 import { DocumentIntakeUploader } from "@/components/expenses/document-intake/DocumentIntakeUploader";
 import { DocumentIntakeInbox } from "@/components/expenses/document-intake/DocumentIntakeInbox";
-import { startOfMonth, addMonths, format } from "date-fns";
+import { startOfMonth, addMonths, format, parseISO } from "date-fns";
 import { useAuth } from "@packages/auth";
 import { fetchExpenses, fetchExpenseCategories, ensureDefaultCategoriesSeeded, ensureDefaultVendorsSeeded, type ExpenseRow } from "@/application/queries/expenses.query";
+import {
+  fetchActiveVendorClassificationRules,
+  fetchBankTransactions,
+  type StoredBankTransaction,
+} from "@/application/queries/accounting.query";
+import {
+  accountingClassificationLabel,
+  isAccountingOperatingExpense,
+  summarizeAccounting,
+  type AccountingClassification,
+} from "@/features/accounting/accounting-engine";
+import type { VendorClassificationRule } from "@/features/accounting/vendor-rules";
+import { BankExpenseLedger, buildBankExpenseGroups } from "@/components/expenses/BankExpenseLedger";
 import { ScanReceiptDialog } from "@/components/expenses/ScanReceiptDialog";
 import { ManualExpenseDialog } from "@/components/expenses/ManualExpenseDialog";
 import { ExpenseTable } from "@/components/expenses/ExpenseTable";
@@ -28,10 +41,10 @@ const KpiCard = ({ title, value, subtitle, icon }: KpiCardProps) => (
             <span className="size-8 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
               {icon}
             </span>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em]">{title}</p>
+            <p className="text-xs font-semibold uppercase tracking-widest">{title}</p>
           </div>
           <h3 className="text-3xl font-extralight mt-3 tracking-tight tabular-nums truncate">{value}</h3>
-          {subtitle && <p className="text-[11px] text-muted-foreground mt-1">{subtitle}</p>}
+          {subtitle && <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>}
         </div>
       </div>
     </CardContent>
@@ -51,6 +64,17 @@ export const ExpensesTab = () => {
   const [activeMonth, setActiveMonth] = useState(() => startOfMonth(new Date()));
   const { ownerUserId, loading: roleLoading } = useTeamRole();
   const { session } = useAuth();
+
+  // The bank layer — the warehouse. Accounting is the record: this tab
+  // reads the same bank transactions through the same shared read the
+  // Accounting tab and the Overview use, so every total here equals the
+  // Accounting totals by construction. Nothing is copied into the
+  // expenses tables; manual entries stay their own layer below.
+  const [bankRows, setBankRows] = useState<StoredBankTransaction[]>([]);
+  const [bankRules, setBankRules] = useState<VendorClassificationRule[]>([]);
+  const [bankLoading, setBankLoading] = useState(true);
+  const [bankError, setBankError] = useState<string | null>(null);
+  const [bankFilter, setBankFilter] = useState<AccountingClassification | "all">("all");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -75,36 +99,77 @@ export const ExpensesTab = () => {
     setLoading(false);
   }, [activeMonth, ownerUserId, session?.user?.id]);
 
+  const loadBank = useCallback(async () => {
+    setBankLoading(true);
+    try {
+      const [rows, rules] = await Promise.all([
+        fetchBankTransactions(),
+        fetchActiveVendorClassificationRules(),
+      ]);
+      setBankRows(rows);
+      setBankRules(rules);
+      setBankError(null);
+    } catch (e) {
+      setBankError(e instanceof Error ? e.message : "Failed to load the bank record.");
+    } finally {
+      setBankLoading(false);
+    }
+  }, []);
+
   useEffect(() => { if (!roleLoading) void Promise.resolve().then(() => load()); }, [load, roleLoading]);
+  useEffect(() => { if (!roleLoading) void Promise.resolve().then(() => loadBank()); }, [loadBank, roleLoading]);
 
   const selected = useMemo(() => expenses.find((e) => e.id === selectedId) ?? null, [expenses, selectedId]);
 
-  const mtdTotal = useMemo(
+  const manualTotal = useMemo(
     () => expenses.filter((e) => e.status !== "rejected").reduce((s, e) => s + Number(e.total_amount), 0),
     [expenses],
   );
-  const pendingCount = expenses.filter((e) => e.status === "pending").length;
-  const topVendor = useMemo(() => {
-    const map = new Map<string, number>();
-    expenses.forEach((e) => map.set(e.vendor_name_raw, (map.get(e.vendor_name_raw) ?? 0) + Number(e.total_amount)));
+  const manualPendingCount = expenses.filter((e) => e.status === "pending").length;
+
+  // Bank figures — the shared summary engine over the shared read. These
+  // are the Accounting tab's numbers, not a second computation of them.
+  const bankSummary = useMemo(
+    () => summarizeAccounting(bankRows.map((row) => ({ amount: Number(row.amount), classification: row.classification }))),
+    [bankRows],
+  );
+  const bankGroups = useMemo(() => buildBankExpenseGroups(bankRows), [bankRows]);
+  const bankRangeLabel = useMemo(() => {
+    const postedDates = bankRows.map((row) => row.posted_on).filter(Boolean).sort();
+    return postedDates.length > 0
+      ? `${format(parseISO(postedDates[0]), "MMM d, yyyy")} – ${format(parseISO(postedDates[postedDates.length - 1]), "MMM d, yyyy")}`
+      : null;
+  }, [bankRows]);
+  const bankPendingCount = useMemo(
+    () => bankRows.filter((row) => row.review_status === "pending").length,
+    [bankRows],
+  );
+  const bankTopVendor = useMemo(() => {
+    const totals = new Map<string, number>();
+    bankGroups.forEach((group) => group.rows.forEach((row) => {
+      totals.set(row.description_raw, (totals.get(row.description_raw) ?? 0) + Math.abs(Number(row.amount)));
+    }));
     let best = ""; let max = 0;
-    map.forEach((v, k) => { if (v > max) { max = v; best = k; } });
+    totals.forEach((v, k) => { if (v > max) { max = v; best = k; } });
     return best || "—";
-  }, [expenses]);
-
-  const breakdown = useMemo(() => {
+  }, [bankGroups]);
+  const bankBreakdown = useMemo(() => {
     const map = new Map<string, number>();
-    expenses.filter((e) => e.status !== "rejected").forEach((e) => {
-      const name = e.category_id ? categoryMap[e.category_id] ?? "Uncategorized" : "Uncategorized";
-      map.set(name, (map.get(name) ?? 0) + Number(e.total_amount));
+    bankRows.forEach((row) => {
+      if (!isAccountingOperatingExpense(row.classification) || Number(row.amount) >= 0) return;
+      const label = accountingClassificationLabel(row.classification);
+      map.set(label, (map.get(label) ?? 0) + Math.abs(Number(row.amount)));
     });
-    const total = mtdTotal || 1;
-    return Array.from(map.entries())
-      .map(([name, amount]) => ({ name, amount, percentage: (amount / total) * 100 }))
-      .sort((a, b) => b.amount - a.amount);
-  }, [expenses, categoryMap, mtdTotal]);
+    const total = Array.from(map.values()).reduce((sum, v) => sum + v, 0);
+    return {
+      total,
+      items: Array.from(map.entries())
+        .map(([name, amount]) => ({ name, amount: Math.round(amount * 100) / 100, percentage: total > 0 ? (amount / total) * 100 : 0 }))
+        .sort((a, b) => b.amount - a.amount),
+    };
+  }, [bankRows]);
 
-  if (loading) {
+  if (loading || bankLoading) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-32" />
@@ -124,14 +189,16 @@ export const ExpensesTab = () => {
       <div className="rounded-lg border border-border/80 bg-card p-5 shadow-sm sm:p-6">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
               Expense Ledger
             </p>
             <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extralight tracking-tight mt-1">
               Sovereign Ledger
             </h1>
             <p className="text-sm text-muted-foreground mt-2">
-              Financial summary for {monthLabel}
+              {bankRangeLabel
+                ? <>Bank record {bankRangeLabel} · manual entries tracked separately below</>
+                : <>No bank record imported yet · manual entries for {monthLabel}</>}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -178,36 +245,84 @@ export const ExpensesTab = () => {
       </div>
 
       <div className={view === "ledger" ? "block space-y-6" : "hidden"} aria-hidden={view !== "ledger"}>
-        {/* KPIs */}
+        {/* KPIs — the bank record, from the shared Accounting summary. */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <KpiCard
-            title="MTD Expenses"
-            value={`$${mtdTotal.toFixed(2)}`}
-            subtitle={mtdTotal === 0 ? "No spending recorded this period" : "Tracked this month"}
+            title="Operating Expenses"
+            value={`$${bankSummary.operatingExpenses.toFixed(2)}`}
+            subtitle={bankRangeLabel ? `Bank record · ${bankRangeLabel}` : "No bank record imported"}
             icon={<Receipt className="h-4 w-4 text-primary" />}
           />
           <KpiCard
-            title="Pending Approvals"
-            value={String(pendingCount)}
-            subtitle={pendingCount === 0 ? "All clear — no pending actions" : "Awaiting review"}
+            title="Pending Review"
+            value={String(bankPendingCount)}
+            subtitle={bankPendingCount === 0 ? "Every classification approved" : "Bank classifications awaiting review"}
             icon={<Clock className="h-4 w-4 text-primary" />}
           />
           <KpiCard
             title="Top Vendor"
-            value={topVendor}
-            subtitle={topVendor === "—" ? "No vendor activity this month" : "Largest spend"}
+            value={bankTopVendor}
+            subtitle={bankTopVendor === "—" ? "No bank spending yet" : "Largest bank spend"}
             icon={<TrendingUp className="h-4 w-4 text-primary" />}
           />
-          <CategoryBreakdownCard breakdown={breakdown} total={mtdTotal} />
+          <CategoryBreakdownCard breakdown={bankBreakdown.items} total={bankBreakdown.total} />
         </div>
 
-        {/* Recent Activity */}
+        {/* Bank record — the warehouse layer. One set of books: these are
+            the Accounting tab's transactions and totals, viewed by
+            classification. Classification review happens in Accounting. */}
+        <div className="space-y-3">
+          <div>
+            <h2 className="text-base font-semibold tracking-tight">Bank Record</h2>
+            <p className="text-xs text-muted-foreground">
+              {bankRangeLabel
+                ? <>Classified bank transactions, {bankRangeLabel}. The same record the Accounting tab shows — review and reclassify there.</>
+                : "Classified bank transactions will appear here once a statement is imported."}
+            </p>
+          </div>
+
+          {bankError ? (
+            <Card className="border-border/60">
+              <CardContent className="p-6">
+                <p className="text-sm text-destructive">Could not load the bank record: {bankError}</p>
+              </CardContent>
+            </Card>
+          ) : bankGroups.length === 0 ? (
+            <Card className="border-border/60">
+              <CardContent className="p-12 text-center space-y-4">
+                <div className="size-12 mx-auto rounded-md bg-muted flex items-center justify-center">
+                  <Landmark className="h-6 w-6 text-muted-foreground" />
+                </div>
+                <div>
+                  <h3 className="font-semibold">No bank record imported yet</h3>
+                  <p className="text-sm text-muted-foreground mt-1 max-w-sm mx-auto">
+                    Import a statement in the Accounting tab and the classified record appears here automatically — one set of books.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          ) : (
+            <BankExpenseLedger
+              groups={bankGroups}
+              filter={bankFilter}
+              onFilterChange={setBankFilter}
+              rules={bankRules}
+            />
+          )}
+        </div>
+
+        {/* Manual entries — their own layer on top of the bank record.
+            Tracked separately and never added into the bank totals. */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2 space-y-3">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-base font-semibold tracking-tight">Recent Activity</h2>
-                <p className="text-xs text-muted-foreground">Your most recent ledger entries.</p>
+                <h2 className="text-base font-semibold tracking-tight">Manual Entries</h2>
+                <p className="text-xs text-muted-foreground">
+                  Receipts and entries added by hand · {monthLabel} · ${manualTotal.toFixed(2)}
+                  {manualPendingCount > 0 ? ` · ${manualPendingCount} pending approval` : ""}.
+                  Tracked separately — not part of the bank record above.
+                </p>
               </div>
               <div className="flex items-center gap-1">
                 <Button
@@ -248,7 +363,7 @@ export const ExpensesTab = () => {
                     <Receipt className="h-6 w-6 text-muted-foreground" />
                   </div>
                   <div>
-                    <h3 className="font-semibold">No expenses yet</h3>
+                    <h3 className="font-semibold">No manual entries this month</h3>
                     <p className="text-sm text-muted-foreground mt-1 max-w-sm mx-auto">
                       Tap "Scan Receipt" to add the first one and begin tracking your wealth flow.
                     </p>

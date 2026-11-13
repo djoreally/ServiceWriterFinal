@@ -30,7 +30,11 @@ export interface CampaignRow extends Omit<CampaignTableRow, "status" | "recipien
 
 export async function fetchCampaigns(): Promise<CampaignRow[]> {
   await requireUser();
-  const { data } = await apiClient.get<{ data: CampaignTableRow[] }>("/v1/crm/marketing/email-campaigns");
+  const context = await resolveCurrentWorkspace();
+  if (!context) return [];
+  const { data } = await apiClient.get<{ data: CampaignTableRow[] }>("/v1/crm/marketing/email-campaigns", {
+    query: { workspace_id: context.workspaceId },
+  });
   return (data ?? []).map((row) => {
     const rollup = row as CampaignTableRow & {
       delivered_count?: number | null;

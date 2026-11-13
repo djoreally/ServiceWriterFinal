@@ -10,6 +10,13 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Loader2, Mail, Pencil, Printer, Trash2, Car, AlertCircle } from "lucide-react";
 import { format, parseISO } from "date-fns";
@@ -52,6 +59,8 @@ export function InvoiceDetailDialog({ invoiceId, open, onOpenChange, onEdit, onC
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentNote, setPaymentNote] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "check" | "external_card" | "other">("cash");
+  const [waiveCardFee, setWaiveCardFee] = useState(false);
   const [recordingPayment, setRecordingPayment] = useState(false);
 
   useEffect(() => {
@@ -90,25 +99,71 @@ export function InvoiceDetailDialog({ invoiceId, open, onOpenChange, onEdit, onC
   const collectable = !!invoice && !["paid", "void"].includes(invoice.status) && balance > 0.01;
   const showRecordPayment = !!invoice && !["paid", "void"].includes(invoice.status);
 
+  // Card processing fee waiver, restored from the manual-payment flow
+  // (ManualPaymentDialog, 2026-09-18): when the invoice carries a card
+  // surcharge, paying in person (cash / check / external card terminal)
+  // can waive that fee — the customer settles balance-minus-fee and the
+  // waiver is recorded in reconciliation so the invoice still closes
+  // PAID. The waivable fee is capped at the remaining balance, and a
+  // settling payment must still leave at least a cent to record.
+  const waivableFee = invoice && invoice.surcharge_enabled
+    ? Math.min(Number(invoice.surcharge) || 0, balance)
+    : 0;
+  const canWaiveCardFee = paymentMethod !== "other" && waivableFee > 0 && balance - waivableFee >= 0.01;
+  const feeWaived = canWaiveCardFee && waiveCardFee;
+  const effectiveBalance = feeWaived ? Number((balance - waivableFee).toFixed(2)) : balance;
+
   const handleSend = () => {
     if (!invoice) return;
     setSendOpen(true);
   };
 
+  const openPaymentDialog = () => {
+    setPaymentMethod("cash");
+    setWaiveCardFee(false);
+    setPaymentAmount(String(balance.toFixed(2)));
+    setPaymentOpen(true);
+  };
+
+  const effectiveBalanceWith = (waived: boolean) =>
+    waived && canWaiveCardFee ? Number((balance - waivableFee).toFixed(2)) : balance;
+
+  const handleWaiveCardFeeChange = (checked: boolean) => {
+    setWaiveCardFee(checked);
+    // The recorded amount follows the waived balance, mirroring the
+    // manual-payment dialog: checking the waiver settles for
+    // balance-minus-fee; unchecking restores the full balance.
+    setPaymentAmount(String(effectiveBalanceWith(checked).toFixed(2)));
+  };
+
   const handleRecordPayment = async () => {
     if (!invoice) return;
     const amount = Number(paymentAmount);
-    if (!Number.isFinite(amount) || amount <= 0 || amount > balance) {
-      toast.error(`Enter an amount between 0.01 and ${formatCurrency(balance)}`);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > effectiveBalance) {
+      toast.error(`Enter an amount between 0.01 and ${formatCurrency(effectiveBalance)}`);
+      return;
+    }
+    if (feeWaived && amount !== effectiveBalance) {
+      toast.error(
+        `Fee waiver settles the invoice at ${formatCurrency(effectiveBalance)} — record that amount or uncheck the waiver`,
+      );
       return;
     }
     setRecordingPayment(true);
     try {
-      await recordFleetInvoicePayment({ invoiceId: invoice.id, amount, note: paymentNote.trim() || undefined });
+      await recordFleetInvoicePayment({
+        invoiceId: invoice.id,
+        amount,
+        note: paymentNote.trim() || undefined,
+        paymentMethod,
+        waiveFees: feeWaived,
+      });
       setInvoice(await fetchInvoiceDetail(invoice.id));
       setPaymentOpen(false);
       setPaymentAmount("");
       setPaymentNote("");
+      setPaymentMethod("cash");
+      setWaiveCardFee(false);
       toast.success("Payment recorded and reconciled");
       onChanged?.();
     } catch (error) {
@@ -351,7 +406,7 @@ export function InvoiceDetailDialog({ invoiceId, open, onOpenChange, onEdit, onC
           {showRecordPayment && (
             <Button
               variant={collectable ? "default" : "outline"}
-              onClick={() => { setPaymentAmount(String(balance.toFixed(2))); setPaymentOpen(true); }}
+              onClick={openPaymentDialog}
             >
               Record payment
             </Button>
@@ -387,11 +442,32 @@ export function InvoiceDetailDialog({ invoiceId, open, onOpenChange, onEdit, onC
               <span className="font-mono font-semibold tabular-nums">{formatCurrency(balance)}</span>
             </div>
             <div className="space-y-1">
+              <Label htmlFor="invoice-payment-method">Payment method</Label>
+              <Select
+                value={paymentMethod}
+                onValueChange={(value) => {
+                  const method = value as typeof paymentMethod;
+                  setPaymentMethod(method);
+                  if (method === "other") setWaiveCardFee(false);
+                }}
+              >
+                <SelectTrigger id="invoice-payment-method">
+                  <SelectValue placeholder="Select method" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="check">Check</SelectItem>
+                  <SelectItem value="external_card">External Card Terminal</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
               <div className="flex items-center justify-between">
                 <Label htmlFor="invoice-payment-amount">Amount</Label>
                 <button
                   type="button"
-                  onClick={() => setPaymentAmount(String(balance.toFixed(2)))}
+                  onClick={() => setPaymentAmount(String(effectiveBalance.toFixed(2)))}
                   className="text-xs font-medium text-primary hover:underline"
                 >
                   Use full balance
@@ -399,6 +475,22 @@ export function InvoiceDetailDialog({ invoiceId, open, onOpenChange, onEdit, onC
               </div>
               <Input id="invoice-payment-amount" type="number" min="0.01" step="0.01" value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} />
             </div>
+            {canWaiveCardFee && (
+              <label className="flex items-start gap-3 rounded-lg border p-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={waiveCardFee}
+                  onChange={(event) => handleWaiveCardFeeChange(event.target.checked)}
+                />
+                <span className="space-y-1">
+                  <span className="block text-sm font-medium">Waive card processing fee</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Subtract {formatCurrency(waivableFee)} and record the waiver in reconciliation.
+                  </span>
+                </span>
+              </label>
+            )}
             <div className="space-y-1"><Label htmlFor="invoice-payment-note">Reference or note</Label><Input id="invoice-payment-note" value={paymentNote} onChange={(event) => setPaymentNote(event.target.value)} placeholder="Check, ACH, or reconciliation reference" /></div>
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setPaymentOpen(false)} disabled={recordingPayment}>Cancel</Button><Button onClick={handleRecordPayment} disabled={recordingPayment}>{recordingPayment ? "Recording…" : "Record payment"}</Button></DialogFooter>

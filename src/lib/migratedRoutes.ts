@@ -23,6 +23,8 @@ export const MIGRATED_ROUTE_PREFIXES: string[] = [
   "/service-catalog",
   "/appointments",
   "/services",
+  "/website-bookings",
+  "/analytics",
   "/work-orders",
   "/quick-service",
   "/quotes",
@@ -35,7 +37,6 @@ export const MIGRATED_ROUTE_PREFIXES: string[] = [
   "/voice-agent",
   // Phase 4: fleet/dispatch
   "/fleet",
-  "/fleet-os",
   "/weather-guard",
   "/dispatch-engine",
   "/dispatch",
@@ -66,8 +67,8 @@ export const MIGRATED_ROUTE_PREFIXES: string[] = [
  *
  * The tenant branch of the SPA (`src/App.tsx`) serves these route shapes;
  * migrate them by adding the corresponding prefixes here:
- * `/customer/dashboard`, `/customer/auth`, `/fleet-manager`,
- * `/fleet-manager/auth`, `/my-bookings`, `/booking-success`,
+ * `/customer/dashboard`, `/customer/auth`,
+ * `/my-bookings`, `/booking-success`,
  * `/messaging-preferences`, `/services`, `/subscribe`, `/embed/services`,
  * `/embed/subscribe`, `/embed/booking`.
  * The tenant catch-all `*` → `TenantBooking` is served by the App Router
@@ -76,8 +77,6 @@ export const MIGRATED_ROUTE_PREFIXES: string[] = [
 export const MIGRATED_TENANT_ROUTE_PREFIXES: string[] = [
   "/customer/dashboard",
   "/customer/auth",
-  "/fleet-manager",
-  "/fleet-manager/auth",
   "/my-bookings",
   "/booking-success",
   "/messaging-preferences",
@@ -109,6 +108,26 @@ export function isMigratedPath(pathname: string): boolean {
 /** True when `pathname` is served by a migrated tenant-subdomain page. */
 export function isMigratedTenantPath(pathname: string): boolean {
   return matchesAnyPrefix(pathname, MIGRATED_TENANT_ROUTE_PREFIXES);
+}
+
+/**
+ * True when an in-app navigation from `fromPathname` to `toPathname` crosses
+ * the shell seam on the apex app: one side is served by a migrated App Router
+ * page, the other by the legacy SPA shell (the `[[...path]]` catch-all +
+ * `ClientOnlyShell`).
+ *
+ * Cross-shell navigations must be REAL document navigations. A client-side
+ * (soft) navigation across the seam strands the visit — reproduced live
+ * 2026-11-09: from a migrated page, a sidebar tap to an SPA-only path
+ * (/availability) painted the SPA's bare NotFound; from the SPA, a tap to a
+ * migrated path (/service-catalog) painted a blank page. In both cases a
+ * refresh — a document load, which boots the shell that owns the URL —
+ * rendered correctly. The two navigation layers (`NextRouterAdapter` inside
+ * migrated pages, the SPA's `BrowserRouter` in `App.tsx`) consult this
+ * helper and fall back to `window.location` when it returns true.
+ */
+export function isCrossShellNavigation(fromPathname: string, toPathname: string): boolean {
+  return isMigratedPath(fromPathname) !== isMigratedPath(toPathname);
 }
 
 const TENANT_ROOT_DOMAIN = "servicewriter.xyz";

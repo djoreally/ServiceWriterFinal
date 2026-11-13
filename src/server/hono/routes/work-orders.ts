@@ -13,10 +13,61 @@
  * `/v1/work-orders/:id` so they cannot be swallowed by the param route.
  */
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { z } from "zod";
 import { ApiError, json, paginationSchema } from "@/server/api";
 import { createSupabaseAdminClient, createSupabaseAnonServerClient } from "@/lib/supabase";
-import { requireAuth, requireWorkspaceAuth } from "@/server/hono/middleware/auth";
+import { requireAuth, requireWorkspaceAuth, requireWorkspacePaymentsAddonAuth } from "@/server/hono/middleware/auth";
+import {
+  bucketInspectionReports,
+  bucketInspectionSteps,
+  bucketJobChanges,
+  bucketJobPhotos,
+  bucketLocations,
+  bucketRecommendations,
+  bucketSopSteps,
+  composeVehicleDisplay,
+  playbookComponentNames,
+  playbookStepLabels,
+  type ComposedSyncAppointment,
+  type ServerInspectionResultRow,
+  type ServerInspectionRow,
+  type ServerJobPhotoRow,
+  type ServerLocationRow,
+  type ServerRecommendationRow,
+  type ServerSopStepRow,
+} from "@/application/queries/tech-app-sync.query";
+import {
+  adoptId,
+  asNumber,
+  asString,
+  changeSetFor,
+  emptyCounts,
+  isLocalOnlyReference,
+  isUuid,
+  jobTransitionFor,
+  parseWireDate,
+  serverReportStatus,
+  serverSopStatus,
+  serverStepStatus,
+  type PushChanges,
+  type TableCounts,
+} from "@/application/queries/tech-app-sync-push.query";
+import {
+  deriveTechJobPaymentState,
+  type TechPaymentInvoiceLike,
+  type TechPaymentPaymentLike,
+} from "@/application/queries/tech-app-payment.query";
+import { captureServerError } from "@/server/sentry";
+import { syncCanonicalInvoiceToStripe } from "@/server/payments/stripe-invoice-sync";
+import { dispatchPaymentLifecycle, LIFECYCLE_EVENT_KEYS } from "@/server/messaging/quote-payment-events";
+import { planVehicleFieldUpdate } from "@/application/commands/tech-app-vehicle.command";
+import {
+  buildVinOcrProviderCall,
+  parseVinOcrProviderResponse,
+  planVinOcrRequest,
+  readVinOcrConfig,
+} from "@/application/commands/tech-app-vin-ocr.command";
 
 export const workOrdersRouter = new Hono();
 
@@ -457,12 +508,19 @@ workOrdersRouter.patch("/v1/assets/bulk-move", async (c) => {
 });
 
 workOrdersRouter.post("/v1/assets/attach", async (c) => {
-  const { supabase, user } = await requireAuth(c);
   const body = z.object({
     service_id: z.string().min(1),
     asset_ids: z.array(z.string().uuid()).min(1).max(500),
+    workspace_id: z.string().uuid().optional(),
   }).parse(await c.req.json());
+  // Step 5 STAMP (NEED-L1): service_assets is workspace-rooted; the
+  // workspace is resolved server-side from the caller's active
+  // memberships (Step 4's resolveCallerWorkspaceId idiom — a
+  // client-supplied id is only a disambiguation hint, never an
+  // authorization input) because the live client command sends none.
+  const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c, body.workspace_id);
   const rows = body.asset_ids.map((asset_id) => ({
+    workspace_id: workspaceId,
     service_id: body.service_id,
     asset_id,
     user_id: user.id,
@@ -474,12 +532,16 @@ workOrdersRouter.post("/v1/assets/attach", async (c) => {
 });
 
 workOrdersRouter.delete("/v1/assets/attach", async (c) => {
-  const { supabase, user } = await requireAuth(c);
   const body = z.object({
     service_id: z.string().min(1),
     asset_id: z.string().uuid(),
+    workspace_id: z.string().uuid().optional(),
   }).parse(await c.req.json());
+  // Step 5 RESCOPE (NEED-L1): the delete is scoped to the caller's
+  // resolved workspace; the user_id filter stays as the actor check.
+  const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c, body.workspace_id);
   const { error } = await (supabase.from("service_assets") as any).delete()
+    .eq("workspace_id", workspaceId)
     .eq("service_id", body.service_id).eq("asset_id", body.asset_id).eq("user_id", user.id);
   if (error) throw error;
   return json({ data: { ok: true } });
@@ -983,19 +1045,22 @@ workOrdersRouter.get("/v1/recurring-services/lookup", async (c) => {
 });
 
 workOrdersRouter.get("/v1/recurring-services", async (c) => {
-  const { supabase } = await requireAuth(c);
-  const userId = z.string().min(1).parse(new URL(c.req.url).searchParams.get("user_id") ?? "");
+  // Step 8 translation: recurring_services is workspace-keyed. The old
+  // handler accepted any user_id as an unauthenticated query parameter
+  // naming ANY user; the read is now gated on the caller's membership
+  // in the workspace it names.
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id") ?? "");
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId, undefined);
   const { data, error } = await (supabase.from("recurring_services") as any)
     .select("id, service_catalog_id, customer_id, vehicle_id, frequency, interval, start_date, next_due_date, is_active, created_at")
-    .eq("user_id", userId).order("created_at", { ascending: false });
+    .eq("workspace_id", workspaceId).order("created_at", { ascending: false });
   if (error) throw error;
   return json({ data: data ?? [] });
 });
 
 workOrdersRouter.post("/v1/recurring-services", async (c) => {
-  const { supabase } = await requireAuth(c);
   const body = z.object({
-    user_id: z.string().min(1),
+    workspace_id: z.string().uuid(),
     service_catalog_id: z.string().min(1),
     customer_id: z.string().nullable().optional(),
     vehicle_id: z.string().nullable().optional(),
@@ -1004,8 +1069,9 @@ workOrdersRouter.post("/v1/recurring-services", async (c) => {
     start_date: z.string().min(1),
     next_due_date: z.string().min(1),
   }).parse(await c.req.json());
+  const { supabase } = await requireWorkspaceAuth(c, body.workspace_id, undefined);
   const { data, error } = await (supabase.from("recurring_services") as any).insert({
-    user_id: body.user_id,
+    workspace_id: body.workspace_id,
     service_catalog_id: body.service_catalog_id,
     customer_id: body.customer_id ?? null,
     vehicle_id: body.vehicle_id ?? null,
@@ -1091,19 +1157,26 @@ workOrdersRouter.post("/v1/detailing-pricing/rules-for-service", async (c) => {
 // ---------------------------------------------------------------------------
 
 workOrdersRouter.get("/v1/services", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  // Step 8 translation: services is workspace-keyed (the user_id column
+  // is not created). The request contract changes accordingly: callers
+  // name the workspace and are gated on membership in it (spec NEED 1 —
+  // no in-repo consumer calls this endpoint; the SPA uses
+  // service_records).
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id") ?? "");
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId, undefined);
   const { data, error } = await (supabase.from("services") as any)
-    .select("id, title, customer_id, vehicle_id, status, service_type, service_date, estimated_cost, metadata, appointment_id, notes, assigned_technician, payment_status, created_at, updated_at, user_id")
-    .eq("user_id", user.id).order("created_at", { ascending: false });
+    .select("id, title, customer_id, vehicle_id, status, service_type, service_date, estimated_cost, metadata, appointment_id, notes, assigned_technician, payment_status, created_at, updated_at, workspace_id")
+    .eq("workspace_id", workspaceId).order("created_at", { ascending: false });
   if (error) throw error;
   return json({ data: data ?? [] });
 });
 
 workOrdersRouter.get("/v1/services/:id", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id") ?? "");
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId, undefined);
   const { data, error } = await (supabase.from("services") as any)
-    .select("id, title, customer_id, vehicle_id, status, service_type, service_date, estimated_cost, metadata, appointment_id, notes, assigned_technician, payment_status, created_at, updated_at, user_id")
-    .eq("id", c.req.param("id")).eq("user_id", user.id).maybeSingle();
+    .select("id, title, customer_id, vehicle_id, status, service_type, service_date, estimated_cost, metadata, appointment_id, notes, assigned_technician, payment_status, created_at, updated_at, workspace_id")
+    .eq("id", c.req.param("id")).eq("workspace_id", workspaceId).maybeSingle();
   if (error) throw error;
   return json({ data: data ?? null });
 });
@@ -1339,18 +1412,28 @@ workOrdersRouter.get("/v1/operational-jobs", async (c) => {
   const workspaceId = z.string().uuid().parse(params.get("workspace_id") ?? "");
   const from = z.string().min(1).parse(params.get("from") ?? "");
   const to = z.string().min(1).parse(params.get("to") ?? "");
+  // Phantom fix #3 (2026-11-10): service_records has no title,
+  // service_type, service_date, estimated_cost or assigned_technician_id
+  // columns in production — the old select/window 42703'd on every call.
+  // Mirrors the healed GET /v1/command-center/technicians sibling: live
+  // columns only, and the day window runs on started_at, which is
+  // stamped with the job's actual/scheduled start (completed_at and
+  // created_at drift to the typing day on back-dated closeouts). The
+  // dropped DTO fields had no consumer — nothing in the repo reads this
+  // route's service_records rows (the Command Center reads
+  // /v1/dispatch/operational-jobs + /v1/command-center/technicians).
   const { data: serviceRecords, error: serviceError } = await (supabase.from("service_records") as any)
-    .select("id,title,status,service_type,service_date,estimated_cost,metadata,appointment_id,assigned_technician_id")
+    .select("id,status,metadata,appointment_id,technician_id,started_at,completed_at,created_at,total_amount")
     .eq("workspace_id", workspaceId)
-    .gte("service_date", from).lte("service_date", to)
-    .order("service_date", { ascending: true });
+    .gte("started_at", from).lte("started_at", to)
+    .order("started_at", { ascending: true });
   if (serviceError) throw serviceError;
   const appointmentIds = Array.from(new Set(
     (serviceRecords ?? []).map((r: any) => r.appointment_id).filter((id: unknown): id is string => typeof id === "string"),
   ));
   const { data: appointments, error: appointmentsError } = appointmentIds.length > 0
     ? await (supabase.from("appointments") as any)
-      .select("id,metadata,appointment_type").in("id", appointmentIds).eq("workspace_id", workspaceId)
+      .select("id,metadata").in("id", appointmentIds).eq("workspace_id", workspaceId)
     : { data: [], error: null };
   if (appointmentsError) throw appointmentsError;
   return json({ data: { service_records: serviceRecords ?? [], appointments: appointments ?? [] } });
@@ -1370,11 +1453,22 @@ workOrdersRouter.get("/v1/command-center/technicians", async (c) => {
     (supabase.from("technicians") as any)
       .select("id, user_id, first_name, last_name, full_name, email, phone, status, role, home_latitude, home_longitude, current_latitude, current_longitude, location_updated_at, assigned_van_id")
       .eq("workspace_id", workspaceId).order("full_name"),
+    // service_records columns below are the LIVE production shape, verified
+    // against information_schema on 2026-11-10 (pinned by
+    // command-center-technicians-selects.test.ts). The previous select named
+    // title/service_type/service_date/estimated_cost/assigned_technician_id —
+    // none of which exist in production — so PostgREST answered 42703 and
+    // this endpoint 500'd on every call, blanking Command Center (the page
+    // blocks all state when either of its endpoints errors). The day window
+    // sits on started_at: the completion guarantee stamps it with the job's
+    // actual (or scheduled) start, i.e. the day the service belongs to,
+    // while completed_at/created_at are closeout/row-mint stamps that drift
+    // to the typing day on a back-dated closeout.
     (supabase.from("service_records") as any)
-      .select("id,title,status,service_type,service_date,estimated_cost,metadata,appointment_id,assigned_technician_id")
+      .select("id,status,metadata,appointment_id,technician_id,started_at,completed_at,created_at,total_amount")
       .eq("workspace_id", workspaceId)
-      .gte("service_date", from).lte("service_date", to)
-      .order("service_date", { ascending: true }),
+      .gte("started_at", from).lte("started_at", to)
+      .order("started_at", { ascending: true }),
     (supabase.from("workspaces") as any).select("timezone").eq("id", workspaceId).maybeSingle(),
   ]);
   const error = techniciansRes.error || jobsRes.error || workspaceRes.error;
@@ -1384,7 +1478,7 @@ workOrdersRouter.get("/v1/command-center/technicians", async (c) => {
   ));
   const { data: appointments, error: appointmentsError } = appointmentIds.length > 0
     ? await (supabase.from("appointments") as any)
-      .select("id,metadata,appointment_type").in("id", appointmentIds).eq("workspace_id", workspaceId)
+      .select("id,metadata").in("id", appointmentIds).eq("workspace_id", workspaceId)
     : { data: [], error: null };
   if (appointmentsError) throw appointmentsError;
   return json({
@@ -1395,25 +1489,6 @@ workOrdersRouter.get("/v1/command-center/technicians", async (c) => {
       timezone: workspaceRes.data?.timezone ?? "UTC",
     },
   });
-});
-
-// ---------------------------------------------------------------------------
-// Dispatcher fleet work orders — GET /v1/fleet/dispatcher-work-orders
-// ---------------------------------------------------------------------------
-
-workOrdersRouter.get("/v1/fleet/dispatcher-work-orders", async (c) => {
-  const { supabase, user } = await requireAuth(c);
-  const todayStart = new Date();
-  todayStart.setUTCHours(0, 0, 0, 0);
-  const { data, error } = await (supabase.from("appointments") as any)
-    .select("id, user_id, title, status, service_catalog_id, customer_id, vehicle_id, fleet_vehicle_id, starts_at, ends_at, address, notes, metadata, priority, dispatch_status, assigned_technician_id")
-    .eq("user_id", user.id)
-    .in("status", ["scheduled", "in_progress"])
-    .gte("starts_at", todayStart.toISOString())
-    .order("starts_at", { ascending: true })
-    .limit(200);
-  if (error) throw error;
-  return json({ data: data ?? [] });
 });
 
 // ---------------------------------------------------------------------------
@@ -1485,6 +1560,44 @@ workOrdersRouter.post("/v1/inline-service-writer/appointment-items", async (c) =
 });
 
 // ---------------------------------------------------------------------------
+// Step 4 workspace resolution (SRC-A mirror of appointments.ts's
+// resolveCallerWorkspaceId): the workspace is resolved server-side from
+// the caller's active workspace_members rows; a client-supplied id is
+// only a disambiguation hint, never an authorization input.
+// ---------------------------------------------------------------------------
+
+async function resolveCallerWorkspaceId(supabase: any, userId: string, selectedWorkspaceId?: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("workspace_members")
+    .select("workspace_id")
+    .eq("user_id", userId)
+    .eq("is_active", true)
+    .order("workspace_id", { ascending: true });
+  if (error) throw error;
+  const ids = ((data ?? []) as Array<{ workspace_id: string }>).map((row) => row.workspace_id);
+  if (selectedWorkspaceId && ids.includes(selectedWorkspaceId)) return selectedWorkspaceId;
+  return ids[0] ?? null;
+}
+
+async function requireCallerWorkspaceId(c: Context, hint?: string): Promise<{ supabase: any; user: any; workspaceId: string }> {
+  const { supabase, user } = await requireAuth(c);
+  const selected = hint ?? new URL(c.req.url).searchParams.get("workspace_id") ?? undefined;
+  const workspaceId = await resolveCallerWorkspaceId(supabase, user.id, selected);
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
+  return { supabase, user, workspaceId };
+}
+
+/** SRC-T: a satellite row's workspace comes from its parent technician row. */
+async function technicianWorkspaceId(supabase: any, technicianId: string): Promise<string> {
+  const { data, error } = await (supabase.from("technicians") as any)
+    .select("workspace_id").eq("id", technicianId).maybeSingle();
+  if (error) throw error;
+  const workspaceId = (data as { workspace_id?: string } | null)?.workspace_id;
+  if (!workspaceId) throw new ApiError(404, "Technician not found.", "not_found");
+  return workspaceId;
+}
+
+// ---------------------------------------------------------------------------
 // Team members — GET/POST /v1/team/members, PATCH/DELETE /v1/team/members/:id
 // ---------------------------------------------------------------------------
 
@@ -1492,32 +1605,54 @@ workOrdersRouter.get("/v1/team/members", async (c) => {
   const { supabase, user } = await requireAuth(c);
   const userId = z.string().min(1).parse(new URL(c.req.url).searchParams.get("user_id") ?? "");
   if (userId !== user.id) throw new ApiError(403, "You can only list your own team members", "team_members_forbidden");
+  // Step 4 RESCOPE: the read's tenancy filter is the caller's workspace,
+  // not the owner user key.
+  const workspaceId = await resolveCallerWorkspaceId(supabase, user.id);
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
   const { data, error } = await (supabase.from("team_members") as any)
-    .select("*").eq("user_id", userId).order("created_at", { ascending: false });
+    .select("*").eq("workspace_id", workspaceId).order("created_at", { ascending: false });
   if (error) throw error;
   return json({ data: data ?? [] });
 });
 
 workOrdersRouter.post("/v1/team/members", async (c) => {
-  const { supabase } = await requireAuth(c);
+  const { supabase, user } = await requireAuth(c);
   const body = z.record(z.string(), z.unknown()).parse(await c.req.json());
-  const { data, error } = await (supabase.from("team_members") as any).insert(body).select().single();
+  // Step 4 STAMP: tenancy is forced server-side; any workspace_id in the
+  // passthrough body is only a disambiguation hint, never trusted.
+  const workspaceId = await resolveCallerWorkspaceId(
+    supabase,
+    user.id,
+    typeof body.workspace_id === "string" ? body.workspace_id : undefined,
+  );
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
+  const { data, error } = await (supabase.from("team_members") as any)
+    .insert({ ...body, workspace_id: workspaceId }).select().single();
   if (error) throw error;
   return json({ data }, { status: 201 });
 });
 
 workOrdersRouter.patch("/v1/team/members/:id", async (c) => {
-  const { supabase } = await requireAuth(c);
+  const { supabase, user } = await requireAuth(c);
   const body = z.record(z.string(), z.unknown()).parse(await c.req.json());
+  // Step 4 GUARD: pin the payload's tenancy and scope the row by it.
+  const workspaceId = await resolveCallerWorkspaceId(
+    supabase,
+    user.id,
+    typeof body.workspace_id === "string" ? body.workspace_id : undefined,
+  );
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
   const { data, error } = await (supabase.from("team_members") as any)
-    .update(body).eq("id", c.req.param("id")).select().single();
+    .update({ ...body, workspace_id: workspaceId })
+    .eq("id", c.req.param("id")).eq("workspace_id", workspaceId).select().single();
   if (error) throw error;
   return json({ data });
 });
 
 workOrdersRouter.delete("/v1/team/members/:id", async (c) => {
-  const { supabase } = await requireAuth(c);
-  const { error } = await (supabase.from("team_members") as any).delete().eq("id", c.req.param("id"));
+  const { supabase, workspaceId } = await requireCallerWorkspaceId(c);
+  const { error } = await (supabase.from("team_members") as any)
+    .delete().eq("id", c.req.param("id")).eq("workspace_id", workspaceId);
   if (error) throw error;
   return json({ data: { ok: true } });
 });
@@ -1570,16 +1705,18 @@ workOrdersRouter.get("/v1/team/dashboard/assignments", async (c) => {
 });
 
 workOrdersRouter.patch("/v1/team/dashboard/profile/:techId", async (c) => {
-  const { supabase } = await requireAuth(c);
+  const { supabase, workspaceId } = await requireCallerWorkspaceId(c);
   const body = z.record(z.string(), z.unknown()).parse(await c.req.json());
+  // Step 4 GUARD: pin tenancy in the passthrough payload + scope by it.
   const { data, error } = await (supabase.from("technicians") as any)
-    .update(body).eq("id", c.req.param("techId")).select().single();
+    .update({ ...body, workspace_id: workspaceId })
+    .eq("id", c.req.param("techId")).eq("workspace_id", workspaceId).select().single();
   if (error) throw error;
   return json({ data });
 });
 
 workOrdersRouter.post("/v1/team/dashboard/drivers-license", async (c) => {
-  const { supabase } = await requireAuth(c);
+  const { supabase, user } = await requireAuth(c);
   const form = await c.req.raw.formData();
   const file = form.get("file");
   const userId = typeof form.get("user_id") === "string" ? (form.get("user_id") as string).trim() : "";
@@ -1590,8 +1727,12 @@ workOrdersRouter.post("/v1/team/dashboard/drivers-license", async (c) => {
   const { error: uploadError } = await supabase.storage.from("team-documents").upload(filePath, file, { upsert: true });
   if (uploadError) throw uploadError;
   const { data } = supabase.storage.from("team-documents").getPublicUrl(filePath);
+  // Step 4 GUARD: the license write is scoped to the caller's workspace.
+  const workspaceId = await resolveCallerWorkspaceId(supabase, user.id);
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
   const { data: updated, error: updateError } = await (supabase.from("technicians") as any)
-    .update({ drivers_license_url: data.publicUrl }).eq("id", techId).select().single();
+    .update({ drivers_license_url: data.publicUrl }).eq("id", techId)
+    .eq("workspace_id", workspaceId).select().single();
   if (updateError) throw updateError;
   return json({ data: { public_url: data.publicUrl, technician: updated } });
 });
@@ -1644,54 +1785,20 @@ workOrdersRouter.post("/v1/time-clock/break/end", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// Job runtime — GET /v1/jobs/:id/runtime (canonical execution bundle)
+// Job runtime — GET /v1/jobs/:id/runtime
+//
+// A second, older registration of this route used to sit here and SERVE
+// (Hono first-match wins): its appointment select named user_id,
+// service_catalog_id, title, assigned_technician_id, estimated_cost and
+// service_date, its items select named name/technician_notes/status, its
+// invoice leg filtered on a non-existent invoices.appointment_id column
+// and selected balance_due/due_date/paid_at, and its payments select
+// named method — none of which exist in production, so the bundle
+// 42703'd on every call (phantom fix #2, 2026-11-10). It was removed;
+// the sole registration is the workspace-scoped handler further down
+// (the "Job runtime bundle" section), whose response shape is the one
+// src/application/queries/get-job-runtime.query.ts consumes.
 // ---------------------------------------------------------------------------
-
-workOrdersRouter.get("/v1/jobs/:id/runtime", async (c) => {
-  const { supabase, user } = await requireAuth(c);
-  const jobId = c.req.param("id");
-  const { data: appointment, error: appointmentError } = await (supabase.from("appointments") as any)
-    .select("id,user_id,workspace_id,customer_id,vehicle_id,service_catalog_id,title,status,dispatch_status,assigned_technician_id,estimated_cost,metadata,starts_at,ends_at,service_date")
-    .eq("id", jobId).eq("user_id", user.id).single();
-  if (appointmentError) throw appointmentError;
-  const [itemsRes, serviceRes, invoiceRes, checklistRes] = await Promise.all([
-    (supabase.from("appointment_items") as any)
-      .select("id,service_catalog_id,name,quantity,unit_price,technician_notes,status,metadata")
-      .eq("workspace_id", appointment.workspace_id).eq("appointment_id", jobId).order("sort_order"),
-    (supabase.from("service_records") as any)
-      .select("id,subtotal,tax_amount,total_amount,status,started_at,completed_at,metadata")
-      .eq("workspace_id", appointment.workspace_id).eq("appointment_id", jobId)
-      .order("created_at", { ascending: false }).limit(1).maybeSingle(),
-    (supabase.from("invoices") as any)
-      .select("id,subtotal,tax_total,total,status,balance_due,due_date,paid_at")
-      .eq("workspace_id", appointment.workspace_id).eq("appointment_id", jobId)
-      .order("created_at", { ascending: false }).limit(1).maybeSingle(),
-    (supabase.from("job_execution_checklist") as any)
-      .select("id,step_key,label,step_order,status,evidence_url,completed_at,completed_by")
-      .eq("appointment_id", jobId).order("step_order"),
-  ]);
-  const error = itemsRes.error || serviceRes.error || invoiceRes.error || checklistRes.error;
-  if (error) throw error;
-  let payments: any[] = [];
-  if (invoiceRes.data?.id) {
-    const { data: paymentRows, error: paymentsError } = await (supabase.from("payments") as any)
-      .select("id,amount,method,status,created_at")
-      .eq("workspace_id", appointment.workspace_id).eq("invoice_id", invoiceRes.data.id)
-      .order("created_at", { ascending: false });
-    if (paymentsError) throw paymentsError;
-    payments = paymentRows ?? [];
-  }
-  return json({
-    data: {
-      appointment,
-      items: itemsRes.data ?? [],
-      service: serviceRes.data ?? null,
-      invoice: invoiceRes.data ?? null,
-      payments,
-      checklist: checklistRes.data ?? [],
-    },
-  });
-});
 
 // ---------------------------------------------------------------------------
 // Tech app — GET /v1/tech-app/* bundles
@@ -1699,11 +1806,15 @@ workOrdersRouter.get("/v1/jobs/:id/runtime", async (c) => {
 
 workOrdersRouter.get("/v1/tech-app/context", async (c) => {
   const { supabase, user } = await requireAuth(c);
+  // Step 4 RESCOPE: the self read is additionally scoped to the
+  // caller's workspace (the user key stays as the self narrowing).
+  const workspaceId = await resolveCallerWorkspaceId(supabase, user.id);
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
   const { data: technician, error: techError } = await (supabase.from("technicians") as any)
-    .select("*").eq("user_id", user.id).maybeSingle();
+    .select("*").eq("user_id", user.id).eq("workspace_id", workspaceId).maybeSingle();
   if (techError && techError.code !== "PGRST116") throw techError;
   const [vanRes, clockRes, prefsRes] = await Promise.all([
-    (supabase.from("vans") as any).select("*").eq("user_id", user.id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    (supabase.from("vans") as any).select("*").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).limit(1).maybeSingle(),
     (() => {
       const start = new Date(); start.setHours(0, 0, 0, 0);
       return (supabase.from("time_clock_entries") as any).select("*").eq("user_id", user.id)
@@ -1726,12 +1837,16 @@ workOrdersRouter.get("/v1/tech-app/context", async (c) => {
 });
 
 workOrdersRouter.get("/v1/tech-app/job-workspace", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  // Phantom heal (2026-11-10): appointments has no user_id in production —
+  // the legacy owner key 42703'd every call. The appointment is scoped to
+  // the caller's workspace (Step 4 resolution), and the downstream
+  // catalog/technician legs key off the appointment's own workspace_id.
+  const { supabase, workspaceId: callerWorkspaceId } = await requireCallerWorkspaceId(c);
   const jobId = z.string().min(1).parse(new URL(c.req.url).searchParams.get("job_id") ?? "");
   const { data: appointment, error: appointmentError } = await (supabase.from("appointments") as any)
-    .select("*").eq("id", jobId).eq("user_id", user.id).single();
+    .select("*").eq("id", jobId).eq("workspace_id", callerWorkspaceId).single();
   if (appointmentError) throw appointmentError;
-  const workspaceId = appointment.user_id;
+  const workspaceId = appointment.workspace_id;
   const [customerRes, vehicleRes, itemsRes, catalogRes, techniciansRes, commentsRes, operationalJobRes] = await Promise.all([
     appointment.customer_id
       ? (supabase.from("customers") as any).select("*").eq("id", appointment.customer_id).maybeSingle()
@@ -1740,10 +1855,10 @@ workOrdersRouter.get("/v1/tech-app/job-workspace", async (c) => {
       ? (supabase.from("vehicles") as any).select("*").eq("id", appointment.vehicle_id).maybeSingle()
       : Promise.resolve({ data: null, error: null }),
     (supabase.from("appointment_items") as any)
-      .select("id, appointment_id, service_catalog_id, name, quantity, unit_price, status, technician_notes, service_catalog(id, name, category, description, base_price, duration_minutes)")
+      .select("id, appointment_id, service_catalog_id, item_type, description, quantity, unit_price, is_prepaid, sort_order, created_at, service_catalog(id, name, category, description, labor_price, estimated_minutes)")
       .eq("appointment_id", jobId).order("created_at"),
     (supabase.from("service_catalog") as any)
-      .select("id, name, category, description, base_price, duration_minutes")
+      .select("id, name, category, description, labor_price, estimated_minutes")
       .eq("workspace_id", workspaceId).order("name"),
     (supabase.from("technicians") as any)
       .select("id, first_name, last_name, full_name, phone, email, status")
@@ -1785,14 +1900,16 @@ workOrdersRouter.get("/v1/tech-app/session", async (c) => {
 });
 
 workOrdersRouter.get("/v1/tech-app/job-workspace-v2", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  // Phantom heal (2026-11-10): same user_id scoping defect as
+  // job-workspace — the appointment keys on workspace_id in production.
+  const { supabase, workspaceId: callerWorkspaceId } = await requireCallerWorkspaceId(c);
   const jobId = z.string().min(1).parse(new URL(c.req.url).searchParams.get("job_id") ?? "");
   const { data: appointment, error: appointmentError } = await (supabase.from("appointments") as any)
-    .select("*").eq("id", jobId).eq("user_id", user.id).single();
+    .select("*").eq("id", jobId).eq("workspace_id", callerWorkspaceId).single();
   if (appointmentError) throw appointmentError;
   const [itemsRes, threadsRes] = await Promise.all([
     (supabase.from("appointment_items") as any)
-      .select("id, appointment_id, service_catalog_id, name, quantity, unit_price, status, technician_notes, service_catalog(id, name, category, description, base_price, duration_minutes)")
+      .select("id, appointment_id, service_catalog_id, item_type, description, quantity, unit_price, is_prepaid, sort_order, created_at, service_catalog(id, name, category, description, labor_price, estimated_minutes)")
       .eq("appointment_id", jobId).order("created_at"),
     (supabase.from("threads") as any).select("id").eq("job_id", jobId).eq("job_source", "appointment")
       .is("deleted_at", null).order("created_at", { ascending: false }).limit(1).maybeSingle(),
@@ -1800,6 +1917,1571 @@ workOrdersRouter.get("/v1/tech-app/job-workspace-v2", async (c) => {
   const error = itemsRes.error || threadsRes.error;
   if (error) throw error;
   return json({ data: { appointment, items: itemsRes.data ?? [], thread: threadsRes.data ?? null } });
+});
+
+workOrdersRouter.get("/v1/tech-app/jobs", async (c) => {
+  // Tech app jobs list (S1 jobs wire, 2026-11-11): the caller's OWN assigned
+  // appointments in the canonical TechOperationalJob shape
+  // (src/application/queries/tech-app.query.ts mapOperationalRowToTechJob),
+  // plus the raw fields the external tech app stores locally (starts_at /
+  // ends_at, estimated_cost, customer email, vehicle VIN, priced services).
+  // Before this door the external tech app could only show on-device demo
+  // data: an assignment existed in the office app but was invisible where
+  // the technician works (Ty's ruling, 2026-11-11: a write nobody can see
+  // is not a working workflow). Columns are the LIVE production shape
+  // (2026-11-10 census, pinned by tech-app-jobs-selects.test.ts):
+  // appointments carries no title, so the title comes from the first
+  // appointment item's catalog name; the address coalesces from the
+  // appointment metadata (website-push shape), then the customer's
+  // address fields. Assignment keys on assigned_user_id — the column the
+  // canonical assign write (assign_dispatch_job_v1's appointment branch)
+  // stamps with the assignee's auth id.
+  const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c);
+  const now = Date.now();
+  const windowStart = new Date(now - 36 * 60 * 60 * 1000).toISOString();
+  // Forward horizon is +31 days (widened from +8 on 2026-11-11, Ty's
+  // ruling): the phone must show the whole coming month — at +8 the
+  // Nov 21 and Nov 23 jobs were invisible no matter their assignment.
+  const windowEnd = new Date(now + 31 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: appointments, error: appointmentsError } = await (supabase.from("appointments") as any)
+    .select("id, workspace_id, customer_id, vehicle_id, assigned_user_id, status, dispatch_status, starts_at, ends_at, source, confirmation_code, notes, metadata, created_at")
+    .eq("workspace_id", workspaceId)
+    .eq("assigned_user_id", user.id)
+    .neq("status", "cancelled")
+    .gte("starts_at", windowStart)
+    .lt("starts_at", windowEnd)
+    .order("starts_at", { ascending: true });
+  if (appointmentsError) throw appointmentsError;
+  const rows = (appointments ?? []) as Array<Record<string, any>>;
+  const customerIds = Array.from(new Set(rows.map((r) => r.customer_id).filter((id: unknown): id is string => typeof id === "string")));
+  const vehicleIds = Array.from(new Set(rows.map((r) => r.vehicle_id).filter((id: unknown): id is string => typeof id === "string")));
+  const appointmentIds = rows.map((r) => r.id as string);
+  const empty = { data: [], error: null };
+  const [customersRes, vehiclesRes, itemsRes] = await Promise.all([
+    customerIds.length > 0
+      ? (supabase.from("customers") as any)
+        .select("id, first_name, last_name, company_name, email, phone, address_line1, address_line2, city, region, postal_code")
+        .in("id", customerIds).eq("workspace_id", workspaceId)
+      : Promise.resolve(empty),
+    vehicleIds.length > 0
+      ? (supabase.from("vehicles") as any)
+        .select("id, vin, year, make, model, trim")
+        .in("id", vehicleIds).eq("workspace_id", workspaceId)
+      : Promise.resolve(empty),
+    appointmentIds.length > 0
+      ? (supabase.from("appointment_items") as any)
+        .select("id, appointment_id, service_catalog_id, item_type, description, quantity, unit_price, sort_order, service_catalog(id, name)")
+        .in("appointment_id", appointmentIds).eq("workspace_id", workspaceId)
+        .order("sort_order", { ascending: true })
+      : Promise.resolve(empty),
+  ]);
+  const joinError = customersRes.error || vehiclesRes.error || itemsRes.error;
+  if (joinError) throw joinError;
+  const customersById = new Map<string, Record<string, any>>(((customersRes.data ?? []) as Array<Record<string, any>>).map((r) => [r.id as string, r]));
+  const vehiclesById = new Map<string, Record<string, any>>(((vehiclesRes.data ?? []) as Array<Record<string, any>>).map((r) => [r.id as string, r]));
+  const itemsByAppointment = new Map<string, Array<Record<string, any>>>();
+  for (const item of (itemsRes.data ?? []) as Array<Record<string, any>>) {
+    const list = itemsByAppointment.get(item.appointment_id as string) ?? [];
+    list.push(item);
+    itemsByAppointment.set(item.appointment_id as string, list);
+  }
+  const jobs = rows.map((appt) => {
+    const customer = appt.customer_id ? customersById.get(appt.customer_id as string) ?? null : null;
+    const vehicle = appt.vehicle_id ? vehiclesById.get(appt.vehicle_id as string) ?? null : null;
+    const metadata = (appt.metadata ?? {}) as Record<string, any>;
+    const services = (itemsByAppointment.get(appt.id as string) ?? []).map((item) => ({
+      name: (item.service_catalog as Record<string, any> | null)?.name ?? item.description ?? "Service",
+      price: Number(item.unit_price ?? 0) * Number(item.quantity ?? 1),
+    }));
+    const customerName = customer
+      ? [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim() || (customer.company_name as string | null) || null
+      : (metadata.customer_name as string | undefined) ?? (metadata.guest_name as string | undefined) ?? null;
+    const customerPhone = (customer?.phone as string | null) ?? (metadata.guest_phone as string | undefined) ?? (metadata.customer_phone as string | undefined) ?? null;
+    const customerAddress = customer
+      ? [customer.address_line1, customer.address_line2, customer.city, customer.region, customer.postal_code].filter(Boolean).join(", ") || null
+      : null;
+    const startsAt = appt.starts_at as string;
+    const endsAt = (appt.ends_at as string | null) ?? null;
+    const durationMinutes = endsAt
+      ? Math.round((new Date(endsAt).getTime() - new Date(startsAt).getTime()) / 60000)
+      : null;
+    const estimatedCost = typeof metadata.estimated_cost === "number"
+      ? metadata.estimated_cost
+      : services.length > 0
+        ? services.reduce((sum, s) => sum + s.price, 0)
+        : null;
+    return {
+      id: appt.id as string,
+      source: "appointment",
+      title: services[0]?.name ?? (metadata.service_name as string | undefined) ?? "Service Appointment",
+      scheduled_date: startsAt.slice(0, 10),
+      scheduled_time: startsAt.slice(11, 16),
+      starts_at: startsAt,
+      ends_at: endsAt,
+      estimated_duration_minutes: durationMinutes,
+      dispatch_status: (appt.dispatch_status as string | null) ?? (metadata.dispatch_status as string | undefined) ?? "assigned",
+      status: (appt.status as string | null) ?? "scheduled",
+      job_priority: "normal",
+      location_address: (metadata.service_address as string | undefined) ?? (metadata.address as string | undefined) ?? customerAddress,
+      location_lat: null,
+      location_lng: null,
+      notes: (appt.notes as string | null) ?? null,
+      confirmation_code: (appt.confirmation_code as string | null) ?? null,
+      customers: customerName || customerPhone
+        ? { name: customerName ?? "Customer", phone: customerPhone }
+        : null,
+      customer_email: (customer?.email as string | null) ?? null,
+      vehicles: vehicle
+        ? { year: (vehicle.year as number | null) ?? 0, make: (vehicle.make as string | null) ?? "", model: (vehicle.model as string | null) ?? "" }
+        : null,
+      vehicle_vin: (vehicle?.vin as string | null) ?? null,
+      service_catalog: services[0] ? { name: services[0].name } : null,
+      services,
+      estimated_cost: estimatedCost,
+      is_fleet: false,
+      fleet_job_id: null,
+      fleet_job_number: null,
+      fleet_vehicle_count: null,
+    };
+  });
+  return json({ data: jobs });
+});
+
+// ---------------------------------------------------------------------------
+// Tech app — job payment (pay-by-link, 2026-11-12)
+//
+// Step 1 of the tech-app payment loop (Ty's approved direction:
+// pay-by-link first, tap-to-pay later). The technician is not a
+// payments-desk role, so the office door (POST /api/v1/payments/actions)
+// refuses techs by design. This door is the tech-scoped equivalent: it
+// resolves ONLY a job assigned to the caller, in the caller's workspace,
+// and then runs the exact canonical machinery the office door runs —
+// syncCanonicalInvoiceToStripe for the hosted invoice URL and
+// dispatchPaymentLifecycle for the customer email. No Stripe logic
+// lives here; nothing about amounts is computed here either — the state
+// comes from deriveTechJobPaymentState over the canonical rows.
+// ---------------------------------------------------------------------------
+
+interface TechJobPaymentResolution {
+  appointment: Record<string, any>;
+  invoice: TechPaymentInvoiceLike | null;
+  payment: TechPaymentPaymentLike | null;
+  customer: Record<string, any> | null;
+}
+
+async function resolveTechJobPayment(
+  supabase: any,
+  workspaceId: string,
+  userId: string,
+  jobId: string,
+): Promise<TechJobPaymentResolution> {
+  const { data: appointment, error: appointmentError } = await (supabase.from("appointments") as any)
+    .select("id, workspace_id, customer_id, assigned_user_id, status")
+    .eq("id", jobId)
+    .eq("workspace_id", workspaceId)
+    .eq("assigned_user_id", userId)
+    .maybeSingle();
+  if (appointmentError) throw appointmentError;
+  if (!appointment) throw new ApiError(404, "Job not found", "job_not_found");
+
+  const { data: invoiceRows, error: invoiceError } = await (supabase.from("invoices") as any)
+    .select("id, invoice_number, total, amount_paid, status, customer_id, metadata")
+    .eq("workspace_id", workspaceId)
+    .eq("metadata->>appointment_id", jobId)
+    .neq("status", "void")
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (invoiceError) throw invoiceError;
+  const invoice = (invoiceRows?.[0] as TechPaymentInvoiceLike | undefined) ?? null;
+
+  let payment: TechPaymentPaymentLike | null = null;
+  if (invoice) {
+    const { data: byInvoice, error: byInvoiceError } = await (supabase.from("payments") as any)
+      .select("id, invoice_id, customer_id, status, amount, currency_code, metadata")
+      .eq("workspace_id", workspaceId)
+      .eq("invoice_id", invoice.id)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    if (byInvoiceError) throw byInvoiceError;
+    payment = (byInvoice?.[0] as TechPaymentPaymentLike | undefined) ?? null;
+  }
+  if (!payment) {
+    const { data: byAppointment, error: byAppointmentError } = await (supabase.from("payments") as any)
+      .select("id, invoice_id, customer_id, status, amount, currency_code, metadata")
+      .eq("workspace_id", workspaceId)
+      .contains("metadata", { appointment_id: jobId })
+      .order("created_at", { ascending: false })
+      .limit(1);
+    if (byAppointmentError) throw byAppointmentError;
+    payment = (byAppointment?.[0] as TechPaymentPaymentLike | undefined) ?? null;
+  }
+
+  const customerId = (invoice?.customer_id as string | null) ?? (appointment.customer_id as string | null);
+  let customer: Record<string, any> | null = null;
+  if (customerId) {
+    const { data: customerRow, error: customerError } = await (supabase.from("customers") as any)
+      .select("id, first_name, last_name, email")
+      .eq("id", customerId)
+      .eq("workspace_id", workspaceId)
+      .maybeSingle();
+    if (customerError) throw customerError;
+    customer = (customerRow as Record<string, any> | null) ?? null;
+  }
+
+  return { appointment, invoice, payment, customer };
+}
+
+workOrdersRouter.get("/v1/tech-app/payment", async (c) => {
+  const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c);
+  const jobId = z.string().min(1).parse(new URL(c.req.url).searchParams.get("job_id") ?? "");
+  const resolved = await resolveTechJobPayment(supabase, workspaceId, user.id, jobId);
+  return json({
+    data: deriveTechJobPaymentState({
+      invoice: resolved.invoice,
+      payment: resolved.payment,
+      customerEmail: (resolved.customer?.email as string | null) ?? null,
+    }),
+  });
+});
+
+workOrdersRouter.post("/v1/tech-app/payment/send", async (c) => {
+  const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c);
+  const body = z.object({ job_id: z.string().min(1) }).parse(await c.req.json());
+  // Sending money requests carries the same workspace gate as the
+  // office payments door: an active Payments add-on (membership is
+  // implied — the caller's workspace was resolved from their rows).
+  await requireWorkspacePaymentsAddonAuth(c, workspaceId);
+
+  const resolved = await resolveTechJobPayment(supabase, workspaceId, user.id, body.job_id);
+  const { appointment, invoice, customer } = resolved;
+  let payment = resolved.payment;
+
+  const state = deriveTechJobPaymentState({
+    invoice,
+    payment,
+    customerEmail: (customer?.email as string | null) ?? null,
+  });
+  if (state.paid) {
+    return json({ error: { code: "already_paid", message: "This balance has already been paid." } }, { status: 409 });
+  }
+  if (!invoice) {
+    return json({ error: { code: "invoice_required", message: "This job has no invoice yet, so there is nothing to collect." } }, { status: 409 });
+  }
+
+  if (!payment) {
+    // The invoice exists but no receivable was ever opened for it
+    // (the office closeout opens the same record). Open the canonical
+    // pending receivable — dollars, invoice total, pay-at-service —
+    // then fall through to the canonical send.
+    const { data: created, error: createError } = await (supabase.from("payments") as any)
+      .insert({
+        workspace_id: workspaceId,
+        invoice_id: invoice.id,
+        customer_id: (invoice.customer_id as string | null) ?? (appointment.customer_id as string | null),
+        provider: null,
+        provider_payment_id: null,
+        status: "pending",
+        amount: Number(invoice.total ?? 0),
+        currency_code: "USD",
+        paid_at: null,
+        created_by: user.id,
+        metadata: { appointment_id: body.job_id, payment_type: "pay_at_service", source: "tech_app" },
+      })
+      .select("id, invoice_id, customer_id, status, amount, currency_code, metadata")
+      .single();
+    if (createError) throw createError;
+    payment = created as TechPaymentPaymentLike;
+  } else if (!payment.invoice_id) {
+    // Appointment-linked receivable that predates its invoice link:
+    // stamp the link so the canonical send can key on it.
+    const { data: linked, error: linkError } = await (supabase.from("payments") as any)
+      .update({ invoice_id: invoice.id })
+      .eq("workspace_id", workspaceId)
+      .eq("id", payment.id)
+      .select("id, invoice_id, customer_id, status, amount, currency_code, metadata")
+      .single();
+    if (linkError) throw linkError;
+    payment = linked as TechPaymentPaymentLike;
+  }
+
+  const paymentMetadata = (payment.metadata ?? {}) as Record<string, unknown>;
+  const sync = await syncCanonicalInvoiceToStripe({
+    supabase,
+    workspaceId,
+    appointmentId: body.job_id,
+    invoiceId: invoice.id as string,
+    paymentId: payment.id as string,
+  });
+  if (sync.provider !== "stripe") {
+    return json({ error: { code: "active_provider_not_stripe", message: `The active payment provider is ${sync.provider}; Stripe was not invoked.` } }, { status: 409 });
+  }
+  if (!sync.hostedInvoiceUrl) {
+    return json({ error: { code: "stripe_invoice_url_missing", message: "Stripe invoice was synchronized but did not return a hosted invoice URL." } }, { status: 502 });
+  }
+
+  const customerEmail = (customer?.email as string | null) ?? null;
+  if (!customerEmail) {
+    return json({ error: { code: "customer_email_required", message: "Customer email is required to send a payment request." } }, { status: 422 });
+  }
+  const customerName = [customer?.first_name, customer?.last_name].filter(Boolean).join(" ") || "Customer";
+
+  const sentAt = new Date().toISOString();
+  const { data: updated, error: updateError } = await (supabase.from("payments") as any)
+    .update({
+      provider: "stripe",
+      metadata: {
+        ...paymentMetadata,
+        payment_url: sync.hostedInvoiceUrl,
+        stripe_invoice_id: sync.stripeInvoiceId,
+        stripe_customer_id: sync.stripeCustomerId,
+        invoice_sent_at: sentAt,
+      },
+    })
+    .eq("workspace_id", workspaceId)
+    .eq("id", payment.id)
+    .select()
+    .single();
+  if (updateError) throw updateError;
+
+  const { data: workspace } = await (supabase.from("workspaces") as any)
+    .select("name,timezone")
+    .eq("id", workspaceId)
+    .single();
+  await dispatchPaymentLifecycle({
+    eventKey: LIFECYCLE_EVENT_KEYS.paymentRequested,
+    eventId: `${payment.id}:requested:${sync.stripeInvoiceId ?? invoice.id}`,
+    payment: {
+      ...updated,
+      customer_email: customerEmail,
+      customer_name: customerName,
+      invoice_number: invoice.invoice_number ?? null,
+    },
+    workspaceName: (workspace?.name as string | undefined) ?? "Service Writer",
+    workspaceTimezone: (workspace?.timezone as string | undefined) ?? "UTC",
+    actionUrl: sync.hostedInvoiceUrl,
+  });
+
+  const nextState = deriveTechJobPaymentState({
+    invoice,
+    payment: updated as TechPaymentPaymentLike,
+    customerEmail,
+  });
+  return json({
+    data: {
+      url: sync.hostedInvoiceUrl,
+      email_sent: true,
+      payment_id: payment.id,
+      invoice_id: invoice.id,
+      state: nextState,
+    },
+  });
+});
+
+workOrdersRouter.post("/v1/tech-app/payment/customer-email", async (c) => {
+  // Collect-step destination check (2026-11-12): the payment link and
+  // the receipt go to the customer's email, so a wrong address means
+  // the customer never gets either. The email is shown ONLY inside
+  // Collect, with this as its correction path: the assigned tech can
+  // fix the canonical customer record for their own job — nothing
+  // else about the customer is writable through this door.
+  const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c);
+  const body = z.object({
+    job_id: z.string().min(1),
+    email: z.string().trim().email().max(320),
+  }).parse(await c.req.json());
+  const resolved = await resolveTechJobPayment(supabase, workspaceId, user.id, body.job_id);
+  const customerId = (resolved.invoice?.customer_id as string | null) ?? (resolved.appointment.customer_id as string | null);
+  if (!customerId) {
+    return json({ error: { code: "customer_required", message: "This job has no customer record to correct." } }, { status: 409 });
+  }
+  const { data: updated, error: updateError } = await (supabase.from("customers") as any)
+    .update({ email: body.email })
+    .eq("id", customerId)
+    .eq("workspace_id", workspaceId)
+    .select("id, first_name, last_name, email")
+    .single();
+  if (updateError) throw updateError;
+  const state = deriveTechJobPaymentState({
+    invoice: resolved.invoice,
+    payment: resolved.payment,
+    customerEmail: (updated?.email as string | null) ?? body.email,
+  });
+  return json({ data: state });
+});
+
+/**
+ * Sync-pull degradation reporter (2026-11-12): the pull's auxiliary
+ * reads (playbook enrichment, SYNC-1b child tables) must never be
+ * load-bearing — when one fails, the failure is captured here and
+ * the pull serves the remaining change sets without it. Core reads
+ * (the appointment census and its customer/vehicle/item joins) keep
+ * throwing: a pull that cannot see the jobs must fail loudly, not
+ * answer an empty list the device would trust.
+ */
+function captureSyncPullDegradation(error: unknown, workspaceId: string, source: string): void {
+  captureServerError(error, {
+    route: "/v1/tech-app/sync/pull",
+    method: "GET",
+    workspaceId,
+    code: `sync_pull_degraded:${source}`,
+  });
+}
+
+workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
+  // Tech app sync pull (SYNC-1, 2026-11-11): the server half of the
+  // Watermelon synchronize() protocol the external tech app already
+  // calls (lovable-tech-partner src/lib/swSync.ts). Returns the
+  // caller's OWN assigned jobs as local-shape change sets bucketed
+  // against last_pulled_at; the pure mapping/bucketing lives in
+  // src/application/queries/tech-app-sync.query.ts.
+  //
+  // Scope: the jobs table (SYNC-1) plus inspections, inspection
+  // steps, recommendations, photos and the caller's own location
+  // pings (SYNC-1b, 2026-11-11). Child rows are scoped to the same
+  // appointment window — the caller's assigned appointments plus,
+  // on incremental pulls, the moved-away ids whose jobs are being
+  // deleted, so their child rows delete too. Locations are scoped
+  // to the caller's technicians row and the same 36h look-back.
+  // Deletes: cancelled appointments, plus (on incremental pulls) appointments in the
+  // window changed since last_pulled_at that are no longer assigned
+  // to the caller — deleting an id the device never held is a
+  // Watermelon no-op, so the wider net is safe. Composition mirrors
+  // the jobs door above (title from the first item's catalog name;
+  // address from appointment metadata, then the customer's fields).
+  const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c);
+  const timestamp = Date.now();
+  const rawLast = new URL(c.req.url).searchParams.get("last_pulled_at");
+  const parsedLast = rawLast ? Number(rawLast) : 0;
+  const lastPulledAt = Number.isFinite(parsedLast) && parsedLast > 0 ? Math.floor(parsedLast) : 0;
+
+  const windowStart = new Date(timestamp - 36 * 60 * 60 * 1000).toISOString();
+  // Forward horizon +31 days — same widening as the jobs door above
+  // (2026-11-11, Ty's ruling: show the whole coming month).
+  const windowEnd = new Date(timestamp + 31 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: appointments, error: appointmentsError } = await (supabase.from("appointments") as any)
+    .select("id, workspace_id, customer_id, vehicle_id, assigned_user_id, status, dispatch_status, starts_at, ends_at, source, confirmation_code, notes, metadata, created_at, updated_at, completed_at")
+    .eq("workspace_id", workspaceId)
+    .eq("assigned_user_id", user.id)
+    .gte("starts_at", windowStart)
+    .lt("starts_at", windowEnd)
+    .order("starts_at", { ascending: true });
+  if (appointmentsError) throw appointmentsError;
+  const rows = (appointments ?? []) as Array<Record<string, any>>;
+
+  let extraDeletedIds: string[] = [];
+  if (lastPulledAt > 0) {
+    const sinceIso = new Date(lastPulledAt).toISOString();
+    const { data: moved, error: movedError } = await (supabase.from("appointments") as any)
+      .select("id")
+      .eq("workspace_id", workspaceId)
+      .or(`assigned_user_id.is.null,assigned_user_id.neq.${user.id}`)
+      .gte("starts_at", windowStart)
+      .lt("starts_at", windowEnd)
+      .gt("updated_at", sinceIso);
+    if (movedError) throw movedError;
+    extraDeletedIds = ((moved ?? []) as Array<Record<string, any>>).map((r) => r.id as string);
+  }
+
+  const customerIds = Array.from(new Set(rows.map((r) => r.customer_id).filter((id: unknown): id is string => typeof id === "string")));
+  const vehicleIds = Array.from(new Set(rows.map((r) => r.vehicle_id).filter((id: unknown): id is string => typeof id === "string")));
+  const appointmentIds = rows.map((r) => r.id as string);
+  const empty = { data: [], error: null };
+  const [customersRes, vehiclesRes, itemsRes] = await Promise.all([
+    customerIds.length > 0
+      ? (supabase.from("customers") as any)
+        .select("id, first_name, last_name, company_name, email, phone, address_line1, address_line2, city, region, postal_code")
+        .in("id", customerIds).eq("workspace_id", workspaceId)
+      : Promise.resolve(empty),
+    vehicleIds.length > 0
+      ? (supabase.from("vehicles") as any)
+        .select("id, vin, year, make, model, trim, mileage, license_plate")
+        .in("id", vehicleIds).eq("workspace_id", workspaceId)
+      : Promise.resolve(empty),
+    appointmentIds.length > 0
+      ? (supabase.from("appointment_items") as any)
+        .select("id, appointment_id, service_catalog_id, item_type, description, quantity, unit_price, sort_order, service_catalog(id, name)")
+        .in("appointment_id", appointmentIds).eq("workspace_id", workspaceId)
+        .order("sort_order", { ascending: true })
+      : Promise.resolve(empty),
+  ]);
+  const joinError = customersRes.error || vehiclesRes.error || itemsRes.error;
+  if (joinError) throw joinError;
+  const customersById = new Map<string, Record<string, any>>(((customersRes.data ?? []) as Array<Record<string, any>>).map((r) => [r.id as string, r]));
+  const vehiclesById = new Map<string, Record<string, any>>(((vehiclesRes.data ?? []) as Array<Record<string, any>>).map((r) => [r.id as string, r]));
+  const itemsByAppointment = new Map<string, Array<Record<string, any>>>();
+  for (const item of (itemsRes.data ?? []) as Array<Record<string, any>>) {
+    const list = itemsByAppointment.get(item.appointment_id as string) ?? [];
+    list.push(item);
+    itemsByAppointment.set(item.appointment_id as string, list);
+  }
+
+  // Job flow (2026-11-12): each service carries its playbook —
+  // components (what's included) + SOP steps (how it's done). The
+  // workspace's own service_playbooks win by catalog id; the global
+  // service_playbook_templates are the fallback by service name.
+  const catalogIds = Array.from(
+    new Set(
+      ((itemsRes.data ?? []) as Array<Record<string, any>>)
+        .map((item) => item.service_catalog_id)
+        .filter((id: unknown): id is string => typeof id === "string"),
+    ),
+  );
+  const serviceNames = Array.from(
+    new Set(
+      ((itemsRes.data ?? []) as Array<Record<string, any>>).map(
+        (item) =>
+          ((item.service_catalog as Record<string, any> | null)?.name as string | undefined) ??
+          (item.description as string | undefined) ??
+          "Service",
+      ),
+    ),
+  );
+  // Fail-soft enrichment (2026-11-12, live 500 — Sentry
+  // SERVICE-WRITER-2): the full selects name the `components` column
+  // that migration 20261112030000 adds to both playbook tables.
+  // Production had not received that migration, PostgREST answered
+  // 42703 ("column service_playbooks.components does not exist"),
+  // and throwing it killed the entire pull — jobs included — for
+  // every caller whose jobs carry catalog items. Enrichment is
+  // decoration on the jobs change set, never a precondition: on
+  // error, capture it, retry with the pre-migration columns (steps
+  // only — SOP still enriches), and if that fails too, ship the
+  // jobs with no playbook data at all.
+  const readPlaybooks = (select: string) =>
+    catalogIds.length > 0
+      ? (supabase.from("service_playbooks") as any)
+          .select(select)
+          .eq("workspace_id", workspaceId)
+          .eq("is_active", true)
+          .in("service_catalog_id", catalogIds)
+      : Promise.resolve(empty);
+  const readTemplates = (select: string) =>
+    serviceNames.length > 0
+      ? (supabase.from("service_playbook_templates") as any)
+          .select(select)
+          .eq("is_active", true)
+          .in("name", serviceNames)
+      : Promise.resolve(empty);
+  const settlePlaybookRead = async (
+    source: string,
+    first: { data: unknown; error: unknown },
+    retry: () => Promise<{ data: unknown; error: unknown }>,
+  ): Promise<{ data: unknown; error: null }> => {
+    if (!first.error) return first as { data: unknown; error: null };
+    captureSyncPullDegradation(first.error, workspaceId, source);
+    const second = await retry();
+    if (second.error) {
+      captureSyncPullDegradation(second.error, workspaceId, source);
+      return empty;
+    }
+    return second as { data: unknown; error: null };
+  };
+  const [playbooksFirst, templatesFirst] = await Promise.all([
+    readPlaybooks("id, service_catalog_id, steps, components"),
+    readTemplates("name, steps, components"),
+  ]);
+  const [playbooksRes, templatesRes] = await Promise.all([
+    settlePlaybookRead("service_playbooks", playbooksFirst, () =>
+      readPlaybooks("id, service_catalog_id, steps"),
+    ),
+    settlePlaybookRead("service_playbook_templates", templatesFirst, () =>
+      readTemplates("name, steps"),
+    ),
+  ]);
+  const playbookByCatalogId = new Map<string, Record<string, any>>(
+    ((playbooksRes.data ?? []) as Array<Record<string, any>>)
+      .filter((row) => typeof row.service_catalog_id === "string")
+      .map((row) => [row.service_catalog_id as string, row]),
+  );
+  const templateByName = new Map<string, Record<string, any>>(
+    ((templatesRes.data ?? []) as Array<Record<string, any>>).map((row) => [row.name as string, row]),
+  );
+
+  // Per-row guard (2026-11-12): one appointment whose stored shape
+  // breaks composition is captured and skipped — it must never 500
+  // the whole pull and strand every other job on the device.
+  const composeSyncAppointment = (appt: Record<string, any>): ComposedSyncAppointment => {
+    const customer = appt.customer_id ? customersById.get(appt.customer_id as string) ?? null : null;
+    const vehicle = appt.vehicle_id ? vehiclesById.get(appt.vehicle_id as string) ?? null : null;
+    const metadata = (appt.metadata ?? {}) as Record<string, any>;
+    const services = (itemsByAppointment.get(appt.id as string) ?? []).map((item) => {
+      const name =
+        (item.service_catalog as Record<string, any> | null)?.name ?? item.description ?? "Service";
+      const playbook =
+        (typeof item.service_catalog_id === "string"
+          ? playbookByCatalogId.get(item.service_catalog_id as string)
+          : undefined) ?? templateByName.get(name);
+      return {
+        name,
+        price: Number(item.unit_price ?? 0) * Number(item.quantity ?? 1),
+        components: playbook ? playbookComponentNames(playbook.components) : [],
+        sopSteps: playbook ? playbookStepLabels(playbook.steps) : [],
+      };
+    });
+    const customerName = customer
+      ? [customer.first_name, customer.last_name].filter(Boolean).join(" ").trim() || (customer.company_name as string | null) || null
+      : (metadata.customer_name as string | undefined) ?? (metadata.guest_name as string | undefined) ?? null;
+    const customerPhone = (customer?.phone as string | null) ?? (metadata.guest_phone as string | undefined) ?? (metadata.customer_phone as string | undefined) ?? null;
+    const customerAddress = customer
+      ? [customer.address_line1, customer.address_line2, customer.city, customer.region, customer.postal_code].filter(Boolean).join(", ") || null
+      : null;
+    const startsAt = appt.starts_at as string;
+    const endsAt = (appt.ends_at as string | null) ?? null;
+    const durationMinutes = endsAt
+      ? Math.round((new Date(endsAt).getTime() - new Date(startsAt).getTime()) / 60000)
+      : null;
+    const estimatedCost = typeof metadata.estimated_cost === "number"
+      ? metadata.estimated_cost
+      : services.length > 0
+        ? services.reduce((sum, s) => sum + s.price, 0)
+        : null;
+    return {
+      id: appt.id as string,
+      serverStatus: (appt.status as string | null) ?? null,
+      completedAt: (appt.completed_at as string | null) ?? null,
+      dispatchStatus:
+        (metadata.dispatch_status as string | undefined) ?? (appt.dispatch_status as string | null) ?? null,
+      enRouteAt: (metadata.en_route_at as string | undefined) ?? null,
+      arrivedAt: (metadata.arrived_at as string | undefined) ?? null,
+      enRouteLat: typeof metadata.en_route_lat === "number" ? metadata.en_route_lat : null,
+      enRouteLng: typeof metadata.en_route_lng === "number" ? metadata.en_route_lng : null,
+      arrivedLat: typeof metadata.arrived_lat === "number" ? metadata.arrived_lat : null,
+      arrivedLng: typeof metadata.arrived_lng === "number" ? metadata.arrived_lng : null,
+      title: services[0]?.name ?? (metadata.service_name as string | undefined) ?? "Service Appointment",
+      customerName,
+      customerPhone,
+      customerEmail: (customer?.email as string | null) ?? null,
+      vehicleDisplay: composeVehicleDisplay(vehicle),
+      vin: (vehicle?.vin as string | null) ?? null,
+      mileageIn: typeof vehicle?.mileage === "number" ? (vehicle.mileage as number) : null,
+      plate: (vehicle?.license_plate as string | null) ?? null,
+      address: (metadata.service_address as string | undefined) ?? (metadata.address as string | undefined) ?? customerAddress,
+      startsAt,
+      endsAt,
+      durationMinutes,
+      estimatedCost,
+      notes: (appt.notes as string | null) ?? null,
+      services,
+      createdAt: appt.created_at as string,
+      updatedAt: (appt.updated_at as string | null) ?? null,
+    };
+  };
+  const composed: ComposedSyncAppointment[] = [];
+  for (const appt of rows) {
+    try {
+      composed.push(composeSyncAppointment(appt));
+    } catch (error) {
+      captureSyncPullDegradation(error, workspaceId, `compose:${appt.id as string}`);
+    }
+  }
+
+  const jobChanges = bucketJobChanges(composed, lastPulledAt, extraDeletedIds);
+
+  // SYNC-1b: the child tables. Every read is workspace-scoped and
+  // keyed to the appointment ids this pull already covers (the
+  // caller's window appointments + the moved-away delete ids).
+  const deletedJobIds = new Set(jobChanges.deleted);
+  const scopedAppointmentIds = Array.from(new Set([...appointmentIds, ...extraDeletedIds]));
+  let [inspectionsRes, recommendationsRes, photosRes, technicianRes] = await Promise.all([
+    scopedAppointmentIds.length > 0
+      ? (supabase.from("service_inspections") as any)
+        .select("id, appointment_id, user_id, notes, status, created_at, updated_at")
+        .eq("workspace_id", workspaceId)
+        .in("appointment_id", scopedAppointmentIds)
+      : Promise.resolve(empty),
+    scopedAppointmentIds.length > 0
+      ? (supabase.from("service_recommendations") as any)
+        .select("id, appointment_id, inspection_id, inspection_result_id, description, technician_notes, price, created_at, updated_at")
+        .eq("workspace_id", workspaceId)
+        .in("appointment_id", scopedAppointmentIds)
+      : Promise.resolve(empty),
+    scopedAppointmentIds.length > 0
+      ? (supabase.from("job_photos") as any)
+        .select("id, appointment_id, technician_id, user_id, photo_type, photo_url, storage_path, caption, created_at")
+        .eq("workspace_id", workspaceId)
+        .in("appointment_id", scopedAppointmentIds)
+      : Promise.resolve(empty),
+    (supabase.from("technicians") as any)
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("workspace_id", workspaceId)
+      .maybeSingle(),
+  ]);
+  // Fail-soft child reads (2026-11-12): a failure in any one child
+  // source empties only that table's change set — the jobs change
+  // set and the remaining tables still ship. Before this, any child
+  // error threw and 500'd the entire pull (including the technician
+  // lookup's maybeSingle answering PGRST116 for a caller whose
+  // workspace holds two technician rows). Each failure is captured
+  // to Sentry via captureSyncPullDegradation, never silent.
+  if (inspectionsRes.error) {
+    captureSyncPullDegradation(inspectionsRes.error, workspaceId, "service_inspections");
+    inspectionsRes = empty;
+  }
+  if (recommendationsRes.error) {
+    captureSyncPullDegradation(recommendationsRes.error, workspaceId, "service_recommendations");
+    recommendationsRes = empty;
+  }
+  if (photosRes.error) {
+    captureSyncPullDegradation(photosRes.error, workspaceId, "job_photos");
+    photosRes = empty;
+  }
+  if (technicianRes.error) {
+    captureSyncPullDegradation(technicianRes.error, workspaceId, "technicians");
+    technicianRes = { data: null, error: null };
+  }
+
+  const inspectionRows = (inspectionsRes.data ?? []) as unknown as ServerInspectionRow[];
+  const reportChanges = bucketInspectionReports(inspectionRows, lastPulledAt, deletedJobIds);
+  const inspectionIds = inspectionRows.map((row) => row.id);
+
+  let [resultsRes, locationsRes, sopRes] = await Promise.all([
+    inspectionIds.length > 0
+      ? (supabase.from("inspection_results") as any)
+        .select("id, inspection_id, item_name, item_category, status, notes, sort_order, created_at")
+        .eq("workspace_id", workspaceId)
+        .in("inspection_id", inspectionIds)
+        .order("sort_order", { ascending: true })
+      : Promise.resolve(empty),
+    technicianRes.data?.id
+      ? (supabase.from("location_history") as any)
+        .select("id, technician_id, latitude, longitude, accuracy, heading, speed, recorded_at")
+        .eq("technician_id", technicianRes.data.id as string)
+        .gte("recorded_at", windowStart)
+        .order("recorded_at", { ascending: true })
+        .limit(1000)
+      : Promise.resolve(empty),
+    scopedAppointmentIds.length > 0
+      ? (supabase.from("job_execution_checklists") as any)
+          .select("id, job_id, step_key, step_name, step_order, status, completed_at, created_at, updated_at")
+          .eq("workspace_id", workspaceId)
+          .eq("job_source", "appointment")
+          .in("job_id", scopedAppointmentIds)
+          .order("step_order", { ascending: true })
+      : Promise.resolve(empty),
+  ]);
+  // Fail-soft, same rule as the child group above (2026-11-12):
+  // each of these reads empties only its own change set on error.
+  if (resultsRes.error) {
+    captureSyncPullDegradation(resultsRes.error, workspaceId, "inspection_results");
+    resultsRes = empty;
+  }
+  if (locationsRes.error) {
+    captureSyncPullDegradation(locationsRes.error, workspaceId, "location_history");
+    locationsRes = empty;
+  }
+  if (sopRes.error) {
+    captureSyncPullDegradation(sopRes.error, workspaceId, "job_execution_checklists");
+    sopRes = empty;
+  }
+
+  const stepChanges = bucketInspectionSteps(
+    (resultsRes.data ?? []) as unknown as ServerInspectionResultRow[],
+    reportChanges,
+    lastPulledAt,
+  );
+  const recommendationChanges = bucketRecommendations(
+    (recommendationsRes.data ?? []) as unknown as ServerRecommendationRow[],
+    lastPulledAt,
+    deletedJobIds,
+  );
+  const photoChanges = bucketJobPhotos(
+    (photosRes.data ?? []) as unknown as ServerJobPhotoRow[],
+    lastPulledAt,
+    deletedJobIds,
+  );
+  const locationChanges = bucketLocations(
+    (locationsRes.data ?? []) as unknown as ServerLocationRow[],
+    lastPulledAt,
+  );
+  const sopChanges = bucketSopSteps(
+    (sopRes.data ?? []) as unknown as ServerSopStepRow[],
+    lastPulledAt,
+    deletedJobIds,
+  );
+
+  return json({
+    data: {
+      changes: {
+        jobs: jobChanges,
+        inspection_reports: reportChanges,
+        inspection_steps: stepChanges,
+        recommendations: recommendationChanges,
+        job_photos: photoChanges,
+        technician_locations: locationChanges,
+        sop_steps: sopChanges,
+      },
+      timestamp,
+    },
+  });
+});
+
+workOrdersRouter.post("/v1/tech-app/sync/push", async (c) => {
+  // Tech app sync push (SYNC-2, 2026-11-11): the applying half of
+  // the Watermelon synchronize() protocol — the device change sets
+  // land in the server tables. Pure mapping lives in
+  // src/application/queries/tech-app-sync-push.query.ts.
+  //
+  // Semantics, decided with the pull: auth + workspace resolution
+  // stay OUTSIDE the per-table applies (an unauthenticated call
+  // answers 401 like every sibling door); inside, each table
+  // applies independently — a failure is counted and named in the
+  // response's errors map, never poisoning the whole sync, and the
+  // answer is always 200 with per-table counts. Scope is the
+  // caller's own assigned appointments: anything addressed outside
+  // that set is skipped, never applied. Jobs are server-born —
+  // the push creates and deletes none; status changes ride the
+  // canonical technician_transition_job_v1 RPC.
+  const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c);
+  const db = supabase as any;
+  const body = z
+    .object({
+      changes: z.record(z.string(), z.unknown()).optional(),
+      last_pulled_at: z.unknown().optional(),
+    })
+    .parse(await c.req.json().catch(() => ({})));
+  const changes = (body.changes ?? {}) as unknown as PushChanges;
+
+  const applied: Record<string, TableCounts> = {};
+  const errors: Record<string, string> = {};
+  const note = (table: string, err: unknown) => {
+    if (!(table in errors)) {
+      errors[table] = err instanceof Error ? err.message : String(err);
+    }
+  };
+  const nowIso = () => new Date().toISOString();
+
+  const { data: technicianRow } = await db
+    .from("technicians")
+    .select("id")
+    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
+    .maybeSingle();
+  const technicianId: string | null = (technicianRow?.id as string | undefined) ?? null;
+
+  const jobsSet = changeSetFor(changes, "jobs");
+  const reportsSet = changeSetFor(changes, "inspection_reports");
+  const stepsSet = changeSetFor(changes, "inspection_steps");
+  const mediaSet = changeSetFor(changes, "inspection_media");
+  const recsSet = changeSetFor(changes, "recommendations");
+  const photosSet = changeSetFor(changes, "job_photos");
+  const locationsSet = changeSetFor(changes, "technician_locations");
+  const sopSet = changeSetFor(changes, "sop_steps");
+
+  // Scope: the appointments this push may touch — the caller's own
+  // assigned set, resolved once for every table below.
+  const referencedAppointmentIds = new Set<string>();
+  for (const row of [...jobsSet.created, ...jobsSet.updated]) {
+    if (typeof row.id === "string") referencedAppointmentIds.add(row.id);
+    if (typeof row.server_id === "string") referencedAppointmentIds.add(row.server_id);
+  }
+  for (const row of [...reportsSet.created, ...reportsSet.updated]) {
+    if (typeof row.appointment_id === "string") referencedAppointmentIds.add(row.appointment_id);
+  }
+  for (const row of [...photosSet.created, ...photosSet.updated]) {
+    if (typeof row.appointment_id === "string") referencedAppointmentIds.add(row.appointment_id);
+  }
+  for (const row of [...sopSet.created, ...sopSet.updated]) {
+    if (typeof row.job_id === "string") referencedAppointmentIds.add(row.job_id);
+  }
+  const assigned = new Map<
+    string,
+    {
+      vehicle_id: string | null;
+      status: string | null;
+      dispatch_status: string | null;
+      completed_at: string | null;
+    }
+  >();
+  if (referencedAppointmentIds.size > 0) {
+    const { data: appts } = await db
+      .from("appointments")
+      .select("id, vehicle_id, status, dispatch_status, completed_at")
+      .eq("workspace_id", workspaceId)
+      .eq("assigned_user_id", user.id)
+      .in("id", [...referencedAppointmentIds]);
+    for (const appt of (appts ?? []) as Array<Record<string, any>>) {
+      assigned.set(appt.id as string, {
+        vehicle_id: (appt.vehicle_id as string | null) ?? null,
+        status: (appt.status as string | null) ?? null,
+        dispatch_status: (appt.dispatch_status as string | null) ?? null,
+        completed_at: (appt.completed_at as string | null) ?? null,
+      });
+    }
+  }
+
+  // --- jobs: status transitions only ---------------------------------
+  {
+    const counts = emptyCounts();
+    applied.jobs = counts;
+    counts.skipped += jobsSet.created.length + jobsSet.deleted.length;
+    for (const row of jobsSet.updated) {
+      const appointmentId =
+        typeof row.server_id === "string" && assigned.has(row.server_id)
+          ? row.server_id
+          : typeof row.id === "string" && assigned.has(row.id)
+            ? row.id
+            : null;
+      const transition = jobTransitionFor(row.status);
+      if (!appointmentId || !transition) {
+        counts.skipped += 1;
+        continue;
+      }
+      const current = assigned.get(appointmentId)!;
+      // SW-87: the device's own completion stamp (jobs.completed_at,
+      // stamped on-device at Complete Job) persists on the
+      // appointment — the transition RPC stamps only the server's
+      // now(), so without this write the actual finish time lived
+      // only on the phone. First stamp wins: a stamp already on the
+      // record is never overwritten by a later push.
+      const deviceCompletedAt =
+        transition === "completed" ? parseWireDate(row.completed_at) : null;
+      const stampCompletedAt = async (): Promise<boolean> => {
+        if (!deviceCompletedAt || current.completed_at) return false;
+        const { error } = await db
+          .from("appointments")
+          .update({ completed_at: deviceCompletedAt })
+          .eq("id", appointmentId)
+          .eq("workspace_id", workspaceId)
+          .is("completed_at", null);
+        if (error) throw error;
+        current.completed_at = deviceCompletedAt;
+        return true;
+      };
+      const alreadyThere =
+        (transition === "en_route" &&
+          (current.dispatch_status === "en_route" || current.status === "en_route")) ||
+        (transition === "arrived" && current.dispatch_status === "arrived") ||
+        (transition === "started" &&
+          (current.status === "in_progress" || current.status === "started")) ||
+        (transition === "completed" && current.status === "completed");
+      if (alreadyThere) {
+        // A re-push of an already-completed job applies nothing —
+        // unless its completion stamp never landed (the push that
+        // completed it predates SW-87, or its stamp write failed):
+        // landing the stamp is a real apply, not a skip.
+        try {
+          if (await stampCompletedAt()) counts.updated += 1;
+          else counts.skipped += 1;
+        } catch (err) {
+          counts.skipped += 1;
+          note("jobs", err);
+        }
+        continue;
+      }
+      // Job flow (2026-11-12): transitions ride v2 — ordered travel
+      // leg, travel stamps, and the clock-in gate. The tap location
+      // rides the job row's travel fields; a missing location stays
+      // null and the server records distance as not captured. The
+      // idempotency key is deterministic per (job, transition,
+      // device update stamp) so a re-push replays instead of
+      // double-applying (v1/v2 both require a non-empty key).
+      const tapLat =
+        transition === "en_route"
+          ? asNumber(row.en_route_lat)
+          : transition === "arrived"
+            ? asNumber(row.arrived_lat)
+            : null;
+      const tapLng =
+        transition === "en_route"
+          ? asNumber(row.en_route_lng)
+          : transition === "arrived"
+            ? asNumber(row.arrived_lng)
+            : null;
+      let transitionApplied = false;
+      try {
+        const { error } = await db.rpc("technician_transition_job_v2", {
+          p_job_id: appointmentId,
+          p_source: "appointment",
+          p_next_status: transition,
+          p_notes: null,
+          p_idempotency_key: `sync-push:${appointmentId}:${transition}:${String(row.updated_at ?? "")}`,
+          p_expected_updated_at: null,
+          p_lat: tapLat,
+          p_lng: tapLng,
+        });
+        if (error) throw error;
+        counts.updated += 1;
+        transitionApplied = true;
+      } catch (err) {
+        counts.skipped += 1;
+        note("jobs", err);
+      }
+      // SW-87: with the completion transition applied, land the
+      // device's stamp. Best-effort and named on failure — the
+      // transition already counted; a later re-push retries the
+      // stamp through the already-completed path above.
+      if (transitionApplied && transition === "completed") {
+        try {
+          await stampCompletedAt();
+        } catch (err) {
+          note("jobs", err);
+        }
+      }
+    }
+  }
+
+  // --- inspection_reports: upsert ------------------------------------
+  const reportServerId = new Map<string, string>();
+  const reportAppointment = new Map<string, string>();
+  {
+    const counts = emptyCounts();
+    applied.inspection_reports = counts;
+    const upserts = [
+      ...reportsSet.created.map((row) => ({ row, isNew: true })),
+      ...reportsSet.updated.map((row) => ({ row, isNew: false })),
+    ];
+    for (const { row, isNew } of upserts) {
+      const appointmentId = typeof row.appointment_id === "string" ? row.appointment_id : null;
+      if (!appointmentId || !assigned.has(appointmentId)) {
+        counts.skipped += 1;
+        continue;
+      }
+      const serverId = adoptId(row.id, () => crypto.randomUUID());
+      if (typeof row.id === "string") reportServerId.set(row.id, serverId);
+      reportAppointment.set(serverId, appointmentId);
+      const createdAt = parseWireDate(row.created_at) ?? nowIso();
+      try {
+        const { error } = await db.from("service_inspections").upsert(
+          {
+            id: serverId,
+            workspace_id: workspaceId,
+            appointment_id: appointmentId,
+            user_id: user.id,
+            vehicle_id: assigned.get(appointmentId)!.vehicle_id,
+            service_id: null,
+            template_id: null,
+            template_name: "Tech App Inspection",
+            inspector_name: null,
+            inspection_date: createdAt.slice(0, 10),
+            notes: asString(row.overall_notes),
+            status: serverReportStatus(row.status),
+            created_at: createdAt,
+            updated_at: parseWireDate(row.updated_at) ?? createdAt,
+          },
+          { onConflict: "id" },
+        );
+        if (error) throw error;
+        if (isNew) counts.created += 1;
+        else counts.updated += 1;
+      } catch (err) {
+        counts.skipped += 1;
+        note("inspection_reports", err);
+      }
+    }
+    for (const localId of reportsSet.deleted) {
+      const serverId = reportServerId.get(localId) ?? (isUuid(localId) ? localId : null);
+      if (!serverId) {
+        counts.skipped += 1;
+        continue;
+      }
+      try {
+        const { error } = await db
+          .from("service_inspections")
+          .update({ status: "cancelled" })
+          .eq("id", serverId)
+          .eq("workspace_id", workspaceId);
+        if (error) throw error;
+        counts.deleted += 1;
+      } catch (err) {
+        counts.skipped += 1;
+        note("inspection_reports", err);
+      }
+    }
+  }
+
+  const resolveReportAppointment = async (serverReportId: string): Promise<string | null> => {
+    const known = reportAppointment.get(serverReportId);
+    if (known) return known;
+    const { data } = await db
+      .from("service_inspections")
+      .select("appointment_id")
+      .eq("id", serverReportId)
+      .eq("workspace_id", workspaceId)
+      .maybeSingle();
+    const appointmentId = (data?.appointment_id as string | null | undefined) ?? null;
+    if (appointmentId) reportAppointment.set(serverReportId, appointmentId);
+    return appointmentId;
+  };
+  const serverReportIdFor = (localId: unknown): string | null =>
+    typeof localId === "string"
+      ? (reportServerId.get(localId) ?? (isUuid(localId) ? localId : null))
+      : null;
+
+  // Media parse (no writes yet): the first uploaded photo per step
+  // becomes that step's image_url when the steps land below.
+  const firstPhotoByLocalStepId = new Map<string, string>();
+  for (const row of [...mediaSet.created, ...mediaSet.updated]) {
+    if (asString(row.kind) !== "photo") continue;
+    const mediaUrl = asString(row.media_url);
+    const stepId = typeof row.step_id === "string" ? row.step_id : null;
+    if (!mediaUrl || !stepId || isLocalOnlyReference(mediaUrl)) continue;
+    if (!firstPhotoByLocalStepId.has(stepId)) firstPhotoByLocalStepId.set(stepId, mediaUrl);
+  }
+
+  // --- inspection_steps: replace-by-report ---------------------------
+  const stepServerId = new Map<string, string>();
+  const stepLabel = new Map<string, string>();
+  const stepAppointment = new Map<string, string>();
+  {
+    const counts = emptyCounts();
+    applied.inspection_steps = counts;
+    counts.skipped += stepsSet.deleted.length; // the replace below covers deletes
+    const byReport = new Map<string, Array<Record<string, unknown>>>();
+    for (const row of [...stepsSet.created, ...stepsSet.updated]) {
+      const serverReportId = serverReportIdFor(row.report_id);
+      if (!serverReportId) {
+        counts.skipped += 1;
+        continue;
+      }
+      const list = byReport.get(serverReportId) ?? [];
+      list.push(row);
+      byReport.set(serverReportId, list);
+    }
+    for (const [serverReportId, list] of byReport) {
+      const appointmentId = await resolveReportAppointment(serverReportId);
+      if (!appointmentId || !assigned.has(appointmentId)) {
+        counts.skipped += list.length;
+        continue;
+      }
+      try {
+        const { error: deleteError } = await db
+          .from("inspection_results")
+          .delete()
+          .eq("inspection_id", serverReportId)
+          .eq("workspace_id", workspaceId);
+        if (deleteError) throw deleteError;
+        const inserts = list.map((row) => {
+          const serverStepId = adoptId(row.id, () => crypto.randomUUID());
+          if (typeof row.id === "string") {
+            stepServerId.set(row.id, serverStepId);
+            stepLabel.set(serverStepId, asString(row.label) ?? "Inspection item");
+            stepAppointment.set(serverStepId, appointmentId);
+          }
+          return {
+            id: serverStepId,
+            workspace_id: workspaceId,
+            inspection_id: serverReportId,
+            appointment_id: appointmentId,
+            item_name: asString(row.label) ?? "Inspection item",
+            item_category: asString(row.category),
+            status: serverStepStatus(row.status),
+            notes: asString(row.notes),
+            sort_order: typeof row.sort_index === "number" ? row.sort_index : 0,
+            image_url:
+              (typeof row.id === "string" ? firstPhotoByLocalStepId.get(row.id) : undefined) ??
+              null,
+            created_at: parseWireDate(row.created_at) ?? nowIso(),
+          };
+        });
+        const { error } = await db.from("inspection_results").insert(inserts);
+        if (error) throw error;
+        counts.created += inserts.length;
+      } catch (err) {
+        counts.skipped += list.length;
+        note("inspection_steps", err);
+      }
+    }
+  }
+
+  // --- inspection_media: every uploaded file also lands as a photo ---
+  {
+    const counts = emptyCounts();
+    applied.inspection_media = counts;
+    counts.skipped += mediaSet.deleted.length;
+    for (const row of [...mediaSet.created, ...mediaSet.updated]) {
+      const mediaUrl = asString(row.media_url);
+      if (!mediaUrl || isLocalOnlyReference(mediaUrl)) {
+        counts.skipped += 1;
+        continue;
+      }
+      const localStepId = typeof row.step_id === "string" ? row.step_id : null;
+      const serverStepId = localStepId
+        ? (stepServerId.get(localStepId) ?? (isUuid(localStepId) ? localStepId : null))
+        : null;
+      const appointmentId = serverStepId ? stepAppointment.get(serverStepId) : undefined;
+      if (!serverStepId || !appointmentId) {
+        counts.skipped += 1;
+        continue;
+      }
+      try {
+        const { error } = await db.from("job_photos").insert({
+          id: adoptId(row.id, () => crypto.randomUUID()),
+          workspace_id: workspaceId,
+          appointment_id: appointmentId,
+          user_id: user.id,
+          technician_id: technicianId,
+          photo_type: "inspection",
+          photo_url: null,
+          storage_path: mediaUrl,
+          caption: `${asString(row.kind) ?? "photo"} — ${stepLabel.get(serverStepId) ?? "inspection step"}`,
+          created_at: parseWireDate(row.created_at) ?? nowIso(),
+        });
+        if (error) throw error;
+        counts.created += 1;
+      } catch (err) {
+        counts.skipped += 1;
+        note("inspection_media", err);
+      }
+    }
+  }
+
+  // --- recommendations: upsert ---------------------------------------
+  {
+    const counts = emptyCounts();
+    applied.recommendations = counts;
+    const upserts = [
+      ...recsSet.created.map((row) => ({ row, isNew: true })),
+      ...recsSet.updated.map((row) => ({ row, isNew: false })),
+    ];
+    for (const { row, isNew } of upserts) {
+      const serverReportId = serverReportIdFor(row.report_id);
+      const appointmentId = serverReportId
+        ? await resolveReportAppointment(serverReportId)
+        : null;
+      if (!serverReportId || !appointmentId || !assigned.has(appointmentId)) {
+        counts.skipped += 1;
+        continue;
+      }
+      const localStepId = typeof row.step_id === "string" ? row.step_id : null;
+      const serverStepId = localStepId
+        ? (stepServerId.get(localStepId) ?? (isUuid(localStepId) ? localStepId : null))
+        : null;
+      const createdAt = parseWireDate(row.created_at) ?? nowIso();
+      try {
+        const { error } = await db.from("service_recommendations").upsert(
+          {
+            id: adoptId(row.id, () => crypto.randomUUID()),
+            workspace_id: workspaceId,
+            appointment_id: appointmentId,
+            inspection_id: serverReportId,
+            inspection_result_id: serverStepId,
+            description: asString(row.recommended_service) ?? "Recommended service",
+            technician_notes: asString(row.notes),
+            price: asNumber(row.estimated_cost),
+            created_at: createdAt,
+            updated_at: parseWireDate(row.updated_at) ?? createdAt,
+          },
+          { onConflict: "id" },
+        );
+        if (error) throw error;
+        if (isNew) counts.created += 1;
+        else counts.updated += 1;
+      } catch (err) {
+        counts.skipped += 1;
+        note("recommendations", err);
+      }
+    }
+    for (const localId of recsSet.deleted) {
+      if (!isUuid(localId)) {
+        counts.skipped += 1;
+        continue;
+      }
+      try {
+        const { error } = await db
+          .from("service_recommendations")
+          .delete()
+          .eq("id", localId)
+          .eq("workspace_id", workspaceId);
+        if (error) throw error;
+        counts.deleted += 1;
+      } catch (err) {
+        counts.skipped += 1;
+        note("recommendations", err);
+      }
+    }
+  }
+
+  // --- job_photos: adopt server-referenced rows -----------------------
+  {
+    const counts = emptyCounts();
+    applied.job_photos = counts;
+    counts.skipped += photosSet.updated.length; // photos are create-only on the wire
+    for (const row of photosSet.created) {
+      const photoUrl = asString(row.photo_url);
+      const appointmentId = typeof row.appointment_id === "string" ? row.appointment_id : null;
+      if (!photoUrl || isLocalOnlyReference(photoUrl) || !appointmentId || !assigned.has(appointmentId)) {
+        counts.skipped += 1;
+        continue;
+      }
+      try {
+        const { error } = await db.from("job_photos").insert({
+          id: adoptId(row.id, () => crypto.randomUUID()),
+          workspace_id: workspaceId,
+          appointment_id: appointmentId,
+          user_id: user.id,
+          technician_id: technicianId,
+          photo_type: asString(row.photo_type) ?? "general",
+          photo_url: photoUrl,
+          storage_path: asString(row.local_path) ?? photoUrl,
+          caption: asString(row.caption),
+          created_at: parseWireDate(row.created_at) ?? nowIso(),
+        });
+        if (error) throw error;
+        counts.created += 1;
+      } catch (err) {
+        counts.skipped += 1;
+        note("job_photos", err);
+      }
+    }
+    for (const localId of photosSet.deleted) {
+      if (!isUuid(localId)) {
+        counts.skipped += 1;
+        continue;
+      }
+      try {
+        const { error } = await db
+          .from("job_photos")
+          .delete()
+          .eq("id", localId)
+          .eq("workspace_id", workspaceId)
+          .eq("user_id", user.id);
+        if (error) throw error;
+        counts.deleted += 1;
+      } catch (err) {
+        counts.skipped += 1;
+        note("job_photos", err);
+      }
+    }
+  }
+
+  // --- technician_locations: append-only inserts ----------------------
+  {
+    const counts = emptyCounts();
+    applied.technician_locations = counts;
+    counts.skipped += locationsSet.updated.length + locationsSet.deleted.length;
+    for (const row of locationsSet.created) {
+      const latitude = asNumber(row.latitude);
+      const longitude = asNumber(row.longitude);
+      if (!technicianId || latitude === null || longitude === null) {
+        counts.skipped += 1;
+        continue;
+      }
+      try {
+        const { error } = await db.from("location_history").insert({
+          id: adoptId(row.id, () => crypto.randomUUID()),
+          technician_id: technicianId,
+          latitude,
+          longitude,
+          accuracy: asNumber(row.accuracy),
+          heading: asNumber(row.heading),
+          speed: asNumber(row.speed),
+          recorded_at: parseWireDate(row.recorded_at) ?? nowIso(),
+          appointment_id: null,
+          activity_type: null,
+          altitude: null,
+        });
+        if (error) throw error;
+        counts.created += 1;
+      } catch (err) {
+        counts.skipped += 1;
+        note("technician_locations", err);
+      }
+    }
+  }
+
+  // --- sop_steps: upsert into job_execution_checklists ----------------
+  {
+    const counts = emptyCounts();
+    applied.sop_steps = counts;
+    const upserts = [
+      ...sopSet.created.map((row) => ({ row, isNew: true })),
+      ...sopSet.updated.map((row) => ({ row, isNew: false })),
+    ];
+    for (const { row, isNew } of upserts) {
+      const appointmentId = typeof row.job_id === "string" ? row.job_id : null;
+      const stepKey = asString(row.step_key);
+      const label = asString(row.label);
+      if (!appointmentId || !assigned.has(appointmentId) || !stepKey || !label) {
+        counts.skipped += 1;
+        continue;
+      }
+      const status = serverSopStatus(row.status);
+      const createdAt = parseWireDate(row.created_at) ?? nowIso();
+      try {
+        const { error } = await db.from("job_execution_checklists").upsert(
+          {
+            id: adoptId(row.id, () => crypto.randomUUID()),
+            workspace_id: workspaceId,
+            job_id: appointmentId,
+            job_source: "appointment",
+            step_key: stepKey,
+            step_name: label,
+            step_order: asNumber(row.sort_index) ?? 0,
+            status,
+            is_required: true,
+            completed_at: status === "completed" ? (parseWireDate(row.completed_at) ?? nowIso()) : null,
+            completed_by: status === "completed" ? user.id : null,
+            user_id: user.id,
+            created_at: createdAt,
+            updated_at: parseWireDate(row.updated_at) ?? createdAt,
+          },
+          { onConflict: "id" },
+        );
+        if (error) throw error;
+        if (isNew) counts.created += 1;
+        else counts.updated += 1;
+      } catch (err) {
+        counts.skipped += 1;
+        note("sop_steps", err);
+      }
+    }
+    for (const localId of sopSet.deleted) {
+      const serverId = isUuid(localId) ? localId : null;
+      if (!serverId) {
+        counts.skipped += 1;
+        continue;
+      }
+      try {
+        const { error } = await db
+          .from("job_execution_checklists")
+          .delete()
+          .eq("id", serverId)
+          .eq("workspace_id", workspaceId)
+          .eq("job_source", "appointment");
+        if (error) throw error;
+        counts.deleted += 1;
+      } catch (err) {
+        counts.skipped += 1;
+        note("sop_steps", err);
+      }
+    }
+  }
+
+  return json({ data: { applied, errors, timestamp: Date.now() } });
+});
+
+workOrdersRouter.patch("/v1/tech-app/jobs/:appointmentId/vehicle", async (c) => {
+  // Tech app vehicle fields (2026-11-12, Ty's ask): standing at the
+  // vehicle, the technician corrects the odometer, VIN, and plate
+  // on the job's vehicle. The canonical PATCH /v1/vehicles/:id
+  // cannot serve this call: the app holds neither the vehicle id
+  // nor a workspace id (its local job rows are appointment-keyed),
+  // and that route checks workspace role only — this door adds the
+  // tech-app scope: the appointment must be the caller's OWN
+  // assigned job. The write itself lands on the same single
+  // vehicles row the office edits, with the same field rules
+  // (planning/validation: src/application/commands/tech-app-vehicle.command.ts).
+  // It never touches pricing or the appointment itself.
+  const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c);
+  const appointmentId = z.string().uuid().parse(c.req.param("appointmentId"));
+  const body = await c.req.json().catch(() => null);
+  const plan = planVehicleFieldUpdate(body);
+  if (!plan.patch) throw new ApiError(400, plan.error ?? "Invalid vehicle fields.", "invalid_vehicle_fields");
+
+  const { data: appointment, error: appointmentError } = await (supabase.from("appointments") as any)
+    .select("id, vehicle_id, assigned_user_id, status")
+    .eq("workspace_id", workspaceId)
+    .eq("id", appointmentId)
+    .maybeSingle();
+  if (appointmentError) throw appointmentError;
+  if (!appointment) throw new ApiError(404, "Job not found.", "job_not_found");
+  if ((appointment as { assigned_user_id?: string | null }).assigned_user_id !== user.id) {
+    throw new ApiError(403, "This job is not assigned to you.", "job_not_assigned");
+  }
+  if (String((appointment as { status?: string | null }).status ?? "").toLowerCase() === "cancelled") {
+    throw new ApiError(409, "This job is cancelled.", "job_cancelled");
+  }
+  const vehicleId = (appointment as { vehicle_id?: string | null }).vehicle_id;
+  if (!vehicleId) throw new ApiError(422, "This job has no vehicle on record.", "job_has_no_vehicle");
+
+  const { data: vehicle, error: vehicleError } = await (supabase.from("vehicles") as any)
+    .update(plan.patch as never)
+    .eq("workspace_id", workspaceId)
+    .eq("id", vehicleId)
+    .select("id, vin, license_plate, mileage")
+    .single();
+  if (vehicleError) throw vehicleError;
+
+  return json({
+    data: {
+      vehicle_id: (vehicle as { id: string }).id,
+      vin: (vehicle as { vin: string | null }).vin ?? null,
+      license_plate: (vehicle as { license_plate: string | null }).license_plate ?? null,
+      // vehicles.mileage is numeric — PostgREST may hand it back as
+      // a string; answer a real number either way.
+      mileage: (() => {
+        const raw = (vehicle as { mileage?: unknown }).mileage;
+        if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+        if (typeof raw === "string" && raw.trim() !== "" && Number.isFinite(Number(raw))) return Number(raw);
+        return null;
+      })(),
+    },
+  });
+});
+
+workOrdersRouter.post("/v1/tech-app/jobs/:appointmentId/vin-ocr", async (c) => {
+  // Tech app VIN photo decode (2026-11-12, Ty's ask): where the
+  // VIN is stamped numbers with no barcode, the tech photographs
+  // it and this door reads the characters, so typing all 17
+  // digits is the last resort. Same tech-app scope as the vehicle
+  // door above: the appointment must be the caller's OWN assigned
+  // job, in the caller's server-resolved workspace.
+  //
+  // The provider is ENV-CONFIGURED, never hardcoded (planning /
+  // config / parsing: src/application/commands/tech-app-vin-ocr.command.ts):
+  // GEMINI_API_KEY in the server environment is the primary key
+  // (Gemini vision); VIN_OCR_AI_API_KEY is a generic fallback for
+  // any OpenAI-compatible vision endpoint. With no key configured
+  // the door answers the house not-configured contract (200 +
+  // integrationUnavailable, the plate-lookup shape) so the app
+  // falls back to typing.
+  //
+  // Decode-only: the photo and the read are stored NOWHERE. The
+  // VIN goes back to the phone, the tech confirms or corrects it
+  // in the field, and the only write path stays the vehicle door.
+  const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c);
+  const appointmentId = z.string().uuid().parse(c.req.param("appointmentId"));
+  const body = await c.req.json().catch(() => null);
+  const plan = planVinOcrRequest(body);
+  if (!plan.request) throw new ApiError(400, plan.error ?? "Invalid photo.", "invalid_vin_photo");
+
+  const { data: appointment, error: appointmentError } = await (supabase.from("appointments") as any)
+    .select("id, assigned_user_id, status")
+    .eq("workspace_id", workspaceId)
+    .eq("id", appointmentId)
+    .maybeSingle();
+  if (appointmentError) throw appointmentError;
+  if (!appointment) throw new ApiError(404, "Job not found.", "job_not_found");
+  if ((appointment as { assigned_user_id?: string | null }).assigned_user_id !== user.id) {
+    throw new ApiError(403, "This job is not assigned to you.", "job_not_assigned");
+  }
+  if (String((appointment as { status?: string | null }).status ?? "").toLowerCase() === "cancelled") {
+    throw new ApiError(409, "This job is cancelled.", "job_cancelled");
+  }
+
+  const config = readVinOcrConfig(process.env);
+  if (!config) {
+    return json({
+      data: { success: false, integrationUnavailable: true, error: "Photo VIN reading is not configured" },
+    });
+  }
+
+  const call = buildVinOcrProviderCall(config, plan.request);
+  let providerBody: unknown = null;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const res = await fetch(call.url, { ...call.init, signal: controller.signal });
+      if (!res.ok) throw new Error(`provider HTTP ${res.status}`);
+      providerBody = await res.json().catch(() => null);
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch {
+    return json({
+      data: { success: false, error: "The photo reader didn't answer — try again, or type the VIN in." },
+    });
+  }
+
+  const { vin } = parseVinOcrProviderResponse(config.provider, providerBody);
+  if (!vin) {
+    return json({
+      data: { success: false, error: "No VIN could be read from that photo — try again closer, or type the VIN in." },
+    });
+  }
+  return json({ data: { success: true, vin } });
 });
 
 workOrdersRouter.get("/v1/tech-app/technician-id", async (c) => {
@@ -1812,11 +3494,16 @@ workOrdersRouter.get("/v1/tech-app/technician-id", async (c) => {
 
 workOrdersRouter.get("/v1/tech-app/more", async (c) => {
   const { supabase, user } = await requireAuth(c);
+  // Dispatch S-D2 (Step 10): vans are workspace-tenanted; resolve the
+  // caller's workspace the Step 4 way and scope the van list to it.
+  const workspaceId = await resolveCallerWorkspaceId(supabase, user.id);
   const [techRes, vansRes] = await Promise.all([
     (supabase.from("technicians") as any)
       .select("id, user_id, workspace_id, first_name, last_name, full_name, phone, email, status, employment_type, hourly_rate, pay_type, role, home_address, avatar_url, emergency_contact_name, emergency_contact_phone")
       .eq("user_id", user.id).single(),
-    (supabase.from("vans") as any).select("*").eq("user_id", user.id),
+    workspaceId
+      ? (supabase.from("vans") as any).select("*").eq("workspace_id", workspaceId)
+      : Promise.resolve({ data: [], error: null }),
   ]);
   const error = techRes.error || vansRes.error;
   if (error) throw error;
@@ -1841,11 +3528,17 @@ workOrdersRouter.get("/v1/tech-app/inventory", async (c) => {
   const { data: technician, error: techError } = await (supabase.from("technicians") as any)
     .select("id").eq("user_id", user.id).maybeSingle();
   if (techError) throw techError;
+  // Dispatch S-D2 (Step 10): the vans leg scopes to the caller's
+  // workspace (the stale van_inventory select above is a separate,
+  // already-reported defect and is deliberately untouched here).
+  const workspaceId = await resolveCallerWorkspaceId(supabase, user.id);
   const [inventoryRes, vansRes] = await Promise.all([
     technician?.id
       ? (supabase.from("van_inventory") as any).select("*").eq("technician_id", technician.id).order("item_name")
       : Promise.resolve({ data: [], error: null }),
-    (supabase.from("vans") as any).select("*").eq("user_id", user.id),
+    workspaceId
+      ? (supabase.from("vans") as any).select("*").eq("workspace_id", workspaceId)
+      : Promise.resolve({ data: [], error: null }),
   ]);
   const error = inventoryRes.error || vansRes.error;
   if (error) throw error;
@@ -1880,8 +3573,12 @@ workOrdersRouter.put("/v1/tech-app/notification-settings", async (c) => {
     enabled: z.boolean(),
     types: z.array(z.string()),
   }).parse(await c.req.json());
+  // Step 4 STAMP: the upsert carries the technician's own workspace
+  // (SRC-T — the row's tenancy follows its parent technician).
+  const workspaceId = await technicianWorkspaceId(supabase, body.tech_id);
   const { data, error } = await (supabase.from("technician_notification_preferences") as any)
     .upsert({
+      workspace_id: workspaceId,
       technician_id: body.tech_id,
       enabled: body.enabled,
       notification_types: body.types,
@@ -1913,17 +3610,20 @@ workOrdersRouter.get("/v1/tech-app/messages", async (c) => {
   return json({ data: { threads: threads ?? [], unread_by_thread: unreadByThread } });
 });
 
-workOrdersRouter.get("/v1/tech-app/job-detail", async (c) => {
-  const { supabase, user } = await requireAuth(c);
-  const jobId = z.string().min(1).parse(new URL(c.req.url).searchParams.get("job_id") ?? "");
-  const { data: appointment, error: appointmentError } = await (supabase.from("appointments") as any)
-    .select("*").eq("id", jobId).eq("user_id", user.id).single();
-  if (appointmentError) throw appointmentError;
-  const { data: service, error: serviceError } = await (supabase.from("services") as any)
-    .select("*").eq("appointment_id", jobId).maybeSingle();
-  if (serviceError) throw serviceError;
-  return json({ data: { appointment, service: service ?? null } });
-});
+// ---------------------------------------------------------------------------
+// Tech-app job detail — GET /v1/tech-app/job-detail
+//
+// A second, older registration of this route used to sit here and SERVE
+// (Hono first-match wins): it scoped the appointment by the phantom
+// appointments.user_id key and read a `services` table that does not
+// exist in production, so it 42703/42P01'd on every call, and its
+// { appointment, service } response shape is not the one the repo's
+// consumer (src/application/queries/tech-app.query.ts
+// fetchTechJobDetailBundle) reads. It was removed (phantom fix,
+// 2026-11-10); the sole registration is the bundle handler further down
+// (the "job-detail" handler in the second tech-app block), healed to
+// live columns in the same change.
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Tech app mutations — POST /v1/tech-app/*
@@ -1939,6 +3639,12 @@ workOrdersRouter.post("/v1/tech-app/job-photos", async (c) => {
   const isRequired = form.get("is_required") === "true";
   if (!(file instanceof File)) throw new ApiError(400, "A photo file is required", "file_required");
   if (!appointmentId) throw new ApiError(400, "appointment_id is required", "appointment_id_required");
+  // Step 5 STAMP: job_photos is workspace-rooted; the workspace derives
+  // from the appointment row (the design's paired change for both
+  // duplicate handlers — finding F1 stands, neither is removed).
+  const { data: appointment } = await (supabase.from("appointments") as any)
+    .select("workspace_id").eq("id", appointmentId).maybeSingle();
+  if (!appointment?.workspace_id) throw new ApiError(404, "Appointment not found", "appointment_not_found");
   const storagePath = `${businessUserId}/job-photos/${appointmentId}/${crypto.randomUUID()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
   const { error: uploadError } = await supabase.storage.from("job-photos").upload(storagePath, file, {
     contentType: file.type || undefined,
@@ -1948,6 +3654,11 @@ workOrdersRouter.post("/v1/tech-app/job-photos", async (c) => {
   const { data: urlData } = supabase.storage.from("job-photos").getPublicUrl(storagePath);
   const { data, error } = await (supabase.from("job_photos") as any).insert({
     appointment_id: appointmentId,
+    workspace_id: appointment.workspace_id,
+    // user_id is the types-required actor column this handler omitted
+    // (it stamped uploaded_by only); the Step 5 design's "neither
+    // handler errors on shape" intent requires stamping it too.
+    user_id: user.id,
     business_user_id: businessUserId,
     photo_type: photoType,
     photo_url: urlData.publicUrl,
@@ -2003,7 +3714,7 @@ workOrdersRouter.post("/v1/tech-app/job-transitions", async (c) => {
   const { supabase } = await requireAuth(c);
   const body = z.object({
     job_id: z.string().min(1),
-    source: z.string().min(1),
+    source: z.literal("appointment"),
     next_status: z.string().min(1),
     notes: z.string().nullable().optional(),
     idempotency_key: z.string().nullable().optional(),
@@ -2052,11 +3763,19 @@ workOrdersRouter.post("/v1/tech-app/fleet-job-notes", async (c) => {
 });
 
 workOrdersRouter.post("/v1/tech-app/appointment-notes", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  // Phantom heal (2026-11-10): appointments has no user_id in production —
+  // the update 42703'd on every save. It scopes to the caller's workspace
+  // instead (Step 4 resolution idiom).
+  const { supabase, workspaceId } = await requireCallerWorkspaceId(c);
   const body = z.object({ job_id: z.string().min(1), notes: z.string().nullable().optional() })
     .parse(await c.req.json());
+  // Partial-update guard (SW-42): notes is this endpoint's only payload.
+  // The schema makes it optional and `?? null` converted an omitted field
+  // into a full clear of the appointment's notes. Require the key: an
+  // explicit null remains a deliberate clear, an omission is a 400.
+  if (!("notes" in body)) throw new ApiError(400, "notes is required", "invalid_input");
   const { data, error } = await (supabase.from("appointments") as any)
-    .update({ notes: body.notes ?? null }).eq("id", body.job_id).eq("user_id", user.id).select();
+    .update({ notes: body.notes ?? null }).eq("id", body.job_id).eq("workspace_id", workspaceId).select();
   if (error) throw error;
   return json({ data: data ?? [] });
 });
@@ -2097,11 +3816,16 @@ workOrdersRouter.get("/v1/tech-os/roster", async (c) => {
   const end = new Date(start); end.setDate(end.getDate() + 1);
   const [membersRes, jobsRes] = await Promise.all([
     (supabase.from("team_members") as any).select("*").eq("workspace_id", workspaceId).order("full_name"),
+    // Phantom fix #3 (2026-11-10): same broken service_records shape as
+    // /v1/operational-jobs had — healed identically to the
+    // command-center/technicians sibling (live columns; window on
+    // started_at). The roster client reads /v1/tech-os/roster-members;
+    // nothing consumes these rows' dropped fields.
     (supabase.from("service_records") as any)
-      .select("id,title,status,service_type,service_date,estimated_cost,metadata,appointment_id,assigned_technician_id")
+      .select("id,status,metadata,appointment_id,technician_id,started_at,completed_at,created_at,total_amount")
       .eq("workspace_id", workspaceId)
-      .gte("service_date", start.toISOString()).lt("service_date", end.toISOString())
-      .order("service_date", { ascending: true }),
+      .gte("started_at", start.toISOString()).lt("started_at", end.toISOString())
+      .order("started_at", { ascending: true }),
   ]);
   const error = membersRes.error || jobsRes.error;
   if (error) throw error;
@@ -2110,7 +3834,7 @@ workOrdersRouter.get("/v1/tech-os/roster", async (c) => {
   ));
   const { data: appointments, error: appointmentsError } = appointmentIds.length > 0
     ? await (supabase.from("appointments") as any)
-      .select("id,metadata,appointment_type").in("id", appointmentIds).eq("workspace_id", workspaceId)
+      .select("id,metadata").in("id", appointmentIds).eq("workspace_id", workspaceId)
     : { data: [], error: null };
   if (appointmentsError) throw appointmentsError;
   const { data: workspace } = await (supabase.from("workspaces") as any)
@@ -2144,10 +3868,12 @@ workOrdersRouter.get("/v1/tech-os/workspace-owner", async (c) => {
 });
 
 workOrdersRouter.patch("/v1/tech-os/technicians/:id", async (c) => {
-  const { supabase } = await requireAuth(c);
+  const { supabase, workspaceId } = await requireCallerWorkspaceId(c);
   const body = z.record(z.string(), z.unknown()).parse(await c.req.json());
+  // Step 4 GUARD: pin tenancy in the passthrough payload + scope by it.
   const { data, error } = await (supabase.from("technicians") as any)
-    .update(body).eq("id", c.req.param("id")).select();
+    .update({ ...body, workspace_id: workspaceId })
+    .eq("id", c.req.param("id")).eq("workspace_id", workspaceId).select();
   if (error) throw error;
   return json({ data: data ?? [] });
 });
@@ -2168,18 +3894,18 @@ workOrdersRouter.post("/v1/tech-os/van-assignments", async (c) => {
 });
 
 workOrdersRouter.patch("/v1/tech-os/technicians/:id/status", async (c) => {
-  const { supabase } = await requireAuth(c);
+  const { supabase, workspaceId } = await requireCallerWorkspaceId(c);
   const body = z.object({ status: z.string().min(1) }).parse(await c.req.json());
   const { data, error } = await (supabase.from("technicians") as any)
-    .update({ status: body.status }).eq("id", c.req.param("id")).select();
+    .update({ status: body.status }).eq("id", c.req.param("id")).eq("workspace_id", workspaceId).select();
   if (error) throw error;
   return json({ data: data ?? [] });
 });
 
 workOrdersRouter.patch("/v1/tech-os/payroll-cycles/:id/pay", async (c) => {
-  const { supabase } = await requireAuth(c);
+  const { supabase, workspaceId } = await requireCallerWorkspaceId(c);
   const { data, error } = await (supabase.from("technician_payroll_cycles") as any)
-    .update({ payout_status: "paid" }).eq("id", c.req.param("id")).select();
+    .update({ payout_status: "paid" }).eq("id", c.req.param("id")).eq("workspace_id", workspaceId).select();
   if (error) throw error;
   return json({ data: data ?? [] });
 });
@@ -2198,8 +3924,25 @@ workOrdersRouter.post("/v1/tech-os/technicians", async (c) => {
   const { supabase } = await requireAuth(c);
   const body = z.object({ user_id: z.string().min(1), profile: z.record(z.string(), z.unknown()) })
     .parse(await c.req.json());
+  // Step 4 STAMP (SRC-P): the row's tenancy follows the owning user it
+  // is keyed to — resolved from body.user_id's owner membership (the
+  // exercised flow passes the caller's own id as the owner key, and
+  // keying the stamp to the same user keeps the pair consistent even
+  // if a manager ever creates on an owner's behalf). A workspace_id
+  // smuggled inside profile is overridden by the spread order.
+  const { data: ownerMembership, error: ownerError } = await (supabase.from("workspace_members") as any)
+    .select("workspace_id")
+    .eq("user_id", body.user_id)
+    .eq("role", "owner")
+    .eq("is_active", true)
+    .order("workspace_id", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (ownerError) throw ownerError;
+  const workspaceId = (ownerMembership as { workspace_id?: string } | null)?.workspace_id;
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
   const { data, error } = await (supabase.from("technicians") as any)
-    .insert({ user_id: body.user_id, ...body.profile }).select().single();
+    .insert({ user_id: body.user_id, ...body.profile, workspace_id: workspaceId }).select().single();
   if (error) {
     if (error.message === "seat_limit_reached") {
       throw new ApiError(403, "Technician seat limit reached for current plan.", "seat_limit_reached");
@@ -2274,8 +4017,16 @@ function techOsInsertRoute(path: string, table: string, build: (techId: string, 
   workOrdersRouter.post(path, async (c) => {
     const { supabase } = await requireAuth(c);
     const body = techOsInsertSchema.parse(await c.req.json());
+    const row = build(body.tech_id, body.user_id, body.data);
+    // Step 4 STAMP (SRC-T): this step's satellites (technician_skills,
+    // technician_payroll_cycles) are workspace-tenanted — stamp from the
+    // parent technician's row. The helper's other tables belong to
+    // later family steps and are inserted exactly as before.
+    if (table === "technician_skills" || table === "technician_payroll_cycles") {
+      row.workspace_id = await technicianWorkspaceId(supabase, body.tech_id);
+    }
     const { data, error } = await (supabase.from(table) as any)
-      .insert(build(body.tech_id, body.user_id, body.data)).select();
+      .insert(row).select();
     if (error) throw error;
     return json({ data: data ?? [] }, { status: 201 });
   });
@@ -2296,20 +4047,22 @@ workOrdersRouter.post("/v1/tech-os/onboarding-tasks", async (c) => {
     user_id: z.string().min(1),
     tasks: z.array(z.object({ name: z.string().min(1), category: z.string().min(1) })).min(1).max(200),
   }).parse(await c.req.json());
+  // Step 4 STAMP (SRC-T): tasks inherit the technician's workspace.
+  const workspaceId = await technicianWorkspaceId(supabase, body.tech_id);
   const { data, error } = await (supabase.from("technician_onboarding_tasks") as any).insert(
-    body.tasks.map((t) => ({ technician_id: body.tech_id, user_id: body.user_id, task_name: t.name, category: t.category })),
+    body.tasks.map((t) => ({ workspace_id: workspaceId, technician_id: body.tech_id, user_id: body.user_id, task_name: t.name, category: t.category })),
   ).select();
   if (error) throw error;
   return json({ data: data ?? [] }, { status: 201 });
 });
 
 workOrdersRouter.patch("/v1/tech-os/onboarding-tasks/:id", async (c) => {
-  const { supabase } = await requireAuth(c);
+  const { supabase, workspaceId } = await requireCallerWorkspaceId(c);
   const body = z.object({ completed: z.boolean() }).parse(await c.req.json());
   const { data, error } = await (supabase.from("technician_onboarding_tasks") as any).update({
     is_completed: body.completed,
     completed_at: body.completed ? new Date().toISOString() : null,
-  }).eq("id", c.req.param("id")).select();
+  }).eq("id", c.req.param("id")).eq("workspace_id", workspaceId).select();
   if (error) throw error;
   return json({ data: data ?? [] });
 });
@@ -2375,15 +4128,19 @@ workOrdersRouter.get("/v1/technicians", async (c) => {
   const { supabase, user } = await requireAuth(c);
   const userId = z.string().min(1).parse(new URL(c.req.url).searchParams.get("user_id") ?? "");
   if (userId !== user.id) throw new ApiError(403, "You can only list your own technicians", "technicians_forbidden");
+  // Step 4 RESCOPE: the admin list's tenancy filter is the workspace.
+  const workspaceId = await resolveCallerWorkspaceId(supabase, user.id);
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
   const { data, error } = await (supabase.from("technicians") as any)
-    .select("*").eq("user_id", userId).order("name", { ascending: true });
+    .select("*").eq("workspace_id", workspaceId).order("name", { ascending: true });
   if (error) throw error;
   return json({ data: data ?? [] });
 });
 
 workOrdersRouter.delete("/v1/tech-os/technicians/:id", async (c) => {
-  const { supabase } = await requireAuth(c);
-  const { error } = await (supabase.from("technicians") as any).delete().eq("id", c.req.param("id"));
+  const { supabase, workspaceId } = await requireCallerWorkspaceId(c);
+  const { error } = await (supabase.from("technicians") as any)
+    .delete().eq("id", c.req.param("id")).eq("workspace_id", workspaceId);
   if (error) throw error;
   return json({ data: { ok: true } });
 });
@@ -2391,25 +4148,14 @@ workOrdersRouter.delete("/v1/tech-os/technicians/:id", async (c) => {
 // ---------------------------------------------------------------------------
 // Service records search for linking — GET /v1/service-records/search-for-linking
 //
-// The CRM ↔ Assets linkage searches service *records* (with customer names),
-// not the service catalog. Returns the raw bundle; the caller filters by
-// term client-side.
+// MOVED to vehicles.ts (registered on vehiclesRouter, before
+// /v1/service-records/:id). It lived here originally, but app.ts mounts
+// workOrdersRouter after vehiclesRouter, whose :id handler captured
+// "search-for-linking" and failed UUID validation before this handler
+// could run — the same shadowing the /page route escaped. Do not
+// re-register it here; a second copy would sit behind the :id handler
+// and never serve.
 // ---------------------------------------------------------------------------
-
-workOrdersRouter.get("/v1/service-records/search-for-linking", async (c) => {
-  const { supabase } = await requireAuth(c);
-  const params = new URL(c.req.url).searchParams;
-  const workspaceId = z.string().uuid().parse(params.get("workspace_id") ?? "");
-  const limit = Math.min(Math.max(Number(params.get("limit") ?? 25) || 25, 1), 200);
-  const { data, error } = await (supabase.from("service_records") as any)
-    .select("id,customer_id,work_performed,metadata,completed_at,created_at,customers(first_name,last_name,company_name)")
-    .eq("workspace_id", workspaceId)
-    .neq("status", "voided")
-    .order("completed_at", { ascending: false, nullsFirst: false })
-    .limit(Math.max(limit * 4, limit));
-  if (error) throw error;
-  return json({ data: data ?? [] });
-});
 
 // ---------------------------------------------------------------------------
 // Shop pricing operational settings — GET/PUT
@@ -2519,12 +4265,22 @@ workOrdersRouter.delete("/v1/catalog/items/:id", async (c) => {
 // around a service record. This endpoint returns all raw pieces in one
 // round trip; the client keeps its mapping/adapter logic. Returns
 // `{ data: null }` when the record does not exist.
+//
+// This is the ONLY registration of this route (Item #9 Step 2): the
+// shadowed twin in vehicles.ts was deleted. Workspace membership is
+// enforced via requireWorkspaceAuth, ported from that serving copy.
+// The catalog embed reads the live `estimated_minutes` column (Step 8
+// schema translation) and the bundle renames it to the client's
+// `estimated_duration` field, matching the rename pattern used by the
+// catalog queries — the legacy `estimated_duration` column does not
+// exist on service_catalog, and embedding it made PostgREST reject the
+// whole bundle for every appointment-linked record.
 // ---------------------------------------------------------------------------
 
 workOrdersRouter.get("/v1/service-records/:id/detail-full", async (c) => {
-  const { supabase } = await requireAuth(c);
-  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id") ?? "");
-  const serviceId = c.req.param("id");
+  const serviceId = z.string().uuid().parse(c.req.param("id"));
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id"));
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId);
   const { data: service, error: serviceError } = await (supabase.from("service_records") as any)
     .select("*").eq("workspace_id", workspaceId).eq("id", serviceId).maybeSingle();
   if (serviceError) throw serviceError;
@@ -2572,11 +4328,29 @@ workOrdersRouter.get("/v1/service-records/:id/detail-full", async (c) => {
   let firstAppointmentItem: unknown = null;
   if (service.appointment_id) {
     const itemRes = await (supabase.from("appointment_items") as any)
-      .select("service_catalog_id,description,quantity,unit_price,service_catalog(name,description,estimated_duration)")
+      .select("service_catalog_id,description,quantity,unit_price,service_catalog(name,description,estimated_minutes)")
       .eq("workspace_id", workspaceId).eq("appointment_id", service.appointment_id)
       .order("created_at").limit(1);
     if (itemRes.error) throw itemRes.error;
-    firstAppointmentItem = (itemRes.data ?? [])[0] ?? null;
+    const rawItem = (itemRes.data ?? [])[0] ?? null;
+    if (rawItem) {
+      const catalog = rawItem.service_catalog as
+        | { name: string | null; description: string | null; estimated_minutes: number | null }
+        | null;
+      firstAppointmentItem = {
+        service_catalog_id: rawItem.service_catalog_id ?? null,
+        description: rawItem.description ?? null,
+        quantity: rawItem.quantity ?? null,
+        unit_price: rawItem.unit_price ?? null,
+        service_catalog: catalog
+          ? {
+              name: catalog.name ?? null,
+              description: catalog.description ?? null,
+              estimated_duration: catalog.estimated_minutes ?? null,
+            }
+          : null,
+      };
+    }
   }
 
   return json({
@@ -2602,17 +4376,18 @@ workOrdersRouter.get("/v1/service-records/:id/detail-full", async (c) => {
 // ---------------------------------------------------------------------------
 
 workOrdersRouter.get("/v1/repair-pricing/catalog-benchmarks", async (c) => {
-  const { supabase } = await requireAuth(c);
+  // Step 8 translation: service_catalog_benchmarks is workspace-keyed.
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id") ?? "");
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId, undefined);
   const { data, error } = await (supabase.from("service_catalog_benchmarks") as any)
-    .select("*").order("captured_at", { ascending: false });
+    .select("*").eq("workspace_id", workspaceId).order("captured_at", { ascending: false });
   if (error) throw error;
   return json({ data: data ?? [] });
 });
 
 workOrdersRouter.post("/v1/repair-pricing/catalog-benchmarks", async (c) => {
-  const { supabase } = await requireAuth(c);
   const body = z.object({
-    user_id: z.string().min(1),
+    workspace_id: z.string().uuid(),
     service_catalog_id: z.string().min(1),
     vin: z.string().nullable(),
     vehicle_label: z.string().nullable(),
@@ -2621,6 +4396,7 @@ workOrdersRouter.post("/v1/repair-pricing/catalog-benchmarks", async (c) => {
     dealer_low: z.number(), dealer_avg: z.number(), dealer_high: z.number(),
     shop_price: z.number().nullable(),
   }).parse(await c.req.json());
+  const { supabase } = await requireWorkspaceAuth(c, body.workspace_id, undefined);
   const { data, error } = await (supabase.from("service_catalog_benchmarks") as any).upsert(
     { ...body, captured_at: new Date().toISOString() },
     { onConflict: "service_catalog_id,vin" },
@@ -2630,22 +4406,26 @@ workOrdersRouter.post("/v1/repair-pricing/catalog-benchmarks", async (c) => {
 });
 
 workOrdersRouter.get("/v1/repair-pricing/shop-quote-requests", async (c) => {
-  const { supabase } = await requireAuth(c);
+  // Step 8 translation: quote_requests is workspace-keyed (it carries
+  // guest PII; the workspace scope is the protection).
+  const workspaceId = z.string().uuid().parse(new URL(c.req.url).searchParams.get("workspace_id") ?? "");
+  const { supabase } = await requireWorkspaceAuth(c, workspaceId, undefined);
   const { data, error } = await (supabase.from("quote_requests") as any)
-    .select("*").order("created_at", { ascending: false }).limit(200);
+    .select("*").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).limit(200);
   if (error) throw error;
   return json({ data: data ?? [] });
 });
 
 workOrdersRouter.patch("/v1/repair-pricing/shop-quote-requests/:id", async (c) => {
-  const { supabase } = await requireAuth(c);
   const body = z.object({
+    workspace_id: z.string().uuid(),
     status: z.string().min(1),
     converted_quote_id: z.string().nullable().optional(),
   }).parse(await c.req.json());
+  const { supabase } = await requireWorkspaceAuth(c, body.workspace_id, undefined);
   const { data, error } = await (supabase.from("quote_requests") as any)
     .update({ status: body.status, ...(body.converted_quote_id ? { converted_quote_id: body.converted_quote_id } : {}) })
-    .eq("id", c.req.param("id")).select().single();
+    .eq("id", c.req.param("id")).eq("workspace_id", body.workspace_id).select().single();
   if (error) throw error;
   return json({ data });
 });
@@ -3159,14 +4939,22 @@ workOrdersRouter.get("/v1/tech-app/job-detail", async (c) => {
   const { supabase } = await requireAuth(c);
   const jobId = z.string().min(1).parse(new URL(c.req.url).searchParams.get("job_id") ?? "");
 
-  // The canonical workspace RPC is the ONLY authority for which table a job
-  // lives in. A failing RPC surfaces an explicit error instead of silently
-  // widening data access.
-  const { data: wsData, error: wsError } = await (supabase.rpc as any)(
-    "get_technician_job_workspace_v1", { p_job_id: jobId },
-  );
-  if (wsError) throw wsError;
-  const source = (wsData as { source?: string } | null)?.source;
+  // Source resolution: which table a job lives in. The canonical
+  // authority was the get_technician_job_workspace_v1 RPC — but that RPC
+  // does not exist in production (it is defined only by an unapplied
+  // Oct-10 reverse-engineered draft and is absent from the production
+  // function inventory), so the call errored on every request
+  // (phantom heal, 2026-11-10). Until the RPC lands, the source resolves
+  // from the only job table that exists in production: an appointments
+  // row (seen through the caller's RLS-bound client) means source
+  // "appointment"; anything else stays unresolved and surfaces the same
+  // explicit 404 instead of silently widening data access.
+  // fleet_work_orders is likewise absent in production, so no fleet job
+  // can resolve today.
+  const { data: probe, error: probeError } = await (supabase as any)
+    .from("appointments").select("id").eq("id", jobId).maybeSingle();
+  if (probeError) throw probeError;
+  const source: string | null = probe ? "appointment" : null;
   if (!source) throw new ApiError(404, "Job access could not be resolved for this technician.", "job_unresolved");
 
   let job: Record<string, unknown> | null = null;
@@ -3179,15 +4967,12 @@ workOrdersRouter.get("/v1/tech-app/job-detail", async (c) => {
     const { data, error } = await (supabase as any)
       .from("appointments")
       .select(`
-        id, scheduled_date, scheduled_time, estimated_duration_minutes,
-        dispatch_status, job_priority, status, location_address, location_lat, location_lng,
-        notes, dispatch_notes, estimated_cost, payment_status,
-        user_id, customer_id, vehicle_id,
-        customers(name, phone, email),
+        id, starts_at, ends_at, dispatch_status, status, notes,
+        workspace_id, customer_id, vehicle_id, location_id, assigned_user_id,
+        metadata, confirmation_code, created_at, updated_at,
+        customers(first_name, last_name, company_name, phone, email),
         vehicles(year, make, model, color, vin, license_plate),
-        service_catalog(name),
-        technicians(id, name),
-        vans(name)
+        locations(name, address_line1, address_line2, city, region, postal_code, latitude, longitude)
       `)
       .eq("id", jobId)
       .maybeSingle();
@@ -3196,7 +4981,7 @@ workOrdersRouter.get("/v1/tech-app/job-detail", async (c) => {
       const [servicesResult, photosResult] = await Promise.all([
         (supabase as any)
           .from("appointment_services")
-          .select("id, quantity, is_prepaid, service_catalog(name, price)")
+          .select("id, quantity, is_prepaid, name, price, description, service_catalog(name)")
           .eq("appointment_id", jobId),
         (supabase as any)
           .from("job_photos")
@@ -3211,60 +4996,6 @@ workOrdersRouter.get("/v1/tech-app/job-detail", async (c) => {
     }
   }
 
-  if (!job && source !== "appointment") {
-    const { data: f, error } = await (supabase as any)
-      .from("fleet_work_orders")
-      .select(`
-        id, scheduled_date, scheduled_time, status, priority, service_type, description, notes, technician_notes,
-        fleet_client_id, fleet_vehicle_id, fleet_location_id, user_id,
-        fleet_clients(company_name, phone),
-        fleet_vehicles(year, make, model, color, vin, license_plate, mileage),
-        fleet_locations(address, name, latitude, longitude),
-        technicians(id, name),
-        vans(name)
-      `)
-      .eq("id", jobId)
-      .maybeSingle();
-    if (!error && f) {
-      job = {
-        id: f.id,
-        scheduled_date: f.scheduled_date,
-        scheduled_time: f.scheduled_time,
-        estimated_duration_minutes: 60,
-        dispatch_status: f.status,
-        status: f.status,
-        job_priority: f.priority,
-        location_address: f.fleet_locations?.address || f.fleet_locations?.name,
-        location_lat: f.fleet_locations?.latitude ?? null,
-        location_lng: f.fleet_locations?.longitude ?? null,
-        notes: f.technician_notes,
-        dispatch_notes: f.description,
-        estimated_cost: null,
-        payment_status: null,
-        user_id: f.user_id,
-        customer_id: null,
-        vehicle_id: f.fleet_vehicle_id,
-        customers: { name: f.fleet_clients?.company_name, phone: f.fleet_clients?.phone, email: null },
-        vehicles: f.fleet_vehicles,
-        service_catalog: { name: f.service_type || "Fleet Service" },
-        technicians: f.technicians,
-        vans: f.vans,
-        is_fleet: true,
-      };
-      const { data: lineItems } = await (supabase as any)
-        .from("fleet_work_order_line_items")
-        .select("id, description, quantity, unit_price")
-        .eq("fleet_work_order_id", jobId);
-      services = ((lineItems ?? []) as Array<{ id: string; description: string | null; quantity: number | null; unit_price: number | null }>)
-        .map((li) => ({
-          id: li.id,
-          service_catalog: { name: li.description, price: li.unit_price },
-          quantity: li.quantity,
-          is_prepaid: false,
-        }));
-    }
-  }
-
   return json({
     data: {
       job,
@@ -3275,44 +5006,6 @@ workOrdersRouter.get("/v1/tech-app/job-detail", async (c) => {
       photosError,
     },
   });
-});
-
-workOrdersRouter.get("/v1/tech-app/fleet-assignments", async (c) => {
-  const { supabase, user } = await requireAuth(c);
-  const params = new URL(c.req.url).searchParams;
-  const techId = params.get("tech_id") || null;
-  const isAdmin = params.get("is_admin") === "true";
-  const scopeUserId = params.get("user_id") || null;
-  const db = supabase as any;
-
-  // Technician path: fleet_work_orders is owner-scoped under RLS, so the
-  // assigned technician (a different auth user) cannot read it directly.
-  // The SECURITY DEFINER RPC enforces tech-or-ops-member access and returns
-  // the same nested shape the client maps.
-  if (techId && !isAdmin) {
-    const { data, error } = await db.rpc("get_tech_fleet_assignments_v1", {
-      p_technician_id: techId,
-    });
-    if (error) throw error;
-    return json({ data: data ?? [] });
-  }
-
-  // Admin/owner queue view: rows owned by the scope user (RLS permits the
-  // owner to read their own rows).
-  let query = db
-    .from("fleet_work_orders")
-    .select(`id, order_number, scheduled_date, scheduled_time, status, priority, service_type, description, total, fleet_job_id,
-       fleet_jobs(job_number),
-       fleet_clients(company_name),
-       fleet_locations(name, address),
-       fleet_vehicles(year, make, model, unit_number, license_plate)`)
-    .order("scheduled_date", { ascending: true })
-    .order("scheduled_time", { ascending: true })
-    .limit(200);
-  query = scopeUserId ? query.eq("user_id", scopeUserId) : query.eq("user_id", user.id);
-  const { data, error } = await query;
-  if (error) throw error;
-  return json({ data: data ?? [] });
 });
 
 // ---------------------------------------------------------------------------
@@ -3347,9 +5040,12 @@ workOrdersRouter.post("/v1/tech-app/notification-settings", async (c) => {
     customer_email_enabled: z.boolean(),
     offline_cache_enabled: z.boolean(),
   }).parse(await c.req.json());
+  // Step 4 STAMP: the user-keyed upsert carries the caller's workspace.
+  const workspaceId = await resolveCallerWorkspaceId(supabase, user.id);
+  if (!workspaceId) throw new ApiError(400, "No active workspace", "no_workspace");
   const { data, error } = await (supabase as any)
     .from("technician_notification_preferences")
-    .upsert({ user_id: user.id, ...body }, { onConflict: "user_id" })
+    .upsert({ user_id: user.id, workspace_id: workspaceId, ...body }, { onConflict: "user_id" })
     .select()
     .single();
   if (error) throw error;
@@ -3428,7 +5124,7 @@ workOrdersRouter.post("/v1/tech-app/job-transition", async (c) => {
   const { supabase } = await requireAuth(c);
   const body = z.object({
     job_id: z.string().min(1),
-    source: z.enum(["appointment", "fleet_work_order"]),
+    source: z.literal("appointment"),
     next_status: z.string().min(1),
     notes: z.string().nullable().optional(),
     idempotency_key: z.string().min(1),
@@ -3460,6 +5156,11 @@ workOrdersRouter.post("/v1/tech-app/job-photos", async (c) => {
   }
   const { data: tech } = await (supabase as any)
     .from("technicians").select("id").eq("auth_user_id", user.id).maybeSingle();
+  // Step 5 STAMP: workspace derives from the appointment row (the
+  // design's paired change for both duplicate handlers — finding F1).
+  const { data: appointment } = await (supabase as any)
+    .from("appointments").select("workspace_id").eq("id", appointmentId).maybeSingle();
+  if (!appointment?.workspace_id) throw new ApiError(404, "Appointment not found", "appointment_not_found");
   const fileExt = file.name.includes(".") ? file.name.split(".").pop() : "bin";
   const storagePath = `${businessUserId}/${appointmentId}/${photoType}-${Date.now()}.${fileExt}`;
   const { error: uploadError } = await supabase.storage
@@ -3470,6 +5171,7 @@ workOrdersRouter.post("/v1/tech-app/job-photos", async (c) => {
     .from("job_photos")
     .insert({
       appointment_id: appointmentId,
+      workspace_id: appointment.workspace_id,
       user_id: businessUserId,
       technician_id: tech?.id ?? null,
       photo_type: photoType,
@@ -3527,16 +5229,7 @@ workOrdersRouter.post("/v1/tech-app/job-notes", async (c) => {
   const body = z.object({
     job_id: z.string().min(1),
     notes: z.string(),
-    is_fleet: z.boolean().default(false),
   }).parse(await c.req.json());
-  if (body.is_fleet) {
-    const { data, error } = await (supabase.rpc as any)("save_technician_fleet_job_notes_v1", {
-      p_job_id: body.job_id,
-      p_notes: body.notes,
-    });
-    if (error) throw error;
-    return json({ data: data ?? null });
-  }
   const { data, error } = await (supabase as any)
     .from("appointments")
     .update({ notes: body.notes, updated_at: new Date().toISOString() })

@@ -25,7 +25,7 @@ export interface PlaybookPayload {
 // ============= Commands =============
 
 /** Create a new service playbook. */
-export async function createPlaybook(userId: string, payload: PlaybookPayload) {
+export async function createPlaybook(workspaceId: string, payload: PlaybookPayload) {
   const row = {
     service_catalog_id: payload.serviceCatalogId ?? null,
     name: payload.name,
@@ -35,7 +35,7 @@ export async function createPlaybook(userId: string, payload: PlaybookPayload) {
   };
 
   const { data } = await apiClient.post<{ data: string }>("/v1/platform/playbooks", {
-    user_id: userId,
+    workspace_id: workspaceId,
     row,
   });
   return data;
@@ -43,6 +43,7 @@ export async function createPlaybook(userId: string, payload: PlaybookPayload) {
 
 /** Update an existing playbook. */
 export async function updatePlaybook(
+  workspaceId: string,
   playbookId: string,
   payload: Partial<PlaybookPayload>
 ) {
@@ -56,27 +57,31 @@ export async function updatePlaybook(
     updates.service_catalog_id = payload.serviceCatalogId;
 
   await apiClient.patch(`/v1/platform/playbooks/${encodeURIComponent(playbookId)}`, {
+    workspace_id: workspaceId,
     updates,
   });
 }
 
 /** Delete a playbook. */
-export async function deletePlaybook(playbookId: string) {
-  await apiClient.delete(`/v1/platform/playbooks/${encodeURIComponent(playbookId)}`);
+export async function deletePlaybook(workspaceId: string, playbookId: string) {
+  await apiClient.delete(`/v1/platform/playbooks/${encodeURIComponent(playbookId)}`, {
+    query: { workspace_id: workspaceId },
+  });
 }
 
 /** Toggle playbook active state. */
-export async function togglePlaybookActive(playbookId: string, isActive: boolean) {
+export async function togglePlaybookActive(workspaceId: string, playbookId: string, isActive: boolean) {
   await apiClient.patch(`/v1/platform/playbooks/${encodeURIComponent(playbookId)}`, {
+    workspace_id: workspaceId,
     updates: { is_active: isActive, updated_at: new Date().toISOString() },
   });
 }
 
-/** Fetch all playbooks for a user (query co-located here for simplicity). */
-export async function fetchPlaybooks(userId: string) {
+/** Fetch all playbooks for a workspace (query co-located here for simplicity). */
+export async function fetchPlaybooks(workspaceId: string) {
   const { data, error } = await apiClient.get<{ data: unknown[]; error: unknown }>(
     "/v1/platform/playbooks",
-    { query: { user_id: userId } },
+    { query: { workspace_id: workspaceId } },
   );
   return { data, error };
 }

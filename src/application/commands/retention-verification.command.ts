@@ -1,4 +1,5 @@
 import { apiClient } from "@/lib/api-client";
+import { resolveCurrentWorkspace } from "@/application/queries/settings.query";
 
 type RetentionEventInsert = {
   event_name: string;
@@ -14,8 +15,14 @@ type RetentionEventInsert = {
 export async function insertRetentionEvents(rows: RetentionEventInsert[]): Promise<void> {
   if (rows.length === 0) return;
   // user_id is re-derived from the auth token server-side; the row field is
-  // kept in the signature for compatibility.
-  await apiClient.post("/v1/crm/retention/events", rows);
+  // kept in the signature for compatibility. The workspace travels in the
+  // request envelope; rows are stamped with it server-side.
+  const context = await resolveCurrentWorkspace();
+  if (!context) throw new Error("No active workspace is available.");
+  await apiClient.post("/v1/crm/retention/events", {
+    workspace_id: context.workspaceId,
+    events: rows,
+  });
 }
 
 export async function retryQueuedEmail(emailQueueId: string): Promise<void> {

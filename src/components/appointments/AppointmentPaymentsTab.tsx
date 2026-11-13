@@ -12,9 +12,13 @@ import {
 } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
 import {
-  fetchAppointmentPayments,
+  fetchAppointmentPaymentsWithState,
+  isProviderSyncArtifact,
+  sumPendingPaymentsCents,
+  sumSucceededPaymentsCents,
   type AppointmentPaymentRow,
-} from "@/application/queries";
+  type AppointmentPaymentState,
+} from "@/application/queries/appointment-payments.query";
 import {
   createAppointmentPaymentRecord,
   sendAppointmentPaymentLink,
@@ -22,7 +26,8 @@ import {
 import { useRegionalSettings } from "@/contexts/RegionalSettingsContext";
 import { format } from "date-fns";
 import { PaymentLinkDialog } from "@/components/payments/PaymentLinkDialog";
-import { centsToDollars, dollarsToCents, toCents, toDollars } from "@/lib/financialMath";
+import { centsToDollars, toCents } from "@/lib/financialMath";
+import { computeAppointmentPaymentAmounts } from "@/lib/appointmentPaymentAmounts";
 
 type PaymentRecord = AppointmentPaymentRow;
 
@@ -34,7 +39,16 @@ interface AppointmentPaymentsTabProps {
   estimatedTotal?: number;
   taxAmount?: number;
   subtotal?: number;
+  /**
+   * Workspace tax_rate — a PERCENT (6 means 6%), exactly as stored in
+   * workspace_settings. Never a fraction; see
+   * @/lib/appointmentPaymentAmounts for the contract.
+   */
   taxRate?: number;
+  /** True when the appointment's quote is locked (see @/lib/price-lock). */
+  priceLocked?: boolean;
+  /** Dollars still to collect on a locked quote (quote − already paid). */
+  lockedAmountDue?: number | null;
 }
 
 export function AppointmentPaymentsTab({
@@ -46,9 +60,12 @@ export function AppointmentPaymentsTab({
   taxAmount = 0,
   subtotal,
   taxRate,
+  priceLocked = false,
+  lockedAmountDue = null,
 }: AppointmentPaymentsTabProps) {
   const { formatCurrency } = useRegionalSettings();
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
+  const [paymentState, setPaymentState] = useState<AppointmentPaymentState | null>(null);
   const [loading, setLoading] = useState(true);
   const [sendingLink, setSendingLink] = useState<string | null>(null);
   const [creatingPaymentRecord, setCreatingPaymentRecord] = useState(false);
@@ -58,8 +75,9 @@ export function AppointmentPaymentsTab({
   const fetchPayments = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await fetchAppointmentPayments(appointmentId);
-      setPayments(data);
+      const { payments: rows, paymentState: state } = await fetchAppointmentPaymentsWithState(appointmentId);
+      setPayments(rows);
+      setPaymentState(state);
     } catch (error) {
       console.error("Failed to fetch payments:", error);
     }
@@ -78,25 +96,24 @@ export function AppointmentPaymentsTab({
     
     setCreatingPaymentRecord(true);
     try {
-      // If no tax was explicitly set on the appointment but a tax rate exists, compute it
-      let effectiveTax = taxAmount;
-      let effectiveSubtotal = subtotal;
-      if (effectiveTax === 0 && taxRate && taxRate > 0 && estimatedTotal > 0) {
-        effectiveSubtotal = effectiveSubtotal ?? estimatedTotal;
-        effectiveTax = effectiveSubtotal * taxRate;
-      }
-      const taxInCents = dollarsToCents(toDollars(effectiveTax));
-      const subtotalInCents = effectiveSubtotal != null
-        ? dollarsToCents(toDollars(effectiveSubtotal))
-        : (dollarsToCents(toDollars(estimatedTotal)) - taxInCents);
-      const amountInCents = subtotalInCents + taxInCents;
-      
+      // All amount math lives in one tested helper: a locked quote
+      // collects exactly its remaining balance (no tax recompute), and
+      // the workspace tax rate is a PERCENT, not a fraction.
+      const amounts = computeAppointmentPaymentAmounts({
+        priceLocked,
+        lockedAmountDue,
+        estimatedTotal,
+        taxAmount,
+        subtotal,
+        taxRatePercent: taxRate,
+      });
+
       await createAppointmentPaymentRecord({
         appointmentId,
-        amountCents: amountInCents,
-        subtotalCents: subtotalInCents,
-        taxCents: taxInCents > 0 ? taxInCents : null,
-        taxRate: taxRate || null,
+        amountCents: amounts.amountCents,
+        subtotalCents: amounts.subtotalCents,
+        taxCents: amounts.taxCents,
+        taxRate: amounts.taxRate,
         customerEmail,
         customerName,
       });
@@ -172,15 +189,22 @@ export function AppointmentPaymentsTab({
     );
   }
 
-  const pendingPayments = payments.filter((p) => p.status === "pending");
-  const completedPayments = payments.filter((p) => p.status === "succeeded");
-  const totalPaid = completedPayments.reduce((sum, p) => sum + p.amount, 0);
-  const totalPending = pendingPayments.reduce((sum, p) => sum + p.amount, 0);
-  
-  // If no payments exist and not prepaid, show the estimated total as pending
+  // P3: the summary reads the COMPOSED payment state (the invoice
+  // facts), never row sums. The provider-sync working row is an
+  // accounting-invisible artifact — its amount mirrors the invoice, so
+  // summing rows double-counts it against the real charge and reported
+  // this tab's paid jobs as unpaid. Artifact-excluded row sums are only
+  // the fallback for appointments with no invoice.
+  // If no payments exist and not prepaid, show the estimated total as pending.
   const hasNoPayments = payments.length === 0;
-  const displayPending = hasNoPayments && !isPrepaid ? estimatedTotal : totalPending / 100;
-  const displayPaid = totalPaid / 100;
+  const displayPaid = paymentState
+    ? paymentState.amount_paid
+    : sumSucceededPaymentsCents(payments) / 100;
+  const displayPending = paymentState
+    ? paymentState.balance
+    : hasNoPayments && !isPrepaid
+      ? estimatedTotal
+      : sumPendingPaymentsCents(payments) / 100;
 
   return (
     <>
@@ -260,14 +284,29 @@ export function AppointmentPaymentsTab({
               </div>
             ) : (
               <div className="space-y-4">
-                {payments.map((payment) => (
+                {payments.map((payment) => {
+                  // The provider-sync working row is a collection
+                  // artifact, not a customer debt: it renders as the
+                  // Stripe sync it is (state + mirrored invoice + hosted
+                  // link) and never gets a dunning action. If its status
+                  // ever truly flips to succeeded, it renders as the
+                  // normal paid row it became.
+                  const isSyncArtifact =
+                    isProviderSyncArtifact(payment) && payment.status !== "succeeded";
+                  return (
                   <div
                     key={payment.id}
                     className="flex items-center justify-between p-4 border rounded-lg"
                   >
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
-                        {getStatusBadge(payment.status)}
+                        {isSyncArtifact ? (
+                          <Badge className="bg-blue-500/10 text-blue-600 border-blue-500/20">
+                            {payment.stripe_sync_status === "synced" ? "Synced to Stripe" : "Stripe sync"}
+                          </Badge>
+                        ) : (
+                          getStatusBadge(payment.status)
+                        )}
                         {getPaymentTypeBadge(payment.payment_type || "payment")}
                       </div>
                       <p className="text-lg font-semibold">{formatCurrency(centsToDollars(toCents(payment.amount)))}</p>
@@ -279,11 +318,30 @@ export function AppointmentPaymentsTab({
                           {payment.stripe_payment_intent_id.slice(-8).toUpperCase()}
                         </p>
                       )}
+                      {isSyncArtifact && payment.stripe_invoice_id && (
+                        <p className="text-xs font-mono text-muted-foreground">
+                          Synced invoice {payment.stripe_invoice_id}
+                        </p>
+                      )}
+                      {isSyncArtifact && payment.payment_url && (
+                        <p className="text-xs">
+                          <a
+                            href={payment.payment_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-blue-600 underline"
+                          >
+                            View hosted invoice
+                          </a>
+                        </p>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {/* Show send link button for pending pay-at-service payments */}
-                      {payment.status === "pending" && (
+                      {/* Show send link button for genuinely pending
+                          payments while a balance is actually due —
+                          never for the sync artifact. */}
+                      {payment.status === "pending" && !isSyncArtifact && displayPending > 0 && (
                         <Button
                           size="sm"
                           variant="outline"
@@ -307,7 +365,8 @@ export function AppointmentPaymentsTab({
                       )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </CardContent>

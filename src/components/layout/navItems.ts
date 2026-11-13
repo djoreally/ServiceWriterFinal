@@ -31,6 +31,7 @@ const buildAllGroups = (terms: Terms): NavGroup[] => [
     { path: "/dashboard", label: "Command Center" },
     { path: "/command-center", label: "Live Operations" },
     { path: "/reports", label: "Reports" },
+    { path: "/analytics", label: "Analytics" },
   ]},
   { label: "Customers & Vehicles", items: [
     { path: "/customers", label: terms.customer + "s" },
@@ -48,7 +49,6 @@ const buildAllGroups = (terms: Terms): NavGroup[] => [
   { label: "Field Ops", items: [
     { path: "/dispatch-engine", label: "Dispatch" },
     { path: "/team-os", label: "Team & Technicians" },
-    { path: "/fleet-os", label: "Fleet OS" },
     { path: "/fleet", label: "Vans & Fleet" },
     { path: "/field-companion", label: "Field Companion" },
     { path: "/inventory", label: "Inventory & Parts" },
@@ -65,7 +65,6 @@ const buildAllGroups = (terms: Terms): NavGroup[] => [
     { path: "/invoices", label: "Invoices" },
     { path: "/payments", label: "Payments" },
     { path: "/financials", label: "Financials" },
-    { path: "/expenses", label: "Expenses" },
     { path: "/tax-compliance", label: "Tax Compliance" },
   ]},
   { label: "Communications", items: [

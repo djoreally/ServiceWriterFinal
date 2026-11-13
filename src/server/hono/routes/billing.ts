@@ -61,6 +61,16 @@ import {
 import { createSupabaseAdminClient, createSupabaseAnonServerClient, supabaseFunctionsBaseUrl, supabasePublishableKey } from "@/lib/supabase";
 import { encryptPaymentCredential } from "@/server/payments/stripe-workspace-execution";
 import { logMutation } from "@/server/audit";
+import {
+  planReceiptParseRequest,
+  type ReceiptExtraction,
+} from "@/application/commands/receipt-parse.command";
+import {
+  ReceiptParseNotConfiguredError,
+  ReceiptParseProviderError,
+  resolveReceiptScanCategory,
+  runReceiptScan,
+} from "@/server/expenses/receipt-parse.service";
 
 export const billingRouter = new Hono();
 
@@ -1294,16 +1304,16 @@ billingRouter.post("/v1/billing/messaging-addon-checkout", async (c) => {
 });
 
 billingRouter.get("/v1/billing/messaging-stats", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, workspaceId } = await resolveBillingWorkspace(c);
   const [outbound, failed, replies, optOuts] = await Promise.all([
     supabase.from("sms_logs").select("id", { count: "exact", head: true })
-      .eq("user_id", user.id).eq("direction", "outbound").in("status", ["sent", "delivered"]),
+      .eq("workspace_id", workspaceId).eq("direction", "outbound").in("status", ["sent", "delivered"]),
     supabase.from("sms_logs").select("id", { count: "exact", head: true })
-      .eq("user_id", user.id).eq("direction", "outbound").in("status", ["failed", "undelivered"]),
+      .eq("workspace_id", workspaceId).eq("direction", "outbound").in("status", ["failed", "undelivered"]),
     supabase.from("sms_logs").select("id", { count: "exact", head: true })
-      .eq("user_id", user.id).eq("direction", "inbound").eq("message_type", "reply"),
+      .eq("workspace_id", workspaceId).eq("direction", "inbound").eq("message_type", "reply"),
     supabase.from("sms_opt_outs").select("id", { count: "exact", head: true })
-      .eq("user_id", user.id),
+      .eq("workspace_id", workspaceId),
   ]);
   if (outbound.error) throw outbound.error;
   if (failed.error) throw failed.error;
@@ -1332,17 +1342,17 @@ const cashDrawerSettingsSchema = z.object({
 });
 
 billingRouter.get("/v1/billing/cash-drawer", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, user, workspaceId } = await resolveBillingWorkspace(c);
   const [profileRes, eventsRes, sessionsRes] = await Promise.all([
     supabase
       .from("business_profiles")
       .select("cash_drawer_enabled, cash_drawer_type, cash_drawer_config, cash_drawer_open_on_cash_payment, cash_drawer_require_reason, stripe_charges_enabled")
-      .eq("user_id", user.id)
+      .eq("workspace_id", workspaceId)
       .maybeSingle(),
     supabase
       .from("cash_drawer_events")
       .select("*")
-      .eq("user_id", user.id)
+      .eq("workspace_id", workspaceId)
       .order("created_at", { ascending: false })
       .limit(20),
     supabase
@@ -1365,7 +1375,7 @@ billingRouter.get("/v1/billing/cash-drawer", async (c) => {
 });
 
 billingRouter.put("/v1/billing/cash-drawer/settings", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, workspaceId } = await resolveBillingWorkspace(c);
   const body = cashDrawerSettingsSchema.parse(await c.req.raw.json());
   const { error } = await (supabase.from("business_profiles") as any)
     .update({
@@ -1375,7 +1385,7 @@ billingRouter.put("/v1/billing/cash-drawer/settings", async (c) => {
       cash_drawer_open_on_cash_payment: body.cash_drawer_open_on_cash_payment,
       cash_drawer_require_reason: body.cash_drawer_require_reason,
     })
-    .eq("user_id", user.id);
+    .eq("workspace_id", workspaceId);
   if (error) throw error;
   return json({ data: { success: true } });
 });
@@ -1910,9 +1920,50 @@ const receiptOcrSchema = z.object({
 
 billingRouter.post("/v1/billing/receipt-ocr", async (c) => {
   const body = receiptOcrSchema.parse(await c.req.raw.json());
-  await requireAuth(c);
-  return proxyEdgeFunction(c, "expense-receipt-ocr", {
-    body: { imageBase64: body.image_base64, mimeType: body.mime_type },
+  const { supabase, user } = await requireAuth(c);
+
+  // Scan Receipt now reads in-process (src/server/expenses/receipt-parse.service.ts).
+  // It used to proxy to an `expense-receipt-ocr` edge function that
+  // exists nowhere in the repo, so every scan died behind the proxy's
+  // fallback message ("The payment service request failed."). The
+  // response keeps the shape the old proxy passed through: the
+  // OcrResult at top level, NOT { data }-wrapped.
+  const plan = planReceiptParseRequest({
+    image_base64: body.image_base64,
+    mime_type: body.mime_type,
+  });
+  if (!plan.request) {
+    throw new ApiError(400, plan.error ?? "Invalid receipt photo.", "invalid_receipt");
+  }
+  let extraction: ReceiptExtraction;
+  try {
+    extraction = await runReceiptScan({ supabase }, plan.request);
+  } catch (e) {
+    if (e instanceof ReceiptParseNotConfiguredError) {
+      throw new ApiError(503, e.message, "receipt_parse_not_configured");
+    }
+    if (e instanceof ReceiptParseProviderError) {
+      throw new ApiError(502, e.message, "receipt_parse_failed");
+    }
+    throw e;
+  }
+  const category = await resolveReceiptScanCategory({ supabase }, user.id, extraction);
+  return json({
+    success: true,
+    extracted: {
+      vendor_name: extraction.vendor_name,
+      transaction_date: extraction.transaction_date,
+      subtotal: extraction.subtotal,
+      tax_amount: extraction.tax_amount,
+      total_amount: extraction.total_amount,
+      payment_method: extraction.payment_method,
+      last4: extraction.last4,
+      reference_number: extraction.reference_number,
+      line_items: extraction.line_items,
+      suggested_category: extraction.suggested_category,
+      confidence: extraction.confidence,
+    },
+    category,
   });
 });
 
@@ -1937,26 +1988,45 @@ billingRouter.get("/v1/billing/payment-provider", async (c) => {
     db.from("provider_connections")
       .select("provider,external_account_id,status,metadata,last_synced_at")
       .eq("workspace_id", workspaceId)
-      .in("provider", ["stripe", "square"]),
+      .in("provider", ["square"]),
   ]);
   if (settingsError) throw settingsError;
   if (connectionsError) throw connectionsError;
 
   const operational = readOperationalSettings(settings?.operational_settings);
-  const stripeConnection = (connections ?? []).find((row: any) => row.provider === "stripe" && row.status === "connected");
   const squareConnection = (connections ?? []).find((row: any) => row.provider === "square" && row.status === "connected");
-  const stripeMetadata = readOperationalSettings(stripeConnection?.metadata);
   const squareMetadata = readOperationalSettings(squareConnection?.metadata);
+
+  // Stripe status derives from the SAME execution state that charges cards:
+  // resolveStripeWorkspaceExecution over workspace_settings.operational_settings
+  // — the exact resolution invoice sync, payment links and booking pay-now
+  // execute through. provider_connections is written only by the connect edge
+  // function and is no longer consulted for Stripe status: a workspace whose
+  // charges succeed must never render "Not connected" because that record was
+  // never written. The charges/payouts/details flags are the execution
+  // layer's own cached account state, refreshed from Stripe whenever the
+  // execution layer runs (refreshStripeWorkspaceState).
+  let stripeExecution: StripeWorkspaceExecution | null = null;
+  try {
+    stripeExecution = resolveStripeWorkspaceExecution(operational);
+  } catch {
+    stripeExecution = null;
+  }
+  const stripeAccountId =
+    stripeExecution && typeof stripeExecution.accountId === "string" && stripeExecution.accountId
+      ? stripeExecution.accountId
+      : null;
+  const stripeDirect = stripeExecution?.mode === "direct";
 
   return json({
     data: {
       provider: settings?.payment_provider ?? "none",
       stripeStatus: {
-        connected: Boolean(stripeConnection?.external_account_id),
-        chargesEnabled: stripeMetadata.charges_enabled === true && operational.stripe_charges_enabled === true,
-        payoutsEnabled: stripeMetadata.payouts_enabled === true && operational.stripe_payouts_enabled === true,
-        detailsSubmitted: stripeMetadata.details_submitted === true || operational.stripe_details_submitted === true || operational.stripe_onboarding_complete === true,
-        accountId: typeof stripeConnection?.external_account_id === "string" ? stripeConnection.external_account_id : undefined,
+        connected: stripeAccountId !== null,
+        chargesEnabled: stripeAccountId !== null && (stripeDirect ? operational.stripe_direct_charges_enabled === true : operational.stripe_charges_enabled === true),
+        payoutsEnabled: stripeAccountId !== null && (stripeDirect ? operational.stripe_direct_payouts_enabled === true : operational.stripe_payouts_enabled === true),
+        detailsSubmitted: stripeAccountId !== null && (stripeDirect ? operational.stripe_direct_details_submitted === true : operational.stripe_onboarding_complete === true),
+        accountId: stripeAccountId ?? undefined,
       },
       squareStatus: {
         connected: Boolean(squareConnection?.external_account_id),
@@ -2151,12 +2221,12 @@ billingRouter.patch("/v1/billing/coupons/:id", async (c) => {
 // ---------------------------------------------------------------------------
 
 billingRouter.get("/v1/billing/qbo", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, user, workspaceId } = await resolveBillingWorkspace(c);
   const [profileResp, logsResp, customersResp, invoicesResp, paymentsResp] = await Promise.all([
     supabase
       .from("business_profiles")
       .select("qbo_enabled, qbo_realm_id, qbo_connected_at, qbo_sync_customers, qbo_sync_invoices, qbo_sync_payments, qbo_income_account_id, qbo_last_sync_at")
-      .eq("user_id", user.id)
+      .eq("workspace_id", workspaceId)
       .maybeSingle(),
     supabase
       .from("qbo_sync_log")
@@ -2194,11 +2264,11 @@ const qboSettingsSchema = z.object({
 });
 
 billingRouter.put("/v1/billing/qbo/settings", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, workspaceId } = await resolveBillingWorkspace(c);
   const body = qboSettingsSchema.parse(await c.req.raw.json());
   // Upsert: a missing business_profiles row must not turn the save into a
   // silent zero-write. The helper throws when the write cannot be verified.
-  await upsertBusinessProfile(supabase as any, user.id, body);
+  await upsertBusinessProfile(supabase as any, workspaceId, body);
   return json({ data: { success: true } });
 });
 
@@ -2476,11 +2546,11 @@ billingRouter.get("/v1/billing/plan-templates", async (c) => {
 });
 
 billingRouter.get("/v1/billing/customer-subscriptions", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, workspaceId } = await resolveBillingWorkspace(c);
   const customerId = new URL(c.req.url).searchParams.get("customer_id");
   let query = (supabase.from("customer_subscriptions") as any)
     .select("*")
-    .eq("user_id", user.id)
+    .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: false });
   if (customerId) query = query.eq("customer_id", customerId);
   const { data, error } = await query;
@@ -2489,14 +2559,14 @@ billingRouter.get("/v1/billing/customer-subscriptions", async (c) => {
 });
 
 billingRouter.get("/v1/billing/subscription-stats", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, user, workspaceId } = await resolveBillingWorkspace(c);
   const [plansResult, subsResult] = await Promise.all([
     (supabase.from("subscription_plans") as any)
       .select("id, price, billing_cycle, is_active, stripe_price_id")
       .eq("user_id", user.id),
     (supabase.from("customer_subscriptions") as any)
       .select("id, plan_id, status")
-      .eq("user_id", user.id)
+      .eq("workspace_id", workspaceId)
       .eq("status", "active"),
   ]);
   if (plansResult.error) throw plansResult.error;
@@ -2780,12 +2850,33 @@ billingRouter.get("/v1/billing/bank-transactions", async (c) => {
   const { supabase, workspaceId } = await resolveBillingWorkspace(c);
   const limit = Math.min(Math.max(Number(new URL(c.req.url).searchParams.get("limit")) || 1000, 1), 5000);
   const { data, error } = await (supabase.from("bank_transactions") as any)
-    .select("id,posted_on,description_raw,amount,direction,classification,confidence,review_status,notes,created_at")
+    .select("id,posted_on,description_raw,amount,direction,classification,confidence,review_status,notes,created_at,source_data")
     .eq("workspace_id", workspaceId)
     .order("posted_on", { ascending: false })
     .limit(limit);
   if (error) throw error;
-  return json({ data: data ?? [] });
+  // Statements need to split owner draws by the side recorded in the
+  // imported source data. Expose only that derived side, not the full
+  // source payload, which can contain provider identifiers.
+  const rows = (data ?? []).map((row: any) => {
+    const sourceData = row.source_data && typeof row.source_data === "object" ? row.source_data : null;
+    return {
+      id: row.id,
+      posted_on: row.posted_on,
+      description_raw: row.description_raw,
+      amount: row.amount,
+      direction: row.direction,
+      classification: row.classification,
+      confidence: row.confidence,
+      draw_side: sourceData?.draw_side === "owner" || sourceData?.draw_side === "partner"
+        ? sourceData.draw_side
+        : null,
+      review_status: row.review_status,
+      notes: row.notes,
+      created_at: row.created_at,
+    };
+  });
+  return json({ data: rows });
 });
 
 const bankTransactionPatchSchema = z.object({
@@ -2797,16 +2888,20 @@ billingRouter.patch("/v1/billing/bank-transactions/:id", async (c) => {
   const { supabase, user, workspaceId } = await resolveBillingWorkspace(c);
   const id = z.string().uuid().parse(c.req.param("id"));
   const body = bankTransactionPatchSchema.parse(await c.req.raw.json());
+  // Partial-update guard (SW-42): notes is optional in the schema; an
+  // omitted notes field must not erase the transaction's stored notes.
+  // Explicit null still clears.
+  const patch: Record<string, unknown> = {
+    classification: body.classification,
+    review_status: body.classification === "unresolved" ? "pending" : "approved",
+    confidence: body.classification === "unresolved" ? 0 : 1,
+    classified_by: user.id,
+    classified_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  if (body.notes !== undefined) patch.notes = body.notes ?? null;
   const { error } = await (supabase.from("bank_transactions") as any)
-    .update({
-      classification: body.classification,
-      review_status: body.classification === "unresolved" ? "pending" : "approved",
-      confidence: body.classification === "unresolved" ? 0 : 1,
-      classified_by: user.id,
-      classified_at: new Date().toISOString(),
-      notes: body.notes ?? null,
-      updated_at: new Date().toISOString(),
-    })
+    .update(patch)
     .eq("workspace_id", workspaceId)
     .eq("id", id);
   if (error) throw error;
@@ -2817,22 +2912,164 @@ billingRouter.patch("/v1/billing/bank-transactions/:id", async (c) => {
 // Cash receipts + financial reports
 // ---------------------------------------------------------------------------
 
+const UUID_SHAPE =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+// Production invoices carry their appointment link in metadata, not in a
+// column: sync_appointment_invoice_v1 itself finds an invoice by
+// metadata->>'appointment_id'. Parse defensively — only a uuid-shaped
+// string counts; anything else falls through to the next hop.
+function invoiceMetadataAppointmentId(metadata: unknown): string | null {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+  const raw = (metadata as Record<string, unknown>).appointment_id;
+  if (typeof raw !== "string") return null;
+  const candidate = raw.trim();
+  return UUID_SHAPE.test(candidate) ? candidate : null;
+}
+
 billingRouter.get("/v1/billing/cash-receipts", async (c) => {
   const { supabase, workspaceId } = await resolveBillingWorkspace(c);
   const url = new URL(c.req.url);
   const from = url.searchParams.get("from") ?? "";
   const to = url.searchParams.get("to");
-  let query = (supabase.from("payments") as any)
-    .select("id,amount,status,provider,paid_at,created_at,metadata")
+
+  // Collected counts on the JOB's date, not the recording date (owner's
+  // rule): a receipt's effective date is the service date of the
+  // appointment it settles. Resolution order follows production's real
+  // shape (live census, 2026-11-10: of 191 paid invoices only 2 carry
+  // work_order_id — the work-order chain PR #205 walked is nearly unused
+  // live): (1) payments.invoice_id → invoices.metadata->>'appointment_id'
+  // → appointments.starts_at — the same metadata key
+  // sync_appointment_invoice_v1 uses to find an invoice; (2)
+  // invoices.work_order_id → work_orders.appointment_id →
+  // appointments.starts_at; (3) the payment's paid date. The from/to
+  // window applies to the EFFECTIVE date so every consumer of this one
+  // endpoint (dashboard cockpit, reports, provider snapshot) sums the
+  // same period. The window therefore cannot stay a SQL paid_at filter —
+  // a back-dated closeout is paid after its job, a prepayment before it —
+  // so candidates are the workspace's settled payments, the chain is
+  // resolved in batched lookups, and the window is applied here.
+  const { data: paymentRows, error } = await (supabase.from("payments") as any)
+    .select("id,amount,status,provider,paid_at,created_at,metadata,invoice_id")
     .eq("workspace_id", workspaceId)
     .in("status", ["succeeded", "partially_refunded", "refunded"])
     .not("paid_at", "is", null)
-    .gte("paid_at", from)
     .order("paid_at", { ascending: true });
-  if (to) query = query.lte("paid_at", to);
-  const { data, error } = await query;
   if (error) throw error;
-  return json({ data: data ?? [] });
+  const payments = (paymentRows ?? []) as Array<Record<string, unknown>>;
+
+  const serviceDateByPaymentId = new Map<string, string | null>();
+  const invoiceIds = Array.from(
+    new Set(
+      payments
+        .map((row) => row.invoice_id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0),
+    ),
+  );
+  if (invoiceIds.length > 0) {
+    const { data: invoiceRows, error: invoiceError } = await (supabase.from("invoices") as any)
+      .select("id,work_order_id,metadata")
+      .eq("workspace_id", workspaceId)
+      .in("id", invoiceIds);
+    if (invoiceError) throw invoiceError;
+    const metadataAppointmentIdByInvoiceId = new Map<string, string>();
+    const workOrderIdByInvoiceId = new Map<string, string>();
+    for (const invoice of (invoiceRows ?? []) as Array<Record<string, unknown>>) {
+      const metadataAppointmentId = invoiceMetadataAppointmentId(invoice.metadata);
+      if (metadataAppointmentId) {
+        metadataAppointmentIdByInvoiceId.set(String(invoice.id), metadataAppointmentId);
+      }
+      if (typeof invoice.work_order_id === "string" && invoice.work_order_id) {
+        workOrderIdByInvoiceId.set(String(invoice.id), invoice.work_order_id);
+      }
+    }
+
+    // Hop 2 is only consulted for invoices the metadata hop did not
+    // resolve, so work orders are fetched for those invoices alone.
+    const appointmentIdByWorkOrderId = new Map<string, string>();
+    const workOrderIds = Array.from(
+      new Set(
+        Array.from(workOrderIdByInvoiceId.entries())
+          .filter(([invoiceId]) => !metadataAppointmentIdByInvoiceId.has(invoiceId))
+          .map(([, workOrderId]) => workOrderId),
+      ),
+    );
+    if (workOrderIds.length > 0) {
+      const { data: workOrderRows, error: workOrderError } = await (supabase.from("work_orders") as any)
+        .select("id,appointment_id")
+        .eq("workspace_id", workspaceId)
+        .in("id", workOrderIds);
+      if (workOrderError) throw workOrderError;
+      for (const workOrder of (workOrderRows ?? []) as Array<Record<string, unknown>>) {
+        if (typeof workOrder.appointment_id === "string" && workOrder.appointment_id) {
+          appointmentIdByWorkOrderId.set(String(workOrder.id), workOrder.appointment_id);
+        }
+      }
+    }
+
+    const startsAtByAppointmentId = new Map<string, string>();
+    const appointmentIds = Array.from(
+      new Set([
+        ...metadataAppointmentIdByInvoiceId.values(),
+        ...appointmentIdByWorkOrderId.values(),
+      ]),
+    );
+    if (appointmentIds.length > 0) {
+      const { data: appointmentRows, error: appointmentError } = await (supabase.from("appointments") as any)
+        .select("id,starts_at")
+        .eq("workspace_id", workspaceId)
+        .in("id", appointmentIds);
+      if (appointmentError) throw appointmentError;
+      for (const appointment of (appointmentRows ?? []) as Array<Record<string, unknown>>) {
+        if (typeof appointment.starts_at === "string" && appointment.starts_at) {
+          startsAtByAppointmentId.set(String(appointment.id), appointment.starts_at);
+        }
+      }
+    }
+
+    for (const row of payments) {
+      const invoiceId = typeof row.invoice_id === "string" ? row.invoice_id : null;
+      const metadataAppointmentId = invoiceId
+        ? metadataAppointmentIdByInvoiceId.get(invoiceId)
+        : undefined;
+      const workOrderId = invoiceId ? workOrderIdByInvoiceId.get(invoiceId) : undefined;
+      const workOrderAppointmentId = workOrderId
+        ? appointmentIdByWorkOrderId.get(workOrderId)
+        : undefined;
+      // Hop 1 wins; if its appointment row is somehow absent, hop 2
+      // still gets its chance before the paid-date fallback rules.
+      const startsAt =
+        (metadataAppointmentId
+          ? startsAtByAppointmentId.get(metadataAppointmentId)
+          : undefined) ??
+        (workOrderAppointmentId
+          ? startsAtByAppointmentId.get(workOrderAppointmentId)
+          : undefined) ??
+        null;
+      serviceDateByPaymentId.set(String(row.id), startsAt);
+    }
+  }
+
+  const fromMs = from ? Date.parse(from) : Number.NaN;
+  const toMs = to ? Date.parse(to) : Number.NaN;
+  const data = payments
+    .map((row): Record<string, unknown> & { appointment_starts_at: string | null } => ({
+      ...row,
+      appointment_starts_at: serviceDateByPaymentId.get(String(row.id)) ?? null,
+    }))
+    .filter((row) => {
+      const effective = row.appointment_starts_at ??
+        (typeof row.paid_at === "string" ? row.paid_at : null);
+      if (!effective) return false;
+      const effectiveMs = Date.parse(effective);
+      if (Number.isNaN(effectiveMs)) return false;
+      if (!Number.isNaN(fromMs) && effectiveMs < fromMs) return false;
+      if (!Number.isNaN(toMs) && effectiveMs > toMs) return false;
+      return true;
+    });
+  return json({ data });
 });
 
 billingRouter.get("/v1/billing/financials/succeeded-payments", async (c) => {
@@ -3116,14 +3353,14 @@ const smsSettingsSchema = z.object({
 });
 
 billingRouter.put("/v1/billing/sms-settings", async (c) => {
-  const { supabase, user } = await requireAuth(c);
+  const { supabase, workspaceId } = await resolveBillingWorkspace(c);
   const body = smsSettingsSchema.parse(await c.req.raw.json());
   const update: Record<string, unknown> = {};
   if (body.sms_low_balance_threshold !== undefined) update.sms_low_balance_threshold = body.sms_low_balance_threshold;
   if (body.sms_transactional_enabled !== undefined) update.sms_transactional_enabled = body.sms_transactional_enabled;
   if (body.sms_marketing_enabled !== undefined) update.sms_marketing_enabled = body.sms_marketing_enabled;
   if (Object.keys(update).length === 0) return json({ data: { success: true } });
-  const { error } = await (supabase.from("business_profiles") as any).update(update).eq("user_id", user.id);
+  const { error } = await (supabase.from("business_profiles") as any).update(update).eq("workspace_id", workspaceId);
   if (error) throw error;
   return json({ data: { success: true } });
 });

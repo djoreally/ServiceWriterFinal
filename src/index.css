@@ -233,7 +233,7 @@
     color-scheme: dark;
 
     /* Shadcn-compatible HSL tokens */
-    --background: 0 0% 0%;               /* #000000 */
+    --background: 222 47% 11%;           /* #0f172a */
     --foreground: 240 9% 97%;             /* #f5f5f7 */
 
     --card: 230 25% 4%;                  /* #0b0b0f */
@@ -334,7 +334,7 @@
     --ring-glow: 0 0 0 3px rgba(10, 132, 255, 0.28);
 
     /* Hero / stage */
-    --hero-bg: radial-gradient(circle at top center, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 35%), linear-gradient(180deg, #050505 0%, #000000 100%);
+    --hero-bg: radial-gradient(circle at top center, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 35%), linear-gradient(180deg, #050505 0%, #0f172a 100%);
     --spotlight: 0 0 120px rgba(255, 255, 255, 0.06);
     --device-frame: #3a404c;
     --device-screen: #05070a;
@@ -485,11 +485,14 @@
 }
 
 /* =========================================
-   TRUE-BLACK DARK MODE
+   DARK MODE BODY PAINT
+   Matches the dark --background token (#0f172a, slate-900 — the same
+   slate the root metadata advertises as the dark themeColor), so the
+   first paint in dark mode is slate, never a pure-black void.
    ========================================= */
 
 .dark body {
-  background-color: #000000;
+  background-color: #0f172a;
   background-image: none;
 }
 

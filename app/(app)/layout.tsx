@@ -23,6 +23,7 @@ import { lazyRetry } from "@/lib/lazyRetry";
 import { NextRouterAdapter } from "@/components/routing/NextRouterAdapter";
 import { AppStartupNavigator } from "@/components/routing/AppStartupNavigator";
 import { NextSeoManager } from "@/components/routing/NextSeoManager";
+import ShellSkeleton from "@/components/routing/ShellSkeleton";
 
 /**
  * Route-group layout for migrated App Router pages (`app/(app)/<section>/page.tsx`).
@@ -75,6 +76,12 @@ const PostHogIdentity = lazyRetry(() =>
   import("@/components/analytics/PostHogIdentity").then((m) => ({ default: m.PostHogIdentity })),
 );
 
+// Built-in telemetry tracker — same lazy treatment: it arms after first
+// paint and renders nothing for anyone.
+const UserActivityTracker = lazyRetry(() =>
+  import("@/components/analytics/UserActivityTracker").then((m) => ({ default: m.UserActivityTracker })),
+);
+
 /**
  * App-shell side effects: the current offline tenant slug, plus the
  * deferred boot tasks (service-worker updates, offline bootstrap/outbox)
@@ -115,7 +122,10 @@ export default function MigratedAppLayout({ children }: { children: ReactNode })
     <StrictMode>
       <ErrorBoundary>
         <AuthProvider authStateSource={supabase.auth}>
-          <ThemeProvider defaultTheme="system" storageKey="servicewriter-ui-theme">
+          {/* Light is the product default in both shells (Redesign Phase 0,
+              Gate 1 — see scripts/check-frontend-ui-contract.mjs); a stored
+              per-user preference still wins inside ThemeProvider. */}
+          <ThemeProvider defaultTheme="light" storageKey="servicewriter-ui-theme">
             <QueryClientProvider client={queryClient}>
               <TooltipProvider>
                 <TerminologyProvider>
@@ -124,11 +134,14 @@ export default function MigratedAppLayout({ children }: { children: ReactNode })
                       <SubscriptionProvider>
                         <TenantProvider>
                           {/* useSearchParams() below needs the Suspense boundary. */}
-                          <Suspense fallback={null}>
+                          <Suspense fallback={<ShellSkeleton />}>
                             <NextRouterAdapter>
                               <KeyboardShortcutsProvider>
                                 <Suspense fallback={null}>
                                   <PostHogIdentity />
+                                </Suspense>
+                                <Suspense fallback={null}>
+                                  <UserActivityTracker />
                                 </Suspense>
                                 <OfflineStatusBanner />
                                 <Toaster />
