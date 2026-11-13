@@ -14,6 +14,8 @@ export interface CarfaxSettingsData {
   phone: string;
   carfax_activated?: boolean;
   carfax_activation_date?: string | null;
+  carfax_product_data_id: string;
+  carfax_comp_code: string;
 }
 
 export interface CarfaxExportRecord {

@@ -42,10 +42,12 @@ import {
   type VinDecodeResult,
 } from "@/server/hono/lib/vin-decode";
 import { fetchWheelSizeFitment } from "@/server/hono/lib/wheel-size";
+import { resolveQldSpec } from "@/server/qld/spec-provider";
 import {
   appliesToFromCatalog,
   hasAnySpec,
   mergeSpecs,
+  parseCapacityQuarts,
   pickCatalogRow,
   specsFromCatalogRow,
   specsFromWorkspaceRow,
@@ -1356,6 +1358,8 @@ vehiclesRouter.get("/v1/carfax/settings", async (c) => {
       phone: settings?.phone || "",
       carfax_activated: Boolean(carfax.location_id),
       carfax_activation_date: typeof carfax.activation_date === "string" ? carfax.activation_date : null,
+      carfax_product_data_id: typeof carfax.product_data_id === "string" ? carfax.product_data_id : "",
+      carfax_comp_code: typeof carfax.comp_code === "string" ? carfax.comp_code : "",
     },
   });
 });
@@ -1381,6 +1385,18 @@ vehiclesRouter.put("/v1/carfax/settings", async (c) => {
     activation_date: body.carfax_location_id
       ? existingCarfax.activation_date || new Date().toISOString()
       : null,
+    // CARFAX-issued identifiers (product-data-id for Service History Check /
+    // QuickVIN, comp-code for the Authorization Tool). They arrive with the
+    // CARFAX agreement, so they are saved independently of the location
+    // fields and preserved when a save does not mention them.
+    product_data_id:
+      typeof body.carfax_product_data_id === "string"
+        ? body.carfax_product_data_id || null
+        : existingCarfax.product_data_id ?? null,
+    comp_code:
+      typeof body.carfax_comp_code === "string"
+        ? body.carfax_comp_code || null
+        : existingCarfax.comp_code ?? null,
   };
   const { error } = await client
     .from("workspace_settings")
@@ -1668,7 +1684,9 @@ vehiclesRouter.post("/v1/vin/plate-lookup", async (c) => {
 // specs. Sources, in trust order: the workspace's own
 // vehicle_service_specs, the vehicle_specifications reference table
 // (~14k rows), the bundled specs catalog (the same index
-// POST /v1/public-vehicle-catalog serves), NHTSA vPIC for a bare VIN,
+// POST /v1/public-vehicle-catalog serves), Quick Lube Data by live
+// lookup (the platform's own spec source; 90-day server cache),
+// NHTSA vPIC for a bare VIN,
 // Vehicle Databases for plate -> VIN (PR #241's helper), Wheel-Size
 // for tire size + pressure — and, for fields still unknown and only
 // against a full VIN, Vehicle Databases' oil lookup, fluids, and
@@ -1856,6 +1874,47 @@ vehiclesRouter.get("/v1/tech-app/data-center/vehicle", async (c) => {
         if (hasAnySpec(filled) && source === "decode") source = "catalog";
         specs = filled;
         if (!vehicle.engine && picked.engine) vehicle.engine = picked.engine;
+      }
+    }
+
+    // Quick Lube Data — the platform's own spec source, by live
+    // lookup (90-day server cache behind it): fills the fields the
+    // house layers above left blank, ahead of the paid Vehicle
+    // Databases last resort. Runs dark when QLD_API_KEY is unset and
+    // fails soft like every layer here; mergeSpecs keeps it
+    // blanks-only, so it can never overwrite a settled value. When
+    // QLD needs an engine choice the caller has not got, it answers
+    // engine_required and this layer simply does not speak.
+    if (
+      vehicle.year &&
+      vehicle.make &&
+      vehicle.model &&
+      (specs.oilType === null ||
+        specs.oilCapacityQuarts === null ||
+        specs.oilFilter === null ||
+        specs.drainPlugTorqueFtLbs === null)
+    ) {
+      try {
+        const qld = await resolveQldSpec(db, {
+          year: vehicle.year,
+          make: vehicle.make,
+          model: vehicle.model,
+          engine: vehicle.engine,
+        });
+        if (qld.status === "ok") {
+          const filled = mergeSpecs(specs, {
+            ...EMPTY_SPECS,
+            oilType: qld.values.oilType ?? null,
+            oilCapacityQuarts: parseCapacityQuarts(qld.values.oilCapacity ?? null),
+            oilFilter: qld.values.oilFilter ?? null,
+            drainPlugTorqueFtLbs: qld.values.drainPlugTorqueFtLbs ?? null,
+          });
+          if (hasAnySpec(filled) && source === "decode") source = "catalog";
+          specs = filled;
+          if (!vehicle.engine && qld.values.engine) vehicle.engine = qld.values.engine;
+        }
+      } catch {
+        // QLD unreachable — the remaining layers still answer.
       }
     }
 

@@ -16,16 +16,21 @@
  *     by the pure module `@/lib/vehicle-spec-merge`, with a per-vehicle
  *     `specStatus` and per-field `specSources` on the response. The
  *     stored snapshot is never mutated.
+ *   - The catalog tier is composed by `@/server/qld/spec-provider`'s
+ *     combineCatalogValues: the Quick Lube Data LIVE lookup first
+ *     (QLD is the platform's single spec source — owner's ruling,
+ *     2026-11-05; 90-day server cache behind it), with the legacy
+ *     `vehicle_specifications` table's consensus resolution filling
+ *     only the fields QLD leaves blank. The catalog resolver RPCs are
+ *     deliberately not consulted: their repo definitions are
+ *     reverse-engineered stubs (production bodies unverified).
  *   - Each vehicle block groups its own service lines (the canonical
  *     appointment_items pinned to it), so money stays per-vehicle.
  *
  * Every enrichment read is best-effort, mirroring the endpoint's
  * existing mileage enrichment and B2's resolvers: a failed lookup logs
  * and degrades to the sources that did answer — it never fails the
- * configuration read itself. The catalog resolver RPCs are deliberately
- * not consulted: their repo definitions are reverse-engineered stubs
- * (production bodies unverified), while `vehicle_specifications` is the
- * typed, grounded catalog source.
+ * configuration read itself.
  */
 import type {
   AppointmentBookingConfiguration,
@@ -37,6 +42,10 @@ import {
   resolveCatalogOilValues,
   type OilSpecValues,
 } from "@/lib/vehicle-spec-merge";
+import {
+  combineCatalogValues,
+  resolveQldSpec,
+} from "@/server/qld/spec-provider";
 
 interface AppointmentRow {
   id: string;
@@ -334,6 +343,39 @@ export async function buildBookingConfiguration(
     return rows;
   };
 
+  // -- QLD live catalog values per distinct year/make/model+engine.
+  //    The provider carries the 90-day server cache; this memo only
+  //    spares duplicate resolutions inside one configuration build.
+  //    Resolves null on every failure (missing key included): the
+  //    merge then runs on the legacy table resolution alone, which
+  //    is exactly the pre-QLD behavior. --
+  const qldMemo = new Map<string, Promise<OilSpecValues | null>>();
+  const qldFor = (
+    year: unknown,
+    make: unknown,
+    model: unknown,
+    engineHint: string | null,
+  ): Promise<OilSpecValues | null> => {
+    const yearNum = yearNumber(year);
+    const makeText = textOrUndefined(make);
+    const modelText = textOrUndefined(model);
+    if (!yearNum || !makeText || !modelText) return Promise.resolve(null);
+    const key = `${yearNum}|${normalizeText(makeText)}|${normalizeText(modelText)}|${normalizeText(engineHint ?? "")}`;
+    const cached = qldMemo.get(key);
+    if (cached) return cached;
+    const promise = (async () => {
+      const result = await resolveQldSpec(db, {
+        year: yearNum,
+        make: makeText,
+        model: modelText,
+        engine: engineHint,
+      });
+      return result.status === "ok" ? (result.values as OilSpecValues) : null;
+    })();
+    qldMemo.set(key, promise);
+    return promise;
+  };
+
   // -- Service lines grouped per vehicle (canonical items win over the
   //    snapshot's booked copy; unpinned lines join only a single-vehicle
   //    job, where the grouping is unambiguous). --
@@ -361,7 +403,7 @@ export async function buildBookingConfiguration(
     const learned = live ? learnedByVehicle.get(String(live.id)) : undefined;
     const engineHint = learned?.engine ?? textOrUndefined(snapshotOil?.engine) ?? null;
     const candidates = await catalogFor(ymm.year, ymm.make, ymm.model);
-    const catalog = resolveCatalogOilValues(
+    const tableCatalog = resolveCatalogOilValues(
       candidates.map((row) => ({
         engine: textOrUndefined(row.engine),
         oilType: textOrUndefined(row.oil_type),
@@ -370,6 +412,12 @@ export async function buildBookingConfiguration(
       })),
       engineHint,
     );
+    const qld = await attempt(
+      "qld spec lookup",
+      () => qldFor(ymm.year, ymm.make, ymm.model, engineHint),
+      null as OilSpecValues | null,
+    );
+    const catalog = combineCatalogValues(tableCatalog, qld);
     return mergeOilSpec({
       learned,
       catalog,

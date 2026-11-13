@@ -25,6 +25,10 @@ import { dispatchInvoiceTransition } from "@/server/messaging/invoice-events";
 import { LIFECYCLE_EVENT_KEYS as INVOICE_LIFECYCLE_EVENT_KEYS } from "@/server/messaging/lifecycle-events";
 import { sendLifecycleEmail } from "@/server/messaging/lifecycle-sender";
 import { dispatchQuoteLifecycle, LIFECYCLE_EVENT_KEYS as QUOTE_LIFECYCLE_EVENT_KEYS } from "@/server/messaging/quote-payment-events";
+import {
+  isIntakeParseFailure,
+  runIntakeDocumentParse,
+} from "@/server/expenses/receipt-parse.service";
 
 export const documentsRouter = new Hono();
 
@@ -1593,30 +1597,34 @@ documentsRouter.post("/v1/document-intake/:id/parse", async (c) => {
 
   const { data: doc, error: docError } = await (supabase as any)
     .from("document_intake")
-    .select("id")
+    .select("*")
     .eq("id", id)
     .eq("user_id", user.id)
     .maybeSingle();
   if (docError) throw docError;
   if (!doc) throw new ApiError(404, "Document not found.", "not_found");
 
-  // The parse function authenticates with a job-scoped token minted for
-  // this one document (see src/server/agent-api/job-token.ts); it also
-  // accepts the caller's session JWT, so a minting failure never blocks
-  // the parse — the invoke falls back to the session header alone.
-  let jobToken: string | null = null;
-  try {
-    const { mintTranscriptionJobToken } = await import("@/server/agent-api/job-token");
-    jobToken = mintTranscriptionJobToken({ documentId: id, ownerUserId: user.id });
-  } catch (e) {
-    console.error("[document-intake] job token mint failed", e);
+  // The reader runs in-process (src/server/expenses/receipt-parse.service.ts).
+  // It replaced the `expense-document-parse` edge function this route
+  // used to invoke: that function was never deployed (nothing in the
+  // deploy path ships Supabase functions), so every parse failed.
+  // The service records parse_failed + reason on the row itself; the
+  // 422 surfaces the same reason to the inbox toast.
+  const outcome = await runIntakeDocumentParse({ supabase }, doc);
+  if (isIntakeParseFailure(outcome)) {
+    throw new ApiError(422, outcome.reason, "parse_failed");
   }
-  const { data, error } = await supabase.functions.invoke("expense-document-parse", {
-    body: { documentId: id },
-    ...(jobToken ? { headers: { "x-job-token": jobToken } } : {}),
+  return json({
+    data: {
+      success: true,
+      confidence: outcome.confidence,
+      vin: outcome.vin,
+      vinValid: outcome.vinValid,
+      fleetVehicleId: outcome.fleetVehicleId,
+      extracted: outcome.extraction,
+      method: outcome.method,
+    },
   });
-  if (error) throw error;
-  return json({ data });
 });
 
 const intakePatchSchema = z.object({

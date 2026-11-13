@@ -33,7 +33,8 @@
     "certify:crud-contract": "node scripts/certify-crud-contract.mjs",
     "certify:email": "node scripts/certify-email-lifecycle.mjs",
     "certify:onboarding": "node scripts/certify-onboarding-contract.mjs",
-    "certify:regressions": "node scripts/certify-regression-lock.mjs"
+    "certify:regressions": "node scripts/certify-regression-lock.mjs",
+    "carfax:feed": "tsx scripts/carfax-feed.ts"
   },
   "playwright": {
     "config": "./e2e/playwright.config.ts"
@@ -108,6 +109,7 @@
     "react-window": "^2.3.0",
     "recharts": "^3.6.0",
     "sonner": "^1.7.4",
+    "ssh2-sftp-client": "^12.1.1",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
     "vaul": "^1.1.2",
@@ -153,6 +155,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.5",
     "@types/resolve": "^1.20.6",
+    "@types/ssh2-sftp-client": "^9.0.6",
     "@types/stack-utils": "^2.0.3",
     "@types/supercluster": "^7.1.3",
     "@types/tough-cookie": "^4.0.5",

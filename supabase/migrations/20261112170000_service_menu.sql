@@ -37,7 +37,6 @@
 -- only (the same data the public booking catalog RPC already exposes).
 -- ============================================================================
 
-begin;
 
 create table if not exists public.service_menus (
   id uuid primary key default gen_random_uuid(),
@@ -126,4 +125,3 @@ grant select, insert, update, delete on public.service_menus to authenticated;
 grant select, insert, update, delete on public.service_menu_items to authenticated;
 grant all on public.service_menus, public.service_menu_items to service_role;
 
-commit;
