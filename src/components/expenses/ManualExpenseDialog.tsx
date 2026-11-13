@@ -295,7 +295,13 @@ export function ManualExpenseDialog({ open, onOpenChange, appointmentId, default
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="sm:col-span-2">
               <Label>Vendor</Label>
-              <Popover open={vendorPickerOpen} onOpenChange={setVendorPickerOpen}>
+              {/* modal: this popover lives inside a modal Dialog. Without
+                  it, Radix treats clicks/focus inside the portaled
+                  PopoverContent as "outside" the dialog's focus layer —
+                  clicking the vendor search box closed the picker and
+                  focus never landed. modal makes the popover own its
+                  layer and focus while it is open. */}
+              <Popover modal open={vendorPickerOpen} onOpenChange={setVendorPickerOpen}>
                 <PopoverTrigger asChild>
                   <Button
                     type="button"
