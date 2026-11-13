@@ -281,11 +281,14 @@ export function CarfaxSettings() {
 
   return (
     <div className="space-y-6">
-      {/* Export Monitoring Dashboard - Show if activated */}
-      {settings.carfax_activated && <CarfaxExportMonitor />}
+      {/* Export Monitoring Dashboard — always on this screen so export
+          history stays reachable before and after enrollment. */}
+      <CarfaxExportMonitor />
 
-      {/* CARFAX Configuration Status */}
-      {!settings.carfax_activated && <Card>
+      {/* CARFAX Configuration Status — always rendered: an enrolled shop
+          (carfax_activated derives from having a location ID) must still be
+          able to see and edit its location settings here. */}
+      <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -338,11 +341,11 @@ export function CarfaxSettings() {
                   id="carfax_location_id"
                   value={settings.carfax_location_id}
                   onChange={(e) => setSettings({ ...settings, carfax_location_id: e.target.value })}
-                  placeholder="MOBILUBE001"
+                  placeholder="e.g. yourshop01"
                   maxLength={70}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Unique identifier for your location (e.g., MOBILUBE001)
+                  Unique identifier for your location (e.g., yourshop01)
                 </p>
               </div>
 
@@ -510,7 +513,7 @@ export function CarfaxSettings() {
             </div>
           </div>
         </CardContent>
-      </Card>}
+      </Card>
     </div>
   );
 }
