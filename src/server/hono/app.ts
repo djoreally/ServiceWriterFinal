@@ -34,6 +34,7 @@ import { messagingRouter } from "./routes/messaging";
 import { platformRouter } from "./routes/platform";
 import { telemetryRouter } from "./routes/telemetry";
 import { publicBookingRouter } from "./routes/public-booking";
+import { serviceMenuRouter } from "./routes/service-menu";
 import { vehiclesRouter } from "./routes/vehicles";
 import { websiteBookingsRouter } from "./routes/website-bookings";
 import { workOrdersRouter } from "./routes/work-orders";
@@ -115,6 +116,7 @@ export function createHonoApp(): Hono {
   app.route("/", appointmentsRouter);
   app.route("/", billingRouter);
   app.route("/", catalogRouter);
+  app.route("/", serviceMenuRouter);
   app.route("/", crmRouter);
   app.route("/", documentsRouter);
   app.route("/", messagingRouter);
