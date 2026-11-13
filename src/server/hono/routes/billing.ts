@@ -61,6 +61,16 @@ import {
 import { createSupabaseAdminClient, createSupabaseAnonServerClient, supabaseFunctionsBaseUrl, supabasePublishableKey } from "@/lib/supabase";
 import { encryptPaymentCredential } from "@/server/payments/stripe-workspace-execution";
 import { logMutation } from "@/server/audit";
+import {
+  planReceiptParseRequest,
+  type ReceiptExtraction,
+} from "@/application/commands/receipt-parse.command";
+import {
+  ReceiptParseNotConfiguredError,
+  ReceiptParseProviderError,
+  resolveReceiptScanCategory,
+  runReceiptScan,
+} from "@/server/expenses/receipt-parse.service";
 
 export const billingRouter = new Hono();
 
@@ -1910,9 +1920,50 @@ const receiptOcrSchema = z.object({
 
 billingRouter.post("/v1/billing/receipt-ocr", async (c) => {
   const body = receiptOcrSchema.parse(await c.req.raw.json());
-  await requireAuth(c);
-  return proxyEdgeFunction(c, "expense-receipt-ocr", {
-    body: { imageBase64: body.image_base64, mimeType: body.mime_type },
+  const { supabase, user } = await requireAuth(c);
+
+  // Scan Receipt now reads in-process (src/server/expenses/receipt-parse.service.ts).
+  // It used to proxy to an `expense-receipt-ocr` edge function that
+  // exists nowhere in the repo, so every scan died behind the proxy's
+  // fallback message ("The payment service request failed."). The
+  // response keeps the shape the old proxy passed through: the
+  // OcrResult at top level, NOT { data }-wrapped.
+  const plan = planReceiptParseRequest({
+    image_base64: body.image_base64,
+    mime_type: body.mime_type,
+  });
+  if (!plan.request) {
+    throw new ApiError(400, plan.error ?? "Invalid receipt photo.", "invalid_receipt");
+  }
+  let extraction: ReceiptExtraction;
+  try {
+    extraction = await runReceiptScan({ supabase }, plan.request);
+  } catch (e) {
+    if (e instanceof ReceiptParseNotConfiguredError) {
+      throw new ApiError(503, e.message, "receipt_parse_not_configured");
+    }
+    if (e instanceof ReceiptParseProviderError) {
+      throw new ApiError(502, e.message, "receipt_parse_failed");
+    }
+    throw e;
+  }
+  const category = await resolveReceiptScanCategory({ supabase }, user.id, extraction);
+  return json({
+    success: true,
+    extracted: {
+      vendor_name: extraction.vendor_name,
+      transaction_date: extraction.transaction_date,
+      subtotal: extraction.subtotal,
+      tax_amount: extraction.tax_amount,
+      total_amount: extraction.total_amount,
+      payment_method: extraction.payment_method,
+      last4: extraction.last4,
+      reference_number: extraction.reference_number,
+      line_items: extraction.line_items,
+      suggested_category: extraction.suggested_category,
+      confidence: extraction.confidence,
+    },
+    category,
   });
 });
 
