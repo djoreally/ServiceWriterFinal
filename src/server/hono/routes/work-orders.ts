@@ -2359,7 +2359,7 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
   // (2026-11-11, Ty's ruling: show the whole coming month).
   const windowEnd = new Date(timestamp + 31 * 24 * 60 * 60 * 1000).toISOString();
   const { data: appointments, error: appointmentsError } = await (supabase.from("appointments") as any)
-    .select("id, workspace_id, customer_id, vehicle_id, assigned_user_id, status, dispatch_status, starts_at, ends_at, source, confirmation_code, notes, metadata, created_at, updated_at")
+    .select("id, workspace_id, customer_id, vehicle_id, assigned_user_id, status, dispatch_status, starts_at, ends_at, source, confirmation_code, notes, metadata, created_at, updated_at, completed_at")
     .eq("workspace_id", workspaceId)
     .eq("assigned_user_id", user.id)
     .gte("starts_at", windowStart)
@@ -2538,6 +2538,7 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
     return {
       id: appt.id as string,
       serverStatus: (appt.status as string | null) ?? null,
+      completedAt: (appt.completed_at as string | null) ?? null,
       dispatchStatus:
         (metadata.dispatch_status as string | undefined) ?? (appt.dispatch_status as string | null) ?? null,
       enRouteAt: (metadata.en_route_at as string | undefined) ?? null,
@@ -2785,12 +2786,17 @@ workOrdersRouter.post("/v1/tech-app/sync/push", async (c) => {
   }
   const assigned = new Map<
     string,
-    { vehicle_id: string | null; status: string | null; dispatch_status: string | null }
+    {
+      vehicle_id: string | null;
+      status: string | null;
+      dispatch_status: string | null;
+      completed_at: string | null;
+    }
   >();
   if (referencedAppointmentIds.size > 0) {
     const { data: appts } = await db
       .from("appointments")
-      .select("id, vehicle_id, status, dispatch_status")
+      .select("id, vehicle_id, status, dispatch_status, completed_at")
       .eq("workspace_id", workspaceId)
       .eq("assigned_user_id", user.id)
       .in("id", [...referencedAppointmentIds]);
@@ -2799,6 +2805,7 @@ workOrdersRouter.post("/v1/tech-app/sync/push", async (c) => {
         vehicle_id: (appt.vehicle_id as string | null) ?? null,
         status: (appt.status as string | null) ?? null,
         dispatch_status: (appt.dispatch_status as string | null) ?? null,
+        completed_at: (appt.completed_at as string | null) ?? null,
       });
     }
   }
@@ -2821,6 +2828,26 @@ workOrdersRouter.post("/v1/tech-app/sync/push", async (c) => {
         continue;
       }
       const current = assigned.get(appointmentId)!;
+      // SW-87: the device's own completion stamp (jobs.completed_at,
+      // stamped on-device at Complete Job) persists on the
+      // appointment — the transition RPC stamps only the server's
+      // now(), so without this write the actual finish time lived
+      // only on the phone. First stamp wins: a stamp already on the
+      // record is never overwritten by a later push.
+      const deviceCompletedAt =
+        transition === "completed" ? parseWireDate(row.completed_at) : null;
+      const stampCompletedAt = async (): Promise<boolean> => {
+        if (!deviceCompletedAt || current.completed_at) return false;
+        const { error } = await db
+          .from("appointments")
+          .update({ completed_at: deviceCompletedAt })
+          .eq("id", appointmentId)
+          .eq("workspace_id", workspaceId)
+          .is("completed_at", null);
+        if (error) throw error;
+        current.completed_at = deviceCompletedAt;
+        return true;
+      };
       const alreadyThere =
         (transition === "en_route" &&
           (current.dispatch_status === "en_route" || current.status === "en_route")) ||
@@ -2829,7 +2856,17 @@ workOrdersRouter.post("/v1/tech-app/sync/push", async (c) => {
           (current.status === "in_progress" || current.status === "started")) ||
         (transition === "completed" && current.status === "completed");
       if (alreadyThere) {
-        counts.skipped += 1;
+        // A re-push of an already-completed job applies nothing —
+        // unless its completion stamp never landed (the push that
+        // completed it predates SW-87, or its stamp write failed):
+        // landing the stamp is a real apply, not a skip.
+        try {
+          if (await stampCompletedAt()) counts.updated += 1;
+          else counts.skipped += 1;
+        } catch (err) {
+          counts.skipped += 1;
+          note("jobs", err);
+        }
         continue;
       }
       // Job flow (2026-11-12): transitions ride v2 — ordered travel
@@ -2851,6 +2888,7 @@ workOrdersRouter.post("/v1/tech-app/sync/push", async (c) => {
           : transition === "arrived"
             ? asNumber(row.arrived_lng)
             : null;
+      let transitionApplied = false;
       try {
         const { error } = await db.rpc("technician_transition_job_v2", {
           p_job_id: appointmentId,
@@ -2864,9 +2902,21 @@ workOrdersRouter.post("/v1/tech-app/sync/push", async (c) => {
         });
         if (error) throw error;
         counts.updated += 1;
+        transitionApplied = true;
       } catch (err) {
         counts.skipped += 1;
         note("jobs", err);
+      }
+      // SW-87: with the completion transition applied, land the
+      // device's stamp. Best-effort and named on failure — the
+      // transition already counted; a later re-push retries the
+      // stamp through the already-completed path above.
+      if (transitionApplied && transition === "completed") {
+        try {
+          await stampCompletedAt();
+        } catch (err) {
+          note("jobs", err);
+        }
       }
     }
   }
