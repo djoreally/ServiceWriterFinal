@@ -18,7 +18,7 @@ assert(contract.provider_ownership?.transactional_email === "Resend", "Transacti
 assert(contract.provider_ownership?.growth_marketing_email === "Enginemailer", "Growth/marketing email must be owned by Enginemailer.");
 
 assert(pkg.scripts?.dev === "next dev", "package.json dev runtime must be Next.js.");
-assert(pkg.scripts?.build === "next build", "package.json build runtime must be Next.js.");
+assert(pkg.scripts?.build === "node scripts/deploy-migrate.mjs && next build", "package.json build must be the canonical chain: deploy-time migrations (SW-38), then the Next.js build.");
 assert(pkg.scripts?.start === "next start", "package.json production runtime must be Next.js.");
 const prebuild = pkg.scripts?.prebuild || "";
 assert(prebuild.split("&&").map((part) => part.trim())[0] === "node scripts/check-architecture-contract.mjs", "Every production build must run the architecture contract first.");
