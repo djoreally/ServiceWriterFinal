@@ -30,7 +30,6 @@
 -- have no token yet. Metadata is merged with the same || shape the
 -- trigger writes.
 
-begin;
 
 create or replace function public.ensure_appointment_management_token_v1()
 returns trigger
@@ -65,4 +64,3 @@ update public.appointments
    and starts_at > now()
    and nullif(metadata ->> 'management_token','') is null;
 
-commit;
