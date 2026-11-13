@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# AI TERRITORY: OWNER-GATED — see docs/ai-territory.md.
+# No agent changes without Ty's explicit word.
 set -euo pipefail
 
 # Apply npm's non-breaking advisory-safe lockfile remediation inside the

@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 /**
+ * AI TERRITORY: OWNER-GATED — see docs/ai-territory.md.
+ * No agent changes without Ty's explicit word.
+ */
+/**
  * Deploy-time database migrations for Service Writer (Jira SW-38).
  *
  * Port of Fleet Mail's deploy-migrate pattern (see

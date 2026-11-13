@@ -1,4 +1,8 @@
 /**
+ * AI TERRITORY: OWNER-GATED — see docs/ai-territory.md.
+ * No agent changes without Ty's explicit word.
+ */
+/**
  * Auth helpers for Hono route handlers.
  *
  * These are thin wrappers over the canonical server auth functions in

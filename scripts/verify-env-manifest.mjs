@@ -1,3 +1,7 @@
+/**
+ * AI TERRITORY: OWNER-GATED — see docs/ai-territory.md.
+ * No agent changes without Ty's explicit word.
+ */
 const environment = process.env.ENVIRONMENT || process.env.NODE_ENV || "development";
 const allowMissing = process.env.ALLOW_MISSING_ENV === "true" || environment !== "production";
 const requiredPublic = [

@@ -1,4 +1,8 @@
 /**
+ * AI TERRITORY: OWNER-GATED — see docs/ai-territory.md.
+ * No agent changes without Ty's explicit word.
+ */
+/**
  * Session life guard — hard limits on how long a signed-in web session may live.
  *
  * Why this exists: Supabase keeps a browser-held refresh token that silently

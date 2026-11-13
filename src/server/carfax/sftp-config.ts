@@ -1,4 +1,8 @@
 /**
+ * AI TERRITORY: OWNER-GATED — see docs/ai-territory.md.
+ * No agent changes without Ty's explicit word.
+ */
+/**
  * CARFAX SFTP connection configuration — environment only.
  *
  * CARFAX issues the feed credentials during onboarding (after sample

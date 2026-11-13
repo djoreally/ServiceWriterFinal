@@ -1,4 +1,8 @@
 /**
+ * AI TERRITORY: OWNER-GATED — see docs/ai-territory.md.
+ * No agent changes without Ty's explicit word.
+ */
+/**
  * Billing & payments domain router (Phase 1 Hono migration).
  *
  * Migrated from:
