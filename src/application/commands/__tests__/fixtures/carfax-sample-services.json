@@ -1,0 +1,361 @@
+{
+  "business": {
+    "carfax_location_id": "servicewriter01",
+    "business_name": "MOMS Mobile Oil Change",
+    "address": "428 Railroad Avenue",
+    "city": "Ambler",
+    "state": "Pennsylvania",
+    "postal_code": "19002",
+    "phone": "215-767-2125",
+    "website_url": "https://momsoilchange.com/"
+  },
+  "services": [
+    {
+      "id": "fixture-d464f9e0",
+      "service_number": "D464F9E0",
+      "service_date": "2026-11-10",
+      "service_type": "Service",
+      "description": "Full Synthetic Oil Change, Waste Oil Disposal Fee, Card Processing Fee, Tax",
+      "created_at": "2026-11-10T00:00:00.000Z",
+      "vehicles": {
+        "vin": "5YFBURHE7JP788719",
+        "make": "Toyota",
+        "model": "Corolla",
+        "year": 2018,
+        "license_plate": null,
+        "plate_state": null,
+        "mileage": 58585,
+        "odometer_measure": "mi"
+      },
+      "labor_items": [],
+      "service_items": []
+    },
+    {
+      "id": "fixture-37edfcfd",
+      "service_number": "37EDFCFD",
+      "service_date": "2026-11-06",
+      "service_type": "Service",
+      "description": "Full Synthetic Oil Change, Waste Oil Disposal Fee, Card Processing Fee, Tax",
+      "created_at": "2026-11-06T00:00:00.000Z",
+      "vehicles": {
+        "vin": "WMWXU1C51G2D10639",
+        "make": "Mini",
+        "model": "Cooper",
+        "year": 2016,
+        "license_plate": null,
+        "plate_state": null,
+        "mileage": 154789,
+        "odometer_measure": "mi"
+      },
+      "labor_items": [],
+      "service_items": []
+    },
+    {
+      "id": "fixture-b0bec31b",
+      "service_number": "B0BEC31B",
+      "service_date": "2026-11-06",
+      "service_type": "Service",
+      "description": "Full Synthetic Oil Change, Waste Oil Disposal Fee, Card Processing Fee, Tax",
+      "created_at": "2026-11-06T00:00:00.000Z",
+      "vehicles": {
+        "vin": "KNDEUCA26M7042780",
+        "make": "Kia",
+        "model": "Seltos",
+        "year": 2021,
+        "license_plate": null,
+        "plate_state": null,
+        "mileage": 111569,
+        "odometer_measure": "mi"
+      },
+      "labor_items": [],
+      "service_items": []
+    },
+    {
+      "id": "fixture-5550015a",
+      "service_number": "5550015A",
+      "service_date": "2026-11-05",
+      "service_type": "Service",
+      "description": "Full Synthetic Oil Change, Waste Oil Disposal Fee, Card Processing Fee, Tax",
+      "created_at": "2026-11-05T00:00:00.000Z",
+      "vehicles": {
+        "vin": "KL4CJGSB4JB648944",
+        "make": "Buick",
+        "model": "Encore",
+        "year": 2018,
+        "license_plate": null,
+        "plate_state": null,
+        "mileage": 44938,
+        "odometer_measure": "mi"
+      },
+      "labor_items": [],
+      "service_items": []
+    },
+    {
+      "id": "fixture-1726f48a",
+      "service_number": "1726F48A",
+      "service_date": "2026-11-04",
+      "service_type": "Service",
+      "description": "Full Synthetic Oil Change, Waste Oil Disposal Fee, Card Processing Fee, Tax",
+      "created_at": "2026-11-04T00:00:00.000Z",
+      "vehicles": {
+        "vin": "JF2SH6BC6AH801757",
+        "make": "Subaru",
+        "model": "Forester",
+        "year": 2010,
+        "license_plate": null,
+        "plate_state": null,
+        "mileage": 90828,
+        "odometer_measure": "mi"
+      },
+      "labor_items": [],
+      "service_items": []
+    },
+    {
+      "id": "fixture-8e05bf43",
+      "service_number": "8E05BF43",
+      "service_date": "2026-11-03",
+      "service_type": "Service",
+      "description": "Full Synthetic Oil Change",
+      "created_at": "2026-11-03T00:00:00.000Z",
+      "vehicles": {
+        "vin": "3N1CP5CV8PL573760",
+        "make": "Nissan",
+        "model": "Kicks",
+        "year": 2023,
+        "license_plate": null,
+        "plate_state": null,
+        "mileage": 34829,
+        "odometer_measure": "mi"
+      },
+      "labor_items": [],
+      "service_items": []
+    },
+    {
+      "id": "fixture-93192993",
+      "service_number": "93192993",
+      "service_date": "2026-11-02",
+      "service_type": "Service",
+      "description": "Mobil 1 Oil Change – Full Synthetic, Additional Oil Quart",
+      "created_at": "2026-11-02T00:00:00.000Z",
+      "vehicles": {
+        "vin": "1FTFW1RGXPFD11666",
+        "make": "Ford",
+        "model": "Pickup F150 All",
+        "year": 2023,
+        "license_plate": "ZRE8933",
+        "plate_state": null,
+        "mileage": 35867,
+        "odometer_measure": "mi"
+      },
+      "labor_items": [],
+      "service_items": []
+    },
+    {
+      "id": "fixture-5dc4207b",
+      "service_number": "5DC4207B",
+      "service_date": "2026-11-02",
+      "service_type": "Service",
+      "description": "Mobil 1 Oil Change – Full Synthetic, Wiper Blade Replacement, Additional Oil Quart",
+      "created_at": "2026-11-02T00:00:00.000Z",
+      "vehicles": {
+        "vin": "5UXTS1C02M9F53938",
+        "make": "BMW",
+        "model": "X3",
+        "year": 2021,
+        "license_plate": "MZW7530",
+        "plate_state": null,
+        "mileage": 36193,
+        "odometer_measure": "mi"
+      },
+      "labor_items": [],
+      "service_items": []
+    },
+    {
+      "id": "fixture-71819c67",
+      "service_number": "71819C67",
+      "service_date": "2026-11-01",
+      "service_type": "Service",
+      "description": "Additional Oil Quart, Mobil 1 Oil Change – Full Synthetic",
+      "created_at": "2026-11-01T00:00:00.000Z",
+      "vehicles": {
+        "vin": "1V2KR2CAXMC571089",
+        "make": "VW",
+        "model": "Atlas",
+        "year": 2021,
+        "license_plate": null,
+        "plate_state": null,
+        "mileage": null,
+        "odometer_measure": "mi"
+      },
+      "labor_items": [],
+      "service_items": []
+    },
+    {
+      "id": "fixture-06aff6c1",
+      "service_number": "06AFF6C1",
+      "service_date": "2026-10-30",
+      "service_type": "Service",
+      "description": "Full Synthetic Oil Change, Waste Oil Disposal Fee, Card Processing Fee",
+      "created_at": "2026-10-30T00:00:00.000Z",
+      "vehicles": {
+        "vin": "SADCJ2FXXLA648278",
+        "make": "JAGUAR",
+        "model": "F-PACE",
+        "year": 2020,
+        "license_plate": null,
+        "plate_state": null,
+        "mileage": 60020,
+        "odometer_measure": "mi"
+      },
+      "labor_items": [],
+      "service_items": []
+    },
+    {
+      "id": "fixture-a4653ac7",
+      "service_number": "A4653AC7",
+      "service_date": "2026-10-22",
+      "service_type": "Service",
+      "description": "Full synthetic oil and filter change, Waste oil disposal, Shop supplies",
+      "created_at": "2026-10-22T00:00:00.000Z",
+      "vehicles": {
+        "vin": "JM3KFBCM5M0321935",
+        "make": "Mazda",
+        "model": "CX-5",
+        "year": 2021,
+        "license_plate": "LJW-9386",
+        "plate_state": "Pennsylvania",
+        "mileage": 37433,
+        "odometer_measure": "mi"
+      },
+      "labor_items": [
+        {
+          "description": "Full synthetic oil and filter change"
+        },
+        {
+          "description": "Waste oil disposal"
+        }
+      ],
+      "service_items": []
+    },
+    {
+      "id": "fixture-d029e8b8",
+      "service_number": "D029E8B8",
+      "service_date": "2026-10-15",
+      "service_type": "Service",
+      "description": "Full synthetic oil change completed. 6 quarts used. 8-point inspection checked out.",
+      "created_at": "2026-10-15T00:00:00.000Z",
+      "vehicles": {
+        "vin": "1GNEVFKW3LJ119159",
+        "make": "Chevrolet Trucks",
+        "model": "Traverse",
+        "year": 2020,
+        "license_plate": "LBS3018",
+        "plate_state": null,
+        "mileage": 87553,
+        "odometer_measure": "mi"
+      },
+      "labor_items": [],
+      "service_items": []
+    },
+    {
+      "id": "fixture-5d08f215",
+      "service_number": "5D08F215",
+      "service_date": "2026-09-07",
+      "service_type": "Service",
+      "description": "Oil Change - Customer to provide oil and oil filter, 5 quarts of 5W30 oil",
+      "created_at": "2026-09-07T00:00:00.000Z",
+      "vehicles": {
+        "vin": "4S4BP62C166361419",
+        "make": "Subaru",
+        "model": "Legacy",
+        "year": 2006,
+        "license_plate": "KGY5622",
+        "plate_state": null,
+        "mileage": 169600,
+        "odometer_measure": "mi"
+      },
+      "labor_items": [],
+      "service_items": []
+    },
+    {
+      "id": "fixture-sr-2026-156",
+      "service_number": "SR-2026-156",
+      "service_date": "2026-02-26",
+      "service_type": "Service",
+      "description": "Full Synthetic Oil Change (1x), Additional Qt 0W20 (1x)",
+      "created_at": "2026-02-26T00:00:00.000Z",
+      "vehicles": {
+        "vin": "5FNYF9H89TB012072",
+        "make": "Honda",
+        "model": "Passport",
+        "year": 2026,
+        "license_plate": null,
+        "plate_state": null,
+        "mileage": 9965,
+        "odometer_measure": "mi"
+      },
+      "labor_items": [],
+      "service_items": []
+    },
+    {
+      "id": "fixture-sr-2026-153",
+      "service_number": "SR-2026-153",
+      "service_date": "2026-02-24",
+      "service_type": "Service",
+      "description": "Cabin Air Filter (1x), Wiper Blade Replacement (1x), Full Synthetic Oil Change (1x)",
+      "created_at": "2026-02-24T00:00:00.000Z",
+      "vehicles": {
+        "vin": "JHMGD38477S018990",
+        "make": "Honda",
+        "model": "Fit",
+        "year": 2007,
+        "license_plate": "NDK2005",
+        "plate_state": null,
+        "mileage": 79458,
+        "odometer_measure": "mi"
+      },
+      "labor_items": [],
+      "service_items": []
+    },
+    {
+      "id": "fixture-sr-2026-152",
+      "service_number": "SR-2026-152",
+      "service_date": "2026-02-21",
+      "service_type": "Service",
+      "description": "Full Synthetic Oil Change (1x)",
+      "created_at": "2026-02-21T00:00:00.000Z",
+      "vehicles": {
+        "vin": "5J8YD4H34LL045332",
+        "make": "Acura",
+        "model": "MDX",
+        "year": 2020,
+        "license_plate": null,
+        "plate_state": null,
+        "mileage": 66005,
+        "odometer_measure": "mi"
+      },
+      "labor_items": [],
+      "service_items": []
+    },
+    {
+      "id": "fixture-sr-2026-151",
+      "service_number": "SR-2026-151",
+      "service_date": "2026-02-20",
+      "service_type": "Service",
+      "description": "Full Synthetic Oil Change (1x)",
+      "created_at": "2026-02-20T00:00:00.000Z",
+      "vehicles": {
+        "vin": "5NMS3CAD2LH254462",
+        "make": "Hyundai",
+        "model": "Santa Fe",
+        "year": 2019,
+        "license_plate": "LPW3950",
+        "plate_state": null,
+        "mileage": 42890,
+        "odometer_measure": "mi"
+      },
+      "labor_items": [],
+      "service_items": []
+    }
+  ]
+}

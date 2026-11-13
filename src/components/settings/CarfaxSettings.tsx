@@ -11,7 +11,8 @@ import { Save, FileText, Download, Upload, ExternalLink, CheckCircle2, AlertCirc
 
 import { fetchCarfaxSettings, fetchCarfaxExports, fetchCarfaxDataStats } from "@/application/queries/carfax.query";
 import type { CarfaxSettingsData, CarfaxExportRecord, CarfaxDataStats } from "@/application/queries/carfax.query";
-import { saveCarfaxSettings, recordCarfaxExport, fetchCarfaxExportServices, activateCarfaxShop } from "@/application/commands/carfax.command";
+import { saveCarfaxSettings, recordCarfaxExport, fetchCarfaxExportServices, activateCarfaxShop, formatCarfaxFeed } from "@/application/commands/carfax.command";
+import type { CarfaxExportServiceRecord } from "@/application/commands/carfax.command";
 import { CarfaxExportMonitor } from "./CarfaxExportMonitor";
 import { Loader2 } from "lucide-react";
 
@@ -173,60 +174,26 @@ export function CarfaxSettings() {
         return;
       }
 
-      const headers = [
-        "VIN", "RO_OPEN_DATE", "RO_CLOSE_DATE", "MILEAGE", "ODOMETER_MEASURE",
-        "RO_INVOICE_NUMBER", "SERVICE_DESCRIPTION", "LABOR_DESCRIPTION",
-        "PART_NAME_DESCRIPTION", "PART_QUANTITY", "MAKE", "MODEL", "MODEL_YEAR",
-        "PLATE", "PLATE_STATE", "MANAGEMENT_SYSTEM", "LOCATION_ID", "LOCATION_NAME",
-        "ADDRESS", "CITY", "STATE", "POSTAL_CODE", "PHONE", "URL"
-      ];
-
-      const formatDate = (dateStr: string) => {
-        const d = new Date(dateStr);
-        return `${(d.getMonth() + 1).toString().padStart(2, "0")}/${d.getDate().toString().padStart(2, "0")}/${d.getFullYear()}`;
-      };
-
-      const rows: string[][] = [];
-      
-      for (const service of validServices) {
-        const vehicle = service.vehicles;
-        const laborItems = service.labor_items || [];
-        const serviceItems = service.service_items || [];
-        const laborDescs = laborItems.map((l) => l.description).join("; ") || service.service_type;
-        
-        const baseRow = [
-          vehicle.vin, formatDate(service.created_at), formatDate(service.service_date),
-          Math.round(vehicle.mileage || 0).toString(), vehicle.odometer_measure || "MI",
-          service.service_number || `SR-${service.id.slice(0, 8)}`,
-          service.description || service.service_type, laborDescs,
-        ];
-        const suffixRow = [
-          vehicle.make, vehicle.model, vehicle.year.toString(),
-          vehicle.license_plate || "", vehicle.plate_state || "",
-          "MOBILUBE_SHOP", settings.carfax_location_id || "MOBILUBE001",
-          settings.business_name || "", settings.address || "",
-          settings.city || "", settings.state || "",
-          settings.postal_code || "", settings.phone || "", settings.website_url || "",
-        ];
-
-        if (serviceItems.length > 0) {
-          for (const item of serviceItems) {
-            rows.push([...baseRow, item.description, (item.quantity || 1).toString(), ...suffixRow]);
-          }
-        } else {
-          rows.push([...baseRow, "", "", ...suffixRow]);
-        }
-      }
-
-      const headerLine = headers.map(h => `"${h}"`).join("|");
-      const dataLines = rows.map(row => row.map(cell => `"${(cell || "").replace(/"/g, '""')}"`).join("|"));
-      const fileContent = [headerLine, ...dataLines].join("\n");
+      // The feed is built by the single canonical formatter (CARFAX_FEED_FIELDS
+      // + formatCarfaxFeed in carfax.command.ts) — one line per service event,
+      // spec quoting and normalizations. No local header or row builder here.
+      const fileContent = formatCarfaxFeed(validServices as unknown as CarfaxExportServiceRecord[], {
+        carfax_location_id: settings.carfax_location_id || "",
+        business_name: settings.business_name || "",
+        address: settings.address || "",
+        city: settings.city || "",
+        state: settings.state || "",
+        postal_code: settings.postal_code || "",
+        phone: settings.phone || "",
+        website_url: settings.website_url || "",
+      });
+      const recordCount = fileContent.split("\n").length - 1;
 
       const today = new Date();
       const dateStr = `${(today.getMonth() + 1).toString().padStart(2, "0")}${today.getDate().toString().padStart(2, "0")}${today.getFullYear()}`;
       const fileName = `MobilubeShop_${exportType}_RO_${dateStr}.txt`;
 
-      await recordCarfaxExport(exportType, fileName, rows.length);
+      await recordCarfaxExport(exportType, fileName, recordCount);
 
       const blob = new Blob([fileContent], { type: "text/plain" });
       const url = URL.createObjectURL(blob);
@@ -238,7 +205,7 @@ export function CarfaxSettings() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
-      toast.success(`Exported ${rows.length} records to ${fileName}`);
+      toast.success(`Exported ${recordCount} records to ${fileName}`);
       const updatedExports = await fetchCarfaxExports();
       setExports(updatedExports);
     } catch (error) {

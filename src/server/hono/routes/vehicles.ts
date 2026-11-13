@@ -1372,7 +1372,7 @@ vehiclesRouter.get("/v1/carfax/export-services", async (c) => {
   const { data, error } = await client
     .from("service_records")
     .select(
-      "id,vehicle_id,work_performed,metadata,completed_at,created_at,vehicles(vin,make,model,year,license_plate,plate_region,mileage,mileage_unit),service_record_line_items(id,item_type,description,quantity,labor_hours)",
+      "id,vehicle_id,work_performed,metadata,completed_at,created_at,vehicles(vin,make,model,year,license_plate,plate_region,mileage,mileage_unit),service_record_line_items(id,item_type,description,quantity,labor_hours,sort_order,created_at)",
     )
     .eq("workspace_id", workspaceId)
     .eq("status", "completed")
