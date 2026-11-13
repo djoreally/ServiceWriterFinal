@@ -1,0 +1,41 @@
+{
+  "success": true,
+  "spec": {
+    "vehicle": {
+      "id": "13235",
+      "year": 2023,
+      "make": "Ford",
+      "model": "Transit-250",
+      "engine": "Turbo 3.5"
+    },
+    "oil": {
+      "viscosity": "5W-20",
+      "capacity": {
+        "display": "6.0 qt",
+        "quarts": 6.0,
+        "liters": 5.7
+      },
+      "drainPlugTorque": {
+        "display": "18 ft-lbs",
+        "ftLbs": 18,
+        "nm": 24
+      }
+    },
+    "fluids": {
+      "automaticTransmission": null,
+      "manualTransmission": null,
+      "transferCase": null,
+      "frontDifferential": null,
+      "rearDifferential": null
+    },
+    "maintenance": {
+      "oilLifeResetInstructions": null
+    },
+    "dataQuality": {
+      "coreOilSpecAvailable": false,
+      "releaseStatusCode": "ENGINE_FILTER_FAMILY_CONTINUITY",
+      "releaseStatus": "ENGINE_FILTER_FAMILY_CONTINUITY \u2014 Engine Oil: 3/3 same engine/filter family; Oil Capacity: 3/3 same engine/filter family; Oil Plug Torque: 3/3 same engine/filter family. WIX official application matched; NAPA Gold cross-reference derived from WIX/NAPA convention; STP cross-reference not verified.",
+      "sourceDataset": "full oil and filter 2022 to 2027"
+    }
+  }
+}
