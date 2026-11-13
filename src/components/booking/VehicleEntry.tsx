@@ -19,6 +19,7 @@ import type { BookingRequirement, VehicleSelectorKind } from "@/lib/service-cate
 import { TireInventorySelector } from "@/components/booking/TireInventorySelector";
 import { TireQuantitySelector } from "@/components/booking/TireQuantitySelector";
 import { uploadBookingAssessmentPhoto } from "@/application/commands/booking-assessment.command";
+import { VinRecallNotice } from "@/components/booking/VinRecallNotice";
 import { resolveDetailingRule, type DetailingPricingRule } from "@/lib/detailing-pricing";
 import { vehicleHasRequiredIdentification, VIN_FORMAT_PATTERN } from "@/lib/booking-requirements";
 import { getInitialTireQuantities, getRequestedTireQuantity, reconcileTireQuantitiesForFitment } from "@/lib/tire-quantity";
@@ -1038,6 +1039,12 @@ export function VehicleEntry({
                 This vehicle still needs one of these: its VIN, its license plate, or its engine selected above.
               </p>
             )}
+
+            {/* SW-68: free NHTSA recall notice — appears once a valid
+                VIN settles (typed, decoded, or filled by plate lookup);
+                renders nothing on any failure or when no recalls are
+                on file, and never blocks the booking. */}
+            <VinRecallNotice vin={activeVehicle?.vin || ""} />
           </div>
 
           {/* Actions */}

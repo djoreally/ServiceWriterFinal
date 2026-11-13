@@ -7,6 +7,7 @@ import {
   attemptAutoDispatchNewAppointment,
   type AutoDispatchOutcome,
 } from "@/server/appointments/auto-dispatch";
+import { lookupRecallsByVin } from "@/server/hono/lib/nhtsa-recalls";
 
 export const publicBookingRouter = new Hono();
 
@@ -111,4 +112,28 @@ publicBookingRouter.post("/v1/public-bookings/appointments", async (c: Context) 
     }
   }
   return json({ data, error: null, ...(autoDispatch ? { auto_dispatch: autoDispatch } : {}) });
+});
+
+// ---------------------------------------------------------------------------
+// Booking recall lookup (SW-68): POST /v1/public-bookings/recall-lookup
+//
+// When a booking customer enters a VIN, the booking page asks what
+// recalls NHTSA has on file for that year/make/model. Public by
+// design — booking guests carry no session (this router's
+// appointment door is public the same way) — and it touches no
+// database: the chain is VIN → NHTSA vPIC decode → NHTSA
+// recallsByVehicle, both free and keyless.
+//
+// FAIL-SOFT, always: any input (missing/garbage body, invalid VIN)
+// and any upstream failure answers 200 with
+// { data: { success: false } } — the house "no data" contract the
+// Data Center door uses — so the booking UI simply shows nothing
+// and a lookup problem can never block a booking.
+// ---------------------------------------------------------------------------
+
+publicBookingRouter.post("/v1/public-bookings/recall-lookup", async (c: Context) => {
+  const body = (await c.req.json().catch(() => null)) as { vin?: unknown } | null;
+  const vin = typeof body?.vin === "string" ? body.vin : "";
+  const result = await lookupRecallsByVin(vin);
+  return json({ data: result });
 });
