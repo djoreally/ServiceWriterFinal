@@ -47,6 +47,7 @@ import { sendInvitationEmail } from "@/server/invitations/mailer";
 import { recordOperationalAudit } from "@/server/audit";
 import { ApiError, json, paginationSchema } from "@/server/api";
 import { accountExportSchema, createImportBatch, executeImportBatch, rollbackImportBatch } from "@/server/accountImport";
+import { validateStreetAddress } from "@/server/hono/lib/creation-validation";
 import { sendBookingConfirmation } from "@/server/messaging/booking-confirmation";
 import { enrollNewsletterFromBooking } from "@/server/crm/newsletter";
 import { requireAuth, requireWorkspaceAuth, requireWorkspacePaymentsAddonAuth } from "@/server/hono/middleware/auth";
@@ -2121,6 +2122,16 @@ platformRouter.post("/v1/platform/settings/business-profile", async (c) => {
   const workspaceId = await resolveWorkspaceIdForUser(supabase, user.id, selected_workspace_id);
   if (!workspaceId) {
     return json({ data: null, error: { code: "workspace_not_found", message: "No active workspace found" } });
+  }
+  // Creation-time validation (Session 7 condition 4): address_line1 is the
+  // street field. Production held a doubled full address in it
+  // ("428 Railroad Avenue, Ambler, Pennsylvania, 19002, Ambler, ..."), which
+  // then printed verbatim into exports; reject that shape at save time.
+  if (typeof data.address === "string" && data.address.trim()) {
+    const addressError = validateStreetAddress(data.address);
+    if (addressError) {
+      return json({ data: null, error: { code: "invalid_address", message: addressError } }, { status: 400 });
+    }
   }
   const db = supabase as any;
 

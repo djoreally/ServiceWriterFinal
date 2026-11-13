@@ -53,6 +53,17 @@ import {
   type DataCenterSpecs,
 } from "@/server/hono/lib/data-center";
 import { toDollars } from "@/lib/money";
+import {
+  MAX_ODOMETER_READING,
+  isDuplicateServiceRecord,
+  mileageFromUnknown,
+  normalizeOdometerUnit,
+  normalizeUsState,
+  normalizeVin,
+  serviceDateKey,
+  validateMileageValue,
+  validateVin,
+} from "@/server/hono/lib/creation-validation";
 
 export const vehiclesRouter = new Hono();
 
@@ -72,8 +83,8 @@ const vehicleSchema = z.object({
   plate_state: z.string().trim().max(20).nullable().optional(),
   plate_region: z.string().trim().max(20).nullable().optional(),
   color: z.string().trim().max(50).nullable().optional(),
-  mileage: z.number().int().min(0).nullable().optional(),
-  mileage_unit: z.enum(["mi", "km"]).default("mi"),
+  mileage: z.number().int().min(0).max(MAX_ODOMETER_READING, `Mileage cannot exceed ${MAX_ODOMETER_READING.toLocaleString("en-US")}`).nullable().optional(),
+  mileage_unit: z.string().trim().max(10).optional(),
   odometer_measure: z.string().trim().max(20).nullable().optional(),
   engine: z.string().trim().max(120).nullable().optional(),
   oil_type: z.string().trim().max(80).nullable().optional(),
@@ -81,6 +92,42 @@ const vehicleSchema = z.object({
   oil_filter: z.string().trim().max(100).nullable().optional(),
   notes: z.string().max(5000).nullable().optional(),
 });
+
+/**
+ * Creation-time validation + normalization for vehicle writes (Build Board
+ * Session 7 condition 4 — see src/server/hono/lib/creation-validation.ts).
+ * Returns the normalized fields to persist; throws ApiError(400) with a
+ * clear message on the first violated rule.
+ */
+function prepareVehicleFields(input: {
+  vin?: string | null;
+  mileage_unit?: string | null;
+  plate_region?: string | null;
+}): { vin?: string | null; mileage_unit?: string; plate_region?: string | null } {
+  const prepared: { vin?: string | null; mileage_unit?: string; plate_region?: string | null } = {};
+  if (input.vin !== undefined) {
+    if (input.vin === null || input.vin.trim() === "") {
+      prepared.vin = null;
+    } else {
+      const vinError = validateVin(input.vin);
+      if (vinError) throw new ApiError(400, vinError, "invalid_vin");
+      prepared.vin = normalizeVin(input.vin);
+    }
+  }
+  if (input.mileage_unit !== undefined && input.mileage_unit !== null && input.mileage_unit !== "") {
+    const unit = normalizeOdometerUnit(input.mileage_unit);
+    if (unit !== "MI" && unit !== "KM") {
+      throw new ApiError(400, "Mileage unit must be MI or KM.", "invalid_mileage_unit");
+    }
+    prepared.mileage_unit = unit;
+  }
+  if (input.plate_region !== undefined) {
+    prepared.plate_region = input.plate_region === null || input.plate_region.trim() === ""
+      ? null
+      : normalizeUsState(input.plate_region);
+  }
+  return prepared;
+}
 
 async function assertCustomerInWorkspace(
   supabase: Awaited<ReturnType<typeof requireWorkspaceMember>>["supabase"],
@@ -142,10 +189,17 @@ vehiclesRouter.post("/v1/vehicles", async (c) => {
   await assertCustomerInWorkspace(supabase, body.workspace_id, body.customer_id);
 
   const { engine, oil_type, oil_capacity, oil_filter, odometer_measure, plate_state, ...vehicleInput } = body;
+  const prepared = prepareVehicleFields({
+    vin: body.vin,
+    mileage_unit: body.mileage_unit,
+    plate_region: body.plate_region ?? plate_state,
+  });
   const { data: vehicle, error } = await supabase.from("vehicles").insert({
     ...vehicleInput,
-    plate_region: body.plate_region ?? plate_state ?? null,
-    metadata: odometer_measure ? { odometer_measure } : {},
+    vin: prepared.vin ?? null,
+    mileage_unit: prepared.mileage_unit ?? "MI",
+    plate_region: prepared.plate_region ?? null,
+    metadata: odometer_measure ? { odometer_measure: normalizeOdometerUnit(odometer_measure) } : {},
   } as never).select().single();
   if (error) throw error;
 
@@ -178,8 +232,8 @@ const vehicleUpdateSchema = z.object({
   plate_state: z.string().trim().max(20).nullable().optional(),
   plate_region: z.string().trim().max(20).nullable().optional(),
   color: z.string().trim().max(50).nullable().optional(),
-  mileage: z.number().int().min(0).nullable().optional(),
-  mileage_unit: z.enum(["mi", "km"]).optional(),
+  mileage: z.number().int().min(0).max(MAX_ODOMETER_READING, `Mileage cannot exceed ${MAX_ODOMETER_READING.toLocaleString("en-US")}`).nullable().optional(),
+  mileage_unit: z.string().trim().max(10).nullable().optional(),
   odometer_measure: z.string().trim().max(20).nullable().optional(),
   engine: z.string().trim().max(120).nullable().optional(),
   oil_type: z.string().trim().max(80).nullable().optional(),
@@ -229,6 +283,16 @@ vehiclesRouter.patch("/v1/vehicles/:id", async (c) => {
   if (Object.prototype.hasOwnProperty.call(body, "plate_state") && !Object.prototype.hasOwnProperty.call(body, "plate_region")) {
     patch.plate_region = plate_state ?? null;
   }
+  const prepared = prepareVehicleFields({
+    ...(Object.prototype.hasOwnProperty.call(body, "vin") ? { vin: body.vin ?? null } : {}),
+    ...(Object.prototype.hasOwnProperty.call(body, "mileage_unit") ? { mileage_unit: body.mileage_unit } : {}),
+    ...(Object.prototype.hasOwnProperty.call(body, "plate_region") || Object.prototype.hasOwnProperty.call(body, "plate_state")
+      ? { plate_region: body.plate_region ?? plate_state ?? null }
+      : {}),
+  });
+  if ("vin" in prepared) patch.vin = prepared.vin;
+  if (prepared.mileage_unit !== undefined) patch.mileage_unit = prepared.mileage_unit;
+  if ("plate_region" in prepared) patch.plate_region = prepared.plate_region;
   if (Object.prototype.hasOwnProperty.call(body, "odometer_measure")) {
     const { data: current, error: currentError } = await supabase
       .from("vehicles")
@@ -241,7 +305,7 @@ vehiclesRouter.patch("/v1/vehicles/:id", async (c) => {
     const metadata = current.metadata && typeof current.metadata === "object" && !Array.isArray(current.metadata)
       ? current.metadata as Record<string, unknown>
       : {};
-    patch.metadata = { ...metadata, odometer_measure: odometer_measure ?? null };
+    patch.metadata = { ...metadata, odometer_measure: odometer_measure ? normalizeOdometerUnit(odometer_measure) : null };
   }
 
   let vehicle: unknown;
@@ -457,6 +521,14 @@ vehiclesRouter.post("/v1/service-records", async (c) => {
   if ("error" in refs) return refs.error;
 
   const meta = body.metadata ?? {};
+  // Creation-time validation (Session 7 condition 4): a service record's
+  // odometer reading lives in metadata; bound it here so an implausible
+  // reading can never be saved, and store the unit normalized (MI/KM).
+  const mileageError = validateMileageValue(meta.mileage);
+  if (mileageError) return json({ error: { code: "invalid_mileage", message: mileageError } }, { status: 400 });
+  const normalizedMeta: Record<string, unknown> = typeof meta.odometer_measure === "string" && meta.odometer_measure.trim()
+    ? { ...meta, odometer_measure: normalizeOdometerUnit(meta.odometer_measure) }
+    : meta;
   const laborCost = numberFromMetadata(meta.labor_cost) ?? 0;
   const partsCost = numberFromMetadata(meta.parts_cost) ?? 0;
   const shopSupplies = numberFromMetadata(meta.shop_supplies) ?? 0;
@@ -470,17 +542,54 @@ vehiclesRouter.post("/v1/service-records", async (c) => {
   if (Math.abs(total - expectedTotal) > 0.01) return json({ error: { code: "financial_math_mismatch", message: "Service record total does not match subtotal, discount, and tax." } }, { status: 400 });
 
   const now = new Date().toISOString();
-  const payload = { ...body, customer_id: refs.customerId, vehicle_id: refs.vehicleId, subtotal, tax_rate: taxRate, tax_amount: taxAmount, discount_amount: discount, total_amount: total, completed_by: body.status === "completed" ? user.id : null, completed_at: body.status === "completed" ? body.completed_at ?? now : body.completed_at ?? null };
+  const payload = { ...body, metadata: normalizedMeta, customer_id: refs.customerId, vehicle_id: refs.vehicleId, subtotal, tax_rate: taxRate, tax_amount: taxAmount, discount_amount: discount, total_amount: total, completed_by: body.status === "completed" ? user.id : null, completed_at: body.status === "completed" ? body.completed_at ?? now : body.completed_at ?? null };
 
   if (body.appointment_id) {
     const { data: existing, error: existingError } = await supabase.from("service_records").select("id,metadata").eq("workspace_id", body.workspace_id).eq("appointment_id", body.appointment_id).neq("status", "voided").order("created_at", { ascending: true }).limit(1).maybeSingle();
     if (existingError) throw existingError;
     if (existing) {
-      const { data, error } = await (supabase.from("service_records") as any).update({ ...payload, metadata: mergeMetadata(existing.metadata, meta) }).eq("workspace_id", body.workspace_id).eq("id", existing.id).select().single();
+      const { data, error } = await (supabase.from("service_records") as any).update({ ...payload, metadata: mergeMetadata(existing.metadata, normalizedMeta) }).eq("workspace_id", body.workspace_id).eq("id", existing.id).select().single();
       if (error) throw error;
       return json({ data, reused: true });
     }
   }
+
+  // Duplicate detection (Session 7 condition 4): the legacy import landed
+  // the same service twice (same vehicle + date + mileage + invoice). Follow
+  // this route's existing idempotency convention — return the existing
+  // record with reused: true instead of inserting a second copy.
+  if (refs.vehicleId) {
+    const candidate = {
+      serviceDate: serviceDateKey(payload.completed_at ?? payload.started_at),
+      mileage: mileageFromUnknown(normalizedMeta.mileage),
+      invoiceNumber: typeof normalizedMeta.service_number === "string" ? normalizedMeta.service_number : null,
+    };
+    if (candidate.serviceDate && (candidate.mileage !== null || candidate.invoiceNumber)) {
+      const { data: prior, error: priorError } = await supabase
+        .from("service_records")
+        .select("id,metadata,completed_at,started_at,created_at")
+        .eq("workspace_id", body.workspace_id)
+        .eq("vehicle_id", refs.vehicleId)
+        .neq("status", "voided")
+        .order("created_at", { ascending: true })
+        .limit(50);
+      if (priorError) throw priorError;
+      const duplicate = (prior ?? []).find((row) => {
+        const rowMeta = (row.metadata && typeof row.metadata === "object" ? row.metadata : {}) as Record<string, unknown>;
+        return isDuplicateServiceRecord(candidate, {
+          serviceDate: serviceDateKey(row.completed_at ?? row.started_at ?? row.created_at),
+          mileage: mileageFromUnknown(rowMeta.mileage),
+          invoiceNumber: typeof rowMeta.service_number === "string" ? rowMeta.service_number : null,
+        });
+      });
+      if (duplicate) {
+        const { data: existingFull, error: existingFullError } = await supabase.from("service_records").select("*").eq("workspace_id", body.workspace_id).eq("id", duplicate.id).single();
+        if (existingFullError) throw existingFullError;
+        return json({ data: existingFull, reused: true });
+      }
+    }
+  }
+
   const { data, error } = await supabase.from("service_records").insert(payload).select().single();
   if (error) throw error;
   return json({ data }, { status: 201 });
@@ -633,6 +742,14 @@ vehiclesRouter.patch("/v1/service-records/:id", async (c) => {
   const body = updateSchema.parse(await c.req.json());
   const { supabase, user } = await requireWorkspaceAuth(c, body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician"]);
   const { workspace_id, ...updates } = body;
+
+  if (updates.metadata && "mileage" in updates.metadata) {
+    const mileageError = validateMileageValue(updates.metadata.mileage);
+    if (mileageError) return json({ error: { code: "invalid_mileage", message: mileageError } }, { status: 400 });
+  }
+  if (updates.metadata && typeof updates.metadata.odometer_measure === "string" && updates.metadata.odometer_measure.trim()) {
+    updates.metadata = { ...updates.metadata, odometer_measure: normalizeOdometerUnit(updates.metadata.odometer_measure) };
+  }
 
   const { data: current, error: currentError } = await supabase.from("service_records").select("id,customer_id,vehicle_id,work_order_id,quote_id,technician_id,subtotal,tax_amount,discount_amount,total_amount,status,metadata").eq("workspace_id", workspace_id).eq("id", id).single();
   if (currentError) throw currentError;
@@ -1235,7 +1352,7 @@ vehiclesRouter.put("/v1/carfax/settings", async (c) => {
     .from("workspace_settings")
     .update({
       city: body.city || null,
-      region: body.state || null,
+      region: typeof body.state === "string" && body.state.trim() ? normalizeUsState(body.state) : null,
       postal_code: body.postal_code || null,
       website_url: body.website_url || null,
       operational_settings: { ...operational, carfax: nextCarfax },
@@ -3718,6 +3835,17 @@ vehiclesRouter.post("/v1/fleet/vehicles", async (c) => {
     validateFleetVehicle(payload),
     "Cannot create vehicle",
   );
+  // Hard creation-time checks (Session 7 condition 4): the fleet validator
+  // only warns on a malformed VIN; a placeholder VIN or an implausible
+  // odometer reading must never be saved at all.
+  if (payload.vin !== undefined && payload.vin !== null && String(payload.vin).trim() !== "") {
+    const vinError = validateVin(String(payload.vin));
+    if (vinError) throw new ApiError(400, vinError, "invalid_vin");
+  }
+  for (const mileageField of ["mileage", "last_service_mileage", "next_service_mileage"] as const) {
+    const mileageError = validateMileageValue(payload[mileageField]);
+    if (mileageError) throw new ApiError(400, mileageError, "invalid_mileage");
+  }
   const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
   const { data, error } = await (supabase as any).from("fleet_vehicles").insert([
     {
@@ -5878,7 +6006,7 @@ vehiclesRouter.post("/v1/fleet/import/clients", async (c) => {
     phone: cli.phone || null,
     address: cli.address || null,
     city: cli.city || null,
-    state: cli.state || null,
+    state: typeof cli.state === "string" && cli.state.trim() ? normalizeUsState(cli.state) : cli.state || null,
     postal_code: cli.postal_code || null,
     payment_terms: cli.payment_terms || "net_30",
     notes: cli.notes || null,
@@ -5897,24 +6025,44 @@ vehiclesRouter.post("/v1/fleet/import/vehicles", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const vehicles = body.vehicles ?? [];
   const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
-  const rows = vehicles.map((v: Record<string, unknown>) => ({
-    user_id: user.id,
-    fleet_client_id: v.fleet_client_id,
-    year: v.year ?? null,
-    make: v.make || null,
-    model: v.model || null,
-    vin: v.vin || null,
-    license_plate: v.license_plate || null,
-    unit_number: v.unit_number || null,
-    color: v.color || null,
-    engine: v.engine || null,
-    fuel_type: v.fuel_type || null,
-    mileage: v.mileage ?? null,
-    status: v.status || "active",
-    notes: v.notes || null,
-  }));
+  // Creation-time validation (Session 7 condition 4): an imported row with a
+  // placeholder/malformed VIN or an implausible odometer reading is skipped
+  // and reported per-row instead of being saved; valid rows are normalized.
+  const validationErrors: string[] = [];
+  const rows: Array<Record<string, unknown>> = [];
+  (vehicles as Array<Record<string, unknown>>).forEach((v, index) => {
+    const rowLabel = `Row ${index + 1}`;
+    if (v.vin !== undefined && v.vin !== null && String(v.vin).trim() !== "") {
+      const vinError = validateVin(String(v.vin));
+      if (vinError) {
+        validationErrors.push(`${rowLabel}: ${vinError}`);
+        return;
+      }
+    }
+    const mileageError = validateMileageValue(v.mileage);
+    if (mileageError) {
+      validationErrors.push(`${rowLabel}: ${mileageError}`);
+      return;
+    }
+    rows.push({
+      user_id: user.id,
+      fleet_client_id: v.fleet_client_id,
+      year: v.year ?? null,
+      make: v.make || null,
+      model: v.model || null,
+      vin: v.vin ? normalizeVin(String(v.vin)) : null,
+      license_plate: v.license_plate || null,
+      unit_number: v.unit_number || null,
+      color: v.color || null,
+      engine: v.engine || null,
+      fuel_type: v.fuel_type || null,
+      mileage: v.mileage ?? null,
+      status: v.status || "active",
+      notes: v.notes || null,
+    });
+  });
   const result = await batchInsertFleetRows(supabase as any, "fleet_vehicles", rows);
-  return json({ data: result });
+  return json({ data: { ...result, errors: [...validationErrors, ...result.errors] } });
 });
 
 vehiclesRouter.get("/v1/fleet/clients/map", async (c) => {
