@@ -95,7 +95,15 @@ describe("website booking management token migration", () => {
   });
 
   it("runs in a single transaction like its neighbors", () => {
-    expect(sql.trimStart().toLowerCase()).toContain("begin;");
-    expect(sql.trimEnd().toLowerCase()).toMatch(/commit;$/);
+    // SW-35: the deploy runner owns the transaction for every migration it
+    // applies, so — like its current neighbors — the file itself carries no
+    // top-level transaction control. An embedded commit; would break the
+    // runner's atomicity mid-file.
+    const lines = sql
+      .toLowerCase()
+      .split("\n")
+      .map((line) => line.trim());
+    expect(lines).not.toContain("begin;");
+    expect(lines).not.toContain("commit;");
   });
 });
