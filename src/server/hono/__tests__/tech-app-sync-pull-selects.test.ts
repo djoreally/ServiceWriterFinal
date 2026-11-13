@@ -67,7 +67,13 @@ describe("GET /v1/tech-app/sync/pull — registration + scoping", () => {
 describe("GET /v1/tech-app/sync/pull — live-census selects", () => {
   it("selects appointments.updated_at for incremental bucketing", () => {
     expect(handlerBlock()).toContain(
-      "id, workspace_id, customer_id, vehicle_id, assigned_user_id, status, dispatch_status, starts_at, ends_at, source, confirmation_code, notes, metadata, created_at, updated_at",
+      "id, workspace_id, customer_id, vehicle_id, assigned_user_id, status, dispatch_status, starts_at, ends_at, source, confirmation_code, notes, metadata, created_at, updated_at, completed_at",
+    );
+  });
+
+  it("composes the persisted completion stamp onto the sync row (SW-87)", () => {
+    expect(handlerBlock()).toContain(
+      "completedAt: (appt.completed_at as string | null) ?? null",
     );
   });
 

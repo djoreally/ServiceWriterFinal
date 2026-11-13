@@ -84,4 +84,20 @@ describe("POST /v1/tech-app/sync/push — apply semantics", () => {
     expect(block).toContain('.from("technicians")');
     expect(block).toContain("technician_id: technicianId");
   });
+
+  it("persists the device's completion stamp on the appointment (SW-87)", () => {
+    const block = handlerBlock();
+    // The scope read carries the existing stamp so first-stamp-wins
+    // can be honored without a second read.
+    expect(block).toContain(
+      '.select("id, vehicle_id, status, dispatch_status, completed_at")',
+    );
+    // The stamp is read off the pushed job row (ISO or epoch-ms —
+    // parseWireDate takes both) and written to the appointments
+    // column, guarded so a stamp already on the record is never
+    // overwritten.
+    expect(block).toContain("parseWireDate(row.completed_at)");
+    expect(block).toContain(".update({ completed_at: deviceCompletedAt })");
+    expect(block).toContain('.is("completed_at", null)');
+  });
 });

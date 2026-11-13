@@ -116,6 +116,35 @@ describe("mapComposedAppointmentToLocalJob", () => {
     expect(row.customer_name).toBe("Customer");
     expect(row.updated_at).toBe(row.created_at);
   });
+
+  describe("completed_at (SW-87)", () => {
+    const STAMP = "2026-11-12T14:05:00.000Z";
+
+    it("carries the server's persisted device stamp verbatim", () => {
+      const row = mapComposedAppointmentToLocalJob(
+        appt({ serverStatus: "completed", completedAt: STAMP }),
+      );
+      expect(row.status).toBe("completed");
+      expect(row.completed_at).toBe(STAMP);
+    });
+
+    it("falls back to updated_at for a job completed before the stamp was persisted", () => {
+      const row = mapComposedAppointmentToLocalJob(
+        appt({
+          serverStatus: "completed",
+          completedAt: null,
+          updatedAt: new Date(T2).toISOString(),
+        }),
+      );
+      expect(row.completed_at).toBe(new Date(T2).toISOString());
+    });
+
+    it("carries no stamp while the job is not completed", () => {
+      const row = mapComposedAppointmentToLocalJob(appt({ completedAt: null }));
+      expect(row.status).toBe("assigned");
+      expect(row.completed_at).toBeNull();
+    });
+  });
 });
 
 describe("bucketJobChanges", () => {

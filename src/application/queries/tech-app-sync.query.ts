@@ -40,6 +40,15 @@ export interface LocalJobRaw {
   ends_at: string;
   duration_minutes: number;
   status: LocalJobStatus;
+  /**
+   * When the job was completed (SW-87): the device's own stamp,
+   * persisted server-side on appointments.completed_at by the sync
+   * push. For a completed row the server never stamped (completed
+   * before the column existed), the mapper falls back to the row's
+   * updated_at — the same convention inspection reports use in this
+   * module. Null while the job is not completed.
+   */
+  completed_at: string | null;
   estimated_cost: number | null;
   notes: string | null;
   services_json: string | null;
@@ -82,6 +91,8 @@ export interface ComposedSyncAppointment {
     /** The SOP procedure steps for the service (playbook steps). */
     sopSteps: string[];
   }>;
+  /** appointments.completed_at (SW-87), when the server holds a stamp. */
+  completedAt?: string | null;
   /** metadata.dispatch_status (en_route / arrived / started …), when set. */
   dispatchStatus?: string | null;
   enRouteAt?: string | null;
@@ -158,6 +169,7 @@ export function mapComposedAppointmentToLocalJob(appt: ComposedSyncAppointment):
   const endsAt =
     appt.endsAt ??
     (Number.isFinite(startsMs) ? new Date(startsMs + duration * 60_000).toISOString() : appt.startsAt);
+  const status = effectiveJobStatus(appt.serverStatus, appt.dispatchStatus);
   return {
     id: appt.id,
     server_id: appt.id,
@@ -173,7 +185,14 @@ export function mapComposedAppointmentToLocalJob(appt: ComposedSyncAppointment):
     starts_at: appt.startsAt,
     ends_at: endsAt,
     duration_minutes: duration,
-    status: effectiveJobStatus(appt.serverStatus, appt.dispatchStatus),
+    status,
+    // SW-87: the persisted device stamp wins whenever the server
+    // holds one; a completed row with no stamp (completed before
+    // the column existed) reads its updated_at as the completion
+    // time; anything else carries no stamp.
+    completed_at:
+      appt.completedAt ??
+      (status === "completed" ? (appt.updatedAt ?? appt.createdAt) : null),
     estimated_cost: appt.estimatedCost,
     notes: appt.notes,
     services_json: appt.services.length > 0 ? JSON.stringify(appt.services) : null,
