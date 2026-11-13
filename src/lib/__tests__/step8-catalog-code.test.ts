@@ -11,6 +11,12 @@ import { join } from "node:path";
 // job-detail is pinned ABSENT — that serving handler was removed by the
 // phantom fix series; the surviving handler reads appointment_services.
 
+// Pruned 2026-11-13 (dead-code pass): the client-module pins for the
+// removed application modules (recurring-services query + command,
+// playbooks command, playbook-seed command) were retired together with
+// those files. The route-file pins below (work-orders, platform,
+// vehicles — the live Hono surface) are unchanged.
+
 const WORK_ORDERS = readFileSync(
   join(__dirname, "../../../src/server/hono/routes/work-orders.ts"),
   "utf8",
@@ -23,24 +29,8 @@ const VEHICLES = readFileSync(
   join(__dirname, "../../../src/server/hono/routes/vehicles.ts"),
   "utf8",
 );
-const RECURRING_QUERY = readFileSync(
-  join(__dirname, "../../../src/application/queries/recurring-services.query.ts"),
-  "utf8",
-);
-const RECURRING_COMMAND = readFileSync(
-  join(__dirname, "../../../src/application/commands/recurring-services.command.ts"),
-  "utf8",
-);
 const REPAIR_PRICING_QUERY = readFileSync(
   join(__dirname, "../../../src/application/queries/repair-pricing.query.ts"),
-  "utf8",
-);
-const PLAYBOOKS_COMMAND = readFileSync(
-  join(__dirname, "../../../src/application/commands/playbooks.command.ts"),
-  "utf8",
-);
-const PLAYBOOK_SEED_COMMAND = readFileSync(
-  join(__dirname, "../../../src/application/commands/playbook-seed.command.ts"),
   "utf8",
 );
 
@@ -214,12 +204,6 @@ describe("step8 code — platform service-images", () => {
 });
 
 describe("step8 code — client modules", () => {
-  it("recurring-services query + command send workspace_id, never user_id", () => {
-    expect(RECURRING_QUERY).toContain("query: { workspace_id: workspaceId }");
-    expect(RECURRING_COMMAND).toContain("workspace_id: context.workspaceId,");
-    expect(RECURRING_COMMAND).not.toContain("user_id: user.id,");
-  });
-
   it("repair-pricing resolves the workspace inside the module and sends it on all four calls", () => {
     expect(REPAIR_PRICING_QUERY).toContain("resolveCurrentWorkspace()");
     expect(REPAIR_PRICING_QUERY).toContain("query: { workspace_id: workspaceId }");
@@ -227,15 +211,6 @@ describe("step8 code — client modules", () => {
     expect(REPAIR_PRICING_QUERY).toContain("{ workspace_id: workspaceId, status,");
     expect(REPAIR_PRICING_QUERY).not.toContain("userId");
     expect(REPAIR_PRICING_QUERY).not.toContain("user_id");
-  });
-
-  it("playbook commands take workspaceId and send workspace_id on all five + seed", () => {
-    expect(PLAYBOOKS_COMMAND).toContain("workspace_id: workspaceId,");
-    expect(PLAYBOOKS_COMMAND).toContain("query: { workspace_id: workspaceId }");
-    expect(PLAYBOOKS_COMMAND).not.toContain("user_id");
-    expect(PLAYBOOKS_COMMAND).not.toContain("userId");
-    expect(PLAYBOOK_SEED_COMMAND).toContain("seedPlaybooksFromTemplates(workspaceId: string)");
-    expect(PLAYBOOK_SEED_COMMAND).toContain("workspace_id: workspaceId,");
   });
 });
 
