@@ -95,6 +95,24 @@ function billingSubscription() {
   };
 }
 
+// CARFAX settings, mirroring the production MOMS workspace shape: the
+// location ID (servicewriter01) was written to workspace_settings before
+// the settings screen was hosted (SW-86), and the server derives
+// carfax_activated from the location ID being present. Stateful so a
+// journey can save through the PUT route and read the value back.
+let carfaxSettings = {
+  carfax_location_id: "servicewriter01",
+  city: "Ambler",
+  state: "PA",
+  postal_code: "19002",
+  website_url: "https://momsoilchange.com",
+  business_name: "MOMS Mobile Oil Change",
+  address: "428 Railroad Avenue",
+  phone: "215-767-2125",
+  carfax_activated: true,
+  carfax_activation_date: "2026-11-13T15:00:00.000Z",
+};
+
 function serviceCatalogRows() {
   const backend = getFakeBackend();
   return (backend.tables.service_catalog || []).map((row) => ({
@@ -252,6 +270,31 @@ async function handleGet(rawPath, options) {
     return { data: [] };
   }
 
+  if (path === "/v1/carfax/settings") {
+    return { data: { ...carfaxSettings } };
+  }
+
+  if (path === "/v1/carfax/data-stats") {
+    return { data: { totalServices: 0, validVins: 0, missingData: 0 } };
+  }
+
+  if (path === "/v1/carfax/exports/history" || path === "/v1/carfax/exports/today") {
+    return { data: [] };
+  }
+
+  if (path === "/v1/carfax/exports/stats") {
+    // The stats query derives its numbers from the export-record list.
+    return { data: [] };
+  }
+
+  if (path === "/v1/carfax/exports/latest") {
+    return { data: null };
+  }
+
+  if (path === "/v1/carfax/export-services") {
+    return { data: [] };
+  }
+
   // Unknown reads resolve empty, mirroring the empty-stub philosophy of
   // src/test/setup.ts: pages render their empty states instead of crashing,
   // and journey assertions fail on content, not on transport.
@@ -259,6 +302,17 @@ async function handleGet(rawPath, options) {
 }
 
 async function handleWrite(path, body) {
+  if (path === "/v1/carfax/settings") {
+    const updates = body && typeof body === "object" ? body : {};
+    const next = { ...carfaxSettings };
+    for (const key of ["carfax_location_id", "city", "state", "postal_code", "website_url"]) {
+      if (key in updates) next[key] = updates[key] ?? "";
+    }
+    next.carfax_activated = Boolean(next.carfax_location_id);
+    carfaxSettings = next;
+    return { data: null };
+  }
+
   const publicBookingMatch = /^\/v1\/public-booking\/(.+)$/.exec(path);
   if (publicBookingMatch) {
     // Booking submissions go through the same RPC contract the fake exposes.
