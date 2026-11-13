@@ -93,10 +93,21 @@ export async function stampWebsiteBookingPushed(
   config: WebsiteBookingsConfig,
   bookingId: string,
   swAppointmentId: string,
+  managementToken?: string | null,
 ): Promise<{ id: string; pushed_sw_appointment_id: string; pushed_at: string }> {
+  const body: { sw_appointment_id: string; managementToken?: string } = {
+    sw_appointment_id: swAppointmentId,
+  };
+  // The website backend stores the appointment's customer-portal
+  // management token (bookings.sw_management_token) so its customer
+  // manage page can drive Service Writer's reschedule-by-token
+  // endpoint. The field is sent only when a token actually exists —
+  // a tokenless stamp is byte-identical to the pre-token stamp, and
+  // this addition must never change or break the push itself.
+  if (managementToken) body.managementToken = managementToken;
   return callWebsiteBackend(config, `/internal/website-bookings/${encodeURIComponent(bookingId)}/push-stamp`, {
     method: "POST",
-    body: { sw_appointment_id: swAppointmentId },
+    body,
   });
 }
 
