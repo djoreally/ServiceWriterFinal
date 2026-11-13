@@ -1,3 +1,7 @@
+/**
+ * AI TERRITORY: OWNER-GATED — see docs/ai-territory.md.
+ * No agent changes without Ty's explicit word.
+ */
 import { ApiError } from "@/server/api";
 import { createSupabaseAdminClient } from "@/lib/supabase";
 import {

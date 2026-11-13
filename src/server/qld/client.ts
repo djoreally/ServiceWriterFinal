@@ -1,4 +1,8 @@
 /**
+ * AI TERRITORY: OWNER-GATED — see docs/ai-territory.md.
+ * No agent changes without Ty's explicit word.
+ */
+/**
  * Quick Lube Data (QLD) Developer API client — server-side only.
  *
  * QLD is the platform's single spec source (owner's ruling, 2026-11-05):

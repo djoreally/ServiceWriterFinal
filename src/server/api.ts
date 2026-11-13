@@ -1,3 +1,7 @@
+/**
+ * AI TERRITORY: OWNER-GATED — see docs/ai-territory.md.
+ * No agent changes without Ty's explicit word.
+ */
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createSupabaseRequestClient, createSupabaseServerClient } from "@/lib/supabase";

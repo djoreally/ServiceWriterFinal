@@ -1,4 +1,8 @@
 /**
+ * AI TERRITORY: OWNER-GATED — see docs/ai-territory.md.
+ * No agent changes without Ty's explicit word.
+ */
+/**
  * CARFAX feed transfer — SFTP upload of one generated feed file.
  *
  * The SFTP client is loaded dynamically so that importing the generator

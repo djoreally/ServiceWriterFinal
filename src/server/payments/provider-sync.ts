@@ -1,4 +1,8 @@
 /**
+ * AI TERRITORY: OWNER-GATED — see docs/ai-territory.md.
+ * No agent changes without Ty's explicit word.
+ */
+/**
  * Provider Sync — canonical server implementation.
  *
  * The appointment "Provider Sync" card and the Settings provider-sync panel
