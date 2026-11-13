@@ -106,6 +106,8 @@ export function CarfaxSettings() {
     business_name: "",
     address: "",
     phone: "",
+    carfax_product_data_id: "",
+    carfax_comp_code: "",
   });
   const [exports, setExports] = useState<CarfaxExportRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -139,6 +141,8 @@ export function CarfaxSettings() {
         state: settings.state || null,
         postal_code: settings.postal_code || null,
         website_url: settings.website_url || null,
+        carfax_product_data_id: settings.carfax_product_data_id || null,
+        carfax_comp_code: settings.carfax_comp_code || null,
       });
       // Refresh derived carfax_activated status from the source of truth
       const fresh = await fetchCarfaxSettings();
@@ -357,6 +361,36 @@ export function CarfaxSettings() {
                   onChange={(e) => setSettings({ ...settings, website_url: e.target.value })}
                   placeholder="https://yourshop.com"
                 />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="carfax_product_data_id">CARFAX Product-Data-ID</Label>
+                <Input
+                  id="carfax_product_data_id"
+                  value={settings.carfax_product_data_id ?? ""}
+                  onChange={(e) => setSettings({ ...settings, carfax_product_data_id: e.target.value })}
+                  placeholder="Issued by CARFAX with your agreement"
+                  maxLength={70}
+                />
+                <p className="text-xs text-muted-foreground">
+                  CARFAX-issued identifier for Service History Check and QuickVIN. Leave blank until CARFAX provides it.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="carfax_comp_code">CARFAX Comp-Code</Label>
+                <Input
+                  id="carfax_comp_code"
+                  value={settings.carfax_comp_code ?? ""}
+                  onChange={(e) => setSettings({ ...settings, carfax_comp_code: e.target.value })}
+                  placeholder="Issued by CARFAX with your agreement"
+                  maxLength={70}
+                />
+                <p className="text-xs text-muted-foreground">
+                  CARFAX-issued code for the Authorization Tool. Leave blank until CARFAX provides it.
+                </p>
               </div>
             </div>
 

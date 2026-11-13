@@ -1356,6 +1356,8 @@ vehiclesRouter.get("/v1/carfax/settings", async (c) => {
       phone: settings?.phone || "",
       carfax_activated: Boolean(carfax.location_id),
       carfax_activation_date: typeof carfax.activation_date === "string" ? carfax.activation_date : null,
+      carfax_product_data_id: typeof carfax.product_data_id === "string" ? carfax.product_data_id : "",
+      carfax_comp_code: typeof carfax.comp_code === "string" ? carfax.comp_code : "",
     },
   });
 });
@@ -1381,6 +1383,18 @@ vehiclesRouter.put("/v1/carfax/settings", async (c) => {
     activation_date: body.carfax_location_id
       ? existingCarfax.activation_date || new Date().toISOString()
       : null,
+    // CARFAX-issued identifiers (product-data-id for Service History Check /
+    // QuickVIN, comp-code for the Authorization Tool). They arrive with the
+    // CARFAX agreement, so they are saved independently of the location
+    // fields and preserved when a save does not mention them.
+    product_data_id:
+      typeof body.carfax_product_data_id === "string"
+        ? body.carfax_product_data_id || null
+        : existingCarfax.product_data_id ?? null,
+    comp_code:
+      typeof body.carfax_comp_code === "string"
+        ? body.carfax_comp_code || null
+        : existingCarfax.comp_code ?? null,
   };
   const { error } = await client
     .from("workspace_settings")

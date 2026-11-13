@@ -252,16 +252,21 @@ export function AdminCarfaxSettings() {
         </CardContent>
       </Card>
 
-      {/* API Credentials Note */}
+      {/* CARFAX Credentials Note */}
       <Card className="border-yellow-500/30 bg-yellow-500/5">
         <CardContent className="p-4">
           <div className="flex items-start gap-3">
             <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5" />
             <div>
-              <p className="font-medium text-yellow-600">API Credentials Required</p>
+              <p className="font-medium text-yellow-600">CARFAX Credentials</p>
               <p className="text-sm text-muted-foreground mt-1">
-                CARFAX API credentials (CARFAX_API_KEY and CARFAX_ACCOUNT_ID) must be configured as 
-                platform secrets to enable live data submissions. Contact CARFAX to obtain your credentials.
+                CARFAX issues every credential during onboarding; there is no CARFAX API key.
+                The data feed is delivered by SFTP to data.carfax.com with the credentials
+                CARFAX provides after sample approval — they are configured as platform
+                secrets (CARFAX_SFTP_HOST, CARFAX_SFTP_USER, CARFAX_SFTP_PASSWORD or
+                CARFAX_SFTP_KEY_PATH). Service History Check and QuickVIN authenticate
+                with the CARFAX-issued product-data-id, stored per shop in its CARFAX
+                settings.
               </p>
             </div>
           </div>
