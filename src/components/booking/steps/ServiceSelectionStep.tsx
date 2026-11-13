@@ -20,6 +20,14 @@ import { cn } from "@/lib/utils";
 import type { BookingRequirement } from "@/lib/service-category-policy";
 import type { VehicleData } from "@/components/booking/VehicleEntry";
 import type { VehicleServiceSelection } from "@/hooks/useBookingState";
+import { ServiceMenu } from "@/components/catalog/ServiceMenu";
+import type { ResolvedMenu } from "@/lib/service-menu/menu";
+import {
+  menuSidePriceMap,
+  selectionQualifiesForWithService,
+  togglePackageInSelection,
+  toggleServiceInSelection,
+} from "@/lib/service-menu/booking-selection";
 import { WheelTireConfigurator } from "@/components/vehicles/WheelTireConfigurator";
 import { TireQuantitySelector } from "@/components/booking/TireQuantitySelector";
 import { TireInventorySelector } from "@/components/booking/TireInventorySelector";
@@ -283,6 +291,13 @@ interface ServiceSelectionStepProps {
   getTotalDuration: () => number;
   serviceDisplayMode?: ServiceDisplayMode;
   detailingRules?: DetailingPricingRule[];
+  /**
+   * Optional resolved Service Menu for this shop. When present, the menu
+   * renders above the selector and its entries toggle selections through
+   * the exact same active-vehicle pathway as the rows and package cards
+   * below. Absent/null = the step behaves exactly as before.
+   */
+  serviceMenu?: ResolvedMenu | null;
 }
 
 /** ⚡ Memoized — 376-line component with catalog rendering, avoids re-render on parent state changes */
@@ -306,6 +321,7 @@ export const ServiceSelectionStep = memo(function ServiceSelectionStep({
   getTotalDuration,
   serviceDisplayMode = "full_list",
   detailingRules = [],
+  serviceMenu,
 }: ServiceSelectionStepProps) {
   const { data: categoryRows } = useQuery({
     queryKey: ["service-category-policies"],
@@ -340,13 +356,48 @@ export const ServiceSelectionStep = memo(function ServiceSelectionStep({
   const updateActiveSelection = (selection: VehicleServiceSelection) => {
     if (activeVehicleId && onVehicleServiceChange) onVehicleServiceChange(activeVehicleId, selection);
   };
+  /**
+   * Service Menu side pricing for the active selection. The adapter
+   * reprices menu sides on every toggle (from the menu AND from the
+   * plain list below) so a side is always stored at the price the menu
+   * promises for the current selection: with-service price alongside a
+   * qualifying service/package, catalog price otherwise. Empty map
+   * (no menu) = toggles behave exactly as they always have.
+   */
+  const sidePrices = useMemo(() => menuSidePriceMap(serviceMenu), [serviceMenu]);
+  const activeSelectionState = { services: activeServices, package: activePackage };
   const handleToggleService = (service: ServiceCatalogItem) => {
-    const exists = activeServices.some((item) => item.id === service.id);
-    updateActiveSelection({ services: exists ? activeServices.filter((item) => item.id !== service.id) : [...activeServices, service], package: null });
+    updateActiveSelection(
+      toggleServiceInSelection(activeSelectionState, service, services, sidePrices),
+    );
   };
   const handleSelectPackage = (pkg: ServicePackage) => {
-    updateActiveSelection({ services: [], package: activePackage?.id === pkg.id ? null : pkg });
+    updateActiveSelection(togglePackageInSelection(activeSelectionState, pkg));
   };
+  /** Menu clicks carry only a target id; resolve it to the catalog /
+   *  package object the normal selector would have used, then reuse the
+   *  same toggle handlers — one pathway for mouse, keyboard, menu, list. */
+  const handleMenuToggleService = (serviceCatalogId: string) => {
+    const service = services.find((item) => item.id === serviceCatalogId);
+    if (service) handleToggleService(service);
+  };
+  const handleMenuTogglePackage = (packageId: string) => {
+    const pkg = packages.find((item) => item.id === packageId);
+    if (pkg) handleSelectPackage(pkg);
+  };
+  const menuSelectedServiceIds = useMemo(
+    () => new Set(activeServices.map((service) => service.id)),
+    [activeServices],
+  );
+  const menuWithServiceQualified = selectionQualifiesForWithService(
+    activeSelectionState,
+    sidePrices,
+  );
+  const activeVehicleIndex = vehicles.findIndex((vehicle) => vehicle.id === activeVehicleId);
+  const menuTargetLabel =
+    vehicles.length > 1
+      ? activeVehicleLabel || `Vehicle ${activeVehicleIndex + 1}`
+      : null;
 
   const categorySummaries = useMemo(() => {
     const counts = bookableServices.reduce<Record<string, number>>((acc, service) => {
@@ -369,6 +420,20 @@ export const ServiceSelectionStep = memo(function ServiceSelectionStep({
 
   return (
     <div>
+      {serviceMenu && (
+        <ServiceMenu
+          menu={serviceMenu}
+          targetLabel={menuTargetLabel}
+          selection={{
+            selectedServiceIds: menuSelectedServiceIds,
+            selectedPackageId: activePackage?.id ?? null,
+            withServiceQualified: menuWithServiceQualified,
+            onToggleService: handleMenuToggleService,
+            onTogglePackage: handleMenuTogglePackage,
+          }}
+        />
+      )}
+
       <div className="text-center mb-8">
         <Wrench className="h-12 w-12 mx-auto text-primary mb-4" />
         <h1 className="text-[30px] font-semibold leading-[1.2] tracking-[-0.01em] mb-2">Select your services</h1>

@@ -171,6 +171,35 @@ describe("resolveMenu", () => {
     expect(menu?.hero).toMatchObject({ name: "2-Car Driveway Deal", price: 219, savings: 19 });
   });
 
+  it("exposes booking target ids for core, combo, side, and hero entries", () => {
+    const menu = resolveMenu({
+      settings: { enabled: true, heroPackageId: "pkg-2car" },
+      items,
+      catalog: CATALOG,
+      packages: [COMMUTER, TWO_CAR],
+    });
+    expect(menu?.core.map((c) => c.serviceCatalogId)).toEqual(["svc-oil", "svc-mobil", "svc-euro"]);
+    expect(menu?.combos[0].packageId).toBe("pkg-commuter");
+    expect(menu?.sides[0].serviceCatalogId).toBe("svc-wipers");
+    expect(menu?.hero?.packageId).toBe("pkg-2car");
+  });
+
+  it("gives draft entries a null target id (never selectable)", () => {
+    const menu = resolveMenu({
+      settings: { enabled: true },
+      items: [
+        { role: "core", serviceCatalogId: null, displayName: "Future Service", isDraft: true },
+        { role: "combo", packageId: null, displayName: "Future Combo", isDraft: true },
+        { role: "side", serviceCatalogId: null, displayName: "Future Side", isDraft: true },
+      ],
+      catalog: CATALOG,
+      packages: [],
+    });
+    expect(menu?.core[0].serviceCatalogId).toBeNull();
+    expect(menu?.combos[0].packageId).toBeNull();
+    expect(menu?.sides[0].serviceCatalogId).toBeNull();
+  });
+
   it("tracks a catalog price change with no menu edit (one source of truth)", () => {
     const repriced = CATALOG.map((r) => (r.id === "svc-oil" ? { ...r, labor_price: 109 } : r));
     const menu = resolveMenu({ settings: { enabled: true }, items, catalog: repriced, packages: [COMMUTER] });

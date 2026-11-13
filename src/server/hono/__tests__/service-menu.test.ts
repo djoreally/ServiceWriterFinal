@@ -141,6 +141,9 @@ describe("service-menu router", () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.data.core[0].price).toBe(119);
+      // Booking-selection target id rides along so menu clicks can select
+      // the real catalog service on the booking surface.
+      expect(body.data.core[0].serviceCatalogId).toBe(OIL_ID);
     });
   });
 
