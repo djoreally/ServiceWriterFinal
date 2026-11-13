@@ -11,53 +11,17 @@ import { join } from "node:path";
 //  - the /generate route's `services` history read was already
 //    translated by Step 8 — this step keys the recommendations legs
 //    of the same handler by the same resolved workspace.
+//
+// Pruned 2026-11-13 (dead-code pass, PR #287): the pins for the removed
+// Fleet OS / vehicle-import files (vehicle-intelligence service wrapper,
+// service-defaults service, FleetWorkOrderCreatePage, the vehicle-import
+// staging trio, commit service, workflow hook, ImportVehiclesPage) were
+// retired together with those files — the code is deleted, so its tenancy
+// pins are moot. The vehicles.ts pins below cover the live route surface
+// and are unchanged.
 
 const VEHICLES = readFileSync(
   join(__dirname, "../../../src/server/hono/routes/vehicles.ts"),
-  "utf8",
-);
-const INTELLIGENCE_SERVICE = readFileSync(
-  join(__dirname, "../../../src/application/services/vehicle-intelligence/vehicle-intelligence.service.ts"),
-  "utf8",
-);
-const INTELLIGENCE_TYPES = readFileSync(
-  join(__dirname, "../../../src/application/services/vehicle-intelligence/types.ts"),
-  "utf8",
-);
-const SERVICE_DEFAULTS = readFileSync(
-  join(__dirname, "../../../src/application/services/service-defaults/service-defaults.service.ts"),
-  "utf8",
-);
-const WORK_ORDER_CREATE_PAGE = readFileSync(
-  join(__dirname, "../../../src/legacy-pages/fleet-os/FleetWorkOrderCreatePage.tsx"),
-  "utf8",
-);
-const IMPORT_TYPES = readFileSync(
-  join(__dirname, "../../../src/features/vehicle-import/types.ts"),
-  "utf8",
-);
-const BATCH_SERVICE = readFileSync(
-  join(__dirname, "../../../src/features/vehicle-import/services/batch.service.ts"),
-  "utf8",
-);
-const PIPELINE = readFileSync(
-  join(__dirname, "../../../src/features/vehicle-import/pipeline.ts"),
-  "utf8",
-);
-const STAGING = readFileSync(
-  join(__dirname, "../../../src/features/vehicle-import/services/staging-persistence.service.ts"),
-  "utf8",
-);
-const COMMIT_SERVICE = readFileSync(
-  join(__dirname, "../../../src/features/vehicle-import/services/commit.service.ts"),
-  "utf8",
-);
-const WORKFLOW = readFileSync(
-  join(__dirname, "../../../src/features/vehicle-import/useVehicleImportWorkflow.ts"),
-  "utf8",
-);
-const IMPORT_PAGE = readFileSync(
-  join(__dirname, "../../../src/legacy-pages/fleet-os/ImportVehiclesPage.tsx"),
   "utf8",
 );
 
@@ -159,107 +123,5 @@ describe("step9 code — vehicles.ts recommendations", () => {
     expect(dismiss).not.toContain("workspace_id");
     const del = block(VEHICLES, 'delete("/v1/vehicle-recommendations/:id"', "vehiclesRouter.");
     expect(del).toContain('.from("vehicle_recommendations").delete().eq("id", id)');
-  });
-});
-
-describe("step9 code — vehicle intelligence chain", () => {
-  it("the input type gains workspaceId and the upsert stamps it (onConflict unchanged)", () => {
-    expect(INTELLIGENCE_TYPES).toContain("workspaceId: string | null");
-    expect(INTELLIGENCE_SERVICE).toContain("workspace_id: input.workspaceId,");
-    expect(INTELLIGENCE_SERVICE).toContain('onConflict: "vehicle_id"');
-    // The override read/update stay vehicle-keyed.
-    const override = block(INTELLIGENCE_SERVICE, "applyVehicleIntelligenceOverride", "export async function");
-    expect(override).not.toContain("workspace_id");
-  });
-
-  it("service-defaults reads profiles by workspace_id, never user_id", () => {
-    expect(SERVICE_DEFAULTS).toContain("workspaceId: string | null");
-    expect(SERVICE_DEFAULTS).toContain('.eq("workspace_id", input.workspaceId)');
-    expect(SERVICE_DEFAULTS).not.toContain('.eq("user_id", input.userId)');
-    expect(SERVICE_DEFAULTS).toContain("workspaceId: input.workspaceId,");
-  });
-
-  it("the work-order create page threads the selected workspace", () => {
-    expect(WORK_ORDER_CREATE_PAGE).toContain('import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";');
-    expect(WORK_ORDER_CREATE_PAGE).toContain("workspaceId: getSelectedWorkspaceId(),");
-  });
-});
-
-describe("step9 code — vehicle-import staging trio", () => {
-  it("the Batch type and its builders carry workspaceId beside createdBy", () => {
-    expect(IMPORT_TYPES).toContain("workspaceId: string | null");
-    expect(BATCH_SERVICE).toContain("workspaceId: string | null;");
-    expect(BATCH_SERVICE).toContain("workspaceId: args.workspaceId,");
-    expect(PIPELINE).toContain("workspaceId: string | null;");
-  });
-
-  it("persistImportBatch stamps the batch's workspace", () => {
-    const b = block(STAGING, "persistImportBatch", "export async function");
-    expect(b).toContain("workspace_id: batch.workspaceId,");
-    expect(b).toContain("created_by: batch.createdBy,");
-  });
-
-  it("persistImportRows takes the batch's workspace as a parameter and stamps every row", () => {
-    expect(STAGING).toContain("persistImportRows(rows: VehicleImportRow[], workspaceId: string | null)");
-    const b = block(STAGING, "persistImportRows", "export async function");
-    expect(b).toContain("workspace_id: workspaceId,");
-  });
-
-  it("hydrateImportSession round-trips the workspace back onto the Batch", () => {
-    expect(STAGING).toContain("workspace_id: string | null;");
-    expect(STAGING).toContain("workspaceId: batchRow.workspace_id,");
-  });
-
-  it("appendImportAuditLog takes workspaceId and stamps it", () => {
-    const b = block(STAGING, "appendImportAuditLog", "export async function");
-    expect(b).toContain("workspaceId: string | null;");
-    expect(b).toContain("workspace_id: input.workspaceId,");
-    expect(b).toContain("actor_id: input.actorId,");
-  });
-
-  it("listImportHistory keeps its created_by actor filter (actor view, RLS-bounded)", () => {
-    const b = block(STAGING, "listImportHistory", "export async function");
-    expect(b).toContain('.eq("created_by", createdBy)');
-  });
-});
-
-describe("step9 code — commit service", () => {
-  it("intelligence inputs gain the batch's workspace", () => {
-    expect(COMMIT_SERVICE).toContain("workspaceId: session.batch.workspaceId,");
-    expect(COMMIT_SERVICE).toContain("await upsertVehicleIntelligenceProfiles(intelligenceInputs);");
-  });
-
-  it("the rollback audit insert stamps the workspace resolved from the batch row", () => {
-    const b = block(COMMIT_SERVICE, "rollbackImportedBatch", "export async function");
-    expect(b).toContain('.from("vehicle_import_batches")');
-    expect(b).toContain('.select("workspace_id")');
-    expect(b).toContain("workspace_id: batchRow.workspace_id,");
-    expect(b).toContain('event_type: "rollback_completed"');
-  });
-});
-
-describe("step9 code — workflow + page threading", () => {
-  it("loadFile/loadPaste accept the workspace and hand it to the session builders", () => {
-    expect(WORKFLOW).toContain("const loadFile = async (file: File, createdBy: string, workspaceId: string | null) => {");
-    expect(WORKFLOW).toContain("const loadPaste = async (input: string, createdBy: string, workspaceId: string | null) => {");
-    expect(WORKFLOW.match(/ {6}workspaceId,\n {6}sheetTitle:/g)).toHaveLength(2);
-  });
-
-  it("every persistImportRows call passes its batch's workspace", () => {
-    expect(WORKFLOW).not.toMatch(/persistImportRows\((next|processed|committed)\.rows\)/);
-    expect(WORKFLOW.match(/persistImportRows\(next\.rows, next\.batch\.workspaceId\)/g)).toHaveLength(8);
-    expect(WORKFLOW).toContain("persistImportRows(processed.rows, processed.batch.workspaceId)");
-    expect(WORKFLOW).toContain("persistImportRows(committed.rows, committed.batch.workspaceId)");
-  });
-
-  it("every appendImportAuditLog call carries its batch's workspace (15 sites)", () => {
-    const sites = WORKFLOW.match(/workspaceId: (next|processed|failed|session|committed)\.batch\.workspaceId,/g) ?? [];
-    expect(sites).toHaveLength(15);
-  });
-
-  it("the page sources the workspace from getSelectedWorkspaceId at both entry points", () => {
-    expect(IMPORT_PAGE).toContain('import { getSelectedWorkspaceId } from "@/application/queries/workspaces.selection";');
-    expect(IMPORT_PAGE).toContain('await workflow.loadFile(file, user?.id || "unknown-user", getSelectedWorkspaceId());');
-    expect(IMPORT_PAGE).toContain('void workflow.loadPaste(input, user?.id || "unknown-user", getSelectedWorkspaceId());');
   });
 });
