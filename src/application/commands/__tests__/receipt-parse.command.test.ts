@@ -12,6 +12,7 @@ import {
   normalizeReceiptExtraction,
   planReceiptParseRequest,
   readReceiptParseConfig,
+  receiptExtractionInstruction,
   receiptProviderAnswerText,
   type ReceiptParseConfig,
 } from "../receipt-parse.command";
@@ -109,7 +110,7 @@ describe("planReceiptParseRequest", () => {
 });
 
 describe("buildReceiptParseProviderCall", () => {
-  it("builds the Gemini generateContent call with inline data + JSON mode", () => {
+  it("builds the Gemini generateContent call — the exact documented camelCase wire shape", () => {
     const call = buildReceiptParseProviderCall(GEMINI, {
       profile: "general",
       mimeType: "image/jpeg",
@@ -118,14 +119,50 @@ describe("buildReceiptParseProviderCall", () => {
     expect(call.url).toBe(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
     );
-    expect(call.init.headers["x-goog-api-key"]).toBe("gemini-key");
-    const body = JSON.parse(call.init.body);
-    expect(body.generationConfig.response_mime_type).toBe("application/json");
-    expect(body.contents[0].parts[1].inline_data).toEqual({
-      mime_type: "image/jpeg",
-      data: "QUJD",
+    expect(call.init.method).toBe("POST");
+    expect(call.init.headers).toEqual({
+      "x-goog-api-key": "gemini-key",
+      "Content-Type": "application/json",
     });
-    expect(body.contents[0].parts[0].text).toMatch(/crossed out or voided, exclude it/);
+    // The EXACT serialized body, field names included. Google's
+    // generateContent REST shape is camelCase (inlineData / mimeType
+    // / responseMimeType); the snake_case proto names shipped first
+    // and production answered HTTP 404 on every receipt (2026-11-13).
+    // This deep-equal + the substring bans below pin the shape so it
+    // cannot regress silently.
+    expect(JSON.parse(call.init.body)).toEqual({
+      contents: [
+        {
+          parts: [
+            {
+              text: `${receiptExtractionInstruction("general")}\n\nExtract the expense data from this document.`,
+            },
+            { inlineData: { mimeType: "image/jpeg", data: "QUJD" } },
+          ],
+        },
+      ],
+      generationConfig: { responseMimeType: "application/json" },
+    });
+    expect(JSON.parse(call.init.body).contents[0].parts[0].text).toMatch(
+      /crossed out or voided, exclude it/
+    );
+    expect(call.init.body).not.toContain("inline_data");
+    expect(call.init.body).not.toContain("response_mime_type");
+    expect(call.init.body).not.toContain("mime_type");
+  });
+
+  it("sends text documents to Gemini as a second text part (no inlineData)", () => {
+    const call = buildReceiptParseProviderCall(GEMINI, {
+      profile: "general",
+      mimeType: "text/plain",
+      text: "Vendor: Robbie's Automotive Total: 1181.00",
+    });
+    const body = JSON.parse(call.init.body);
+    expect(body.contents[0].parts).toHaveLength(2);
+    expect(body.contents[0].parts[1]).toEqual({
+      text: "Vendor: Robbie's Automotive Total: 1181.00",
+    });
+    expect(body.generationConfig).toEqual({ responseMimeType: "application/json" });
   });
 
   it("builds the OpenAI chat call with an image_url part for photos", () => {

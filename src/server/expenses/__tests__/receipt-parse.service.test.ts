@@ -14,6 +14,7 @@ import { normalizeReceiptExtraction } from "@/application/commands/receipt-parse
 import {
   isIntakeParseFailure,
   ReceiptParseNotConfiguredError,
+  ReceiptParseProviderError,
   resolveReceiptScanCategory,
   runIntakeDocumentParse,
   runReceiptScan,
@@ -119,6 +120,27 @@ function fetchReturning(body: unknown, ok = true, status = 200) {
   })) as unknown as typeof fetch;
 }
 
+/** A provider failure whose body arrives as raw text, as fetch gives it. */
+function fetchFailingWithBody(status: number, bodyText: string) {
+  return jest.fn(async () => ({
+    ok: false,
+    status,
+    text: async () => bodyText,
+    json: async () => {
+      throw new Error("error body is not JSON");
+    },
+  })) as unknown as typeof fetch;
+}
+
+const GOOGLE_404_BODY = JSON.stringify({
+  error: {
+    code: 404,
+    message:
+      "models/gemini-2.5-flash is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.",
+    status: "NOT_FOUND",
+  },
+});
+
 const ENV = { GEMINI_API_KEY: "test-key" };
 
 describe("runIntakeDocumentParse", () => {
@@ -157,6 +179,49 @@ describe("runIntakeDocumentParse", () => {
     for (const patch of patches) {
       expect(patch).not.toHaveProperty("parsed_json");
     }
+  });
+
+  it("provider 404 → parse_error carries the provider's OWN stated reason, not a bare status", async () => {
+    // The 2026-11-13 production acceptance run failed every receipt
+    // with HTTP 404 and the old service discarded the body, leaving
+    // nothing to diagnose. The recorded parse_error must now state
+    // Google's reason verbatim (truncated excerpt).
+    const { supabase, patches } = makeFakeSupabase();
+    const fetchFn = fetchFailingWithBody(404, GOOGLE_404_BODY);
+    const outcome = await runIntakeDocumentParse({ supabase, env: ENV, fetchFn }, DOC);
+    expect(outcome.ok).toBe(false);
+    if (!isIntakeParseFailure(outcome)) return;
+    expect(outcome.reason).toMatch(/HTTP 404/);
+    expect(outcome.reason).toContain("is not found for API version v1beta");
+    const failure = patches[patches.length - 1];
+    expect(failure.parse_status).toBe("parse_failed");
+    expect(failure.parse_error).toBe(outcome.reason);
+    for (const patch of patches) {
+      expect(patch).not.toHaveProperty("parsed_json");
+    }
+  });
+
+  it("the recorded provider excerpt never contains the API key, even if the body echoes it", async () => {
+    const { supabase, patches } = makeFakeSupabase();
+    const fetchFn = fetchFailingWithBody(
+      400,
+      `{"error":{"message":"bad request for key test-key — retry"}}`
+    );
+    const outcome = await runIntakeDocumentParse({ supabase, env: ENV, fetchFn }, DOC);
+    expect(outcome.ok).toBe(false);
+    const failure = patches[patches.length - 1];
+    expect(String(failure.parse_error)).not.toContain("test-key");
+    expect(String(failure.parse_error)).toContain("[redacted]");
+  });
+
+  it("a huge provider error body is truncated in the recorded parse_error", async () => {
+    const { supabase, patches } = makeFakeSupabase();
+    const fetchFn = fetchFailingWithBody(502, `upstream said ${"x".repeat(5000)}`);
+    const outcome = await runIntakeDocumentParse({ supabase, env: ENV, fetchFn }, DOC);
+    expect(outcome.ok).toBe(false);
+    const failure = patches[patches.length - 1];
+    expect(String(failure.parse_error)).toContain("…");
+    expect(String(failure.parse_error).length).toBeLessThan(600);
   });
 
   it("an unreadable document (model reads nothing usable) → honest parse_failed, no poisoning", async () => {
@@ -254,6 +319,22 @@ describe("runReceiptScan", () => {
     );
     expect(extraction.vendor_name).toBe("Robbie's Automotive");
     expect(extraction.total_amount).toBe(1181);
+  });
+
+  it("a provider failure keeps the user-facing message short but carries the provider detail on the error", async () => {
+    const { supabase } = makeFakeSupabase();
+    const thrown = await runReceiptScan(
+      { supabase, env: ENV, fetchFn: fetchFailingWithBody(404, GOOGLE_404_BODY) },
+      { imageBase64: "QUJD", mimeType: "image/jpeg" }
+    ).catch((e: unknown) => e);
+    expect(thrown).toBeInstanceOf(ReceiptParseProviderError);
+    const err = thrown as ReceiptParseProviderError;
+    // The route surfaces err.message to the user — it stays short and
+    // honest, without the raw provider body…
+    expect(err.message).toMatch(/HTTP 404/);
+    expect(err.message).not.toContain("NOT_FOUND");
+    // …while the verbatim reason rides along for logs/diagnosis.
+    expect(err.providerDetail).toContain("is not found for API version v1beta");
   });
 });
 

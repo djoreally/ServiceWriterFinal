@@ -226,11 +226,17 @@ export function buildReceiptParseProviderCall(
   const instruction = receiptExtractionInstruction(input.profile);
 
   if (config.provider === "gemini") {
+    // Google's generateContent REST shape is camelCase — inlineData /
+    // mimeType / responseMimeType. The snake_case proto names
+    // (inline_data / mime_type / response_mime_type) are NOT accepted
+    // in the JSON body: the 2026-11-13 production acceptance run
+    // failed every receipt with HTTP 404 on the snake_case shape.
+    // The command tests pin this exact serialized body.
     const parts: Array<Record<string, unknown>> = [{ text: `${instruction}\n\nExtract the expense data from this document.` }];
     if (typeof input.text === "string") {
       parts.push({ text: input.text.slice(0, 24000) });
     } else {
-      parts.push({ inline_data: { mime_type: input.mimeType, data: input.base64 ?? "" } });
+      parts.push({ inlineData: { mimeType: input.mimeType, data: input.base64 ?? "" } });
     }
     return {
       url: `${config.baseUrl}/models/${config.model}:generateContent`,
@@ -242,7 +248,7 @@ export function buildReceiptParseProviderCall(
         },
         body: JSON.stringify({
           contents: [{ parts }],
-          generationConfig: { response_mime_type: "application/json" },
+          generationConfig: { responseMimeType: "application/json" },
         }),
       },
     };

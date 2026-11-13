@@ -16,7 +16,12 @@
  * read can never masquerade as a successful empty extraction, and
  * the document stays re-parseable. A successful parse writes the
  * full extraction in the app's own vocabulary
- * (pending | parsing | parsed | parse_failed).
+ * (pending | parsing | parsed | parse_failed). When the provider
+ * answers non-2xx, its error body is captured (truncated,
+ * credential-redacted) into parse_error and the service log — the
+ * first production run of this reader failed every receipt with a
+ * bare HTTP 404 precisely because the original service discarded
+ * the body and left nothing to diagnose.
  *
  * Provider access is env-driven via readReceiptParseConfig
  * (GEMINI_API_KEY first — the key already provisioned in the server
@@ -51,10 +56,33 @@ export class ReceiptParseNotConfiguredError extends Error {
 
 /** Thrown by the scan door when the provider call or read fails. */
 export class ReceiptParseProviderError extends Error {
-  constructor(reason: string) {
+  /**
+   * The provider's own error-body excerpt (truncated, credential-free)
+   * when the provider answered a non-2xx. The message itself stays
+   * short and user-honest; the detail exists so the recorded
+   * parse_error and the service log state the provider's actual
+   * reason instead of a bare status code.
+   */
+  providerDetail?: string;
+
+  constructor(reason: string, providerDetail?: string) {
     super(reason);
     this.name = "ReceiptParseProviderError";
+    if (providerDetail) this.providerDetail = providerDetail;
   }
+}
+
+/**
+ * The parse_error recorded on an intake row for a provider error:
+ * the short user-honest message PLUS the provider's verbatim
+ * excerpt when one was captured, so a failed parse can be diagnosed
+ * from the row alone (the pre-fix reader discarded the body, which
+ * is why the 2026-11-13 production 404s carried no reason).
+ */
+export function recordedProviderFailureReason(error: ReceiptParseProviderError): string {
+  return error.providerDetail
+    ? `${error.message} Provider said: ${error.providerDetail}`
+    : error.message;
 }
 
 /**
@@ -109,6 +137,44 @@ interface ProviderRead {
   answerText: string;
 }
 
+/** Longest provider error-body excerpt kept for parse_error / logs. */
+const PROVIDER_ERROR_EXCERPT_CHARS = 400;
+
+/**
+ * Read a non-2xx provider answer's body as a short, secret-free
+ * excerpt. The provider's stated reason (Google's error.message, a
+ * proxy's complaint, …) is the difference between a diagnosable
+ * failure and a bare status code, so it is ALWAYS captured when the
+ * provider sends one. The configured key is redacted defensively —
+ * a provider error body should never echo it, but the excerpt lands
+ * in a database row and a log, and neither may ever hold a secret.
+ */
+async function providerErrorExcerpt(
+  res: { text?: unknown; json?: unknown },
+  apiKey: string
+): Promise<string | undefined> {
+  let raw = "";
+  try {
+    if (typeof res.text === "function") {
+      raw = await (res.text as () => Promise<string>)();
+    } else if (typeof res.json === "function") {
+      const parsed: unknown = await (res.json as () => Promise<unknown>)().catch(
+        () => null
+      );
+      if (parsed !== null && parsed !== undefined) raw = JSON.stringify(parsed);
+    }
+  } catch {
+    raw = "";
+  }
+  let excerpt = raw.replace(/\s+/g, " ").trim();
+  if (apiKey !== "") excerpt = excerpt.split(apiKey).join("[redacted]");
+  if (excerpt === "") return undefined;
+  if (excerpt.length > PROVIDER_ERROR_EXCERPT_CHARS) {
+    excerpt = `${excerpt.slice(0, PROVIDER_ERROR_EXCERPT_CHARS)}…`;
+  }
+  return excerpt;
+}
+
 /**
  * One provider round-trip: build the call in the provider's wire
  * shape, fetch with a hard timeout, and normalize the answer.
@@ -129,8 +195,13 @@ async function callReceiptProvider(
     try {
       const res = await fetchFn(call.url, { ...call.init, signal: controller.signal });
       if (!res.ok) {
+        const detail = await providerErrorExcerpt(res, config.apiKey);
+        console.error(
+          `[receipt-parse] provider answered HTTP ${res.status} for ${config.provider}:${config.model}: ${detail ?? "(no error body)"}`
+        );
         throw new ReceiptParseProviderError(
-          `The receipt reader's provider answered HTTP ${res.status} — try again in a moment.`
+          `The receipt reader's provider answered HTTP ${res.status} — try again in a moment.`,
+          detail
         );
       }
       body = await res.json().catch(() => null);
@@ -252,6 +323,11 @@ export async function runIntakeDocumentParse(
       });
     }
   } catch (e) {
+    if (e instanceof ReceiptParseProviderError) {
+      // Record the provider's own excerpt alongside the short reason —
+      // the row must state WHY the provider refused, not just that it did.
+      return fail(recordedProviderFailureReason(e));
+    }
     return fail(e instanceof Error ? e.message : "The receipt could not be read.");
   }
 
