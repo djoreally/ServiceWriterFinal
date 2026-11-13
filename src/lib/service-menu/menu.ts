@@ -99,6 +99,11 @@ export interface ResolvedCoreEntry extends ResolvedMenuEntry {
   price: number | null;
   estimatedMinutes: number | null;
   isMostPopular: boolean;
+  /**
+   * Booking target: the service_catalog id this entry selects, or null
+   * for drafts (drafts have no target and are never selectable).
+   */
+  serviceCatalogId: string | null;
 }
 
 export interface ResolvedComboEntry extends ResolvedMenuEntry {
@@ -107,11 +112,15 @@ export interface ResolvedComboEntry extends ResolvedMenuEntry {
   savings: number | null;
   savingsPercent: number | null;
   includedNames: string[];
+  /** Booking target: the service_packages id this entry selects, or null for drafts. */
+  packageId: string | null;
 }
 
 export interface ResolvedSideEntry extends ResolvedMenuEntry {
   standalonePrice: number | null;
   withServicePrice: number | null;
+  /** Booking target: the service_catalog id this entry selects, or null for drafts. */
+  serviceCatalogId: string | null;
 }
 
 export interface ResolvedHero {
@@ -120,6 +129,8 @@ export interface ResolvedHero {
   price: number | null;
   separateTotal: number | null;
   savings: number | null;
+  /** Booking target: the service_packages id the hero selects. */
+  packageId: string;
 }
 
 export interface ResolvedMenu {
@@ -327,6 +338,7 @@ export function resolveMenu(input: {
         name: item.displayName || pkg?.name || "Combo",
         description: pkg?.description ?? null,
         isDraft: Boolean(item.isDraft || !pkg),
+        packageId: pkg ? pkg.id : null,
         price: math ? math.bundlePrice : null,
         separateTotal: math ? math.separateTotal : null,
         savings: math ? math.savings : null,
@@ -352,6 +364,7 @@ export function resolveMenu(input: {
         name,
         description: row?.description ?? null,
         isDraft: Boolean(item.isDraft || !row),
+        serviceCatalogId: row ? row.id : null,
         price: row ? catalogPrice(row) : null,
         estimatedMinutes:
           row?.estimated_minutes == null ? null : Number(row.estimated_minutes),
@@ -363,6 +376,7 @@ export function resolveMenu(input: {
         name,
         description: row?.description ?? null,
         isDraft: Boolean(item.isDraft || !row),
+        serviceCatalogId: row ? row.id : null,
         standalonePrice: row ? catalogPrice(row) : null,
         withServicePrice:
           item.withServicePrice == null
@@ -381,6 +395,7 @@ export function resolveMenu(input: {
     hero = {
       name: heroPkg.name,
       label: input.settings.heroLabel ?? null,
+      packageId: heroPkg.id,
       price: math.bundlePrice,
       separateTotal: math.separateTotal,
       savings: math.savings,

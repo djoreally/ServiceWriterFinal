@@ -63,7 +63,7 @@ import { applyProviderVerticalDefault } from "@/lib/service-category-policy";
 import { LocationStep } from "@/components/booking/steps/LocationStep";
 import { VehicleStep } from "@/components/booking/steps/VehicleStep";
 import { ServiceSelectionStep, type ServiceCatalogItem } from "@/components/booking/steps/ServiceSelectionStep";
-import { ServiceMenuSection } from "@/components/catalog/ServiceMenu";
+import { usePublicServiceMenu } from "@/hooks/usePublicServiceMenu";
 import { ConfirmationStep } from "@/components/booking/steps/ConfirmationStep";
 import { BookingCardPayment } from "@/components/booking/BookingCardPayment";
 import { DateTimeStep } from "@/components/booking/steps/DateTimeStep";
@@ -621,6 +621,13 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
     grandTotal: pricing.grandTotal,
     payNowStatus: bs.payNow?.status,
   });
+
+  // ── Service Menu (Step 3) ─────────────────────────────────────────────
+  // Resolved public menu for this shop's booking slug (null when the shop
+  // has not enabled one or the load fails). Passed into the service
+  // selection step, which renders it above the catalog and wires its
+  // entries into the step's normal per-vehicle selection pathway.
+  const serviceMenu = usePublicServiceMenu(slug);
 
   // ── Category-driven vehicle selector policy ─────────────────────────────
   // Tire categories use the wheel/tire configurator and never show fluid specs.
@@ -1353,9 +1360,8 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
         {/* Step 3: Assign services independently to each vehicle */}
         {bs.step === 3 && (
           <>
-          {/* Service Menu (renders only when this shop enabled one) */}
-          <ServiceMenuSection slug={slug} />
           <ServiceSelectionStep
+            serviceMenu={serviceMenu}
             services={services}
             packages={packages}
             subscriptionPlans={subscriptionPlans}
