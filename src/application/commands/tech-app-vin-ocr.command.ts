@@ -143,11 +143,14 @@ export function buildVinOcrProviderCall(
             {
               parts: [
                 { text: `${VIN_INSTRUCTION}\n\nRead the VIN in this photo.` },
-                { inline_data: { mime_type: image.mimeType, data: image.imageBase64 } },
+                // Google's generateContent REST shape is camelCase
+                // (inlineData / mimeType) — the snake_case proto names
+                // are not accepted in the JSON body. Pinned by tests.
+                { inlineData: { mimeType: image.mimeType, data: image.imageBase64 } },
               ],
             },
           ],
-          generationConfig: { response_mime_type: "application/json" },
+          generationConfig: { responseMimeType: "application/json" },
         }),
       },
     };

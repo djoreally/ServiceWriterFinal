@@ -81,7 +81,7 @@ describe("planVinOcrRequest", () => {
 });
 
 describe("buildVinOcrProviderCall", () => {
-  it("builds a Gemini generateContent call carrying the photo as inline_data", () => {
+  it("builds a Gemini generateContent call — the exact documented camelCase wire shape", () => {
     const call = buildVinOcrProviderCall(
       {
         provider: "gemini",
@@ -96,14 +96,26 @@ describe("buildVinOcrProviderCall", () => {
     );
     expect(call.init.method).toBe("POST");
     expect(call.init.headers["x-goog-api-key"]).toBe("gem-key");
-    const body = JSON.parse(call.init.body);
-    const parts = body.contents[0].parts as Array<Record<string, unknown>>;
-    const imagePart = parts.find((p) => "inline_data" in p) as {
-      inline_data: { mime_type: string; data: string };
-    };
-    expect(imagePart.inline_data).toEqual({ mime_type: "image/png", data: "QUJD" });
-    const textPart = parts.find((p) => typeof p.text === "string") as { text: string };
-    expect(textPart.text).toMatch(/Never invent/);
+    // The EXACT serialized body, field names included. Google's
+    // generateContent REST shape is camelCase (inlineData / mimeType
+    // / responseMimeType); this door originally shipped the
+    // snake_case proto names — the same defect that made the receipt
+    // reader's production calls answer HTTP 404 (2026-11-13). The
+    // deep-equal + substring bans pin the shape against regression.
+    expect(JSON.parse(call.init.body)).toEqual({
+      contents: [
+        {
+          parts: [
+            { text: expect.stringContaining("Never invent") },
+            { inlineData: { mimeType: "image/png", data: "QUJD" } },
+          ],
+        },
+      ],
+      generationConfig: { responseMimeType: "application/json" },
+    });
+    expect(call.init.body).not.toContain("inline_data");
+    expect(call.init.body).not.toContain("response_mime_type");
+    expect(call.init.body).not.toContain("mime_type");
   });
 
   it("builds an OpenAI-compatible chat call carrying the photo as a data URI", () => {
