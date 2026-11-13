@@ -63,6 +63,7 @@ import { applyProviderVerticalDefault } from "@/lib/service-category-policy";
 import { LocationStep } from "@/components/booking/steps/LocationStep";
 import { VehicleStep } from "@/components/booking/steps/VehicleStep";
 import { ServiceSelectionStep, type ServiceCatalogItem } from "@/components/booking/steps/ServiceSelectionStep";
+import { ServiceMenuSection } from "@/components/catalog/ServiceMenu";
 import { ConfirmationStep } from "@/components/booking/steps/ConfirmationStep";
 import { BookingCardPayment } from "@/components/booking/BookingCardPayment";
 import { DateTimeStep } from "@/components/booking/steps/DateTimeStep";
@@ -1351,6 +1352,9 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
 
         {/* Step 3: Assign services independently to each vehicle */}
         {bs.step === 3 && (
+          <>
+          {/* Service Menu (renders only when this shop enabled one) */}
+          <ServiceMenuSection slug={slug} />
           <ServiceSelectionStep
             services={services}
             packages={packages}
@@ -1372,6 +1376,7 @@ const PublicBooking = ({ tenantSlug }: PublicBookingProps = {}) => {
             serviceDisplayMode={business?.service_display_mode || "full_list"}
             detailingRules={detailingRules}
           />
+          </>
         )}
 
         {/* Step 4: Date & Time */}
