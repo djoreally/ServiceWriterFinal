@@ -60,7 +60,37 @@ export async function saveAppointment(formData:AppointmentFormState,options:Save
   let resolvedLocationAddress=formData.location_address?.trim()||null;if(!resolvedLocationAddress){const addressResponse=await apiClient.get<{ data: { address_line1: string | null; address_line2: string | null; city: string | null; region: string | null; postal_code: string | null } | null }>(`/v1/appointments/customer-address`,{query:{customer_id:customerId}});const customer=addressResponse.data;if(customer)resolvedLocationAddress=[customer.address_line1,customer.address_line2,customer.city,customer.region,customer.postal_code].filter(Boolean).join(", ")||null;}
   const overrideAvailability=(formData as AppointmentFormState&{override_availability?:boolean}).override_availability===true;
   const payload={workspace_id:context.workspaceId,customer_id:customerId,vehicle_id:vehicleId,starts_at:startsAt,ends_at:endsAt,status:formData.status||"confirmed",notes:formData.notes?.trim()||null,title:formData.title?.trim()||"Appointment",description:formData.description?.trim()||null,guest_name:formData.guest_name?.trim()||null,guest_email:formData.guest_email?.trim()||null,guest_phone:formData.guest_phone?.trim()||null,service_catalog_id:serviceCatalogId,estimated_cost:formData.estimated_cost!=null?Number(formData.estimated_cost):null,tax_amount:resolvedTaxAmount,location_address:resolvedLocationAddress,customer_city:formData.customer_city?.trim()||null,customer_state:formData.customer_state?.trim()||null,customer_postal_code:formData.customer_postal_code?.trim()||null,override_availability:overrideAvailability};
-  const shouldUpdate=Boolean(options.existingAppointmentId&&!options.isPrefillNew);if(shouldUpdate&&options.existingAppointmentId){await nextApi.appointments.update(options.existingAppointmentId,payload);await syncAppointmentPrimaryService({workspaceId:context.workspaceId,appointmentId:options.existingAppointmentId,serviceCatalogId});if(formData.sendEmailNotification&&formData.guest_email?.trim())await sendStaffAppointmentConfirmation(options.existingAppointmentId,context.workspaceId);return{appointmentId:options.existingAppointmentId,isUpdate:true};}
+  // Partial-update guard (SW-42): the create payload above always carries
+  // every field — absent form values coerced to null, and location_address /
+  // tax_amount derived from other records when the form omits them. Sent on
+  // UPDATE, that erases stored data the form never mentioned (vehicle
+  // assignment, guest fields, quoted tax, the service address). The update
+  // payload therefore includes a field only when the form actually carries
+  // it; starts/ends/customer/service are always carried because this command
+  // requires them.
+  const updatePayload: Record<string, unknown> = {
+    workspace_id: context.workspaceId,
+    customer_id: customerId,
+    service_catalog_id: serviceCatalogId,
+    starts_at: startsAt,
+    ends_at: endsAt,
+  };
+  if (formData.vehicle_id !== undefined) updatePayload.vehicle_id = vehicleId;
+  if (formData.status !== undefined) updatePayload.status = payload.status;
+  if (formData.title !== undefined) updatePayload.title = payload.title;
+  if (formData.notes !== undefined) updatePayload.notes = payload.notes;
+  if (formData.description !== undefined) updatePayload.description = payload.description;
+  if (formData.guest_name !== undefined) updatePayload.guest_name = payload.guest_name;
+  if (formData.guest_email !== undefined) updatePayload.guest_email = payload.guest_email;
+  if (formData.guest_phone !== undefined) updatePayload.guest_phone = payload.guest_phone;
+  if (formData.estimated_cost !== undefined) updatePayload.estimated_cost = payload.estimated_cost;
+  if (formData.estimated_cost !== undefined || formData.tax_amount !== undefined) updatePayload.tax_amount = resolvedTaxAmount;
+  if (formData.location_address !== undefined) updatePayload.location_address = formData.location_address?.trim() || null;
+  if (formData.customer_city !== undefined) updatePayload.customer_city = payload.customer_city;
+  if (formData.customer_state !== undefined) updatePayload.customer_state = payload.customer_state;
+  if (formData.customer_postal_code !== undefined) updatePayload.customer_postal_code = payload.customer_postal_code;
+  if (overrideAvailability) updatePayload.override_availability = true;
+  const shouldUpdate=Boolean(options.existingAppointmentId&&!options.isPrefillNew);if(shouldUpdate&&options.existingAppointmentId){await nextApi.appointments.update(options.existingAppointmentId,updatePayload);await syncAppointmentPrimaryService({workspaceId:context.workspaceId,appointmentId:options.existingAppointmentId,serviceCatalogId});if(formData.sendEmailNotification&&formData.guest_email?.trim())await sendStaffAppointmentConfirmation(options.existingAppointmentId,context.workspaceId);return{appointmentId:options.existingAppointmentId,isUpdate:true};}
   // Manual quote lock (creation only): staff explicitly locked the typed
   // estimated cost as the custom/flat price. The server stamps the lock,
   // zeroes the tax, and seeds the priced item itself; the primary-service

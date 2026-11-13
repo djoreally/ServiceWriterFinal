@@ -1906,8 +1906,29 @@ appointmentsRouter.post("/v1/appointments/booking-progress", async (c: Context) 
     last_attempted_at: new Date().toISOString(),
   };
 
+  // Partial-update guard (SW-42): the shared payload is correct for the
+  // INSERT, but on the update branch its `?? null` / `?? {}` coercions wiped
+  // the visitor's previously captured progress fields whenever a later
+  // progress ping omitted them. The update writes only what this ping
+  // actually carries; identity fields are written only when this ping
+  // supplied that identity dimension.
+  const updatePayload: Record<string, unknown> = {
+    user_id: body.business_user_id,
+    last_step: body.last_step,
+    status: "pending",
+    last_attempted_at: payload.last_attempted_at,
+  };
+  if (email) updatePayload.guest_email = email;
+  if (sessionId) updatePayload.session_id = sessionId;
+  if (body.guest_name !== undefined) updatePayload.guest_name = body.guest_name ?? null;
+  if (body.guest_phone !== undefined) updatePayload.guest_phone = body.guest_phone ?? null;
+  if (body.service_catalog_id !== undefined) updatePayload.service_catalog_id = body.service_catalog_id ?? null;
+  if (body.scheduled_date !== undefined) updatePayload.scheduled_date = body.scheduled_date ?? null;
+  if (body.scheduled_time !== undefined) updatePayload.scheduled_time = body.scheduled_time ?? null;
+  if (body.metadata !== undefined) updatePayload.metadata = body.metadata ?? {};
+
   const { data, error } = existingId
-    ? await db.from("abandoned_bookings").update(payload).eq("id", existingId).select("id").single()
+    ? await db.from("abandoned_bookings").update(updatePayload).eq("id", existingId).select("id").single()
     : await db.from("abandoned_bookings").insert(payload).select("id").single();
   if (error) return json({ data: null, error: serializeDataError(error) });
 

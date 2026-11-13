@@ -3719,6 +3719,11 @@ workOrdersRouter.post("/v1/tech-app/appointment-notes", async (c) => {
   const { supabase, workspaceId } = await requireCallerWorkspaceId(c);
   const body = z.object({ job_id: z.string().min(1), notes: z.string().nullable().optional() })
     .parse(await c.req.json());
+  // Partial-update guard (SW-42): notes is this endpoint's only payload.
+  // The schema makes it optional and `?? null` converted an omitted field
+  // into a full clear of the appointment's notes. Require the key: an
+  // explicit null remains a deliberate clear, an omission is a 400.
+  if (!("notes" in body)) throw new ApiError(400, "notes is required", "invalid_input");
   const { data, error } = await (supabase.from("appointments") as any)
     .update({ notes: body.notes ?? null }).eq("id", body.job_id).eq("workspace_id", workspaceId).select();
   if (error) throw error;

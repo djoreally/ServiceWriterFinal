@@ -85,31 +85,61 @@ export async function updateServiceRecord(serviceId: string, data: Record<string
   const workspace_id = getSelectedWorkspaceId();
   if (!workspace_id) return { data: null, error: new Error("Select a workspace before updating a service record.") };
   try {
-    const labor = bankersRound(Number(data.labor_cost ?? 0), 2);
-    const parts = bankersRound(Number(data.parts_cost ?? 0), 2);
-    const supplies = bankersRound(Number(data.shop_supplies ?? 0), 2);
-    const subtotal = bankersRound(labor + parts + supplies, 2);
-    const discount = bankersRound(Number(data.discount_amount ?? 0), 2);
-    if (discount > subtotal) throw new Error("Discount cannot exceed subtotal.");
-    const taxRate = bankersRound(Number(data.tax_rate ?? 0), 4);
-    const taxAmount = bankersRound(Math.max(subtotal - discount, 0) * (taxRate / 100), 2);
-    const total = bankersRound(Math.max(subtotal - discount, 0) + taxAmount, 2);
-    const metadata = { ...data, labor_cost: labor, parts_cost: parts, shop_supplies: supplies, total_cost: total };
+    // Partial-update guard (SW-42): write only the fields the caller actually
+    // provided. This used to coerce every absent field — customer_id /
+    // vehicle_id / work_performed / internal_notes to null, the whole money
+    // block to values recomputed from 0 — and replace the stored metadata
+    // with just the caller's keys, so a partial save erased stored data.
+    // A key that IS provided keeps the historical coercion (non-string ->
+    // null is the form's explicit clear); a key that is absent is not sent.
+    const has = (key: string) => Object.prototype.hasOwnProperty.call(data, key) && data[key] !== undefined;
+    const payload: Record<string, unknown> = { workspace_id };
+    if (has("customer_id")) payload.customer_id = typeof data.customer_id === "string" ? data.customer_id : null;
+    if (has("vehicle_id")) payload.vehicle_id = typeof data.vehicle_id === "string" ? data.vehicle_id : null;
+    const status = data.status === "pending" ? "draft" : data.status === "in_progress" ? "in_progress" : data.status === "completed" ? "completed" : undefined;
+    if (status !== undefined) payload.status = status;
+    if (has("description")) payload.work_performed = typeof data.description === "string" ? data.description : null;
+    if (has("notes")) payload.internal_notes = typeof data.notes === "string" ? data.notes : null;
 
-    await nextApi.serviceRecords.update(serviceId, {
-      workspace_id,
-      customer_id: typeof data.customer_id === "string" ? data.customer_id : null,
-      vehicle_id: typeof data.vehicle_id === "string" ? data.vehicle_id : null,
-      status: data.status === "pending" ? "draft" : data.status === "in_progress" ? "in_progress" : data.status === "completed" ? "completed" : undefined,
-      work_performed: typeof data.description === "string" ? data.description : null,
-      internal_notes: typeof data.notes === "string" ? data.notes : null,
-      subtotal,
-      tax_rate: taxRate,
-      tax_amount: taxAmount,
-      discount_amount: discount,
-      total_amount: total,
-      metadata,
-    });
+    // The money block is one derived set: it is written only when the caller
+    // provided at least one money input, and computed exactly as before.
+    const moneyKeys = ["labor_cost", "parts_cost", "shop_supplies", "discount_amount", "tax_rate"] as const;
+    if (moneyKeys.some((key) => has(key))) {
+      const labor = bankersRound(Number(data.labor_cost ?? 0), 2);
+      const parts = bankersRound(Number(data.parts_cost ?? 0), 2);
+      const supplies = bankersRound(Number(data.shop_supplies ?? 0), 2);
+      const subtotal = bankersRound(labor + parts + supplies, 2);
+      const discount = bankersRound(Number(data.discount_amount ?? 0), 2);
+      if (discount > subtotal) throw new Error("Discount cannot exceed subtotal.");
+      const taxRate = bankersRound(Number(data.tax_rate ?? 0), 4);
+      const taxAmount = bankersRound(Math.max(subtotal - discount, 0) * (taxRate / 100), 2);
+      const total = bankersRound(Math.max(subtotal - discount, 0) + taxAmount, 2);
+      payload.subtotal = subtotal;
+      payload.tax_rate = taxRate;
+      payload.tax_amount = taxAmount;
+      payload.discount_amount = discount;
+      payload.total_amount = total;
+      payload.metadata = { labor_cost: labor, parts_cost: parts, shop_supplies: supplies, total_cost: total };
+    }
+
+    if (payload.metadata || Object.keys(data).length > 0) {
+      // The server PATCH replaces the metadata column with what it is sent,
+      // so merge the caller's keys over the record's stored metadata —
+      // stored keys the caller never mentioned (service_number, completion
+      // details, ...) must survive the save. Fail closed if the current
+      // record cannot be read: an unmerged write would be destructive.
+      const current = await nextApi.serviceRecords.get(workspace_id, serviceId);
+      const currentRow = current.data as { metadata?: unknown } | null;
+      const storedMetadata = currentRow?.metadata && typeof currentRow.metadata === "object" && !Array.isArray(currentRow.metadata)
+        ? currentRow.metadata as Record<string, unknown>
+        : {};
+      const callerMetadata = payload.metadata && typeof payload.metadata === "object"
+        ? payload.metadata as Record<string, unknown>
+        : {};
+      payload.metadata = { ...storedMetadata, ...data, ...callerMetadata };
+    }
+
+    await nextApi.serviceRecords.update(serviceId, payload);
     return { data: null, error: null };
   } catch (error) { return { data: null, error: error instanceof Error ? error : new Error("Failed to update service record.") }; }
 }

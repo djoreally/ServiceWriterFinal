@@ -43,7 +43,7 @@ export async function upsertVehicleIntelligenceProfiles(inputs: VehicleIntellige
 export async function applyVehicleIntelligenceOverride(vehicleId: string, overrideDefaults: Partial<VehicleIntelligenceDefaults>): Promise<void> {
   const { data, error } = await db
     .from("vehicle_intelligence_profiles")
-    .select("derived_defaults")
+    .select("derived_defaults, override_defaults")
     .eq("vehicle_id", vehicleId)
     .single();
 
@@ -52,20 +52,34 @@ export async function applyVehicleIntelligenceOverride(vehicleId: string, overri
     return;
   }
 
-  const derived = ((data as { derived_defaults?: VehicleIntelligenceDefaults } | null)?.derived_defaults || {}) as VehicleIntelligenceDefaults;
-  const effective = {
-    ...derived,
+  const row = data as { derived_defaults?: VehicleIntelligenceDefaults; override_defaults?: Partial<VehicleIntelligenceDefaults> } | null;
+  const derived = (row?.derived_defaults || {}) as VehicleIntelligenceDefaults;
+  // Partial-update guard (SW-42): an override call carries only the keys it
+  // changes. Merge it over the stored overrides instead of replacing
+  // override_defaults outright — replacing silently dropped every previously
+  // overridden key from both override_defaults and effective_defaults.
+  const storedOverrides = (row?.override_defaults || {}) as Partial<VehicleIntelligenceDefaults>;
+  const mergedOverrides = {
+    ...storedOverrides,
     ...overrideDefaults,
     maintenanceProfile: {
-      ...derived.maintenanceProfile,
+      ...(storedOverrides.maintenanceProfile || {}),
       ...(overrideDefaults.maintenanceProfile || {}),
+    },
+  };
+  const effective = {
+    ...derived,
+    ...mergedOverrides,
+    maintenanceProfile: {
+      ...derived.maintenanceProfile,
+      ...(mergedOverrides.maintenanceProfile || {}),
     },
   };
 
   const { error: updateError } = await db
     .from("vehicle_intelligence_profiles")
     .update({
-      override_defaults: overrideDefaults,
+      override_defaults: mergedOverrides,
       effective_defaults: effective,
       updated_at: new Date().toISOString(),
     })

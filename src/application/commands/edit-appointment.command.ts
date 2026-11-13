@@ -22,7 +22,10 @@ export interface EditAppointmentPayload {
   customer_postal_code?: string | null;
 }
 
-export async function editAppointment(appointmentId: string, payload: EditAppointmentPayload): Promise<void> {
+// Accepts a partial payload (SW-42): callers send only the fields they mean
+// to change, and the server PATCH writes only the keys it receives. Fields
+// the caller never mentioned keep their stored values.
+export async function editAppointment(appointmentId: string, payload: Partial<EditAppointmentPayload>): Promise<void> {
   const workspace_id = getSelectedWorkspaceId();
   if (!workspace_id) throw new Error("Select a workspace before editing an appointment.");
   await nextApi.appointments.update(appointmentId, { workspace_id, ...payload });

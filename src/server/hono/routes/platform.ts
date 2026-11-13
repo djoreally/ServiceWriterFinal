@@ -2155,32 +2155,34 @@ platformRouter.post("/v1/platform/settings/business-profile", async (c) => {
   const currentOperational = currentSettings?.operational_settings && typeof currentSettings.operational_settings === "object" && !Array.isArray(currentSettings.operational_settings)
     ? currentSettings.operational_settings as Record<string, unknown>
     : {};
-  const operational = {
-    ...currentOperational,
-    date_format: data.date_format,
-    service_address: data.service_address,
-    service_coordinates: data.service_coordinates,
-    cover_image_url: data.cover_image_url,
-    weather_guard_enabled: data.weather_guard_enabled,
-    weather_guard_settings: data.weather_guard_settings,
-  };
-  const settingsPatch: Record<string, unknown> = {
-    owner_name: data.owner_name || null,
-    phone: data.phone || null,
-    email: data.email || null,
-    address_line1: data.address || null,
-    website_url: data.website_url || null,
-    logo_url: data.logo_url || null,
-    terminology: data.terminology ?? {},
-    opening_time: data.opening_time || null,
-    closing_time: data.closing_time || null,
-    working_days: data.working_days ?? [],
-    booking_slug: data.booking_slug || null,
-    service_radius_miles: data.service_radius_miles ?? null,
-    marketplace_opt_in: data.marketplace_opt_in === true,
-    day_hours: data.day_hours ?? {},
-    operational_settings: operational,
-  };
+  // Partial-update guard (SW-42): both patches are built ONLY from the keys
+  // the caller actually sent. This endpoint serves the full Settings form
+  // save AND single-field callers — the marketplace visibility toggle sends
+  // only { marketplace_opt_in }. Rebuilding every column from an absent key
+  // (|| null / ?? [] / ?? {}) used to erase the stored business profile on
+  // every one-field save. A key that is present keeps the historical
+  // coercion (empty -> null / empty collection); an absent key is not
+  // written at all.
+  const operational: Record<string, unknown> = { ...currentOperational };
+  for (const key of ["date_format", "service_address", "service_coordinates", "cover_image_url", "weather_guard_enabled", "weather_guard_settings"] as const) {
+    if (data[key] !== undefined) operational[key] = data[key];
+  }
+  const settingsPatch: Record<string, unknown> = {};
+  if (data.owner_name !== undefined) settingsPatch.owner_name = data.owner_name || null;
+  if (data.phone !== undefined) settingsPatch.phone = data.phone || null;
+  if (data.email !== undefined) settingsPatch.email = data.email || null;
+  if (data.address !== undefined) settingsPatch.address_line1 = data.address || null;
+  if (data.website_url !== undefined) settingsPatch.website_url = data.website_url || null;
+  if (data.logo_url !== undefined) settingsPatch.logo_url = data.logo_url || null;
+  if (data.terminology !== undefined) settingsPatch.terminology = data.terminology ?? {};
+  if (data.opening_time !== undefined) settingsPatch.opening_time = data.opening_time || null;
+  if (data.closing_time !== undefined) settingsPatch.closing_time = data.closing_time || null;
+  if (data.working_days !== undefined) settingsPatch.working_days = data.working_days ?? [];
+  if (data.booking_slug !== undefined) settingsPatch.booking_slug = data.booking_slug || null;
+  if (data.service_radius_miles !== undefined) settingsPatch.service_radius_miles = data.service_radius_miles ?? null;
+  if (data.marketplace_opt_in !== undefined) settingsPatch.marketplace_opt_in = data.marketplace_opt_in === true;
+  if (data.day_hours !== undefined) settingsPatch.day_hours = data.day_hours ?? {};
+  settingsPatch.operational_settings = operational;
   // Upsert, not update: workspaces whose workspace_settings row was never
   // seeded must still save. workspace_id is the primary key, so it is the
   // conflict target. A missing row after the write is a failed save, not a
@@ -2255,12 +2257,15 @@ platformRouter.put("/v1/platform/tracking-settings", async (c) => {
     enabled: z.boolean(),
   }).passthrough().parse(await c.req.json());
   const { supabase, user } = await requireAuth(c);
+  // Partial-update guard (SW-42): the schema marks every tracking field
+  // optional and the spread already carries only the keys the caller sent.
+  // The old explicit `custom_head_script: ... || null` lines converted an
+  // omitted script into a stored null on every save; an explicitly sent
+  // null still clears, an omitted key now leaves the stored script intact.
   const payload = {
     user_id: user.id,
     ...settings,
     enabled: settings.enabled,
-    custom_head_script: settings.custom_head_script || null,
-    custom_body_script: settings.custom_body_script || null,
   };
   const { error } = await (supabase as any).from("tenant_tracking_settings").upsert(payload, { onConflict: "user_id" });
   if (error) throw error;

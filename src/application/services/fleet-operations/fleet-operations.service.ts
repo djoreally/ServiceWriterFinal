@@ -278,15 +278,19 @@ export async function approveServiceSchedulesInBulk(input: {
   proposedTime?: string | null;
 }): Promise<number> {
   if (!input.scheduleIds.length) return 0;
+  // Partial-update guard (SW-42): only write the proposed date/time when the
+  // caller actually proposed one. Coercing an absent proposal to null wiped
+  // previously proposed schedule dates/times on every plain approval.
+  const patch: Record<string, unknown> = {
+    queue_status: "approved",
+    approved_by: input.userId,
+    approved_at: new Date().toISOString(),
+  };
+  if (input.proposedDate) patch.proposed_scheduled_date = input.proposedDate;
+  if (input.proposedTime) patch.proposed_scheduled_time = input.proposedTime;
   const { data, error } = await db
     .from("fleet_service_schedules")
-    .update({
-      queue_status: "approved",
-      approved_by: input.userId,
-      approved_at: new Date().toISOString(),
-      proposed_scheduled_date: input.proposedDate || null,
-      proposed_scheduled_time: input.proposedTime || null,
-    })
+    .update(patch)
     .eq("user_id", input.userId)
     .in("id", input.scheduleIds)
     .select("id");
