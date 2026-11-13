@@ -863,7 +863,8 @@ crmRouter.post("/v1/crm/follow-up/rules/seed-defaults", async (c) => {
 });
 
 crmRouter.post("/v1/crm/follow-up/rules", async (c) => {
-  const body = followUpRuleSchema.parse(await c.req.json());
+  const rawBody = await c.req.json();
+  const body = followUpRuleSchema.parse(rawBody);
   if (!body.name?.trim() || !body.trigger_type || !body.action_type) {
     throw new ApiError(400, "Follow-up rule is missing required fields", "invalid_rule");
   }
@@ -888,6 +889,13 @@ crmRouter.post("/v1/crm/follow-up/rules", async (c) => {
     updated_at: new Date().toISOString(),
   };
   if (is_edit && id) {
+    // Partial-update guard (SW-42): the schema's .default(0) injects
+    // trigger_days into every parse output, so an edit that omitted it
+    // reset the stored value to 0. On edit, an unsent trigger_days is not
+    // written; the insert path below keeps the default.
+    if (!rawBody || typeof rawBody !== "object" || !("trigger_days" in rawBody)) {
+      delete (payload as Record<string, unknown>).trigger_days;
+    }
     const { error } = await db.from("follow_up_rules").update(payload).eq("workspace_id", workspace_id).eq("id", id);
     if (error) throw error;
     return json({ data: { id } });
@@ -2447,15 +2455,20 @@ crmRouter.patch("/v1/crm/marketing/settings", async (c) => {
   const body = marketingSettingsSchema.parse(await c.req.json());
   const { supabase } = await requireAuth(c);
   const workspaceId = await resolveSettingsWorkspaceId(c);
+  // Partial-update guard (SW-42): the two review URLs are optional in the
+  // schema; writing `|| null` unconditionally erased a stored URL whenever
+  // the caller omitted it. The numeric fields are schema-required and
+  // always written. A sent URL keeps the old coercion (empty -> null).
+  const patch: Record<string, unknown> = {
+    review_request_delay_hours: body.review_request_delay_hours,
+    appointment_reminder_hours: body.appointment_reminder_hours,
+    service_reminder_months: body.service_reminder_months,
+  };
+  if (body.google_review_url !== undefined) patch.google_review_url = body.google_review_url || null;
+  if (body.yelp_review_url !== undefined) patch.yelp_review_url = body.yelp_review_url || null;
   const { error } = await supabase
     .from("business_profiles")
-    .update({
-      google_review_url: body.google_review_url || null,
-      yelp_review_url: body.yelp_review_url || null,
-      review_request_delay_hours: body.review_request_delay_hours,
-      appointment_reminder_hours: body.appointment_reminder_hours,
-      service_reminder_months: body.service_reminder_months,
-    })
+    .update(patch)
     .eq("workspace_id", workspaceId);
   if (error) throw error;
   return json({ data: { updated: true } });

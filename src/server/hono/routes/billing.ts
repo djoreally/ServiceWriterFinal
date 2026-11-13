@@ -2837,16 +2837,20 @@ billingRouter.patch("/v1/billing/bank-transactions/:id", async (c) => {
   const { supabase, user, workspaceId } = await resolveBillingWorkspace(c);
   const id = z.string().uuid().parse(c.req.param("id"));
   const body = bankTransactionPatchSchema.parse(await c.req.raw.json());
+  // Partial-update guard (SW-42): notes is optional in the schema; an
+  // omitted notes field must not erase the transaction's stored notes.
+  // Explicit null still clears.
+  const patch: Record<string, unknown> = {
+    classification: body.classification,
+    review_status: body.classification === "unresolved" ? "pending" : "approved",
+    confidence: body.classification === "unresolved" ? 0 : 1,
+    classified_by: user.id,
+    classified_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  if (body.notes !== undefined) patch.notes = body.notes ?? null;
   const { error } = await (supabase.from("bank_transactions") as any)
-    .update({
-      classification: body.classification,
-      review_status: body.classification === "unresolved" ? "pending" : "approved",
-      confidence: body.classification === "unresolved" ? 0 : 1,
-      classified_by: user.id,
-      classified_at: new Date().toISOString(),
-      notes: body.notes ?? null,
-      updated_at: new Date().toISOString(),
-    })
+    .update(patch)
     .eq("workspace_id", workspaceId)
     .eq("id", id);
   if (error) throw error;

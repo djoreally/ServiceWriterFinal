@@ -1,5 +1,5 @@
 import { errorMessage } from "@/lib/error-message";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { FleetOSLayout } from "@/components/layout/FleetOSLayout";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -343,10 +343,15 @@ function ClientOverviewTab({ client, editing, onSaved }: { client: FleetClient; 
     communication_preference: client.communication_preference || "email",
   }), [client]);
   const [form, setForm] = useState(buildForm());
+  // Snapshot of the form as initialized from the loaded client, for the
+  // diff-save in handleSave (SW-42).
+  const initialFormRef = useRef(buildForm());
 
   // Reset form when client or editing changes
   useEffect(() => {
-    void Promise.resolve().then(() => setForm(buildForm()));
+    const initial = buildForm();
+    initialFormRef.current = initial;
+    void Promise.resolve().then(() => setForm(initial));
   }, [buildForm, editing]);
 
   const updateField = (field: string, value: string | boolean) => setForm((p) => ({ ...p, [field]: value }));
@@ -356,9 +361,24 @@ function ClientOverviewTab({ client, editing, onSaved }: { client: FleetClient; 
       toast.error("Company name is required");
       return;
     }
+    // Partial-update guard (SW-42): send only the fields the user actually
+    // changed. buildForm() initializes every field with a fallback
+    // (payment_terms "net_30", status/credit_status "active",
+    // default_pricing_tier "retail", text fields "" for stored nulls);
+    // sending the whole form wrote those fabrications over stored values
+    // whenever the loaded client lacked a field.
+    const initial = initialFormRef.current;
+    const changed: Record<string, unknown> = {};
+    for (const key of Object.keys(form) as Array<keyof typeof form>) {
+      if (form[key] !== initial[key]) changed[key] = form[key];
+    }
+    if (Object.keys(changed).length === 0) {
+      onSaved(client);
+      return;
+    }
     setSaving(true);
     try {
-      const { data, error } = await updateFleetClient(client.id, form);
+      const { data, error } = await updateFleetClient(client.id, changed);
       if (error) throw error;
       toast.success("Client updated");
       onSaved(data as FleetClient);

@@ -91,13 +91,19 @@ export async function completeWorkOrder(
     else console.warn(`completeWorkOrder: rejected invalid signature URL for ${workOrderId}`);
   }
 
-  await nextApi.workOrders.update(workOrderId, {
+  // Partial-update guard (SW-42): omit signature_url / tech_notes when the
+  // caller did not provide them. Sending them as explicit nulls erased a
+  // previously captured signature / tech note whenever a completion omitted
+  // the option (or the signature URL failed validation). There is no
+  // explicit-clear contract for these fields through this command.
+  const payload: Record<string, unknown> = {
     workspace_id: workspaceId(),
     status: "completed",
-    signature_url: signatureUrl,
-    tech_notes: options?.techNotes ?? null,
     completed_at: new Date().toISOString(),
-  });
+  };
+  if (signatureUrl) payload.signature_url = signatureUrl;
+  if (options?.techNotes !== undefined) payload.tech_notes = options.techNotes;
+  await nextApi.workOrders.update(workOrderId, payload);
 }
 
 function checklistUnavailable(): never {

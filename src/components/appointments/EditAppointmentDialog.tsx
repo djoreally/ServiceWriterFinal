@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/select";
 import { Loader2, Save, Calendar } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
-import { editAppointment } from "@/application/commands/edit-appointment.command";
+import { editAppointment, type EditAppointmentPayload } from "@/application/commands/edit-appointment.command";
 import { Appointment } from "@/shared/types";
 import { format, parseISO, parse } from "date-fns";
 import { bankersRound } from "@/lib/financialMath";
@@ -48,7 +48,7 @@ export function EditAppointmentDialog({
   onSuccess,
 }: EditAppointmentDialogProps) {
   const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({
+  const emptyForm = {
     title: "",
     scheduled_date: "",
     scheduled_time: "",
@@ -61,13 +61,17 @@ export function EditAppointmentDialog({
     estimated_cost: 0,
     override_availability: false,
     location_address: "",
-  });
+  };
+  const [formData, setFormData] = useState(emptyForm);
+  // Snapshot of the form as initialized from the appointment, for the
+  // diff-save in handleSave (SW-42).
+  const [initialForm, setInitialForm] = useState<typeof emptyForm | null>(null);
 
   useEffect(() => {
     if (appointment) {
       const apptAny = appointment as unknown as Record<string, unknown>;
       const customerAddress = (appointment.customer as { address?: string } | undefined)?.address;
-      void Promise.resolve().then(() => setFormData({
+      const initial = {
         title: appointment.title || "",
         scheduled_date: appointment.scheduled_date || "",
         scheduled_time: appointment.scheduled_time || "",
@@ -83,7 +87,11 @@ export function EditAppointmentDialog({
           (apptAny.location_address as string | null | undefined) ||
           customerAddress ||
           "",
-      }));
+      };
+      void Promise.resolve().then(() => {
+        setFormData(initial);
+        setInitialForm(initial);
+      });
     }
   }, [appointment, open]);
 
@@ -92,10 +100,27 @@ export function EditAppointmentDialog({
 
     setLoading(true);
     try {
-      await editAppointment(appointment.id, {
-        ...formData,
-        guest_phone: normalizePhoneToE164(formData.guest_phone) || formData.guest_phone,
-      });
+      // Partial-update guard (SW-42): send only the fields the user actually
+      // changed in this dialog. The form is initialized with defaults and
+      // customer fallbacks for anything the appointment object does not
+      // carry (duration 60, estimated_cost 0, guest_* from the customer,
+      // override_availability false); sending the whole form wrote those
+      // fabrications over the stored values on every save.
+      const changed: Partial<EditAppointmentPayload> = {};
+      for (const key of Object.keys(formData) as Array<keyof typeof formData>) {
+        const value = key === "guest_phone"
+          ? normalizePhoneToE164(formData.guest_phone) || formData.guest_phone
+          : formData[key];
+        if (!initialForm || value !== initialForm[key]) {
+          (changed as Record<string, unknown>)[key] = value;
+        }
+      }
+      if (Object.keys(changed).length === 0) {
+        onSuccess();
+        onOpenChange(false);
+        return;
+      }
+      await editAppointment(appointment.id, changed);
 
       toast.success("Appointment updated successfully");
       onSuccess();

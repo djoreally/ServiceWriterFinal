@@ -515,7 +515,12 @@ vehiclesRouter.get("/v1/service-records", async (c) => {
 });
 
 vehiclesRouter.post("/v1/service-records", async (c) => {
-  const body = serviceRecordSchema.parse(await c.req.json());
+  const rawBody = await c.req.json();
+  // Keys the caller actually sent (the schema applies defaults for status /
+  // metadata, so the parsed body cannot distinguish sent from defaulted) —
+  // the reuse update below needs that distinction (SW-42).
+  const sentKeys = new Set(Object.keys(rawBody && typeof rawBody === "object" ? rawBody : {}));
+  const body = serviceRecordSchema.parse(rawBody);
   const { supabase, user } = await requireWorkspaceAuth(c, body.workspace_id, ["owner", "admin", "manager", "service_advisor", "dispatcher", "technician"]);
   const refs = await resolveReferences(supabase, body);
   if ("error" in refs) return refs.error;
@@ -548,7 +553,36 @@ vehiclesRouter.post("/v1/service-records", async (c) => {
     const { data: existing, error: existingError } = await supabase.from("service_records").select("id,metadata").eq("workspace_id", body.workspace_id).eq("appointment_id", body.appointment_id).neq("status", "voided").order("created_at", { ascending: true }).limit(1).maybeSingle();
     if (existingError) throw existingError;
     if (existing) {
-      const { data, error } = await (supabase.from("service_records") as any).update({ ...payload, metadata: mergeMetadata(existing.metadata, normalizedMeta) }).eq("workspace_id", body.workspace_id).eq("id", existing.id).select().single();
+      // Partial-update guard (SW-42): this path RETURNs the existing record
+      // for a duplicate create; it must not rewrite it with values derived
+      // from a request that never mentioned them (financials recomputed to
+      // 0-based values, tax_rate null, completion fields from the defaulted
+      // status). Write only what this request actually provided — same rule
+      // as the Next twin of this route.
+      const updatePayload: Record<string, unknown> = { metadata: mergeMetadata(existing.metadata, normalizedMeta) };
+      for (const key of Object.keys(body)) {
+        if (key === "workspace_id" || key === "metadata" || !sentKeys.has(key)) continue;
+        updatePayload[key] = (body as Record<string, unknown>)[key];
+      }
+      if (refs.customerId !== null || sentKeys.has("customer_id")) updatePayload.customer_id = refs.customerId;
+      if (refs.vehicleId !== null || sentKeys.has("vehicle_id")) updatePayload.vehicle_id = refs.vehicleId;
+      // Each derived financial field is written only when its own inputs
+      // were sent (same rule as the Next twin of this route).
+      const subtotalSent = sentKeys.has("subtotal")
+        || ["labor_cost", "parts_cost", "shop_supplies"].every((key) => meta[key] !== undefined);
+      const taxSent = sentKeys.has("tax_amount") || meta.tax_amount !== undefined
+        || sentKeys.has("tax_rate") || meta.tax_rate !== undefined;
+      const totalSent = sentKeys.has("total_amount") || meta.total_cost !== undefined;
+      if (subtotalSent) updatePayload.subtotal = subtotal;
+      if (sentKeys.has("discount_amount") || meta.discount_amount !== undefined) updatePayload.discount_amount = discount;
+      if (sentKeys.has("tax_rate") || meta.tax_rate !== undefined) updatePayload.tax_rate = taxRate;
+      if (taxSent) updatePayload.tax_amount = taxAmount;
+      if (totalSent || (subtotalSent && taxSent)) updatePayload.total_amount = total;
+      if (sentKeys.has("status") || sentKeys.has("completed_at")) {
+        updatePayload.completed_by = body.status === "completed" ? user.id : null;
+        updatePayload.completed_at = body.status === "completed" ? body.completed_at ?? now : body.completed_at ?? null;
+      }
+      const { data, error } = await (supabase.from("service_records") as any).update(updatePayload).eq("workspace_id", body.workspace_id).eq("id", existing.id).select().single();
       if (error) throw error;
       return json({ data, reused: true });
     }
@@ -2261,21 +2295,28 @@ vehiclesRouter.patch("/v1/vehicle-part-assignments/:id", async (c) => {
   const body = await c.req.json();
   const { supabase, user } = await requireFleetScope(c, selectedWorkspaceHint(c));
   const input = body.input ?? body;
+  // Partial-update guard (SW-42): this PATCH used to rebuild every column
+  // from the request, so a caller that sent one field erased the rest
+  // (part_number -> "", brand/oem/unit/inventory/notes -> null, quantity ->
+  // 1, is_required -> true). Write only the fields the caller sent; a sent
+  // field keeps the historical coercion (empty -> null is an explicit
+  // clear). verified_by/at always restamp — they record this verification.
+  const patch: Record<string, unknown> = {
+    verified_by: user.id,
+    verified_at: new Date().toISOString(),
+  };
+  if (input.part_category !== undefined) patch.part_category = input.part_category;
+  if (input.part_number !== undefined) patch.part_number = String(input.part_number ?? "").trim();
+  if (input.brand !== undefined) patch.brand = input.brand?.trim() || null;
+  if (input.oem_number !== undefined) patch.oem_number = input.oem_number?.trim() || null;
+  if (input.quantity !== undefined) patch.quantity = input.quantity ?? 1;
+  if (input.unit !== undefined) patch.unit = input.unit || null;
+  if (input.inventory_item_id !== undefined) patch.inventory_item_id = input.inventory_item_id || null;
+  if (input.is_required !== undefined) patch.is_required = input.is_required ?? true;
+  if (input.notes !== undefined) patch.notes = input.notes?.trim() || null;
   const { error } = await (supabase as any)
     .from("vehicle_part_assignments")
-    .update({
-      part_category: input.part_category,
-      part_number: String(input.part_number ?? "").trim(),
-      brand: input.brand?.trim() || null,
-      oem_number: input.oem_number?.trim() || null,
-      quantity: input.quantity ?? 1,
-      unit: input.unit || null,
-      inventory_item_id: input.inventory_item_id || null,
-      is_required: input.is_required ?? true,
-      notes: input.notes?.trim() || null,
-      verified_by: user.id,
-      verified_at: new Date().toISOString(),
-    })
+    .update(patch)
     .eq("id", id);
   if (error) throw new Error(error.message);
   return json({ data: { ok: true } });
@@ -3147,28 +3188,45 @@ vehiclesRouter.patch("/v1/fleet/contracts/:id", async (c) => {
     updated_by: user.id,
     change_summary: payload.change_summary || "Contract rules updated",
   };
-  const nextRules = { ...payload.rule_engine, version_meta: revisionMeta };
+  // Partial-update guard (SW-42): merge the incoming rule_engine over the
+  // stored pricing_rules instead of replacing the blob. pricing_rules can
+  // carry keys the editing form does not model; a wholesale replace dropped
+  // them on every save. The payload's own sections still win key-by-key at
+  // the top level, and version_meta is always the new revision.
+  const nextRules = { ...currentRules, ...payload.rule_engine, version_meta: revisionMeta };
   let history: Array<Record<string, unknown>> = [];
+  let notesHoldFreeText = false;
   try {
     const parsed = existing?.notes ? JSON.parse(existing.notes) : {};
     history = Array.isArray(parsed?.version_history) ? parsed.version_history : [];
+    // notes is (ab)used as the version-history store, but a value that is
+    // not that JSON shape is user free text — never overwrite it (below).
+    notesHoldFreeText = Boolean(existing?.notes) && !Array.isArray(parsed?.version_history);
   } catch {
     history = [];
+    notesHoldFreeText = Boolean(existing?.notes);
+  }
+  const contractPatch: Record<string, unknown> = {
+    fleet_client_id: payload.fleet_client_id,
+    name: payload.name,
+    sla_hours: payload.rule_engine.sla_hours,
+    approval_threshold: payload.rule_engine.approval.threshold_amount || null,
+    invoice_frequency: payload.rule_engine.billing.invoice_frequency,
+    start_date: payload.start_date,
+    end_date: payload.end_date,
+    is_active: payload.is_active,
+    pricing_rules: nextRules,
+  };
+  // Only write the version-history JSON into notes when notes is empty or
+  // already holds that shape; free-text notes are the user's data and are
+  // left untouched (the revision still lands in pricing_rules.version_meta
+  // and the audit log).
+  if (!notesHoldFreeText) {
+    contractPatch.notes = JSON.stringify({ version_history: [...history, revisionMeta] });
   }
   const { error } = await client
     .from("fleet_contracts")
-    .update({
-      fleet_client_id: payload.fleet_client_id,
-      name: payload.name,
-      sla_hours: payload.rule_engine.sla_hours,
-      approval_threshold: payload.rule_engine.approval.threshold_amount || null,
-      invoice_frequency: payload.rule_engine.billing.invoice_frequency,
-      start_date: payload.start_date,
-      end_date: payload.end_date,
-      is_active: payload.is_active,
-      pricing_rules: nextRules,
-      notes: JSON.stringify({ version_history: [...history, revisionMeta] }),
-    })
+    .update(contractPatch)
     .eq("id", contractId)
     .eq("user_id", user.id);
   if (error) throw new Error(error.message);
@@ -5640,6 +5698,11 @@ vehiclesRouter.patch("/v1/fleet/work-orders/:id/notes", async (c) => {
   const status = await getFleetWorkOrderStatusForUser(db, workOrderId, user.id);
   assertFleetWorkOrderEditableForAction(status, "restricted");
 
+  // Partial-update guard (SW-42): an omitted notes field is not a clear.
+  // Only an explicitly sent value (including null) writes the column.
+  if (!("notes" in body)) {
+    return json({ data: null, error: { code: "invalid_input", message: "notes is required" } }, { status: 400 });
+  }
   const { error } = await db
     .from("fleet_work_orders")
     .update({ notes: body.notes ?? null })
