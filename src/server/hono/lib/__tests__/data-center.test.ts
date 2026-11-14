@@ -11,6 +11,7 @@ import { mapVpicDecodeResponse, decodeVinWithNhtsa } from "../vin-decode";
 import { mapWheelSizeModifications, wheelSizeSlug } from "../wheel-size";
 import {
   appliesToFromCatalog,
+  fillVehicleIdentityBlanks,
   mergeSpecs,
   parseCapacityQuarts,
   pickCatalogRow,
@@ -151,6 +152,55 @@ describe("spec mapping + merge", () => {
   });
 });
 
+describe("fillVehicleIdentityBlanks", () => {
+  // The live shape (diagnosed 2026-11-13): Dave Hamilton's NV2500
+  // row carries year + make and NO model; the NHTSA decode of its
+  // VIN answers year/make/model "NV"/engine "4.0L".
+  const decoded = {
+    vin: "1N6BF0KY7JN800080",
+    year: 2018,
+    make: "Nissan",
+    model: "NV",
+    engine: "4.0L",
+  };
+
+  it("fills the blanks a legacy row never captured, from the decode", () => {
+    expect(
+      fillVehicleIdentityBlanks(
+        { vin: "1N6BF0KY7JN800080", year: 2018, make: "Nissan", model: null, engine: null },
+        decoded,
+      ),
+    ).toEqual({
+      vin: "1N6BF0KY7JN800080",
+      year: 2018,
+      make: "Nissan",
+      model: "NV",
+      engine: "4.0L",
+    });
+  });
+
+  it("never overwrites a stored value — the workspace record wins", () => {
+    expect(
+      fillVehicleIdentityBlanks(
+        { vin: "1N6BF0KY7JN800080", year: 2018, make: "Nissan", model: "NV2500", engine: "5.6L" },
+        decoded,
+      ),
+    ).toEqual({
+      vin: "1N6BF0KY7JN800080",
+      year: 2018,
+      make: "Nissan",
+      model: "NV2500",
+      engine: "5.6L",
+    });
+  });
+
+  it("leaves the identity untouched when there is no decode", () => {
+    const vehicle = { vin: "1N6BF0KY7JN800080", year: 2018, make: "Nissan", model: null, engine: null };
+    expect(fillVehicleIdentityBlanks(vehicle, null)).toEqual(vehicle);
+    expect(fillVehicleIdentityBlanks(vehicle, undefined)).toEqual(vehicle);
+  });
+});
+
 describe("appliesToFromCatalog", () => {
   it("derives the shop's services from its own catalog rows", () => {
     expect(
@@ -192,5 +242,14 @@ describe("GET /v1/tech-app/data-center/vehicle — route contract", () => {
     expect(block).not.toContain("providerUnavailable");
     expect(block).toContain("decodePlateWithVehicleDatabases");
     expect(block).toContain("specsByYmm");
+  });
+
+  it("completes a matched-but-incomplete row's identity from the VIN decode", () => {
+    // Regression (2026-11-13): a row with year+make but no model
+    // starved every spec layer — the decode ran only when NO row
+    // matched. Both row-adoption branches must run the completion.
+    expect(block).toContain("completeIdentityFromDecode");
+    expect(block).toContain("fillVehicleIdentityBlanks");
+    expect(block.match(/await completeIdentityFromDecode\(\)/g) ?? []).toHaveLength(2);
   });
 });
