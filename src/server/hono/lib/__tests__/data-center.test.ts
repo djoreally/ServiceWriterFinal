@@ -247,9 +247,23 @@ describe("GET /v1/tech-app/data-center/vehicle — route contract", () => {
   it("completes a matched-but-incomplete row's identity from the VIN decode", () => {
     // Regression (2026-11-13): a row with year+make but no model
     // starved every spec layer — the decode ran only when NO row
-    // matched. Both row-adoption branches must run the completion.
+    // matched. Every row-adoption branch must run the completion:
+    // vehicle_id, vin, and the identity selector that adopts a
+    // uniquely matching row.
     expect(block).toContain("completeIdentityFromDecode");
     expect(block).toContain("fillVehicleIdentityBlanks");
-    expect(block.match(/await completeIdentityFromDecode\(\)/g) ?? []).toHaveLength(2);
+    expect(block.match(/await completeIdentityFromDecode\(\)/g) ?? []).toHaveLength(3);
+  });
+
+  it("accepts a bare year+make+model identity selector for VIN-less jobs", () => {
+    // Ariane Klepacki's 2024 Suburban (2026-11-13): the job has no
+    // VIN, so a VIN-keyed fetch could never run — identity alone
+    // must select, with the engine riding as a hint only.
+    expect(block).toContain('url.searchParams.get("year")');
+    expect(block).toContain('url.searchParams.get("make")');
+    expect(block).toContain('url.searchParams.get("model")');
+    expect(block).toContain('url.searchParams.get("engine")');
+    expect(block).toContain("identityProvided");
+    expect(block).toContain("year+make+model");
   });
 });

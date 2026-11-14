@@ -34,7 +34,8 @@
     "certify:email": "node scripts/certify-email-lifecycle.mjs",
     "certify:onboarding": "node scripts/certify-onboarding-contract.mjs",
     "certify:regressions": "node scripts/certify-regression-lock.mjs",
-    "carfax:feed": "tsx scripts/carfax-feed.ts"
+    "carfax:feed": "tsx scripts/carfax-feed.ts",
+    "specs:backfill": "tsx scripts/backfill-vehicle-specs.ts"
   },
   "playwright": {
     "config": "./e2e/playwright.config.ts"

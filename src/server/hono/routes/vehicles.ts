@@ -1817,7 +1817,8 @@ vehiclesRouter.post("/v1/vin/plate-lookup", async (c) => {
 // Tech app — Data Center (GET /v1/tech-app/data-center/vehicle)
 //
 // One endpoint behind the tech app's Data tab: given exactly one of
-// vin | plate+state | vehicle_id, answer the vehicle and its service
+// vin | plate+state | vehicle_id | year+make+model (+engine hint),
+// answer the vehicle and its service
 // specs. Sources, in trust order: the workspace's own
 // vehicle_service_specs, the vehicle_specifications reference table
 // (~14k rows), the bundled specs catalog (the same index
@@ -1859,9 +1860,23 @@ vehiclesRouter.get("/v1/tech-app/data-center/vehicle", async (c) => {
     const plateParam = url.searchParams.get("plate")?.trim().toUpperCase() || null;
     const stateParam = url.searchParams.get("state")?.trim().toUpperCase() || null;
     const vehicleIdParam = url.searchParams.get("vehicle_id")?.trim() || null;
+    // Identity selector: a job whose vehicle was never given a VIN
+    // (Ariane Klepacki's 2024 Suburban, 2026-11-13) still carries a
+    // full year/make/model, and the catalog tiers resolve from that
+    // alone — the VIN was never the only key. The engine rides as a
+    // hint (the job record's booked/learned engine), never a fact:
+    // every layer below treats it exactly like a stored engine.
+    const yearParamRaw = url.searchParams.get("year");
+    const yearParam = yearParamRaw ? Number(yearParamRaw) : null;
+    const makeParam = url.searchParams.get("make")?.trim() || null;
+    const modelParam = url.searchParams.get("model")?.trim() || null;
+    const engineParam = url.searchParams.get("engine")?.trim() || null;
+    const identityProvided = Boolean(
+      yearParam && Number.isFinite(yearParam) && makeParam && modelParam,
+    );
 
-    const provided = [vinParam, plateParam, vehicleIdParam].filter(Boolean).length;
-    if (provided !== 1) return fail("Provide exactly one of vin, plate+state, or vehicle_id");
+    const provided = [vinParam, plateParam, vehicleIdParam, identityProvided || null].filter(Boolean).length;
+    if (provided !== 1) return fail("Provide exactly one of vin, plate+state, vehicle_id, or year+make+model");
     if (plateParam && (!stateParam || stateParam.length !== 2)) {
       return fail("Plate lookup needs a 2-letter state");
     }
@@ -1940,6 +1955,43 @@ vehiclesRouter.get("/v1/tech-app/data-center/vehicle", async (c) => {
       if (!row) return fail("Vehicle not found");
       adoptRow(row);
       await completeIdentityFromDecode();
+    } else if (identityProvided) {
+      vehicle = {
+        vin: null,
+        year: yearParam,
+        make: makeParam,
+        model: modelParam,
+        engine: engineParam,
+      };
+      // A workspace row carrying this exact identity joins the
+      // learned tier (and its VIN unlocks the decode completion +
+      // depth layers below) — adopt it only when the match is
+      // unique, the same rule the job path's snapshot matching
+      // uses. An ambiguous or absent match keeps the bare identity,
+      // which the catalog tiers still resolve.
+      try {
+        const { data: rows } = await db
+          .from("vehicles")
+          .select("id,vin,year,make,model")
+          .eq("workspace_id", workspaceId)
+          .eq("year", yearParam)
+          .ilike("make", makeParam as string)
+          .limit(25);
+        const norm = (value: unknown) =>
+          String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+        const matches = (Array.isArray(rows) ? rows : []).filter(
+          (row: any) =>
+            row.year === yearParam &&
+            norm(row.make) === norm(makeParam) &&
+            norm(row.model) === norm(modelParam),
+        );
+        if (matches.length === 1) {
+          adoptRow(matches[0]);
+          await completeIdentityFromDecode();
+        }
+      } catch {
+        // The bare identity still resolves through the catalog tiers.
+      }
     } else {
       let vin = vinParam;
       if (plateParam && stateParam) {
