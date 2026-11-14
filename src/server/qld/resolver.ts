@@ -17,6 +17,11 @@
  *   - Resolve the engine from the caller's hints (learned/stored,
  *     then NHTSA decode) converted to displacement tokens, matched
  *     against the hierarchy's engine list for the canonical YMM.
+ *   - Expand a FAMILY model string (NHTSA's "NV" for the Nissan
+ *     NV1500/2500/3500 vans) against the hierarchy when it matches
+ *     no single model: a lone survivor is the model, and several
+ *     survivors must agree on the oil data before any value is
+ *     taken from the family — identity is never guessed.
  *   - Probe candidates in a deliberate order — a plain displacement
  *     token first, because QLD's oil data hangs on the plain-token
  *     row ("3.5") while the dressed token's row ("Turbo 3.5") can
@@ -340,6 +345,231 @@ export function specCarriesOil(serviceSpecBody: Record<string, unknown>): boolea
 }
 
 // ---------------------------------------------------------------------------
+// Family models
+// ---------------------------------------------------------------------------
+
+const MAX_FAMILY_MEMBERS = 6;
+
+/** The oil identity two spec bodies must share to be "the same spec". */
+function oilAgreementKey(serviceSpecBody: Record<string, unknown>): string {
+  const oil = record(record(serviceSpecBody.spec).oil);
+  const capacity = record(oil.capacity);
+  const torque = record(oil.drainPlugTorque);
+  return JSON.stringify({
+    viscosity: clean(oil.viscosity) ?? null,
+    quarts: finitePositive(capacity.quarts) ?? null,
+    liters: finitePositive(capacity.liters) ?? null,
+    capacityDisplay: clean(capacity.display) ?? null,
+    ftLbs: finitePositive(torque.ftLbs) ?? null,
+    nm: finitePositive(torque.nm) ?? null,
+  });
+}
+
+function filtersAgreementKey(filtersBody: Record<string, unknown> | null): string {
+  if (!filtersBody) return "null";
+  return JSON.stringify(record(record(filtersBody.spec).filters));
+}
+
+/**
+ * Probe one model's engines for a spec row, cache port first, then
+ * live in hint order, preferring the oil-carrying row — the main
+ * resolution's probe discipline, for one family member.
+ */
+async function probeModelEngines(
+  ymm: QldYmm,
+  engines: string[],
+  hints: string[],
+  deps: QldResolveDeps,
+): Promise<{ engine: string; body: Record<string, unknown>; fromCache: boolean } | null> {
+  const candidates = orderEngineCandidates(engines, hints);
+  if (deps.cachePort) {
+    let reads = 0;
+    for (const engine of candidates) {
+      if (reads >= MAX_CACHE_READS) break;
+      reads += 1;
+      const hit = await deps.cachePort
+        .read({ ...ymm, engine })
+        .catch(() => null);
+      if (hit) return { engine, body: hit.serviceSpec, fromCache: true };
+    }
+  }
+  const maxProbes = Math.max(1, deps.maxSpecProbes ?? DEFAULT_MAX_SPEC_PROBES);
+  let fallback: { engine: string; body: Record<string, unknown>; fromCache: boolean } | null = null;
+  let probed = 0;
+  for (const engine of candidates) {
+    if (probed >= maxProbes) break;
+    probed += 1;
+    const result = await fetchQldJson(
+      `/api/v1/developer/vehicles/service-spec?${ymmQuery({ ...ymm, engine })}`,
+      deps,
+    );
+    if (!isSpecSuccess(result)) continue;
+    if (specCarriesOil(result!.body)) {
+      return { engine, body: result!.body, fromCache: false };
+    }
+    if (!fallback) fallback = { engine, body: result!.body, fromCache: false };
+  }
+  return fallback;
+}
+
+type ModelFamilyOutcome =
+  | { kind: "model"; model: string; engines: string[] }
+  | { kind: "resolution"; resolution: QldResolution };
+
+/**
+ * Expand a stored model string that names a FAMILY of QLD models —
+ * its squashed form is a strict prefix of several hierarchy entries
+ * (NHTSA's "NV" for Nissan's NV1500/NV200/NV2500/NV3500) — using
+ * only the family's own evidence:
+ *
+ *   - a lone prefix extension, or a lone survivor once the
+ *     caller's engine hints filter the family's engine lists, IS
+ *     the model (the caller continues down the normal path);
+ *   - several survivors are probed, and their values are taken
+ *     only when every probed survivor AGREES on the oil data (and
+ *     on the filters, when filters answer at all) — the values
+ *     are then verified family-wide facts, not a guessed identity;
+ *   - disagreement answers `unavailable`: a guess would be worse
+ *     than an honest blank.
+ *
+ * The canonical model on a family-verified answer stays the stored
+ * family string — the resolver resolves specs, not identities.
+ */
+async function resolveModelFamily(
+  args: {
+    year: number;
+    make: string;
+    rawModel: string;
+    models: string[];
+    hints: string[];
+  },
+  deps: QldResolveDeps,
+): Promise<ModelFamilyOutcome | null> {
+  const rawSquash = squash(args.rawModel);
+  if (rawSquash.length < 2) return null;
+  const family = args.models.filter((candidate) => {
+    const candidateSquash = squash(candidate);
+    return (
+      candidateSquash.length > rawSquash.length &&
+      candidateSquash.startsWith(rawSquash)
+    );
+  });
+  if (!family.length) return null;
+
+  const enginesFor = (forModel: string) =>
+    fetchHierarchyList(
+      `/api/v1/developer/engines?${ymmQuery({ year: args.year, make: args.make, model: forModel })}`,
+      "engines",
+      deps,
+    );
+
+  if (family.length === 1) {
+    return {
+      kind: "model",
+      model: family[0],
+      engines: (await enginesFor(family[0])) ?? [],
+    };
+  }
+
+  const members: { model: string; engines: string[] }[] = [];
+  for (const member of family.slice(0, MAX_FAMILY_MEMBERS)) {
+    const engines = await enginesFor(member);
+    if (engines && engines.length) members.push({ model: member, engines });
+  }
+  if (!members.length) return null;
+
+  const hintTokens = args.hints
+    .map((hint) => displacementToken(hint))
+    .filter((token): token is string => Boolean(token));
+  let survivors = members;
+  if (hintTokens.length) {
+    const preferred = members.filter((member) =>
+      member.engines.some(
+        (engine) => hintTokens.includes(displacementToken(engine) ?? ""),
+      ),
+    );
+    if (preferred.length) survivors = preferred;
+  }
+  if (survivors.length === 1) {
+    return {
+      kind: "model",
+      model: survivors[0].model,
+      engines: survivors[0].engines,
+    };
+  }
+
+  const probed: {
+    model: string;
+    engine: string;
+    body: Record<string, unknown>;
+    fromCache: boolean;
+  }[] = [];
+  for (const survivor of survivors) {
+    const hit = await probeModelEngines(
+      { year: args.year, make: args.make, model: survivor.model },
+      survivor.engines,
+      args.hints,
+      deps,
+    );
+    if (hit) probed.push({ model: survivor.model, ...hit });
+  }
+  if (!probed.length) return null;
+
+  const first = probed[0];
+  const agreed = probed.every(
+    (entry) => oilAgreementKey(entry.body) === oilAgreementKey(first.body),
+  );
+  if (!agreed) {
+    return {
+      kind: "resolution",
+      resolution: {
+        status: "unavailable",
+        canonical: { year: args.year, make: args.make, model: args.rawModel },
+      },
+    };
+  }
+
+  // Filters ride along only when the family agrees on them too;
+  // any refusal or disagreement leaves them an honest blank.
+  let filters: Record<string, unknown> | null = null;
+  const filterBodies: (Record<string, unknown> | null)[] = [];
+  for (const entry of probed) {
+    const result = await fetchQldJson(
+      `/api/v1/developer/filters?${ymmQuery({ year: args.year, make: args.make, model: entry.model, engine: entry.engine })}`,
+      deps,
+    );
+    filterBodies.push(isSpecSuccess(result) ? result!.body : null);
+  }
+  const firstFilters = filterBodies[0] ?? null;
+  if (
+    firstFilters &&
+    filterBodies.every((body) => body !== null) &&
+    filterBodies.every(
+      (body) => filtersAgreementKey(body) === filtersAgreementKey(firstFilters),
+    )
+  ) {
+    filters = firstFilters;
+  }
+
+  return {
+    kind: "resolution",
+    resolution: {
+      status: "ok",
+      canonical: {
+        year: args.year,
+        make: args.make,
+        model: args.rawModel,
+        engine: first.engine,
+      },
+      serviceSpec: first.body,
+      filters,
+      engines: survivors.find((s) => s.model === first.model)?.engines ?? [],
+      fromCache: probed.every((entry) => entry.fromCache),
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // The resolution
 // ---------------------------------------------------------------------------
 
@@ -384,9 +614,14 @@ export async function resolveQldVehicle(
   let models = await fetchModels(make);
   if (!models && make !== raw.make) models = await fetchModels(raw.make);
   let model = raw.model;
-  if (models) model = matchQldCandidate(raw.model, models) ?? raw.model;
-
-  const canonical: QldYmm = { year: raw.year, make, model };
+  let modelMatched = false;
+  if (models) {
+    const matched = matchQldCandidate(raw.model, models);
+    if (matched) {
+      model = matched;
+      modelMatched = true;
+    }
+  }
 
   // -- The canonical engine list for the YMM (free). --
   const fetchEngines = (forModel: string) =>
@@ -399,7 +634,27 @@ export async function resolveQldVehicle(
   if ((!engines || engines.length === 0) && model !== raw.model) {
     engines = (await fetchEngines(raw.model)) ?? engines;
   }
-  const engineList = engines ?? [];
+  let engineList = engines ?? [];
+
+  // -- Family models: a stored string that matched no candidate
+  //    and names no engines of its own may name a FAMILY of QLD
+  //    models instead (NHTSA decodes every Nissan NV van as model
+  //    "NV"; QLD lists NV1500/NV200/NV2500/NV3500). Expand it
+  //    against the hierarchy and let the family's own evidence
+  //    settle what it can — see resolveModelFamily. --
+  if (!engineList.length && !modelMatched && models && models.length) {
+    const family = await resolveModelFamily(
+      { year: raw.year, make, rawModel: raw.model, models, hints },
+      deps,
+    );
+    if (family?.kind === "resolution") return family.resolution;
+    if (family?.kind === "model") {
+      model = family.model;
+      engineList = family.engines;
+    }
+  }
+
+  const canonical: QldYmm = { year: raw.year, make, model };
 
   // -- Candidate order. With no hierarchy list, fall back to the
   //    caller's own hint (then its bare token): a stored string is

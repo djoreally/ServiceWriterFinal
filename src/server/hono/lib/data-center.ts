@@ -8,6 +8,7 @@
  * a field is the value a source stated (a unit conversion of a
  * stated value included), or null.
  */
+import type { DecodedVehicle } from "./vin-decode";
 
 export interface DataCenterSpecs {
   oilType: string | null;
@@ -44,6 +45,38 @@ export function mergeSpecs(base: DataCenterSpecs, fill: DataCenterSpecs): DataCe
     }
   });
   return out;
+}
+
+export interface VehicleIdentity {
+  vin: string | null;
+  year: number | null;
+  make: string | null;
+  model: string | null;
+  engine: string | null;
+}
+
+/**
+ * Fill an identity's blank fields from a VIN decode; the stored
+ * record always wins — the decode only completes what the record
+ * never captured. Legacy workspace rows exist with year + make
+ * and NO model, and every spec layer keys on a full
+ * year/make/model, so a blank model silently starved all of them
+ * (Dave Hamilton's 2018 NV2500, diagnosed 2026-11-13: the row
+ * matched by VIN, the decode never ran, and no spec source was
+ * ever consulted). A null decode leaves the identity untouched.
+ */
+export function fillVehicleIdentityBlanks(
+  vehicle: VehicleIdentity,
+  decoded: DecodedVehicle | null | undefined,
+): VehicleIdentity {
+  if (!decoded) return vehicle;
+  return {
+    vin: vehicle.vin ?? decoded.vin,
+    year: vehicle.year ?? decoded.year,
+    make: vehicle.make ?? decoded.make,
+    model: vehicle.model ?? decoded.model,
+    engine: vehicle.engine ?? decoded.engine,
+  };
 }
 
 function round1(value: number): number {

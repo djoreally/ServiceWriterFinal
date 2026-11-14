@@ -46,6 +46,7 @@ import { resolveQldSpec } from "@/server/qld/spec-provider";
 import { matchQldCandidate, qldLooseMakeKey } from "@/server/qld/resolver";
 import {
   appliesToFromCatalog,
+  fillVehicleIdentityBlanks,
   hasAnySpec,
   mergeSpecs,
   parseCapacityQuarts,
@@ -1803,10 +1804,28 @@ vehiclesRouter.get("/v1/tech-app/data-center/vehicle", async (c) => {
       };
     };
 
+    // A workspace row can predate complete identity capture —
+    // legacy rows exist with year + make and no model. The decode
+    // used to run only when NO row matched, so a matched-but-
+    // incomplete row kept its blanks, and every spec layer below
+    // (which keys on a full year/make/model) silently starved.
+    // When the VIN is known and the adopted identity is
+    // incomplete, fill ONLY the blanks from the decode; stored
+    // workspace values always win.
+    const completeIdentityFromDecode = async () => {
+      if (!vehicle.vin) return;
+      if (vehicle.year && vehicle.make && vehicle.model) return;
+      const decoded = await decodeVinWithNhtsa(vehicle.vin);
+      if (decoded.success) {
+        vehicle = fillVehicleIdentityBlanks(vehicle, decoded.vehicle);
+      }
+    };
+
     if (vehicleIdParam) {
       const row = await loadVehicleRow("id", vehicleIdParam);
       if (!row) return fail("Vehicle not found");
       adoptRow(row);
+      await completeIdentityFromDecode();
     } else {
       let vin = vinParam;
       if (plateParam && stateParam) {
@@ -1831,6 +1850,7 @@ vehiclesRouter.get("/v1/tech-app/data-center/vehicle", async (c) => {
         const row = await loadVehicleRow("vin", vin);
         if (row) {
           adoptRow(row);
+          await completeIdentityFromDecode();
         } else {
           const decoded = await decodeVinWithNhtsa(vin);
           if (decoded.success) {

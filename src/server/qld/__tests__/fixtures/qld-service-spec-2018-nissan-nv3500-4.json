@@ -1,0 +1,41 @@
+{
+ "success": true,
+ "spec": {
+  "vehicle": {
+   "id": "3202",
+   "year": 2018,
+   "make": "Nissan",
+   "model": "NV3500",
+   "engine": "4"
+  },
+  "oil": {
+   "viscosity": "5W-30",
+   "capacity": {
+    "display": "5.1 liters with filter",
+    "quarts": 5.39,
+    "liters": 5.1
+   },
+   "drainPlugTorque": {
+    "display": "25 ft. lbs.",
+    "ftLbs": 25,
+    "nm": 33.9
+   }
+  },
+  "fluids": {
+   "automaticTransmission": "Nissan Matic S",
+   "manualTransmission": null,
+   "transferCase": null,
+   "frontDifferential": null,
+   "rearDifferential": "75W-90 Synthetic"
+  },
+  "maintenance": {
+   "oilLifeResetInstructions": null
+  },
+  "dataQuality": {
+   "coreOilSpecAvailable": true,
+   "releaseStatusCode": "UNKNOWN",
+   "releaseStatus": null,
+   "sourceDataset": "full oil and filter 2022 to 2027"
+  }
+ }
+}
