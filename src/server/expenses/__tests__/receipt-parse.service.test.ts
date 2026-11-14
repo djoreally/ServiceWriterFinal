@@ -44,9 +44,9 @@ const ROBBIES_EXTRACTION = {
   confidence: 0.93,
 };
 
-function geminiBody(payload: unknown) {
+function chatBody(payload: unknown) {
   return {
-    candidates: [{ content: { parts: [{ text: JSON.stringify(payload) }] } }],
+    choices: [{ message: { content: JSON.stringify(payload) } }],
   };
 }
 
@@ -132,21 +132,20 @@ function fetchFailingWithBody(status: number, bodyText: string) {
   })) as unknown as typeof fetch;
 }
 
-const GOOGLE_404_BODY = JSON.stringify({
+const PROVIDER_404_BODY = JSON.stringify({
   error: {
+    message: "model 'qwen3-vl-8b-instruct' is not loaded on this endpoint",
+    type: "not_found",
     code: 404,
-    message:
-      "models/gemini-2.5-flash is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.",
-    status: "NOT_FOUND",
   },
 });
 
-const ENV = { GEMINI_API_KEY: "test-key" };
+const ENV = { RECEIPT_PARSE_AI_API_KEY: "test-key" };
 
 describe("runIntakeDocumentParse", () => {
   it("parses Robbie's #49576 and stores the full extraction as parsed", async () => {
     const { supabase, patches } = makeFakeSupabase();
-    const fetchFn = fetchReturning(geminiBody(ROBBIES_EXTRACTION));
+    const fetchFn = fetchReturning(chatBody(ROBBIES_EXTRACTION));
     const outcome = await runIntakeDocumentParse(
       { supabase, env: ENV, fetchFn },
       DOC
@@ -155,12 +154,12 @@ describe("runIntakeDocumentParse", () => {
     if (isIntakeParseFailure(outcome)) return;
     expect(outcome.extraction.vendor_name).toBe("Robbie's Automotive");
     expect(outcome.extraction.total_amount).toBe(1181);
-    expect(outcome.method).toBe("gemini:gemini-2.5-flash");
+    expect(outcome.method).toBe("openai-compatible:gpt-4o-mini");
 
     expect(patches[0]).toEqual({ parse_status: "parsing", parse_error: null });
     const saved = patches[patches.length - 1];
     expect(saved.parse_status).toBe("parsed");
-    expect(saved.parse_method).toBe("gemini:gemini-2.5-flash");
+    expect(saved.parse_method).toBe("openai-compatible:gpt-4o-mini");
     expect(saved.parse_error).toBeNull();
     expect((saved.parsed_json as { total_amount: number }).total_amount).toBe(1181);
     expect(saved.confidence).toBe(0.93);
@@ -182,17 +181,17 @@ describe("runIntakeDocumentParse", () => {
   });
 
   it("provider 404 → parse_error carries the provider's OWN stated reason, not a bare status", async () => {
-    // The 2026-11-13 production acceptance run failed every receipt
-    // with HTTP 404 and the old service discarded the body, leaving
-    // nothing to diagnose. The recorded parse_error must now state
-    // Google's reason verbatim (truncated excerpt).
+    // The reader's first production run (on the old Google chain)
+    // failed every receipt with HTTP 404 while the service discarded
+    // the body, leaving nothing to diagnose. The recorded parse_error
+    // must state the provider's reason verbatim (truncated excerpt).
     const { supabase, patches } = makeFakeSupabase();
-    const fetchFn = fetchFailingWithBody(404, GOOGLE_404_BODY);
+    const fetchFn = fetchFailingWithBody(404, PROVIDER_404_BODY);
     const outcome = await runIntakeDocumentParse({ supabase, env: ENV, fetchFn }, DOC);
     expect(outcome.ok).toBe(false);
     if (!isIntakeParseFailure(outcome)) return;
     expect(outcome.reason).toMatch(/HTTP 404/);
-    expect(outcome.reason).toContain("is not found for API version v1beta");
+    expect(outcome.reason).toContain("is not loaded on this endpoint");
     const failure = patches[patches.length - 1];
     expect(failure.parse_status).toBe("parse_failed");
     expect(failure.parse_error).toBe(outcome.reason);
@@ -226,7 +225,7 @@ describe("runIntakeDocumentParse", () => {
 
   it("an unreadable document (model reads nothing usable) → honest parse_failed, no poisoning", async () => {
     const { supabase, patches } = makeFakeSupabase();
-    const fetchFn = fetchReturning(geminiBody({}));
+    const fetchFn = fetchReturning(chatBody({}));
     const outcome = await runIntakeDocumentParse({ supabase, env: ENV, fetchFn }, DOC);
     expect(outcome.ok).toBe(false);
     const failure = patches[patches.length - 1];
@@ -239,7 +238,7 @@ describe("runIntakeDocumentParse", () => {
 
   it("no provider key configured → parse_failed with the configuration reason; provider never called", async () => {
     const { supabase, patches } = makeFakeSupabase();
-    const fetchFn = fetchReturning(geminiBody(ROBBIES_EXTRACTION));
+    const fetchFn = fetchReturning(chatBody(ROBBIES_EXTRACTION));
     const outcome = await runIntakeDocumentParse({ supabase, env: {}, fetchFn }, DOC);
     expect(outcome.ok).toBe(false);
     if (!isIntakeParseFailure(outcome)) return;
@@ -249,9 +248,61 @@ describe("runIntakeDocumentParse", () => {
     expect(patches[0].parse_status).toBe("parse_failed");
   });
 
+  it("GEMINI_API_KEY alone → still not configured; the reader NEVER calls Google (bridge pulled)", async () => {
+    // Ty's call, 2026-11-13: zero Google calls from the receipt
+    // reader. Google's key remains provisioned in the server
+    // environment for the VIN OCR door, but this reader must ignore
+    // it entirely — the honest not-configured failure is the parked
+    // state until the bake-off winner is wired into RECEIPT_PARSE_AI_*.
+    const { supabase, patches } = makeFakeSupabase();
+    const fetchFn = fetchReturning(chatBody(ROBBIES_EXTRACTION));
+    const outcome = await runIntakeDocumentParse(
+      { supabase, env: { GEMINI_API_KEY: "test-key" }, fetchFn },
+      DOC
+    );
+    expect(outcome.ok).toBe(false);
+    if (!isIntakeParseFailure(outcome)) return;
+    expect(outcome.reason).toMatch(/not configured/);
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(patches).toHaveLength(1);
+    expect(patches[0].parse_status).toBe("parse_failed");
+    expect(patches[0].parse_error).toMatch(/not configured/);
+  });
+
+  it("a configured RECEIPT_PARSE_AI_* endpoint receives the call at its own base URL + model", async () => {
+    const { supabase } = makeFakeSupabase();
+    const calls: Array<{ url: string; init: unknown }> = [];
+    const fetchFn = jest.fn(async (url: string, init: unknown) => {
+      calls.push({ url, init });
+      return { ok: true, status: 200, json: async () => chatBody(ROBBIES_EXTRACTION) };
+    }) as unknown as typeof fetch;
+    const outcome = await runIntakeDocumentParse(
+      {
+        supabase,
+        env: {
+          RECEIPT_PARSE_AI_API_KEY: "endpoint-key",
+          RECEIPT_PARSE_AI_BASE_URL: "https://vision.internal.test/v1",
+          RECEIPT_PARSE_AI_MODEL: "qwen3-vl-8b-instruct",
+          // Present in the environment, must not divert the call.
+          GEMINI_API_KEY: "test-key",
+        },
+        fetchFn,
+      },
+      DOC
+    );
+    expect(outcome.ok).toBe(true);
+    if (isIntakeParseFailure(outcome)) return;
+    expect(outcome.method).toBe("openai-compatible:qwen3-vl-8b-instruct");
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe("https://vision.internal.test/v1/chat/completions");
+    const init = calls[0].init as { headers: Record<string, string>; body: string };
+    expect(init.headers.Authorization).toBe("Bearer endpoint-key");
+    expect(JSON.parse(init.body).model).toBe("qwen3-vl-8b-instruct");
+  });
+
   it("a storage download failure → parse_failed, document stays re-parseable", async () => {
     const { supabase, patches } = makeFakeSupabase({ downloadError: true });
-    const fetchFn = fetchReturning(geminiBody(ROBBIES_EXTRACTION));
+    const fetchFn = fetchReturning(chatBody(ROBBIES_EXTRACTION));
     const outcome = await runIntakeDocumentParse({ supabase, env: ENV, fetchFn }, DOC);
     expect(outcome.ok).toBe(false);
     expect(patches[patches.length - 1].parse_status).toBe("parse_failed");
@@ -261,7 +312,7 @@ describe("runIntakeDocumentParse", () => {
   it("service profile: a valid VIN is validated and linked to its fleet vehicle", async () => {
     const { supabase, patches } = makeFakeSupabase({ fleetVehicle: { id: "veh-1" } });
     const fetchFn = fetchReturning(
-      geminiBody({
+      chatBody({
         vendor_name: "Robbie's Automotive",
         total_amount: 815,
         vin: "1FTBR1Y86PKB51521",
@@ -286,7 +337,7 @@ describe("runIntakeDocumentParse", () => {
   it("an invalid VIN is stored as read but flagged invalid and never linked", async () => {
     const { supabase, patches } = makeFakeSupabase({ fleetVehicle: { id: "veh-1" } });
     const fetchFn = fetchReturning(
-      geminiBody({ vendor_name: "X", total_amount: 10, vin: "TOOSHORT" })
+      chatBody({ vendor_name: "X", total_amount: 10, vin: "TOOSHORT" })
     );
     const outcome = await runIntakeDocumentParse(
       { supabase, env: ENV, fetchFn },
@@ -305,7 +356,7 @@ describe("runReceiptScan", () => {
     const { supabase } = makeFakeSupabase();
     await expect(
       runReceiptScan(
-        { supabase, env: {}, fetchFn: fetchReturning(geminiBody(ROBBIES_EXTRACTION)) },
+        { supabase, env: {}, fetchFn: fetchReturning(chatBody(ROBBIES_EXTRACTION)) },
         { imageBase64: "QUJD", mimeType: "image/jpeg" }
       )
     ).rejects.toBeInstanceOf(ReceiptParseNotConfiguredError);
@@ -314,7 +365,7 @@ describe("runReceiptScan", () => {
   it("returns the extraction for a scanned photo", async () => {
     const { supabase } = makeFakeSupabase();
     const extraction = await runReceiptScan(
-      { supabase, env: ENV, fetchFn: fetchReturning(geminiBody(ROBBIES_EXTRACTION)) },
+      { supabase, env: ENV, fetchFn: fetchReturning(chatBody(ROBBIES_EXTRACTION)) },
       { imageBase64: "QUJD", mimeType: "image/jpeg" }
     );
     expect(extraction.vendor_name).toBe("Robbie's Automotive");
@@ -324,7 +375,7 @@ describe("runReceiptScan", () => {
   it("a provider failure keeps the user-facing message short but carries the provider detail on the error", async () => {
     const { supabase } = makeFakeSupabase();
     const thrown = await runReceiptScan(
-      { supabase, env: ENV, fetchFn: fetchFailingWithBody(404, GOOGLE_404_BODY) },
+      { supabase, env: ENV, fetchFn: fetchFailingWithBody(404, PROVIDER_404_BODY) },
       { imageBase64: "QUJD", mimeType: "image/jpeg" }
     ).catch((e: unknown) => e);
     expect(thrown).toBeInstanceOf(ReceiptParseProviderError);
@@ -332,9 +383,9 @@ describe("runReceiptScan", () => {
     // The route surfaces err.message to the user — it stays short and
     // honest, without the raw provider body…
     expect(err.message).toMatch(/HTTP 404/);
-    expect(err.message).not.toContain("NOT_FOUND");
+    expect(err.message).not.toContain("is not loaded on this endpoint");
     // …while the verbatim reason rides along for logs/diagnosis.
-    expect(err.providerDetail).toContain("is not found for API version v1beta");
+    expect(err.providerDetail).toContain("is not loaded on this endpoint");
   });
 });
 

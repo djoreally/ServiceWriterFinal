@@ -24,10 +24,12 @@
  * the body and left nothing to diagnose.
  *
  * Provider access is env-driven via readReceiptParseConfig
- * (GEMINI_API_KEY first — the key already provisioned in the server
- * environment for the VIN decode door). With no key configured the
- * intake row records the configuration reason and the scan door
- * throws ReceiptParseNotConfiguredError; no credential is invented.
+ * (RECEIPT_PARSE_AI_* only — the Google bridge was pulled on
+ * 2026-11-13, so GEMINI_API_KEY is ignored by this reader even
+ * though it remains provisioned for the VIN OCR door). With no
+ * endpoint configured the intake row records the configuration
+ * reason and the scan door throws ReceiptParseNotConfiguredError;
+ * no credential is invented and no provider is called.
  */
 import {
   buildReceiptParseProviderCall,
@@ -142,7 +144,7 @@ const PROVIDER_ERROR_EXCERPT_CHARS = 400;
 
 /**
  * Read a non-2xx provider answer's body as a short, secret-free
- * excerpt. The provider's stated reason (Google's error.message, a
+ * excerpt. The provider's stated reason (its error.message, a
  * proxy's complaint, …) is the difference between a diagnosable
  * failure and a bare status code, so it is ALWAYS captured when the
  * provider sends one. The configured key is redacted defensively —
