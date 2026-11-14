@@ -62,8 +62,11 @@ export async function deleteVehiclePart(id: string): Promise<void> {
 }
 
 /**
- * Promote confirmed part numbers into the shared vehicle_specifications reference so the
- * workspace builds its own fitment coverage over time.
+ * File confirmed part numbers as Field Data Collection submissions
+ * (SW-137): the claims wait in the submissions quarantine for the
+ * verification phases — they are NEVER written into the shared
+ * vehicle_specifications reference directly (Ty's law, 2026-11-13:
+ * collected data is not automatically added to anything).
  */
 export async function promotePartsToSpecReference(params: {
   year: number | null;

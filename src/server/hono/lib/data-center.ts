@@ -84,6 +84,71 @@ function round1(value: number): number {
 }
 
 /**
+ * Field Data Collection provenance (SW-137): when a field user's
+ * submission fills a blank in the learned tier, the write-through
+ * stamps metadata.field_provenance[<field>] = { submission_id, by,
+ * at } on the vehicle_service_specs row. Renders label such values
+ * "From field entry" — the pocket is the only place that claim is
+ * recorded, so the labeling can never drift from the data.
+ */
+export const FIELD_PROVENANCE_KEY = "field_provenance";
+
+/** Submission field key -> DataCenterSpecs key ("engine" is the vehicle's). */
+export const FIELD_TO_SPEC_KEY: Record<string, string> = {
+  engine: "engine",
+  oil_type: "oilType",
+  oil_capacity: "oilCapacityQuarts",
+  oil_filter: "oilFilter",
+  drain_plug_torque: "drainPlugTorqueFtLbs",
+  tire_size: "tireSize",
+  tire_pressure: "tirePressurePsi",
+  coolant_type: "coolantType",
+  battery_group: "batteryGroup",
+};
+
+export interface FieldProvenanceEntry {
+  submission_id?: unknown;
+  by?: unknown;
+  at?: unknown;
+}
+
+export function fieldProvenanceOf(metadata: unknown): Record<string, FieldProvenanceEntry> {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return {};
+  const pocket = (metadata as Record<string, unknown>)[FIELD_PROVENANCE_KEY];
+  if (!pocket || typeof pocket !== "object" || Array.isArray(pocket)) return {};
+  return pocket as Record<string, FieldProvenanceEntry>;
+}
+
+/**
+ * Which of the workspace row's spec values are field entries, mapped
+ * spec key -> submission id. A provenance stamp counts only when the
+ * workspace layer actually carries the value (the stamp is removed
+ * whenever the office overwrites the field, so a surviving stamp
+ * always describes the value beside it). Call with the specs derived
+ * from the workspace row itself, before catalog layers merge in.
+ */
+export function fieldEntrySources(
+  row: WorkspaceSpecRow,
+  workspaceSpecs: DataCenterSpecs,
+  engine: string | null,
+): Record<string, string> {
+  const provenance = fieldProvenanceOf(row.metadata);
+  const out: Record<string, string> = {};
+  for (const [field, entry] of Object.entries(provenance)) {
+    const specKey = FIELD_TO_SPEC_KEY[field];
+    if (!specKey) continue;
+    const submissionId = typeof entry?.submission_id === "string" ? entry.submission_id : null;
+    if (!submissionId) continue;
+    if (specKey === "engine") {
+      if (engine) out[specKey] = submissionId;
+    } else if (workspaceSpecs[specKey as keyof DataCenterSpecs] !== null) {
+      out[specKey] = submissionId;
+    }
+  }
+  return out;
+}
+
+/**
  * Parse a stated oil capacity ("6.5 liters with filter", "8.0 qt",
  * "5.3 quarts") into quarts. A bare number with no unit is NOT
  * guessed — it stays null.
@@ -150,6 +215,7 @@ export function specsFromWorkspaceRow(row: WorkspaceSpecRow): DataCenterSpecs {
       ? (row.metadata as Record<string, unknown>)
       : {};
   const torque = metadata.drain_plug_torque_ft_lbs;
+  const tirePressure = metadata.tire_pressure_psi;
   return {
     ...EMPTY_SPECS,
     oilType: cleanString(row.oil_type),
@@ -159,6 +225,14 @@ export function specsFromWorkspaceRow(row: WorkspaceSpecRow): DataCenterSpecs {
     oilFilter: cleanString(row.oil_filter),
     drainPlugTorqueFtLbs:
       typeof torque === "number" && Number.isFinite(torque) && torque > 0 ? torque : null,
+    // Tire facts have no columns anywhere (SW-137 Decision 2): the
+    // learned tier's metadata pocket is their workspace home, written
+    // by field submissions and read here like torque/coolant/battery.
+    tireSize: cleanString(metadata.tire_size),
+    tirePressurePsi:
+      typeof tirePressure === "number" && Number.isFinite(tirePressure) && tirePressure > 0
+        ? tirePressure
+        : null,
     coolantType: cleanString(metadata.coolant_type),
     batteryGroup: cleanString(metadata.battery_group),
   };
