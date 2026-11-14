@@ -1,0 +1,24 @@
+{
+ "success": true,
+ "models": [
+  "Bronco",
+  "Bronco Sport",
+  "E-350 Super Duty",
+  "E-450 Super Duty",
+  "Edge",
+  "Escape",
+  "Expedition",
+  "Explorer",
+  "Maverick",
+  "Mustang",
+  "Pickup F-Series Super Duty (Up To 550 Series)",
+  "Pickup F150 All",
+  "Police Interceptor Utility",
+  "Ranger",
+  "Transit Connect",
+  "Transit-150",
+  "Transit-250",
+  "Transit-350",
+  "Transit-350 Hd"
+ ]
+}

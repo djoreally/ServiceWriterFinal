@@ -43,6 +43,7 @@ import {
 } from "@/server/hono/lib/vin-decode";
 import { fetchWheelSizeFitment } from "@/server/hono/lib/wheel-size";
 import { resolveQldSpec } from "@/server/qld/spec-provider";
+import { matchQldCandidate, qldLooseMakeKey } from "@/server/qld/resolver";
 import {
   appliesToFromCatalog,
   hasAnySpec,
@@ -1007,6 +1008,14 @@ interface VehicleCatalogIndex {
   makesByYear: Map<number, string[]>;
   modelsByYearMake: Map<string, string[]>;
   specsByYmm: Map<string, VehicleCatalogRow[]>;
+  /**
+   * The same catalog indexed loosely — `year|looseMake` → the
+   * catalog's own make spelling + its models — so a lookup holding
+   * Service Writer's stored spellings ("Ford" / "Transit T250")
+   * can find the CSV's rows ("Ford Trucks" / "Transit-250") that
+   * the verbatim ymmKey misses.
+   */
+  looseModelsByYearMake: Map<string, { make: string; models: string[] }>;
 }
 
 let catalogPromise: Promise<VehicleCatalogIndex> | null = null;
@@ -1130,6 +1139,7 @@ async function loadCatalog(): Promise<VehicleCatalogIndex> {
   const makes = new Map<number, Set<string>>();
   const models = new Map<string, Set<string>>();
   const specsByYmm = new Map<string, VehicleCatalogRow[]>();
+  const looseModels = new Map<string, { make: string; models: Set<string> }>();
 
   for (const row of rows) {
     if (!makes.has(row.year)) makes.set(row.year, new Set());
@@ -1143,6 +1153,12 @@ async function loadCatalog(): Promise<VehicleCatalogIndex> {
     const group = specsByYmm.get(specKey) ?? [];
     group.push(row);
     specsByYmm.set(specKey, group);
+
+    const looseKey = `${row.year}|${qldLooseMakeKey(row.make)}`;
+    if (!looseModels.has(looseKey)) {
+      looseModels.set(looseKey, { make: row.make, models: new Set() });
+    }
+    looseModels.get(looseKey)!.models.add(row.model);
   }
 
   return {
@@ -1150,6 +1166,12 @@ async function loadCatalog(): Promise<VehicleCatalogIndex> {
     makesByYear: new Map(Array.from(makes, ([year, values]) => [year, Array.from(values).sort((a, b) => a.localeCompare(b))])),
     modelsByYearMake: new Map(Array.from(models, ([key, values]) => [key, Array.from(values).sort((a, b) => a.localeCompare(b))])),
     specsByYmm,
+    looseModelsByYearMake: new Map(
+      Array.from(looseModels, ([key, value]) => [
+        key,
+        { make: value.make, models: Array.from(value.models) },
+      ]),
+    ),
   };
 }
 
@@ -1867,7 +1889,25 @@ vehiclesRouter.get("/v1/tech-app/data-center/vehicle", async (c) => {
     }
     if (vehicle.year && vehicle.make && vehicle.model) {
       const catalog = await getCatalog();
-      const rows = catalog.specsByYmm.get(ymmKey(vehicle.year, vehicle.make, vehicle.model)) ?? [];
+      let rows = catalog.specsByYmm.get(ymmKey(vehicle.year, vehicle.make, vehicle.model)) ?? [];
+      if (!rows.length) {
+        // The CSV's spellings are its own ("Ford Trucks" /
+        // "Transit-250"); the workspace's stored strings ("Ford" /
+        // "Transit T250") miss the verbatim key. Retry through the
+        // QLD resolver's loose candidate matching before falling
+        // through to the live tiers.
+        const loose = catalog.looseModelsByYearMake.get(
+          `${vehicle.year}|${qldLooseMakeKey(vehicle.make)}`,
+        );
+        const canonicalModel = loose
+          ? matchQldCandidate(vehicle.model, loose.models)
+          : null;
+        if (loose && canonicalModel) {
+          rows =
+            catalog.specsByYmm.get(ymmKey(vehicle.year, loose.make, canonicalModel)) ??
+            [];
+        }
+      }
       const picked = pickCatalogRow(rows, vehicle.engine);
       if (picked) {
         const filled = mergeSpecs(specs, specsFromCatalogRow(picked));
@@ -1882,9 +1922,11 @@ vehiclesRouter.get("/v1/tech-app/data-center/vehicle", async (c) => {
     // house layers above left blank, ahead of the paid Vehicle
     // Databases last resort. Runs dark when QLD_API_KEY is unset and
     // fails soft like every layer here; mergeSpecs keeps it
-    // blanks-only, so it can never overwrite a settled value. When
-    // QLD needs an engine choice the caller has not got, it answers
-    // engine_required and this layer simply does not speak.
+    // blanks-only, so it can never overwrite a settled value. The
+    // provider's resolver canonicalizes the stored strings against
+    // QLD's hierarchy and resolves the engine (stored → VIN decode
+    // → hierarchy candidates, preferring the oil-carrying row), so
+    // this layer receives values, not an engine choice to speak.
     if (
       vehicle.year &&
       vehicle.make &&
@@ -1900,6 +1942,10 @@ vehiclesRouter.get("/v1/tech-app/data-center/vehicle", async (c) => {
           make: vehicle.make,
           model: vehicle.model,
           engine: vehicle.engine,
+          // The VIN rides along even when it matched a workspace
+          // row: with no stored engine, the provider decodes it
+          // for a hint instead of sending an engine-less request.
+          vin: vehicle.vin,
         });
         if (qld.status === "ok") {
           const filled = mergeSpecs(specs, {

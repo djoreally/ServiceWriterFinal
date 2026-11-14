@@ -1,0 +1,12 @@
+{
+ "success": false,
+ "error": "unsupported_filter_year",
+ "message": "That model year is not certified for the public Filter API.",
+ "supportedYears": [
+  2027,
+  2026,
+  2025,
+  2024,
+  2023
+ ]
+}

@@ -17,7 +17,12 @@
  *   src/application/commands/__tests__/tech-app-vehicle.command.test.ts),
  * - the update lands on the ONE vehicles row (workspace-scoped,
  *   by the appointment's vehicle_id) and answers the saved values,
- * - nothing about invoices, pricing, or the appointment itself.
+ * - a VIN change reconciles downstream (requirement, 2026-11-13):
+ *   identity + specs re-resolve, the price basis is re-checked and
+ *   any delta is flagged in the response, and the correction is
+ *   persisted on the job's audit trail — the reconciliation lives
+ *   in src/server/vin-correction.ts and NEVER writes an invoice,
+ *   an appointment item, or a quote.
  */
 import { describe, it, expect } from "@jest/globals";
 import { readFileSync } from "node:fs";
@@ -85,11 +90,49 @@ describe("PATCH /v1/tech-app/jobs/:appointmentId/vehicle — the write", () => {
     expect(block).toContain("mileage:");
   });
 
-  it("never touches invoices, pricing, or the appointment row", () => {
+  it("keeps exactly one direct write in the handler: the vehicles update", () => {
     const block = handlerBlock();
-    expect(block.toLowerCase()).not.toContain("invoice");
     // Exactly one .update( in the whole handler: the vehicles write.
+    // (The reconciliation's own writes live in its module, below.)
     expect(block.match(/\.update\(/g) ?? []).toHaveLength(1);
     expect(block).not.toContain("unit_price");
+  });
+
+  it("reconciles a VIN change and answers the correction contract", () => {
+    const block = handlerBlock();
+    expect(block).toContain("reconcileVinCorrection");
+    expect(block).toContain("previousVin !== savedVin");
+    expect(block).toContain("identity:");
+    expect(block).toContain("specs:");
+    expect(block).toContain("priceBasisDelta");
+    expect(block).toContain("correctionRecord:");
+  });
+});
+
+describe("VIN-correction reconciliation module — the flag-only guarantee", () => {
+  const MODULE = readFileSync(
+    join(repoRoot, "src/server/vin-correction.ts"),
+    "utf8",
+  );
+
+  it("persists the correction on the job's audit trail", () => {
+    expect(MODULE).toContain("recordOperationalAudit");
+    expect(MODULE).toContain("tech_app.vin_correction");
+    expect(MODULE).toContain('entityType: "appointment"');
+  });
+
+  it("reads invoices only to flag the delta; it never writes one", () => {
+    const start = MODULE.indexOf('.from("invoices")');
+    expect(start).toBeGreaterThan(-1);
+    const statement = MODULE.slice(start, MODULE.indexOf(";", start));
+    expect(statement).toContain(".select(");
+    expect(statement).not.toMatch(/\.(update|insert|upsert|delete)\(/);
+    // And the invoices table appears exactly once in the module.
+    expect(MODULE.match(/from\("invoices"\)/g) ?? []).toHaveLength(1);
+  });
+
+  it("never writes appointment items or the appointment row", () => {
+    expect(MODULE).not.toContain("appointment_items");
+    expect(MODULE).not.toMatch(/from\("appointments"\)[\s\S]{0,160}?\.(update|insert|upsert|delete)\(/);
   });
 });
