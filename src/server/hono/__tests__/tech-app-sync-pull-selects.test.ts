@@ -107,8 +107,30 @@ describe("tech-app window horizon (Ty's ruling, 2026-11-11)", () => {
     // phone no matter their assignment; Ty ruled the phone shows
     // the whole coming month. Pin the horizon so it cannot shrink
     // back silently.
-    expect(SOURCE.match(/31 \* 24 \* 60 \* 60 \* 1000/g) ?? []).toHaveLength(2);
     expect(SOURCE).not.toContain("8 * 24 * 60 * 60 * 1000");
+  });
+
+  it("both tech-app doors look −31 days back, symmetric with the horizon (2026-11-14)", () => {
+    // At the old −36 hours a job completed earlier in the month
+    // fell out of every full pull and vanished off the phone
+    // (Dave's Nov 12 completed jobs, lost on the Nov 13 redeploys'
+    // fresh pulls — the server records never changed). The
+    // look-back widened to match the forward month on both doors:
+    // the 31-day span now appears exactly four times in this file
+    // (windowStart + windowEnd on the jobs door and on the pull).
+    expect(SOURCE.match(/31 \* 24 \* 60 \* 60 \* 1000/g) ?? []).toHaveLength(4);
+    expect(SOURCE.match(/new Date\((now|timestamp) - 31 \* 24 \* 60 \* 60 \* 1000\)/g) ?? [])
+      .toHaveLength(2);
+  });
+
+  it("the only 36h look-back left is the location pings' own window", () => {
+    // GPS history is a live trail, not a job record: when the
+    // appointment window widened, the pings kept their transient
+    // 36h look-back on a dedicated variable so they never widen.
+    expect(SOURCE.match(/36 \* 60 \* 60 \* 1000/g) ?? []).toHaveLength(1);
+    expect(SOURCE).toContain(
+      "const locationWindowStart = new Date(timestamp - 36 * 60 * 60 * 1000).toISOString();",
+    );
   });
 });
 
@@ -150,7 +172,7 @@ describe("GET /v1/tech-app/sync/pull — SYNC-1b child selects (live census)", (
     );
     expect(block).toContain('.from("location_history")');
     expect(block).toContain('.eq("technician_id", technicianRes.data.id as string)');
-    expect(block).toContain('.gte("recorded_at", windowStart)');
+    expect(block).toContain('.gte("recorded_at", locationWindowStart)');
   });
 
   it("returns all six synced tables in the change set", () => {
