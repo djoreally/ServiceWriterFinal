@@ -98,6 +98,7 @@ export async function findOrCreateCustomerByPhone(
   workspaceId: string,
   phone: string,
   name?: string,
+  source: string = "shop-agent-sms",
 ): Promise<{ id: string; created: boolean }> {
   const normalized = normalizePhone(phone);
   const digitsOnly = normalized.replace(/\D/g, "");
@@ -123,7 +124,7 @@ export async function findOrCreateCustomerByPhone(
       first_name: firstName || null,
       last_name: rest.length ? rest.join(" ") : null,
       phone: normalized,
-      metadata: { source: "shop-agent-sms" },
+      metadata: { source },
     })
     .select("id")
     .single();
@@ -283,6 +284,133 @@ export async function getAvailableSlots(
     }
   }
   return slots;
+}
+
+// ---------------------------------------------------------------------------
+// Vehicle matching (external mirrors)
+// ---------------------------------------------------------------------------
+
+export interface AgentVehicleInput {
+  year?: number | null;
+  make?: string | null;
+  model?: string | null;
+}
+
+/**
+ * Look up a vehicle for the customer within the workspace by
+ * year/make/model (case-insensitive on make/model); create a minimal
+ * record when absent. Used by external booking mirrors (ScreenMyCalls),
+ * where the vehicle arrives as spoken year/make/model rather than a
+ * ServiceWriter vehicle id. Archived vehicles (metadata.archived_at) are
+ * never matched.
+ */
+export async function findOrCreateVehicleForCustomer(
+  supabase: any,
+  workspaceId: string,
+  customerId: string,
+  vehicle: AgentVehicleInput,
+  source: string = "screenmycalls",
+): Promise<{ id: string; created: boolean }> {
+  const year = typeof vehicle.year === "number" && Number.isFinite(vehicle.year) ? vehicle.year : null;
+  const make = (vehicle.make ?? "").trim();
+  const model = (vehicle.model ?? "").trim();
+
+  const { data: existingRows, error: lookupError } = await supabase
+    .from("vehicles")
+    .select("id,year,make,model,metadata")
+    .eq("workspace_id", workspaceId)
+    .eq("customer_id", customerId)
+    .order("created_at", { ascending: true });
+  if (lookupError) throw lookupError;
+
+  const rows = (existingRows ?? []) as Array<{
+    id: string;
+    year: number | null;
+    make: string | null;
+    model: string | null;
+    metadata: unknown;
+  }>;
+  const match = rows.find((row) => {
+    if (row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+      && (row.metadata as Record<string, unknown>).archived_at) {
+      return false;
+    }
+    if (year !== null && row.year !== null && Number(row.year) !== year) return false;
+    if (make && (row.make ?? "").trim().toLowerCase() !== make.toLowerCase()) return false;
+    if (model && (row.model ?? "").trim().toLowerCase() !== model.toLowerCase()) return false;
+    return true;
+  });
+  if (match) return { id: match.id, created: false };
+
+  const { data: created, error: insertError } = await supabase
+    .from("vehicles")
+    .insert({
+      workspace_id: workspaceId,
+      customer_id: customerId,
+      year,
+      make: make || null,
+      model: model || null,
+      vin: null,
+      mileage_unit: "MI",
+      metadata: { source },
+    })
+    .select("id")
+    .single();
+  if (insertError) throw insertError;
+  return { id: created.id, created: true };
+}
+
+// ---------------------------------------------------------------------------
+// Mirrored bookings (ScreenMyCalls)
+// ---------------------------------------------------------------------------
+
+export interface MirroredBookingInput {
+  customerId: string;
+  vehicleId?: string | null;
+  startsAt: string; // UTC ISO
+  endsAt: string; // UTC ISO
+  serviceName?: string | null;
+  notes?: string | null;
+  locationAddress?: string | null;
+  /** Idempotency anchor: stored in appointment metadata; re-deliveries dedupe on it. */
+  externalReference: string;
+}
+
+/**
+ * Book a MIRRORED appointment: the booking already exists in the sender's
+ * system of record (ScreenMyCalls booked it into Square or its built-in
+ * calendar), so this copy must land on the shop's board even when it falls
+ * outside ServiceWriter's own availability rules — hence
+ * override_availability. Source is stamped "screenmycalls" and the
+ * external reference rides in metadata for dedupe. Same booking core as
+ * every other path — no side door.
+ */
+export async function bookMirroredAppointment(
+  supabase: any,
+  workspaceId: string,
+  input: MirroredBookingInput,
+): Promise<{ data: unknown } | { error: Response }> {
+  return bookAppointmentCore(
+    supabase,
+    {
+      workspace_id: workspaceId,
+      customer_id: input.customerId,
+      vehicle_id: input.vehicleId ?? null,
+      starts_at: input.startsAt,
+      ends_at: input.endsAt,
+      source: "screenmycalls",
+      status: "confirmed",
+      notes: input.notes ?? null,
+      title: input.serviceName ?? null,
+      location_address: input.locationAddress ?? null,
+      external_reference: input.externalReference,
+      service_catalog_id: null,
+      estimated_cost: null,
+      override_availability: true,
+      lock_custom_price: false,
+    },
+    { createdBy: null },
+  );
 }
 
 // ---------------------------------------------------------------------------

@@ -86,6 +86,12 @@ import {
 } from "@/server/shop-agent/channels/agentphone-webhook";
 import { ensureDefaultReasoner } from "@/server/shop-agent/channels/sms";
 import {
+  handleScreenMyCallsMirror,
+  SMC_EVENT_HEADER,
+  SMC_KEY_ID_HEADER,
+  SMC_SIGNATURE_HEADER,
+} from "@/server/shop-agent/channels/screenmycalls-intake";
+import {
   AGENTPHONE_EVENT_HEADER,
   AGENTPHONE_SIGNATURE_HEADER,
   AGENTPHONE_TIMESTAMP_HEADER,
@@ -228,6 +234,38 @@ messagingRouter.post("/v1/shop-agent/agentphone", async (c) => {
       error: error instanceof Error ? error.message : "unknown error",
     });
     return NextResponse.json({ error: "Webhook processing failed", requestId }, { status: 500 });
+  }
+});
+
+/**
+ * ScreenMyCalls booking mirror intake (public, HMAC-signature-verified
+ * against the PER-WORKSPACE pairing credential — not the AgentPhone
+ * secret). The tenant workspace is resolved from the credential only;
+ * see src/server/shop-agent/channels/screenmycalls-intake.ts.
+ *   https://<host>/api/v1/shop-agent/screenmycalls
+ */
+messagingRouter.post("/v1/shop-agent/screenmycalls", async (c) => {
+  const request = c.req.raw;
+  const rawBody = await request.text();
+  const requestId = request.headers.get("x-vercel-id") ?? request.headers.get("x-request-id") ?? crypto.randomUUID();
+  try {
+    const supabase = createSupabaseAdminClient() as unknown as ShopAgentSupabase;
+    const result = await handleScreenMyCallsMirror(
+      { supabase },
+      rawBody,
+      {
+        signature: request.headers.get(SMC_SIGNATURE_HEADER),
+        keyId: request.headers.get(SMC_KEY_ID_HEADER),
+        event: request.headers.get(SMC_EVENT_HEADER),
+      },
+    );
+    return NextResponse.json(result.body, { status: result.status });
+  } catch (error) {
+    console.error("shop_agent_screenmycalls_mirror_failed", {
+      requestId,
+      error: error instanceof Error ? error.message : "unknown error",
+    });
+    return NextResponse.json({ error: "Mirror processing failed", requestId }, { status: 500 });
   }
 });
 

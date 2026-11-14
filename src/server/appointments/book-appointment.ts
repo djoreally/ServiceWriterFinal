@@ -42,6 +42,11 @@ export const appointmentBookingSchema = z.object({
   guest_email: z.string().email().max(320).nullable().optional(),
   guest_phone: z.string().max(40).nullable().optional(),
   service_catalog_id: z.string().uuid().nullable().optional(),
+  // Opaque reference from an external booking system (e.g. a ScreenMyCalls
+  // booking mirrored into ServiceWriter). Stored in metadata and used by
+  // the producing integration to dedupe re-deliveries; null for native
+  // bookings.
+  external_reference: z.string().trim().max(200).nullable().optional(),
   estimated_cost: z.number().nonnegative().nullable().optional(),
   tax_amount: z.number().nonnegative().nullable().optional(),
   location_address: z.string().max(500).nullable().optional(),
@@ -85,6 +90,7 @@ export function compatibilityMetadata(body: AppointmentBookingInput) {
     guest_email: body.guest_email ?? null,
     guest_phone: body.guest_phone ?? null,
     service_catalog_id: body.service_catalog_id ?? null,
+    external_reference: body.external_reference ?? null,
     // Manual quote lock: the typed total IS the price — it is stamped as
     // the quote with no tax on top, in the same shape the website push
     // and booking-link create write for their locks.
