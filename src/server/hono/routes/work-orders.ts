@@ -65,6 +65,7 @@ import {
 } from "@/server/vin-correction";
 import { syncCanonicalInvoiceToStripe } from "@/server/payments/stripe-invoice-sync";
 import { dispatchPaymentLifecycle, LIFECYCLE_EVENT_KEYS } from "@/server/messaging/quote-payment-events";
+import { notifyJobStepAdvanced } from "@/server/messaging/job-status-notifications";
 import { planVehicleFieldUpdate } from "@/application/commands/tech-app-vehicle.command";
 import {
   buildVinOcrProviderCall,
@@ -2922,6 +2923,27 @@ workOrdersRouter.post("/v1/tech-app/sync/push", async (c) => {
           note("jobs", err);
         }
       }
+      // Job-step notifications (2026-11-13): a transition that
+      // lands from the field tells the office and the customer —
+      // the same fan-out the step-notification door fires when
+      // the device is online at tap time. Deterministic lifecycle
+      // event ids make the pair idempotent: whichever lands
+      // second enqueues nothing new. Best-effort, like everything
+      // notification-shaped here: a failure is logged and never
+      // fails the sync that carried the transition.
+      if (transitionApplied) {
+        try {
+          await notifyJobStepAdvanced({
+            workspaceId,
+            appointmentId,
+            step: transition as "en_route" | "arrived" | "started" | "completed",
+            actorUserId: user.id,
+            origin: new URL(c.req.url).origin,
+          });
+        } catch (notifyError) {
+          console.error("[Lifecycle] tech-app sync step notification failed", notifyError);
+        }
+      }
     }
   }
 
@@ -3453,6 +3475,58 @@ workOrdersRouter.patch("/v1/tech-app/jobs/:appointmentId/vehicle", async (c) => 
             correctionRecord: correction.correctionRecord,
           }
         : {}),
+    },
+  });
+});
+
+const techAppStepNotificationSchema = z.object({
+  step: z.enum(["en_route", "arrived", "in_progress", "completed"]),
+});
+
+workOrdersRouter.post("/v1/tech-app/jobs/:appointmentId/step-notification", async (c) => {
+  // Tech app job-step notification door (2026-11-13, Ty's
+  // direction): the Job Details stepper steps are buttons that
+  // notify the office and the customer when a step advances. The
+  // app calls this door the moment a step advances locally (its
+  // state change itself rides the sync push, as always — this
+  // door carries only the news). The fan-out lives in
+  // src/server/messaging/job-status-notifications.ts and is
+  // idempotent per (job, step, recipient), so a double-tap — or
+  // this call racing the sync push's own notification — never
+  // double-sends. Same tech-app scope as the vehicle door: the
+  // appointment must be the caller's OWN assigned job.
+  const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c);
+  const appointmentId = z.string().uuid().parse(c.req.param("appointmentId"));
+  const body = techAppStepNotificationSchema.parse(await c.req.json().catch(() => ({})));
+
+  const { data: appointment, error: appointmentError } = await (supabase.from("appointments") as any)
+    .select("id, assigned_user_id")
+    .eq("workspace_id", workspaceId)
+    .eq("id", appointmentId)
+    .maybeSingle();
+  if (appointmentError) throw appointmentError;
+  if (!appointment) throw new ApiError(404, "Job not found.", "job_not_found");
+  if ((appointment as { assigned_user_id?: string | null }).assigned_user_id !== user.id) {
+    throw new ApiError(403, "This job is not assigned to you.", "job_not_assigned");
+  }
+
+  // The app's step vocabulary is the server transition vocabulary
+  // everywhere except in_progress, which transitions as "started".
+  const step = body.step === "in_progress" ? "started" : body.step;
+  const report = await notifyJobStepAdvanced({
+    workspaceId,
+    appointmentId,
+    step,
+    actorUserId: user.id,
+    request: c.req.raw,
+    origin: new URL(c.req.url).origin,
+  });
+
+  return json({
+    data: {
+      appointment_id: report.appointmentId,
+      step: body.step,
+      notifications: report.notifications,
     },
   });
 });
