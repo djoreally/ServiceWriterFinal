@@ -150,6 +150,7 @@
 | Route | Method | Needs | Returns | Used by |
 |---|---|---|---|---|
 | `/v1/shop-agent/agentphone` | POST | signed | AgentPhone integration | Phone |
+| `/v1/shop-agent/screenmycalls` | POST | signed (per-workspace pairing HMAC) | ScreenMyCalls booking mirror intake | Phone |
 | `/v1/webhooks/twilio` | POST | Twilio sig | SMS webhook | SMS |
 | `/v1/webhooks/twilio/inbound` | POST | Twilio sig | Inbound SMS | SMS |
 
