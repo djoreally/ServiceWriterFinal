@@ -26,6 +26,14 @@
  *     reverse-engineered stubs (production bodies unverified).
  *   - Each vehicle block groups its own service lines (the canonical
  *     appointment_items pinned to it), so money stays per-vehicle.
+ *   - Vehicle identity is completed BLANKS-ONLY from the VIN decode
+ *     before either catalog tier is consulted: a workspace row can
+ *     carry year + make with a NULL model, and both tiers key on a
+ *     full year/make/model, so a blank model silently starved them
+ *     (the job-path twin of the Data Center disease PR #293 fixed —
+ *     Dave Hamilton's NV2500 job page stayed "Not recorded" while
+ *     the Data Center answered). Stored/learned/human values always
+ *     win; the decode only fills what was never captured.
  *
  * Every enrichment read is best-effort, mirroring the endpoint's
  * existing mileage enrichment and B2's resolvers: a failed lookup logs
@@ -46,6 +54,14 @@ import {
   combineCatalogValues,
   resolveQldSpec,
 } from "@/server/qld/spec-provider";
+import {
+  fillVehicleIdentityBlanks,
+  type VehicleIdentity,
+} from "@/server/hono/lib/data-center";
+import {
+  decodeVinWithNhtsa,
+  type DecodedVehicle,
+} from "@/server/hono/lib/vin-decode";
 
 interface AppointmentRow {
   id: string;
@@ -304,6 +320,47 @@ export async function buildBookingConfiguration(
     }
   }
 
+  // -- Identity completion (the job-path twin of PR #293's Data
+  //    Center fix): when the composed year/make/model is incomplete
+  //    and a VIN is available, fill BLANKS ONLY from the NHTSA
+  //    decode via the shared fillVehicleIdentityBlanks helper.
+  //    Decodes are memoized per VIN inside one configuration build,
+  //    and a failed decode degrades like every enrichment here —
+  //    the identity stays as stored and the spec merge reports the
+  //    honest "Not recorded". --
+  const decodeMemo = new Map<string, Promise<DecodedVehicle | null>>();
+  const decodeForVin = (vin: string): Promise<DecodedVehicle | null> => {
+    const key = normalizeVin(vin);
+    const cached = decodeMemo.get(key);
+    if (cached) return cached;
+    const promise = (async () => {
+      const result = await decodeVinWithNhtsa(key);
+      return result.success ? result.vehicle : null;
+    })();
+    decodeMemo.set(key, promise);
+    return promise;
+  };
+  const completeIdentity = async (
+    ymm: { year: unknown; make: unknown; model: unknown },
+    vin: string | null,
+  ): Promise<VehicleIdentity> => {
+    const identity: VehicleIdentity = {
+      vin: textOrUndefined(vin) ?? null,
+      year: yearNumber(ymm.year),
+      make: textOrUndefined(ymm.make) ?? null,
+      model: textOrUndefined(ymm.model) ?? null,
+      engine: null,
+    };
+    if (identity.year && identity.make && identity.model) return identity;
+    if (!identity.vin) return identity;
+    const decoded = await attempt(
+      "vin identity decode",
+      () => decodeForVin(identity.vin as string),
+      null as DecodedVehicle | null,
+    );
+    return fillVehicleIdentityBlanks(identity, decoded);
+  };
+
   // -- Catalog candidates per distinct year/make/model (global
   //    reference table; rows are matched exactly in code). --
   const catalogCache = new Map<string, Array<Record<string, unknown>>>();
@@ -404,10 +461,12 @@ export async function buildBookingConfiguration(
     live: VehicleRow | null,
     snapshotOil: Record<string, unknown> | undefined,
     ymm: { year: unknown; make: unknown; model: unknown },
+    vin: string | null,
   ) => {
     const learned = live ? learnedByVehicle.get(String(live.id)) : undefined;
     const engineHint = learned?.engine ?? textOrUndefined(snapshotOil?.engine) ?? null;
-    const candidates = await catalogFor(ymm.year, ymm.make, ymm.model);
+    const identity = await completeIdentity(ymm, vin);
+    const candidates = await catalogFor(identity.year, identity.make, identity.model);
     const tableCatalog = resolveCatalogOilValues(
       candidates.map((row) => ({
         engine: textOrUndefined(row.engine),
@@ -419,7 +478,7 @@ export async function buildBookingConfiguration(
     );
     const qld = await attempt(
       "qld spec lookup",
-      () => qldFor(ymm.year, ymm.make, ymm.model, engineHint, live ? textOrUndefined(live.vin) ?? null : null),
+      () => qldFor(identity.year, identity.make, identity.model, engineHint, vin),
       null as OilSpecValues | null,
     );
     const catalog = combineCatalogValues(tableCatalog, qld);
@@ -462,6 +521,7 @@ export async function buildBookingConfiguration(
         make: live?.make ?? snapshotVehicle.make,
         model: live?.model ?? snapshotVehicle.model,
       },
+      textOrUndefined(live?.vin) ?? textOrUndefined(snapshotVehicle.vin) ?? null,
     );
     const liveMileage = live ? Number(live.mileage) : NaN;
     const vehicleBlock: Record<string, unknown> = { ...snapshotVehicle };
@@ -490,11 +550,16 @@ export async function buildBookingConfiguration(
     const live = vehiclesById.get(vehicleId);
     if (!live) continue;
     coveredIds.add(vehicleId);
-    const merged = await mergedOilFor(live, undefined, {
-      year: live.year,
-      make: live.make,
-      model: live.model,
-    });
+    const merged = await mergedOilFor(
+      live,
+      undefined,
+      {
+        year: live.year,
+        make: live.make,
+        model: live.model,
+      },
+      textOrUndefined(live.vin) ?? null,
+    );
     const mileage = Number(live.mileage);
     const services = servicesFor(vehicleId);
     vehicles.push({
