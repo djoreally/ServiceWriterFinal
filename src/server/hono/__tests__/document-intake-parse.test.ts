@@ -2,7 +2,7 @@
  * Grey-box tests for the Document Intake parse + approve routes —
  * the Sovereign Ledger receipt reader's intake door.
  *
- * The provider is stubbed at global.fetch (Gemini wire shape); the
+ * The provider is stubbed at global.fetch (OpenAI-compatible chat shape); the
  * Supabase harness supplies the stored document and captures the
  * row writes, so the honest-failure contract (parse_failed + reason,
  * never a stored empty parse) and approve idempotency are asserted
@@ -89,19 +89,19 @@ function stubProviderFetch(payload: unknown, ok = true, status = 200) {
     ok,
     status,
     json: async () => ({
-      candidates: [{ content: { parts: [{ text: JSON.stringify(payload) }] } }],
+      choices: [{ message: { content: JSON.stringify(payload) } }],
     }),
   })) as unknown as typeof fetch;
 }
 
 beforeEach(() => {
   resetHarness();
-  process.env.GEMINI_API_KEY = "test-key";
+  process.env.RECEIPT_PARSE_AI_API_KEY = "test-key";
 });
 
 afterEach(() => {
   globalThis.fetch = realFetch;
-  delete process.env.GEMINI_API_KEY;
+  delete process.env.RECEIPT_PARSE_AI_API_KEY;
 });
 
 describe("POST /v1/document-intake/:id/parse", () => {
@@ -114,7 +114,7 @@ describe("POST /v1/document-intake/:id/parse", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.success).toBe(true);
-    expect(body.data.method).toBe("gemini:gemini-2.5-flash");
+    expect(body.data.method).toBe("openai-compatible:gpt-4o-mini");
     expect(body.data.extracted.vendor_name).toBe("Robbie's Automotive");
     expect(body.data.extracted.total_amount).toBe(1181);
     const patches = calls.updates

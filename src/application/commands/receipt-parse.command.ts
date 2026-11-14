@@ -23,24 +23,38 @@
  * provider call itself, and the document row writes.
  *
  * PROVIDER CONFIGURATION IS ENV-DRIVEN, never hardcoded:
- *   GEMINI_API_KEY          the platform's provisioned vision key
- *                           (the same one the VIN decode door runs
- *                           on; Gemini, default gemini-2.5-flash).
- *   RECEIPT_PARSE_AI_API_KEY  optional receipt-specific key for any
- *                           OpenAI-compatible vision endpoint
- *                           (RECEIPT_PARSE_AI_BASE_URL, default
- *                           https://api.openai.com/v1).
- *   VIN_OCR_AI_API_KEY      the VIN door's generic fallback key is
- *                           honored last, so one provisioned
- *                           OpenAI-compatible key serves both doors.
- *   RECEIPT_PARSE_MODEL     optional model override (falls back to
- *                           VIN_OCR_MODEL, then the provider default).
- * With no key configured the reader answers honestly — the intake row
- * records parse_failed with the configuration reason and the scan
- * door returns a not-configured error — never a fake success.
+ *   RECEIPT_PARSE_AI_API_KEY  the receipt reader's key for an
+ *                           OpenAI-compatible vision endpoint.
+ *   RECEIPT_PARSE_AI_BASE_URL the endpoint's base URL (default
+ *                           https://api.openai.com/v1); the
+ *                           self-hosted bake-off winner plugs in
+ *                           here at cutover.
+ *   RECEIPT_PARSE_AI_MODEL  the endpoint's model (RECEIPT_PARSE_MODEL
+ *                           is honored as a generic override, then
+ *                           the default gpt-4o-mini).
+ * GOOGLE IS NOT A PROVIDER HERE (Ty's call, 2026-11-13 — "pull the
+ * Google bridge"): the reader must make zero Google calls. The
+ * earlier chain tried GEMINI_API_KEY first; it retired silently in
+ * production (the provisioned model was withdrawn for new users,
+ * then its replacement sat behind capacity errors), and the reader
+ * spent an afternoon failing against a provider the shop does not
+ * control. GEMINI_API_KEY is therefore IGNORED by this module even
+ * when present in the environment. The tech-app VIN OCR door
+ * (tech-app-vin-ocr.command.ts) still runs on it — that is the last
+ * Google seat, and it moves to this same endpoint shape at cutover.
+ * With no RECEIPT_PARSE_AI_* key configured the reader answers
+ * honestly — the intake row records parse_failed with the
+ * configuration reason and the scan door returns a not-configured
+ * error — never a fake success. That is the parked state until the
+ * bake-off winner is wired into RECEIPT_PARSE_AI_*.
  */
 
-export type ReceiptParseProvider = "gemini" | "openai-compatible";
+/**
+ * The reader's one provider shape. It used to be a union with a
+ * "gemini" arm; that arm was removed with the Google bridge
+ * (2026-11-13) so no code path in this module can address Google.
+ */
+export type ReceiptParseProvider = "openai-compatible";
 
 export interface ReceiptParseConfig {
   provider: ReceiptParseProvider;
@@ -112,50 +126,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /** ~9 MB of document once decoded — a phone photo, not an archive. */
 const MAX_IMAGE_BASE64_CHARS = 12_000_000;
 
-const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta";
-const GEMINI_DEFAULT_MODEL = "gemini-2.5-flash";
 const OPENAI_BASE_URL = "https://api.openai.com/v1";
 const OPENAI_DEFAULT_MODEL = "gpt-4o-mini";
 
+/**
+ * The reader's ONLY configuration source is RECEIPT_PARSE_AI_*.
+ * GEMINI_API_KEY is deliberately never read here (see the header:
+ * zero Google calls), and neither are the VIN door's VIN_OCR_AI_*
+ * fallbacks — each door owns its provider config outright.
+ */
 export function readReceiptParseConfig(
   env: Record<string, string | undefined>
 ): ReceiptParseConfig | null {
-  const modelOverride =
-    (env.RECEIPT_PARSE_MODEL ?? "").trim() || (env.VIN_OCR_MODEL ?? "").trim();
+  const apiKey = (env.RECEIPT_PARSE_AI_API_KEY ?? "").trim();
+  if (apiKey === "") return null;
 
-  const geminiKey = (env.GEMINI_API_KEY ?? "").trim();
-  if (geminiKey !== "") {
-    return {
-      provider: "gemini",
-      baseUrl: GEMINI_BASE_URL,
-      apiKey: geminiKey,
-      model: modelOverride === "" ? GEMINI_DEFAULT_MODEL : modelOverride,
-    };
-  }
-
-  const receiptKey = (env.RECEIPT_PARSE_AI_API_KEY ?? "").trim();
-  if (receiptKey !== "") {
-    const baseUrl = (env.RECEIPT_PARSE_AI_BASE_URL ?? "").trim().replace(/\/$/, "");
-    return {
-      provider: "openai-compatible",
-      baseUrl: baseUrl === "" ? OPENAI_BASE_URL : baseUrl,
-      apiKey: receiptKey,
-      model: modelOverride === "" ? OPENAI_DEFAULT_MODEL : modelOverride,
-    };
-  }
-
-  const vinKey = (env.VIN_OCR_AI_API_KEY ?? "").trim();
-  if (vinKey !== "") {
-    const baseUrl = (env.VIN_OCR_AI_BASE_URL ?? "").trim().replace(/\/$/, "");
-    return {
-      provider: "openai-compatible",
-      baseUrl: baseUrl === "" ? OPENAI_BASE_URL : baseUrl,
-      apiKey: vinKey,
-      model: modelOverride === "" ? OPENAI_DEFAULT_MODEL : modelOverride,
-    };
-  }
-
-  return null;
+  const baseUrl = (env.RECEIPT_PARSE_AI_BASE_URL ?? "").trim().replace(/\/$/, "");
+  const model =
+    (env.RECEIPT_PARSE_AI_MODEL ?? "").trim() ||
+    (env.RECEIPT_PARSE_MODEL ?? "").trim();
+  return {
+    provider: "openai-compatible",
+    baseUrl: baseUrl === "" ? OPENAI_BASE_URL : baseUrl,
+    apiKey,
+    model: model === "" ? OPENAI_DEFAULT_MODEL : model,
+  };
 }
 
 /**
@@ -212,47 +207,22 @@ export function receiptExtractionInstruction(profile: string): string {
 export interface ReceiptParseCallInput {
   profile: string;
   mimeType: string;
-  /** Base64 document bytes (image / PDF / audio for Gemini). */
+  /** Base64 document bytes (image / PDF). */
   base64?: string;
   /** Decoded text for text/* documents — sent instead of bytes. */
   text?: string;
 }
 
-/** The provider call, ready for fetch, in the configured provider's own wire shape. */
+/**
+ * The provider call, ready for fetch, in the OpenAI-compatible wire
+ * shape — the only shape this module builds (the Gemini
+ * generateContent shape left with the Google bridge, 2026-11-13).
+ */
 export function buildReceiptParseProviderCall(
   config: ReceiptParseConfig,
   input: ReceiptParseCallInput
 ): { url: string; init: { method: string; headers: Record<string, string>; body: string } } {
   const instruction = receiptExtractionInstruction(input.profile);
-
-  if (config.provider === "gemini") {
-    // Google's generateContent REST shape is camelCase — inlineData /
-    // mimeType / responseMimeType. The snake_case proto names
-    // (inline_data / mime_type / response_mime_type) are NOT accepted
-    // in the JSON body: the 2026-11-13 production acceptance run
-    // failed every receipt with HTTP 404 on the snake_case shape.
-    // The command tests pin this exact serialized body.
-    const parts: Array<Record<string, unknown>> = [{ text: `${instruction}\n\nExtract the expense data from this document.` }];
-    if (typeof input.text === "string") {
-      parts.push({ text: input.text.slice(0, 24000) });
-    } else {
-      parts.push({ inlineData: { mimeType: input.mimeType, data: input.base64 ?? "" } });
-    }
-    return {
-      url: `${config.baseUrl}/models/${config.model}:generateContent`,
-      init: {
-        method: "POST",
-        headers: {
-          "x-goog-api-key": config.apiKey,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          contents: [{ parts }],
-          generationConfig: { responseMimeType: "application/json" },
-        }),
-      },
-    };
-  }
 
   const userContent: Array<Record<string, unknown>> =
     typeof input.text === "string"
@@ -292,24 +262,15 @@ export function buildReceiptParseProviderCall(
   };
 }
 
-/** The model's answer text, whichever provider answered. */
+/** The model's answer text from a chat-completions response body. */
 export function receiptProviderAnswerText(
   provider: ReceiptParseProvider,
   body: unknown
 ): string | null {
   if (!isRecord(body)) return null;
-  if (provider === "gemini") {
-    const candidates = body.candidates;
-    if (!Array.isArray(candidates) || candidates.length === 0) return null;
-    const first: unknown = candidates[0];
-    if (!isRecord(first) || !isRecord(first.content)) return null;
-    const parts = first.content.parts;
-    if (!Array.isArray(parts)) return null;
-    const texts = parts
-      .map((p: unknown) => (isRecord(p) && typeof p.text === "string" ? p.text : ""))
-      .filter((t: string) => t !== "");
-    return texts.length > 0 ? texts.join("") : null;
-  }
+  // The provider union has one arm today; the parameter stays so the
+  // service's call site names the shape it is reading.
+  void provider;
   const choices = body.choices;
   if (!Array.isArray(choices) || choices.length === 0) return null;
   const first: unknown = choices[0];

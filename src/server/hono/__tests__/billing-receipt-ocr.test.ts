@@ -52,19 +52,19 @@ function stubProviderFetch(payload: unknown) {
     ok: true,
     status: 200,
     json: async () => ({
-      candidates: [{ content: { parts: [{ text: JSON.stringify(payload) }] } }],
+      choices: [{ message: { content: JSON.stringify(payload) } }],
     }),
   })) as unknown as typeof fetch;
 }
 
 beforeEach(() => {
   resetHarness();
-  process.env.GEMINI_API_KEY = "test-key";
+  process.env.RECEIPT_PARSE_AI_API_KEY = "test-key";
 });
 
 afterEach(() => {
   globalThis.fetch = realFetch;
-  delete process.env.GEMINI_API_KEY;
+  delete process.env.RECEIPT_PARSE_AI_API_KEY;
 });
 
 describe("POST /v1/billing/receipt-ocr", () => {
@@ -103,7 +103,7 @@ describe("POST /v1/billing/receipt-ocr", () => {
   });
 
   it("answers 503 not-configured when no vision key is set — never the old proxy fallback", async () => {
-    delete process.env.GEMINI_API_KEY;
+    delete process.env.RECEIPT_PARSE_AI_API_KEY;
     const res = await billingRouter.request("/v1/billing/receipt-ocr", {
       method: "POST",
       headers: { "Content-Type": "application/json" },

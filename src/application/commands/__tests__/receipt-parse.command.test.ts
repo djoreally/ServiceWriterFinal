@@ -17,12 +17,6 @@ import {
   type ReceiptParseConfig,
 } from "../receipt-parse.command";
 
-const GEMINI: ReceiptParseConfig = {
-  provider: "gemini",
-  baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-  apiKey: "gemini-key",
-  model: "gemini-2.5-flash",
-};
 const OPENAI: ReceiptParseConfig = {
   provider: "openai-compatible",
   baseUrl: "https://api.openai.com/v1",
@@ -33,29 +27,27 @@ const OPENAI: ReceiptParseConfig = {
 describe("readReceiptParseConfig", () => {
   it("is null with no key at all — both doors must answer not-configured", () => {
     expect(readReceiptParseConfig({})).toBeNull();
-    expect(readReceiptParseConfig({ GEMINI_API_KEY: "  " })).toBeNull();
+    expect(readReceiptParseConfig({ RECEIPT_PARSE_AI_API_KEY: "  " })).toBeNull();
     expect(readReceiptParseConfig({ RECEIPT_PARSE_MODEL: "x" })).toBeNull();
   });
 
-  it("reads GEMINI_API_KEY first — the key the platform already provisions", () => {
-    expect(readReceiptParseConfig({ GEMINI_API_KEY: "k" })).toEqual({
-      provider: "gemini",
-      baseUrl: "https://generativelanguage.googleapis.com/v1beta",
-      apiKey: "k",
-      model: "gemini-2.5-flash",
+  it("IGNORES GEMINI_API_KEY — the reader makes zero Google calls (bridge pulled 2026-11-13)", () => {
+    // Even with Google's key provisioned in the environment, the
+    // receipt reader must not resolve a provider from it: with no
+    // RECEIPT_PARSE_AI_* endpoint the reader is honestly
+    // not-configured, and when one IS configured it wins outright.
+    expect(readReceiptParseConfig({ GEMINI_API_KEY: "k" })).toBeNull();
+    expect(
+      readReceiptParseConfig({ GEMINI_API_KEY: "g", RECEIPT_PARSE_AI_API_KEY: "r" })
+    ).toEqual({
+      provider: "openai-compatible",
+      baseUrl: "https://api.openai.com/v1",
+      apiKey: "r",
+      model: "gpt-4o-mini",
     });
   });
 
-  it("honors RECEIPT_PARSE_MODEL, then VIN_OCR_MODEL, as the override", () => {
-    expect(
-      readReceiptParseConfig({ GEMINI_API_KEY: "k", RECEIPT_PARSE_MODEL: "gemini-pro" })?.model
-    ).toBe("gemini-pro");
-    expect(
-      readReceiptParseConfig({ GEMINI_API_KEY: "k", VIN_OCR_MODEL: "gemini-vin" })?.model
-    ).toBe("gemini-vin");
-  });
-
-  it("falls back to a receipt-specific OpenAI-compatible key, then the VIN door's", () => {
+  it("reads the RECEIPT_PARSE_AI_* endpoint — base URL and model, with defaults", () => {
     expect(readReceiptParseConfig({ RECEIPT_PARSE_AI_API_KEY: "rk" })).toEqual({
       provider: "openai-compatible",
       baseUrl: "https://api.openai.com/v1",
@@ -68,13 +60,35 @@ describe("readReceiptParseConfig", () => {
         RECEIPT_PARSE_AI_BASE_URL: "https://vision.example.test/v1/",
       })?.baseUrl
     ).toBe("https://vision.example.test/v1");
-    expect(readReceiptParseConfig({ VIN_OCR_AI_API_KEY: "vk" })?.provider).toBe(
-      "openai-compatible"
-    );
-    // Gemini still wins when several keys exist.
     expect(
-      readReceiptParseConfig({ GEMINI_API_KEY: "g", RECEIPT_PARSE_AI_API_KEY: "r" })?.provider
-    ).toBe("gemini");
+      readReceiptParseConfig({
+        RECEIPT_PARSE_AI_API_KEY: "rk",
+        RECEIPT_PARSE_AI_MODEL: "qwen3-vl-8b",
+      })?.model
+    ).toBe("qwen3-vl-8b");
+  });
+
+  it("honors RECEIPT_PARSE_MODEL only as a generic model override, never as a Google path", () => {
+    expect(
+      readReceiptParseConfig({
+        RECEIPT_PARSE_AI_API_KEY: "rk",
+        RECEIPT_PARSE_MODEL: "override-model",
+      })?.model
+    ).toBe("override-model");
+    expect(
+      readReceiptParseConfig({
+        RECEIPT_PARSE_AI_API_KEY: "rk",
+        RECEIPT_PARSE_AI_MODEL: "endpoint-model",
+        RECEIPT_PARSE_MODEL: "override-model",
+      })?.model
+    ).toBe("endpoint-model");
+  });
+
+  it("no longer falls back to the VIN door's keys — each door owns its config", () => {
+    expect(readReceiptParseConfig({ VIN_OCR_AI_API_KEY: "vk" })).toBeNull();
+    expect(
+      readReceiptParseConfig({ VIN_OCR_AI_API_KEY: "vk", VIN_OCR_MODEL: "m" })
+    ).toBeNull();
   });
 });
 
@@ -110,61 +124,6 @@ describe("planReceiptParseRequest", () => {
 });
 
 describe("buildReceiptParseProviderCall", () => {
-  it("builds the Gemini generateContent call — the exact documented camelCase wire shape", () => {
-    const call = buildReceiptParseProviderCall(GEMINI, {
-      profile: "general",
-      mimeType: "image/jpeg",
-      base64: "QUJD",
-    });
-    expect(call.url).toBe(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
-    );
-    expect(call.init.method).toBe("POST");
-    expect(call.init.headers).toEqual({
-      "x-goog-api-key": "gemini-key",
-      "Content-Type": "application/json",
-    });
-    // The EXACT serialized body, field names included. Google's
-    // generateContent REST shape is camelCase (inlineData / mimeType
-    // / responseMimeType); the snake_case proto names shipped first
-    // and production answered HTTP 404 on every receipt (2026-11-13).
-    // This deep-equal + the substring bans below pin the shape so it
-    // cannot regress silently.
-    expect(JSON.parse(call.init.body)).toEqual({
-      contents: [
-        {
-          parts: [
-            {
-              text: `${receiptExtractionInstruction("general")}\n\nExtract the expense data from this document.`,
-            },
-            { inlineData: { mimeType: "image/jpeg", data: "QUJD" } },
-          ],
-        },
-      ],
-      generationConfig: { responseMimeType: "application/json" },
-    });
-    expect(JSON.parse(call.init.body).contents[0].parts[0].text).toMatch(
-      /crossed out or voided, exclude it/
-    );
-    expect(call.init.body).not.toContain("inline_data");
-    expect(call.init.body).not.toContain("response_mime_type");
-    expect(call.init.body).not.toContain("mime_type");
-  });
-
-  it("sends text documents to Gemini as a second text part (no inlineData)", () => {
-    const call = buildReceiptParseProviderCall(GEMINI, {
-      profile: "general",
-      mimeType: "text/plain",
-      text: "Vendor: Robbie's Automotive Total: 1181.00",
-    });
-    const body = JSON.parse(call.init.body);
-    expect(body.contents[0].parts).toHaveLength(2);
-    expect(body.contents[0].parts[1]).toEqual({
-      text: "Vendor: Robbie's Automotive Total: 1181.00",
-    });
-    expect(body.generationConfig).toEqual({ responseMimeType: "application/json" });
-  });
-
   it("builds the OpenAI chat call with an image_url part for photos", () => {
     const call = buildReceiptParseProviderCall(OPENAI, {
       profile: "general",
@@ -172,14 +131,39 @@ describe("buildReceiptParseProviderCall", () => {
       base64: "QUJD",
     });
     expect(call.url).toBe("https://api.openai.com/v1/chat/completions");
+    expect(call.init.method).toBe("POST");
     expect(call.init.headers.Authorization).toBe("Bearer openai-key");
     const body = JSON.parse(call.init.body);
+    expect(body.model).toBe("gpt-4o-mini");
     expect(body.response_format).toEqual({ type: "json_object" });
+    expect(body.messages[0]).toEqual({
+      role: "system",
+      content: receiptExtractionInstruction("general"),
+    });
+    expect(body.messages[0].content).toMatch(/crossed out or voided, exclude it/);
     const userParts = body.messages[1].content;
     expect(userParts[1]).toEqual({
       type: "image_url",
       image_url: { url: "data:image/png;base64,QUJD" },
     });
+    // Zero Google surface in the built call — no Google host, no
+    // Google auth header, no generateContent wire shape.
+    expect(call.url).not.toContain("generativelanguage.googleapis.com");
+    expect(call.init.headers).not.toHaveProperty("x-goog-api-key");
+    expect(call.init.body).not.toContain("inlineData");
+    expect(call.init.body).not.toContain("generateContent");
+  });
+
+  it("sends text documents as a single text part", () => {
+    const call = buildReceiptParseProviderCall(OPENAI, {
+      profile: "general",
+      mimeType: "text/plain",
+      text: "Vendor: Robbie's Automotive Total: 1181.00",
+    });
+    const body = JSON.parse(call.init.body);
+    expect(body.messages[1].content).toEqual([
+      { type: "text", text: "Vendor: Robbie's Automotive Total: 1181.00" },
+    ]);
   });
 
   it("uses a file part for PDFs on the OpenAI-compatible shape", () => {
@@ -195,12 +179,7 @@ describe("buildReceiptParseProviderCall", () => {
 });
 
 describe("receiptProviderAnswerText", () => {
-  it("joins Gemini candidate parts and reads OpenAI choices", () => {
-    expect(
-      receiptProviderAnswerText("gemini", {
-        candidates: [{ content: { parts: [{ text: "{\"a\":" }, { text: "1}" }] } }],
-      })
-    ).toBe('{"a":1}');
+  it("reads OpenAI choices", () => {
     expect(
       receiptProviderAnswerText("openai-compatible", {
         choices: [{ message: { content: "{\"a\":1}" } }],
@@ -209,9 +188,15 @@ describe("receiptProviderAnswerText", () => {
   });
 
   it("returns null for empty or malformed provider bodies", () => {
-    expect(receiptProviderAnswerText("gemini", null)).toBeNull();
-    expect(receiptProviderAnswerText("gemini", { candidates: [] })).toBeNull();
+    expect(receiptProviderAnswerText("openai-compatible", null)).toBeNull();
     expect(receiptProviderAnswerText("openai-compatible", { choices: [] })).toBeNull();
+    // A Gemini-shaped body is not readable here anymore — no
+    // candidates arm exists in the reader.
+    expect(
+      receiptProviderAnswerText("openai-compatible", {
+        candidates: [{ content: { parts: [{ text: "{\"a\":1}" }] } }],
+      })
+    ).toBeNull();
   });
 });
 
