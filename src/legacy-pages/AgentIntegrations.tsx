@@ -1,6 +1,7 @@
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ApiKeysPanel } from "@/components/integrations/ApiKeysPanel";
 import { McpConnectPanel } from "@/components/integrations/McpConnectPanel";
+import { ScreenMyCallsPanel } from "@/components/integrations/ScreenMyCallsPanel";
 
 export default function AgentIntegrations() {
   return (
@@ -14,6 +15,7 @@ export default function AgentIntegrations() {
             grant.
           </p>
         </div>
+        <ScreenMyCallsPanel />
         <ApiKeysPanel />
         <McpConnectPanel variant="user" />
       </div>

@@ -31,6 +31,7 @@ import { catalogRouter } from "./routes/catalog";
 import { crmRouter } from "./routes/crm";
 import { documentsRouter } from "./routes/documents";
 import { messagingRouter } from "./routes/messaging";
+import { screenMyCallsRouter } from "./routes/screenmycalls";
 import { platformRouter } from "./routes/platform";
 import { telemetryRouter } from "./routes/telemetry";
 import { publicBookingRouter } from "./routes/public-booking";
@@ -120,6 +121,7 @@ export function createHonoApp(): Hono {
   app.route("/", crmRouter);
   app.route("/", documentsRouter);
   app.route("/", messagingRouter);
+  app.route("/", screenMyCallsRouter);
   app.route("/", platformRouter);
   app.route("/", telemetryRouter);
   app.route("/", vehiclesRouter);
