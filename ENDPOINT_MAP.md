@@ -142,6 +142,14 @@
 | `/v1/identity` | GET | auth | Current user + workspace | App shell |
 | `/v1/workspaces` | GET | auth | Workspace list | Workspace switcher |
 | `/v1/workforce-identity` | GET | auth | Tech/dispatcher identity | Tech app auth |
+| `/v1/integrations/screenmycalls/connect` | POST | workspace owner/admin | ScreenMyCalls connection state (no secret) | Agent integrations → ScreenMyCalls |
+| `/v1/integrations/screenmycalls/status` | GET | workspace owner/admin | Connection + live ScreenMyCalls status | Agent integrations → ScreenMyCalls |
+| `/v1/integrations/screenmycalls/numbers/search` | POST | workspace owner/admin | Telnyx number inventory | Agent integrations → ScreenMyCalls |
+| `/v1/integrations/screenmycalls/numbers/purchase` | POST | workspace owner/admin | Purchased number | Agent integrations → ScreenMyCalls |
+| `/v1/integrations/screenmycalls/numbers/select` | POST | workspace owner/admin | Selected number | Agent integrations → ScreenMyCalls |
+| `/v1/integrations/screenmycalls/mirror` | POST | workspace owner/admin | Mirror on/off state | Agent integrations → ScreenMyCalls |
+| `/v1/integrations/screenmycalls/10dlc` | POST/GET | workspace owner/admin | 10DLC registration state | Agent integrations → ScreenMyCalls |
+| `/v1/integrations/screenmycalls/disconnect` | POST | workspace owner/admin | Revoked connection | Agent integrations → ScreenMyCalls |
 
 ---
 
