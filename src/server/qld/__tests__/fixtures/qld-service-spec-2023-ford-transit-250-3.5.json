@@ -1,0 +1,41 @@
+{
+ "success": true,
+ "spec": {
+  "vehicle": {
+   "id": "13233",
+   "year": 2023,
+   "make": "Ford",
+   "model": "Transit-250",
+   "engine": "3.5"
+  },
+  "oil": {
+   "viscosity": "5W-20",
+   "capacity": {
+    "display": "5.7 liters with filter",
+    "quarts": 6.02,
+    "liters": 5.7
+   },
+   "drainPlugTorque": {
+    "display": "19 ft. lbs.",
+    "ftLbs": 19,
+    "nm": 25.8
+   }
+  },
+  "fluids": {
+   "automaticTransmission": "Mercon ULV",
+   "manualTransmission": null,
+   "transferCase": null,
+   "frontDifferential": null,
+   "rearDifferential": null
+  },
+  "maintenance": {
+   "oilLifeResetInstructions": "Switch the ignition on without starting the engine. Press the accelerator and brake pedals at the same time and keep both fully pressed. After about 3 seconds a message confirms the reset is in progress; after about 25 seconds a message confirms it is complete. Release both pedals and switch the ignition off. Reset only after changing the oil and filter. (Ford owner's manual, Oil Change Indicator Reset.)"
+  },
+  "dataQuality": {
+   "coreOilSpecAvailable": true,
+   "releaseStatusCode": "ENGINE_FILTER_FAMILY_CONTINUITY",
+   "releaseStatus": "ENGINE_FILTER_FAMILY_CONTINUITY \u2014 Engine Oil: 1/1 same engine/filter family; Oil Capacity: 1/1 same engine/filter family; Oil Plug Torque: 1/1 same engine/filter family. WIX official application matched; NAPA Gold cross-reference derived from WIX/NAPA convention; STP cross-reference not verified.",
+   "sourceDataset": "full oil and filter 2022 to 2027"
+  }
+ }
+}

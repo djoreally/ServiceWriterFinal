@@ -7,32 +7,46 @@
  * the source — callers keep it only as a legacy fallback under this
  * tier, and nothing new reads from it.
  *
+ * This module is the Service Writer adapter over the resolver in
+ * ./resolver, which owns the actual translation between SW's
+ * stored strings and QLD's exact-match contract (canonicalize via
+ * QLD's hierarchy, resolve the engine from hints, probe for the
+ * oil-carrying row). The adapter owns what is SW-specific:
+ *
+ *   - The 90-day server cache in `qld_spec_cache` (migration
+ *     20261113133000; request/response JSONB + created_at, keyed by
+ *     normalized year|make|model|engine because Service Writer
+ *     resolves specs by YMM, not by VIN). Successful resolutions
+ *     are written under their CANONICAL key; the resolver reads
+ *     them back through the cache port before spending probes.
+ *   - The engine-hint assembly: the caller's stored/learned engine
+ *     first, then an NHTSA VIN decode when the caller supplies a
+ *     VIN and no engine — including when the VIN matched a
+ *     workspace row (the Data Center used to skip the decode
+ *     there, which is how engine-less 400s reached QLD).
+ *
  * Contract:
  *   - Blanks only. This provider only ever answers values; every
  *     caller merges them under stronger sources (a shop's learned
- *     working spec, a human-entered value), so a QLD value can never
- *     overwrite what a human settled.
- *   - Engine-ambiguous means the choice is surfaced, never guessed:
- *     when QLD will not answer without an engine and the caller has
- *     none, the result is `engine_required` carrying QLD's own engine
- *     list — and no values.
- *   - Fail-open: missing key, QLD down, timeout, or a cache failure
- *     all degrade to `unavailable` (or a cache miss), which callers
- *     read as "spec not recorded" — the pre-QLD behavior, exactly.
- *   - Successful lookups are cached server-side for 90 days in
- *     `qld_spec_cache` (migration 20261113133000), mirroring Fleet
- *     Mail's vin_spec_cache shape (request/response JSONB +
- *     created_at), keyed by normalized year|make|model|engine
- *     because Service Writer resolves specs by YMM, not by VIN.
+ *     working spec, a human-entered value), so a QLD value can
+ *     never overwrite what a human settled.
+ *   - Engine-ambiguous means the choice is surfaced, never
+ *     guessed: when no hint, decode, or hierarchy probe can settle
+ *     the engine, the result is `engine_required` carrying QLD's
+ *     own engine list — and no values.
+ *   - Fail-open: missing key, QLD down, timeout, or a cache
+ *     failure all degrade to `unavailable` (or a cache miss),
+ *     which callers read as "spec not recorded" — the pre-QLD
+ *     behavior, exactly.
  */
 import type { OilSpecValues } from "@/lib/vehicle-spec-merge";
+import { decodeVinWithNhtsa } from "@/server/hono/lib/vin-decode";
+import { isQldConfigured, type QldClientDeps } from "./client";
 import {
-  fetchQldJson,
-  isQldConfigured,
-  qldYmmQuery,
-  type QldClientDeps,
-  type QldHttpResult,
-} from "./client";
+  displacementToken,
+  resolveQldVehicle,
+  type QldSpecCachePort,
+} from "./resolver";
 
 export interface QldSpecValues extends OilSpecValues {
   drainPlugTorqueFtLbs?: number;
@@ -48,11 +62,18 @@ export interface QldLookupInput {
   make: string;
   model: string;
   engine?: string | null;
+  /** When set and no engine is known, the decode supplies a hint. */
+  vin?: string | null;
 }
 
 export interface QldProviderDeps extends QldClientDeps {
   /** Injectable clock for cache-TTL tests. */
   now?: () => Date;
+  /**
+   * Injectable VIN → engine-string decode (defaults to NHTSA
+   * vPIC). Pass null to disable decoding entirely.
+   */
+  decodeEngineHint?: ((vin: string) => Promise<string | null>) | null;
 }
 
 const CACHE_TABLE = "qld_spec_cache";
@@ -158,35 +179,6 @@ export function mapQldSpecValues(
   return values;
 }
 
-/** Engine list from a QLD body, when the body carries one. */
-function enginesFromBody(body: Record<string, unknown>): string[] {
-  const raw = body.engines ?? record(body.spec).engines;
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((entry) => clean(entry) ?? clean(record(entry).engine) ?? clean(record(entry).name))
-    .filter((entry): entry is string => Boolean(entry));
-}
-
-function isEngineRequired(result: QldHttpResult | null): boolean {
-  if (!result) return false;
-  if (result.body.status === "engine_required") return true;
-  if (result.status === 400) {
-    const message = String(result.body.message ?? "");
-    return /engine/i.test(message) && /required/i.test(message);
-  }
-  return false;
-}
-
-function isSpecSuccess(result: QldHttpResult | null): boolean {
-  return Boolean(
-    result &&
-      result.status >= 200 &&
-      result.status < 300 &&
-      result.body.success === true &&
-      record(result.body.spec).vehicle,
-  );
-}
-
 interface CachedPayload {
   values: QldSpecValues;
   serviceSpec: Record<string, unknown> | null;
@@ -247,16 +239,13 @@ async function writeCache(
   }
 }
 
-/** The 0-credit hierarchy list of engines for a YMM, fail-soft. */
-async function fetchEngineOptions(
-  input: QldLookupInput,
+/** Default VIN → engine hint: the free NHTSA vPIC decode. */
+async function defaultDecodeEngineHint(
+  vin: string,
   deps: QldProviderDeps,
-): Promise<string[]> {
-  const result = await fetchQldJson(
-    `/api/v1/developer/engines?${qldYmmQuery(input)}`,
-    deps,
-  );
-  return result ? enginesFromBody(result.body) : [];
+): Promise<string | null> {
+  const result = await decodeVinWithNhtsa(vin, deps.fetchImpl ?? fetch);
+  return result.success ? result.vehicle.engine : null;
 }
 
 /**
@@ -277,48 +266,88 @@ export async function resolveQldSpec(
   if (!Number.isFinite(year) || year <= 0 || !make || !model) {
     return { status: "unavailable" };
   }
-  const lookup: QldLookupInput = {
+  const now = deps.now ?? (() => new Date());
+  const rawLookup: QldLookupInput = {
     year,
     make,
     model,
     engine: clean(input.engine) ?? null,
   };
-  const now = deps.now ?? (() => new Date());
-  const key = qldCacheKey(lookup);
 
-  const cached = await readCache(db, key, now);
+  const cached = await readCache(db, qldCacheKey(rawLookup), now);
   if (cached) return { status: "ok", values: cached.values };
 
-  const query = qldYmmQuery(lookup);
-  const [specResult, filtersResult] = await Promise.all([
-    fetchQldJson(`/api/v1/developer/vehicles/service-spec?${query}`, deps),
-    fetchQldJson(`/api/v1/developer/filters?${query}`, deps),
-  ]);
-
-  if (isEngineRequired(specResult) || isEngineRequired(filtersResult)) {
-    // An engine was already supplied and QLD still will not answer:
-    // that is a dead end, not a choice to surface.
-    if (lookup.engine) return { status: "unavailable" };
-    const listed = enginesFromBody(specResult?.body ?? {});
-    const engines = listed.length ? listed : enginesFromBody(filtersResult?.body ?? {});
-    return {
-      status: "engine_required",
-      engines: engines.length ? engines : await fetchEngineOptions(lookup, deps),
-    };
+  // Engine hints, best first: the caller's stored/learned engine,
+  // else a decode of the VIN. The decode runs whenever a VIN is
+  // supplied and no engine is known — a workspace-row match no
+  // longer stops the sourcing (that skip was one of the three
+  // failure modes in the 2026-11-13 diagnosis).
+  const hints: string[] = [];
+  if (rawLookup.engine) hints.push(rawLookup.engine);
+  const vin = clean(input.vin);
+  if (!hints.length && vin && deps.decodeEngineHint !== null) {
+    const decode =
+      deps.decodeEngineHint ??
+      ((value: string) => defaultDecodeEngineHint(value, deps));
+    const decoded = await decode(vin).catch(() => null);
+    if (clean(decoded)) hints.push(decoded as string);
   }
 
-  if (!isSpecSuccess(specResult) && !isSpecSuccess(filtersResult)) {
-    return { status: "unavailable" };
+  // A repeat resolution with the same stored strings usually sits
+  // in the cache under a hint-derived key (the canonical spelling
+  // or its displacement token) — check those before any wire call.
+  if (hints.length) {
+    const guesses = new Set<string>();
+    for (const hint of hints) {
+      guesses.add(hint);
+      const token = displacementToken(hint);
+      if (token) guesses.add(token);
+    }
+    for (const guess of guesses) {
+      const hit = await readCache(
+        db,
+        qldCacheKey({ ...rawLookup, engine: guess }),
+        now,
+      );
+      if (hit) return { status: "ok", values: hit.values };
+    }
   }
 
-  const serviceSpecBody = isSpecSuccess(specResult) ? specResult!.body : null;
-  const filtersBody = isSpecSuccess(filtersResult) ? filtersResult!.body : null;
-  const values = mapQldSpecValues(serviceSpecBody, filtersBody);
-  await writeCache(db, key, lookup, {
-    values,
-    serviceSpec: serviceSpecBody,
-    filters: filtersBody,
-  });
+  const cachePort: QldSpecCachePort = {
+    read: async (canonical) => {
+      const hit = await readCache(db, qldCacheKey(canonical), now);
+      if (!hit || !hit.serviceSpec) return null;
+      return { serviceSpec: hit.serviceSpec, filters: hit.filters };
+    },
+  };
+
+  const resolution = await resolveQldVehicle(
+    { year, make, model, engineHints: hints },
+    { ...deps, cachePort },
+  );
+  if (resolution.status === "engine_required") {
+    return { status: "engine_required", engines: resolution.engines };
+  }
+  if (resolution.status !== "ok") return { status: "unavailable" };
+
+  const values = mapQldSpecValues(resolution.serviceSpec, resolution.filters);
+  if (!resolution.fromCache) {
+    await writeCache(
+      db,
+      qldCacheKey(resolution.canonical),
+      {
+        year: resolution.canonical.year,
+        make: resolution.canonical.make,
+        model: resolution.canonical.model,
+        engine: resolution.canonical.engine || null,
+      },
+      {
+        values,
+        serviceSpec: resolution.serviceSpec,
+        filters: resolution.filters,
+      },
+    );
+  }
   return { status: "ok", values };
 }
 

@@ -1,0 +1,41 @@
+{
+ "success": true,
+ "spec": {
+  "vehicle": {
+   "id": "3201",
+   "year": 2018,
+   "make": "Nissan",
+   "model": "NV2500",
+   "engine": "5.6"
+  },
+  "oil": {
+   "viscosity": "0W-20",
+   "capacity": {
+    "display": "6.5 liters with filter",
+    "quarts": 6.87,
+    "liters": 6.5
+   },
+   "drainPlugTorque": {
+    "display": "25 ft. lbs.",
+    "ftLbs": 25,
+    "nm": 33.9
+   }
+  },
+  "fluids": {
+   "automaticTransmission": "Nissan Matic S",
+   "manualTransmission": null,
+   "transferCase": null,
+   "frontDifferential": null,
+   "rearDifferential": "75W-90 Synthetic"
+  },
+  "maintenance": {
+   "oilLifeResetInstructions": null
+  },
+  "dataQuality": {
+   "coreOilSpecAvailable": true,
+   "releaseStatusCode": "UNKNOWN",
+   "releaseStatus": null,
+   "sourceDataset": "full oil and filter 2022 to 2027"
+  }
+ }
+}

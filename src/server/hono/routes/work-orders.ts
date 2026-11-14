@@ -59,6 +59,10 @@ import {
   type TechPaymentPaymentLike,
 } from "@/application/queries/tech-app-payment.query";
 import { captureServerError } from "@/server/sentry";
+import {
+  reconcileVinCorrection,
+  type VinCorrectionResult,
+} from "@/server/vin-correction";
 import { syncCanonicalInvoiceToStripe } from "@/server/payments/stripe-invoice-sync";
 import { dispatchPaymentLifecycle, LIFECYCLE_EVENT_KEYS } from "@/server/messaging/quote-payment-events";
 import { planVehicleFieldUpdate } from "@/application/commands/tech-app-vehicle.command";
@@ -3362,7 +3366,15 @@ workOrdersRouter.patch("/v1/tech-app/jobs/:appointmentId/vehicle", async (c) => 
   // assigned job. The write itself lands on the same single
   // vehicles row the office edits, with the same field rules
   // (planning/validation: src/application/commands/tech-app-vehicle.command.ts).
-  // It never touches pricing or the appointment itself.
+  //
+  // A VIN change is not a silent field edit (Ty's requirement,
+  // 2026-11-13): identities and specs derive from the VIN, so when
+  // it changes the save reconciles downstream — identity and specs
+  // re-resolve, the price basis is re-checked and any delta is
+  // FLAGGED in the response for the owner (never charged here, and
+  // no issued document or locked quote is ever mutated from this
+  // door), and the correction is persisted on the job's audit
+  // trail. Reconciliation: src/server/vin-correction.ts.
   const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c);
   const appointmentId = z.string().uuid().parse(c.req.param("appointmentId"));
   const body = await c.req.json().catch(() => null);
@@ -3385,6 +3397,15 @@ workOrdersRouter.patch("/v1/tech-app/jobs/:appointmentId/vehicle", async (c) => 
   const vehicleId = (appointment as { vehicle_id?: string | null }).vehicle_id;
   if (!vehicleId) throw new ApiError(422, "This job has no vehicle on record.", "job_has_no_vehicle");
 
+  // The row as it stands before the write: a VIN change is judged
+  // against it, and the reconciliation reads the old identity from
+  // it. A failed read degrades to "unknown", never to a refused save.
+  const { data: currentVehicle } = await (supabase.from("vehicles") as any)
+    .select("id, vin, year, make, model")
+    .eq("workspace_id", workspaceId)
+    .eq("id", vehicleId)
+    .maybeSingle();
+
   const { data: vehicle, error: vehicleError } = await (supabase.from("vehicles") as any)
     .update(plan.patch as never)
     .eq("workspace_id", workspaceId)
@@ -3393,10 +3414,26 @@ workOrdersRouter.patch("/v1/tech-app/jobs/:appointmentId/vehicle", async (c) => 
     .single();
   if (vehicleError) throw vehicleError;
 
+  const savedVin = (vehicle as { vin: string | null }).vin ?? null;
+  const previousVin =
+    (currentVehicle as { vin?: string | null } | null)?.vin ?? null;
+  let correction: VinCorrectionResult | null = null;
+  if (savedVin && previousVin !== savedVin) {
+    correction = await reconcileVinCorrection(supabase as any, {
+      workspaceId,
+      appointmentId,
+      vehicleId,
+      oldVin: previousVin,
+      newVin: savedVin,
+      actorUserId: user.id,
+      request: c.req.raw,
+    });
+  }
+
   return json({
     data: {
       vehicle_id: (vehicle as { id: string }).id,
-      vin: (vehicle as { vin: string | null }).vin ?? null,
+      vin: savedVin,
       license_plate: (vehicle as { license_plate: string | null }).license_plate ?? null,
       // vehicles.mileage is numeric — PostgREST may hand it back as
       // a string; answer a real number either way.
@@ -3406,6 +3443,16 @@ workOrdersRouter.patch("/v1/tech-app/jobs/:appointmentId/vehicle", async (c) => 
         if (typeof raw === "string" && raw.trim() !== "" && Number.isFinite(Number(raw))) return Number(raw);
         return null;
       })(),
+      ...(correction
+        ? {
+            identity: correction.identity,
+            specs: correction.specs,
+            ...(correction.priceBasisDelta
+              ? { priceBasisDelta: correction.priceBasisDelta }
+              : {}),
+            correctionRecord: correction.correctionRecord,
+          }
+        : {}),
     },
   });
 });

@@ -348,19 +348,23 @@ export async function buildBookingConfiguration(
   //    spares duplicate resolutions inside one configuration build.
   //    Resolves null on every failure (missing key included): the
   //    merge then runs on the legacy table resolution alone, which
-  //    is exactly the pre-QLD behavior. --
+  //    is exactly the pre-QLD behavior. The vehicle's VIN rides
+  //    along: with no learned/snapshot engine, the provider decodes
+  //    it (NHTSA) for an engine hint instead of sending QLD an
+  //    engine-less request it can only refuse. --
   const qldMemo = new Map<string, Promise<OilSpecValues | null>>();
   const qldFor = (
     year: unknown,
     make: unknown,
     model: unknown,
     engineHint: string | null,
+    vin?: string | null,
   ): Promise<OilSpecValues | null> => {
     const yearNum = yearNumber(year);
     const makeText = textOrUndefined(make);
     const modelText = textOrUndefined(model);
     if (!yearNum || !makeText || !modelText) return Promise.resolve(null);
-    const key = `${yearNum}|${normalizeText(makeText)}|${normalizeText(modelText)}|${normalizeText(engineHint ?? "")}`;
+    const key = `${yearNum}|${normalizeText(makeText)}|${normalizeText(modelText)}|${normalizeText(engineHint ?? "")}|${normalizeVin(vin ?? "")}`;
     const cached = qldMemo.get(key);
     if (cached) return cached;
     const promise = (async () => {
@@ -369,6 +373,7 @@ export async function buildBookingConfiguration(
         make: makeText,
         model: modelText,
         engine: engineHint,
+        vin: vin ?? null,
       });
       return result.status === "ok" ? (result.values as OilSpecValues) : null;
     })();
@@ -414,7 +419,7 @@ export async function buildBookingConfiguration(
     );
     const qld = await attempt(
       "qld spec lookup",
-      () => qldFor(ymm.year, ymm.make, ymm.model, engineHint),
+      () => qldFor(ymm.year, ymm.make, ymm.model, engineHint, live ? textOrUndefined(live.vin) ?? null : null),
       null as OilSpecValues | null,
     );
     const catalog = combineCatalogValues(tableCatalog, qld);

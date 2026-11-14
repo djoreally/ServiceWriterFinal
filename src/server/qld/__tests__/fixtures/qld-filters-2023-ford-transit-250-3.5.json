@@ -1,0 +1,22 @@
+{
+ "success": true,
+ "spec": {
+  "vehicle": {
+   "id": "13233",
+   "year": 2023,
+   "make": "Ford",
+   "model": "Transit-250",
+   "engine": "3.5"
+  },
+  "filters": {
+   "wix": "57502",
+   "napaGold": "7502",
+   "stp": "S10590"
+  },
+  "verification": {
+   "status": "verified",
+   "source": "full oil and filter 2022 to 2027; catalog_cross_reference_2026-10-01",
+   "verifiedAt": "2026-10-01T13:33:44.354Z"
+  }
+ }
+}
