@@ -47,6 +47,8 @@ import { matchQldCandidate, qldLooseMakeKey } from "@/server/qld/resolver";
 import {
   appliesToFromCatalog,
   fillVehicleIdentityBlanks,
+  fieldEntrySources,
+  fieldProvenanceOf,
   hasAnySpec,
   mergeSpecs,
   parseCapacityQuarts,
@@ -54,8 +56,16 @@ import {
   specsFromCatalogRow,
   specsFromWorkspaceRow,
   EMPTY_SPECS,
+  FIELD_PROVENANCE_KEY,
   type DataCenterSpecs,
 } from "@/server/hono/lib/data-center";
+import {
+  submitFieldValue,
+  retractFieldSubmission,
+  fileOfficeSpecSubmissions,
+  FIELD_KEYS,
+  PART_SUBMISSION_FIELDS,
+} from "@/server/hono/lib/field-submissions";
 import { toDollars } from "@/lib/money";
 import {
   MAX_ODOMETER_READING,
@@ -189,7 +199,7 @@ vehiclesRouter.get("/v1/vehicles", async (c) => {
 
 vehiclesRouter.post("/v1/vehicles", async (c) => {
   const body = vehicleSchema.parse(await c.req.json());
-  const { supabase } = await requireWorkspaceAuth(c, body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist", "technician"]);
+  const { supabase, user, membership } = await requireWorkspaceAuth(c, body.workspace_id, ["owner", "admin", "manager", "service_advisor", "receptionist", "technician"]);
   await assertCustomerInWorkspace(supabase, body.workspace_id, body.customer_id);
 
   const { engine, oil_type, oil_capacity, oil_filter, odometer_measure, plate_state, ...vehicleInput } = body;
@@ -219,6 +229,28 @@ vehiclesRouter.post("/v1/vehicles", async (c) => {
       metadata: {},
     } as never, { onConflict: "workspace_id,vehicle_id" });
     if (specsError) throw specsError;
+    // Field Data Collection (SW-137 Decision 4): office entries file
+    // submissions too, silently — the office's direct write above is
+    // the trusted door for its own account; the filing exists so the
+    // platform's collection holds its highest-quality source. Filing
+    // must never fail the office's own save.
+    try {
+      await fileOfficeSpecSubmissions(supabase as any, {
+        workspaceId: body.workspace_id,
+        userId: user.id,
+        role: membership?.role ?? null,
+        vehicleId: vehicle.id,
+        vin: (vehicle as { vin?: string | null }).vin ?? null,
+        year: body.year ?? null,
+        make: body.make ?? null,
+        model: body.model ?? null,
+        engine: engine ?? null,
+        values: { engine, oil_type, oil_capacity, oil_filter },
+        sourceSurface: "vehicle_page",
+      });
+    } catch {
+      // Silent by design (Decision 4).
+    }
   }
 
   return json({ data: vehicle }, { status: 201 });
@@ -267,7 +299,7 @@ vehiclesRouter.get("/v1/vehicles/:id", async (c) => {
 vehiclesRouter.patch("/v1/vehicles/:id", async (c) => {
   const body = vehicleUpdateSchema.parse(await c.req.json());
   const id = z.string().uuid().parse(c.req.param("id"));
-  const { supabase } = await requireWorkspaceAuth(c, body.workspace_id, [...writeRoles]);
+  const { supabase, user, membership } = await requireWorkspaceAuth(c, body.workspace_id, [...writeRoles]);
 
   if (Object.prototype.hasOwnProperty.call(body, "customer_id") && body.customer_id) {
     const { data: customer, error: customerError } = await supabase
@@ -342,6 +374,34 @@ vehiclesRouter.patch("/v1/vehicles/:id", async (c) => {
       .eq("vehicle_id", id)
       .maybeSingle();
     if (currentSpecsError) throw currentSpecsError;
+    // Field Data Collection provenance hygiene: a field the office
+    // (re)sets here is the office's value now — a surviving
+    // field-entry stamp for it would mislabel the render, so the
+    // stamps for exactly the fields this request touches come off.
+    const nextMetadata: Record<string, unknown> = {
+      ...((currentSpecs?.metadata as Record<string, unknown> | null) ?? {}),
+    };
+    const provenance = { ...fieldProvenanceOf(nextMetadata) };
+    let provenanceChanged = false;
+    const officeSetFields: Record<string, string | null | undefined> = {
+      engine,
+      oil_type,
+      oil_capacity,
+      oil_filter,
+    };
+    for (const field of Object.keys(officeSetFields)) {
+      if (officeSetFields[field] !== undefined && field in provenance) {
+        delete provenance[field];
+        provenanceChanged = true;
+      }
+    }
+    if (provenanceChanged) {
+      if (Object.keys(provenance).length > 0) {
+        nextMetadata[FIELD_PROVENANCE_KEY] = provenance;
+      } else {
+        delete nextMetadata[FIELD_PROVENANCE_KEY];
+      }
+    }
     const { error: specsError } = await supabase.from("vehicle_service_specs").upsert({
       workspace_id,
       vehicle_id: id,
@@ -350,9 +410,34 @@ vehiclesRouter.patch("/v1/vehicles/:id", async (c) => {
       oil_capacity: oil_capacity !== undefined ? oil_capacity : currentSpecs?.oil_capacity ?? null,
       oil_filter: oil_filter !== undefined ? oil_filter : currentSpecs?.oil_filter ?? null,
       source: "service_writer",
-      metadata: currentSpecs?.metadata ?? {},
+      metadata: nextMetadata,
     } as never, { onConflict: "workspace_id,vehicle_id" });
     if (specsError) throw specsError;
+    // Field Data Collection (SW-137 Decision 4): file the office's
+    // set values as submissions too, silently — never fail the save.
+    try {
+      const vehicleRow = (vehicle ?? {}) as {
+        vin?: string | null;
+        year?: number | null;
+        make?: string | null;
+        model?: string | null;
+      };
+      await fileOfficeSpecSubmissions(supabase as any, {
+        workspaceId: workspace_id,
+        userId: user.id,
+        role: membership?.role ?? null,
+        vehicleId: id,
+        vin: vehicleRow.vin ?? null,
+        year: vehicleRow.year ?? null,
+        make: vehicleRow.make ?? null,
+        model: vehicleRow.model ?? null,
+        engine: engine !== undefined ? engine : currentSpecs?.engine ?? null,
+        values: officeSetFields,
+        sourceSurface: "vehicle_page",
+      });
+    } catch {
+      // Silent by design (Decision 4).
+    }
   }
 
   return json({ data: vehicle });
@@ -1278,6 +1363,35 @@ async function resolveWorkspaceIdForUser(
 }
 
 /**
+ * Same resolution as resolveWorkspaceIdForUser, but returns the
+ * membership itself — Field Data Collection needs the caller's role
+ * (any member may submit; retraction is owner-scope) and attributes
+ * every submission with it.
+ */
+async function resolveWorkspaceMembership(
+  supabase: FleetDbClient,
+  userId: string,
+  selectedWorkspaceId?: string,
+): Promise<{ workspace_id: string; role: string } | null> {
+  const { data, error } = await supabase
+    .from("workspace_members")
+    .select("workspace_id,role,is_active,workspaces(id,name,slug,kind,timezone,currency_code,is_active)")
+    .eq("user_id", userId)
+    .eq("is_active", true)
+    .order("workspace_id", { ascending: true });
+  if (error) throw error;
+  const active = ((data ?? []) as unknown as WorkspaceMembershipRow[]).filter(
+    (membership) => membership.is_active && membership.workspaces?.is_active,
+  );
+  if (selectedWorkspaceId) {
+    const selected = active.find((membership) => membership.workspace_id === selectedWorkspaceId);
+    if (selected) return { workspace_id: selected.workspace_id, role: selected.role };
+  }
+  const first = active[0];
+  return first ? { workspace_id: first.workspace_id, role: first.role } : null;
+}
+
+/**
  * Platform-admin gate (same idiom as platform.ts / messaging.ts,
  * verified via user_roles). platform_settings is a global table whose
  * RLS write arms are platform-admin-only after the Step 3 translation,
@@ -1864,6 +1978,10 @@ vehiclesRouter.get("/v1/tech-app/data-center/vehicle", async (c) => {
 
     // Specs: the workspace's own records first, the catalog fills gaps.
     let specs: DataCenterSpecs = { ...EMPTY_SPECS };
+    // Field Data Collection (SW-137): which of the final values are
+    // the workspace's own field entries (spec key -> submission id),
+    // so the app labels them "Field entry" and owners can retract.
+    let fieldEntries: Record<string, string> = {};
     if (vehicleRowId) {
       const { data: specRow } = await db
         .from("vehicle_service_specs")
@@ -1875,6 +1993,14 @@ vehiclesRouter.get("/v1/tech-app/data-center/vehicle", async (c) => {
         specs = specsFromWorkspaceRow(specRow);
         if (hasAnySpec(specs)) source = "workspace";
         if (typeof specRow.engine === "string" && specRow.engine) vehicle.engine = specRow.engine;
+        // Computed on the workspace layer alone, before any catalog
+        // merge: the learned tier is first in the cascade and wins,
+        // so a stamped field's final value IS this layer's value.
+        fieldEntries = fieldEntrySources(
+          specRow,
+          specs,
+          typeof specRow.engine === "string" && specRow.engine ? specRow.engine : null,
+        );
       }
     }
     // The vehicle_specifications reference table is the house layer
@@ -2056,10 +2182,151 @@ vehiclesRouter.get("/v1/tech-app/data-center/vehicle", async (c) => {
       source,
       appliesTo,
       maintenance,
+      fieldEntries,
+      fieldEntryFields: Object.keys(fieldEntries),
     });
   } catch {
     return fail("Data center lookup failed");
   }
+});
+
+// ---------------------------------------------------------------------------
+// Tech app — Field Data Collection (SW-137, Phase 1)
+//
+// POST /v1/tech-app/data-center/field-values
+//   A field user fills a blank the Data Center showed. The value
+//   lands in the submissions quarantine FIRST (Ty's law: collected
+//   data is never automatically added to anything shared), then —
+//   blanks only — writes through to the submitting workspace's own
+//   learned tier, stamped with provenance so every render can label
+//   it "From field entry". Any signed-in workspace member may
+//   submit (Decision 1); the response carries the workspace's
+//   learned layer after the write so the screen re-renders the
+//   field with its label in the same round trip.
+//
+// POST /v1/tech-app/data-center/field-values/:id/retract
+//   Owner-scope only (owner/admin). Withdraws the submission
+//   (status -> superseded, audit-logged) and clears its learned
+//   write-through when the learned tier still carries exactly it.
+// ---------------------------------------------------------------------------
+
+const fieldValueSubmitSchema = z.object({
+  field: z.enum(FIELD_KEYS as [string, ...string[]]),
+  value: z.string().trim().min(1).max(200),
+  vehicle_id: z.string().uuid().nullable().optional(),
+  vin: z.string().trim().max(32).nullable().optional(),
+  year: z.number().int().min(1886).max(2200).nullable().optional(),
+  make: z.string().trim().max(80).nullable().optional(),
+  model: z.string().trim().max(120).nullable().optional(),
+  engine: z.string().trim().max(120).nullable().optional(),
+  job_id: z.string().uuid().nullable().optional(),
+  photo_ref: z.string().trim().max(500).nullable().optional(),
+  note: z.string().trim().max(1000).nullable().optional(),
+  source_surface: z.enum(["data_center", "job_details", "vehicle_page"]).optional(),
+  selected_workspace_id: z.string().uuid().nullable().optional(),
+});
+
+vehiclesRouter.post("/v1/tech-app/data-center/field-values", async (c) => {
+  const body = fieldValueSubmitSchema.parse(await c.req.json());
+  const { supabase, user } = await requireAuth(c);
+  const membership = await resolveWorkspaceMembership(
+    supabase,
+    user.id,
+    body.selected_workspace_id ?? undefined,
+  );
+  if (!membership) throw new ApiError(403, "No active workspace.", "forbidden");
+  const db = supabase as any;
+
+  // A job context resolves to the job's vehicle when the caller did
+  // not name one directly (Job Details submits from the job).
+  let vehicleId = body.vehicle_id ?? null;
+  if (!vehicleId && body.job_id) {
+    const { data: appointment } = await db
+      .from("appointments")
+      .select("vehicle_id")
+      .eq("workspace_id", membership.workspace_id)
+      .eq("id", body.job_id)
+      .maybeSingle();
+    if (appointment && typeof appointment.vehicle_id === "string") {
+      vehicleId = appointment.vehicle_id;
+    }
+  }
+
+  // Identity as the field user saw it: the client states the decoded
+  // identity it displayed; a stored workspace row still outranks it
+  // inside the service. When the VIN is known and the stated
+  // identity is incomplete, the same blanks-only decode completion
+  // the lookup performs fills the submission's identity too.
+  const identity = {
+    vin: body.vin ? body.vin.toUpperCase() : null,
+    year: body.year ?? null,
+    make: body.make ?? null,
+    model: body.model ?? null,
+    engine: body.engine ?? null,
+  };
+  if (identity.vin && (!identity.year || !identity.make || !identity.model)) {
+    const decoded = await decodeVinWithNhtsa(identity.vin);
+    if (decoded.success) {
+      const completed = fillVehicleIdentityBlanks(identity, decoded.vehicle);
+      identity.year = completed.year;
+      identity.make = completed.make;
+      identity.model = completed.model;
+      identity.engine = identity.engine ?? completed.engine;
+    }
+  }
+
+  const result = await submitFieldValue(db, {
+    workspaceId: membership.workspace_id,
+    userId: user.id,
+    role: membership.role,
+    vehicleId,
+    vin: identity.vin,
+    year: identity.year,
+    make: identity.make,
+    model: identity.model,
+    engine: identity.engine,
+    field: body.field,
+    value: body.value,
+    sourceSurface: body.source_surface ?? "data_center",
+    sourceJobId: body.job_id ?? null,
+    photoRef: body.photo_ref ?? null,
+    note: body.note ?? null,
+    writeThrough: true,
+  });
+  return json({ data: result }, { status: 201 });
+});
+
+vehiclesRouter.post("/v1/tech-app/data-center/field-values/:id/retract", async (c) => {
+  const id = z.string().uuid().parse(c.req.param("id"));
+  const body = (await c.req.json().catch(() => ({}))) as {
+    selected_workspace_id?: string;
+  };
+  const { supabase, user } = await requireAuth(c);
+  const membership = await resolveWorkspaceMembership(
+    supabase,
+    user.id,
+    typeof body?.selected_workspace_id === "string" ? body.selected_workspace_id : undefined,
+  );
+  if (!membership) throw new ApiError(403, "No active workspace.", "forbidden");
+  if (membership.role !== "owner" && membership.role !== "admin") {
+    throw new ApiError(403, "Only a workspace owner can retract a field submission.", "forbidden");
+  }
+  const result = await retractFieldSubmission(supabase as any, {
+    workspaceId: membership.workspace_id,
+    submissionId: id,
+  });
+  if (!result) throw new ApiError(404, "Submission not found.", "not_found");
+  if (!result.ok) {
+    throw new ApiError(409, "A promoted submission can no longer be retracted.", "already_promoted");
+  }
+  await logFleetAudit(supabase, {
+    action: "field_submission.retracted",
+    userId: user.id,
+    tableName: "field_data_submissions",
+    recordId: id,
+    newData: { learned_cleared: result.learnedCleared },
+  });
+  return json({ data: { ok: true, learned_cleared: result.learnedCleared } });
 });
 
 // ---------------------------------------------------------------------------
@@ -2457,42 +2724,47 @@ vehiclesRouter.delete("/v1/vehicle-part-assignments/:id", async (c) => {
 
 vehiclesRouter.post("/v1/vehicle-specs/promote-parts", async (c) => {
   const body = await c.req.json().catch(() => ({}));
-  const { supabase } = await requireFleetScope(c, selectedWorkspaceHint(c));
+  const { supabase, user, workspaceId: hintedWorkspaceId } = await requireFleetScope(c, selectedWorkspaceHint(c));
   const { year, make, model, engine, parts } = body;
   if (!year || !make || !model) return json({ data: { ok: true, skipped: true } });
-  const map: Record<string, string> = {
-    oil_filter: "oil_filter",
-    air_filter: "air_filter",
-    cabin_filter: "cabin_filter",
-    fuel_filter: "fuel_filter",
-    wiper_blade_driver: "wiper_blade_driver",
-    wiper_blade_passenger: "wiper_blade_passenger",
-    wiper_blade_rear: "wiper_blade_rear",
-  };
-  const payload: Record<string, string> = {};
-  for (const p of parts ?? []) {
-    const col = map[p.part_category];
-    if (col && p.part_number) payload[col] = p.part_number;
+  const submittable = (Array.isArray(parts) ? parts : []).filter(
+    (p: { part_category?: unknown; part_number?: unknown }) =>
+      typeof p?.part_category === "string" &&
+      (PART_SUBMISSION_FIELDS as readonly string[]).includes(p.part_category) &&
+      typeof p?.part_number === "string" &&
+      p.part_number.trim() !== "",
+  );
+  if (submittable.length === 0) return json({ data: { ok: true, skipped: true } });
+  // Field Data Collection re-point (SW-137, anti-poisoning rule 6):
+  // this door used to write the shop's part numbers DIRECTLY into the
+  // global vehicle_specifications table, overwriting rows — exactly
+  // what Ty's "won't automatically be added to anything" forbids.
+  // The calls now file field submissions instead: the workspace's own
+  // part assignments (their per-workspace records) are untouched,
+  // and the claims wait in quarantine for the verification phases
+  // like every other collected value. An unattributable call (no
+  // resolvable workspace) files nothing.
+  const workspaceId = hintedWorkspaceId ?? (await resolveWorkspaceIdForUser(supabase, user.id));
+  if (!workspaceId) return json({ data: { ok: true, skipped: true } });
+  const membership = await resolveWorkspaceMembership(supabase, user.id, workspaceId);
+  let filed = 0;
+  for (const p of submittable) {
+    await submitFieldValue(supabase as any, {
+      workspaceId,
+      userId: user.id,
+      role: membership?.role ?? null,
+      year,
+      make,
+      model,
+      engine: typeof engine === "string" && engine ? engine : null,
+      field: p.part_category as string,
+      value: p.part_number as string,
+      sourceSurface: "parts_registry",
+      writeThrough: false,
+    });
+    filed += 1;
   }
-  if (Object.keys(payload).length === 0) return json({ data: { ok: true, skipped: true } });
-  const client = supabase as any;
-  const { data: existing } = await client
-    .from("vehicle_specifications")
-    .select("id")
-    .eq("year", year)
-    .ilike("make", make)
-    .ilike("model", model)
-    .maybeSingle();
-  if (existing?.id) {
-    const { error } = await client.from("vehicle_specifications").update(payload).eq("id", existing.id);
-    if (error) throw error;
-  } else {
-    const { error } = await client
-      .from("vehicle_specifications")
-      .insert({ year, make, model, engine: engine || null, source: "shop_confirmed", ...payload });
-    if (error) throw error;
-  }
-  return json({ data: { ok: true } });
+  return json({ data: { ok: true, submissions: filed } });
 });
 
 vehiclesRouter.get("/v1/inventory/stock-options", async (c) => {
