@@ -1942,7 +1942,12 @@ workOrdersRouter.get("/v1/tech-app/jobs", async (c) => {
   // stamps with the assignee's auth id.
   const { supabase, user, workspaceId } = await requireCallerWorkspaceId(c);
   const now = Date.now();
-  const windowStart = new Date(now - 36 * 60 * 60 * 1000).toISOString();
+  // Look-back is −31 days (widened from −36 hours on 2026-11-14),
+  // symmetric with the forward horizon below: a job stays visible
+  // on the phone for the whole month behind, not just the last day
+  // and a half — at −36h a completed job silently aged off the
+  // list while its office record stood untouched.
+  const windowStart = new Date(now - 31 * 24 * 60 * 60 * 1000).toISOString();
   // Forward horizon is +31 days (widened from +8 on 2026-11-11, Ty's
   // ruling): the phone must show the whole coming month — at +8 the
   // Nov 21 and Nov 23 jobs were invisible no matter their assignment.
@@ -2345,7 +2350,9 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
   // appointment window — the caller's assigned appointments plus,
   // on incremental pulls, the moved-away ids whose jobs are being
   // deleted, so their child rows delete too. Locations are scoped
-  // to the caller's technicians row and the same 36h look-back.
+  // to the caller's technicians row and their own 36h look-back —
+  // GPS history is a live trail and does NOT widen with the
+  // appointment window.
   // Deletes: cancelled appointments, plus (on incremental pulls) appointments in the
   // window changed since last_pulled_at that are no longer assigned
   // to the caller — deleting an id the device never held is a
@@ -2358,10 +2365,19 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
   const parsedLast = rawLast ? Number(rawLast) : 0;
   const lastPulledAt = Number.isFinite(parsedLast) && parsedLast > 0 ? Math.floor(parsedLast) : 0;
 
-  const windowStart = new Date(timestamp - 36 * 60 * 60 * 1000).toISOString();
+  // Look-back −31 days — same widening as the jobs door above
+  // (2026-11-14), symmetric with the forward horizon below: at
+  // −36 hours a job completed earlier in the month fell out of
+  // the pull and vanished off the phone on the next full sync,
+  // though its server record never changed (Dave's Nov 12 jobs).
+  const windowStart = new Date(timestamp - 31 * 24 * 60 * 60 * 1000).toISOString();
   // Forward horizon +31 days — same widening as the jobs door above
   // (2026-11-11, Ty's ruling: show the whole coming month).
   const windowEnd = new Date(timestamp + 31 * 24 * 60 * 60 * 1000).toISOString();
+  // Location pings keep their own transient 36h look-back: the
+  // GPS trail is live exhaust, not a job record, and must not
+  // widen with the appointment window above.
+  const locationWindowStart = new Date(timestamp - 36 * 60 * 60 * 1000).toISOString();
   const { data: appointments, error: appointmentsError } = await (supabase.from("appointments") as any)
     .select("id, workspace_id, customer_id, vehicle_id, assigned_user_id, status, dispatch_status, starts_at, ends_at, source, confirmation_code, notes, metadata, created_at, updated_at, completed_at")
     .eq("workspace_id", workspaceId)
@@ -2651,7 +2667,7 @@ workOrdersRouter.get("/v1/tech-app/sync/pull", async (c) => {
       ? (supabase.from("location_history") as any)
         .select("id, technician_id, latitude, longitude, accuracy, heading, speed, recorded_at")
         .eq("technician_id", technicianRes.data.id as string)
-        .gte("recorded_at", windowStart)
+        .gte("recorded_at", locationWindowStart)
         .order("recorded_at", { ascending: true })
         .limit(1000)
       : Promise.resolve(empty),
